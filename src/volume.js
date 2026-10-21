@@ -43,7 +43,6 @@
 // поля. Объект без чертежа честно отвечает `empty`.
 import {
   OPENING_GLASS_FRAME_MM,
-  OPENING_KIND_GLASS_DOOR,
   drawingBoundsMm,
   findScheme,
   schemeObjectKeyOf,
@@ -55,7 +54,13 @@ import {
   markSizes,
   markWall,
   markWallSideOn,
+  openingFaceGrid,
+  openingFamilyOf,
+  openingGlazed,
   openingHasLeaf,
+  openingLeavesOf,
+  openingMotionOf,
+  openingWalkThrough,
   openingsInWall,
   outlinesInOrder,
   planFractionToMm,
@@ -1285,7 +1290,11 @@ function volumePrismFaces(corners, bottomMm, topMm, rgb, out, options = {}) {
  * панорамное окно до пола держит так же, как стена под обычным.
  */
 export function volumeOpeningWalkable(opening) {
-  if (!opening || opening.kind === "window") return false;
+  // Сквозь что ходят, решает модель (`openingWalkThrough`): сквозь окно любого
+  // вида — нет, сквозь дверь, проём, арку и ворота — да. Сравнения с `"window"`
+  // здесь больше нет нарочно: витраж в пол и балконное остекление (таск 215)
+  // стоят от пола, и забытое сравнение пустило бы человека сквозь стекло.
+  if (!opening || !openingWalkThrough(opening.kind)) return false;
   return Number(opening.heightAboveFloorMm || 0) <= VOLUME_STEP_MM;
 }
 
@@ -1626,13 +1635,50 @@ function volumeOpeningFaces(wall, opening, heightMm, out, openDoorIds) {
       }),
     );
   }
-  if (opening.kind === "window") {
-    volumeWindowFrame(at, from, to, bottom, top, out);
+  if (openingFamilyOf(opening.kind) === "window") {
+    volumeWindowFrame(at, from, to, bottom, top, out, openingFaceGrid(opening));
     return out;
   }
   if (openingHasLeaf(opening.kind)) {
     const open = volumeDoorOpen(openDoorIds, opening.id);
     volumeDoorLeaf(wall, opening, { from, to, bottom, top }, out, open);
+    return out;
+  }
+  // **Роллетные и подъёмно-секционные ворота** (таск 215): полотно стоит в
+  // проёме, в середине толщины стены — там же, где бруски рамы у окна, — и
+  // открытого положения у них нет. Решение названо вслух: открытая роллета
+  // уезжает в вал под перемычкой, а секционные панели уходят под потолок, то
+  // есть **из плоскости проёма наружу**, и показывать это пришлось бы
+  // горизонтальным листом в комнате. Полотно в проёме честнее: ворота закрыты,
+  // и это видно.
+  if (openingMotionOf(opening.kind) === "lift") {
+    volumeLiftLeaf(at, from, to, bottom, top, out, openingFaceGrid(opening));
+  }
+  return out;
+}
+
+/**
+ * Полотно поднимающихся ворот: панели по горизонталям его лица.
+ *
+ * Панель на панель не налезает и все они коплоскостны — то же условие, по
+ * которому не спорят за порядок рама и стекло двери (таск 180): грани в одной
+ * плоскости, которые друг друга не закрывают, в сортировке по дальности
+ * безразличны.
+ */
+function volumeLiftLeaf(at, from, to, bottom, top, out, grid) {
+  const height = top - bottom;
+  const edges = [0, ...(grid && Array.isArray(grid.ys) ? grid.ys : []), 1];
+  for (let index = 1; index < edges.length; index += 1) {
+    const low = bottom + height * edges[index - 1];
+    const high = bottom + height * edges[index];
+    if (!(high > low)) continue;
+    const first = at(from, 0);
+    const second = at(to, 0);
+    out.push(
+      volumeFace([volumeAt(first, low), volumeAt(second, low), volumeAt(second, high), volumeAt(first, high)], VOLUME_DOOR_RGB, {
+        both: true,
+      }),
+    );
   }
   return out;
 }
@@ -1658,13 +1704,43 @@ const VOLUME_HANDLE_EDGE_MM = 70;
 
 // Рама — четыре бруска по краю проёма, в середине толщины стены. Стекла нет:
 // сквозь окно видно фон, и это ровно то, чего просил заказчик.
-function volumeWindowFrame(at, from, to, bottom, top, out) {
+//
+// **Импосты** (таск 215) — те же бруски по долям `openingFaceGrid`: двойное
+// окно получает стойку посередине, тройное две, балконное две стойки и
+// перекладину пояса. Своей сетки объём не считает: разойдись она с листом —
+// окно на развёртке делилось бы на три, а в объёме на две.
+function volumeWindowFrame(at, from, to, bottom, top, out, grid) {
+  const half = VOLUME_FRAME_MM / 2;
+  const span = to - from;
+  const height = top - bottom;
   const bars = [
     { from, to, bottom, top: Math.min(top, bottom + VOLUME_FRAME_MM) },
     { from, to, bottom: Math.max(bottom, top - VOLUME_FRAME_MM), top },
     { from, to: Math.min(to, from + VOLUME_FRAME_MM), bottom, top },
     { from: Math.max(from, to - VOLUME_FRAME_MM), to, bottom, top },
   ];
+  // Импосты встают **внутрь** рамы, а перекладина — отрезками между стойками:
+  // наложенных коплоскостных граней в сцене быть не должно (правило таска 180),
+  // а сошлись бы они здесь трижды — стойка с низом, с верхом и с поясом.
+  const xs = grid && Array.isArray(grid.xs) ? grid.xs : [];
+  const ys = grid && Array.isArray(grid.ys) ? grid.ys : [];
+  const inner = {
+    from: from + VOLUME_FRAME_MM,
+    to: to - VOLUME_FRAME_MM,
+    bottom: bottom + VOLUME_FRAME_MM,
+    top: top - VOLUME_FRAME_MM,
+  };
+  const posts = xs.map((part) => from + span * part);
+  for (const middle of posts) {
+    bars.push({ from: middle - half, to: middle + half, bottom: inner.bottom, top: inner.top });
+  }
+  const gaps = [inner.from, ...posts.flatMap((middle) => [middle - half, middle + half]), inner.to];
+  for (const part of ys) {
+    const middle = bottom + height * part;
+    for (let index = 0; index + 1 < gaps.length; index += 2) {
+      bars.push({ from: gaps[index], to: gaps[index + 1], bottom: middle - half, top: middle + half });
+    }
+  }
   for (const bar of bars) {
     if (!(bar.to > bar.from) || !(bar.top > bar.bottom)) continue;
     const first = at(bar.from, 0);
@@ -1698,49 +1774,76 @@ function volumeWindowFrame(at, from, to, bottom, top, out) {
  */
 function volumeDoorLeaf(wall, opening, span, out, open) {
   const vectors = wallVectors(wall);
-  const width = span.to - span.from;
-  if (!vectors || !(width > 0)) return out;
+  const whole = span.to - span.from;
+  if (!vectors || !(whole > 0)) return out;
   const { u, n } = vectors;
+  const motion = openingMotionOf(opening.kind);
   const atStart = opening.hinge !== "end";
-  const alongHinge = atStart ? span.from : span.to;
-  const hinge = {
-    x: Number(wall.aMm.x) + u.x * alongHinge,
-    y: Number(wall.aMm.y) + u.y * alongHinge,
-  };
   const side = opening.swing === "right" ? -1 : 1;
   const doorId = opening.id || null;
-  // Куда смотрит полотно: раскрытое — прочь от стены, закрытое — вдоль неё.
-  const leaf = open ? { x: n.x * side, y: n.y * side } : { x: u.x * (atStart ? 1 : -1), y: u.y * (atStart ? 1 : -1) };
-  const tip = { x: hinge.x + leaf.x * width, y: hinge.y + leaf.y * width };
-  if (opening.kind === OPENING_KIND_GLASS_DOOR) {
-    volumeGlassLeaf(hinge, leaf, width, span, out, doorId);
-  } else {
-    out.push(
-      volumeFace(
-        [volumeAt(hinge, span.bottom), volumeAt(tip, span.bottom), volumeAt(tip, span.top), volumeAt(hinge, span.top)],
-        VOLUME_DOOR_RGB,
-        { both: true, doorId },
-      ),
-    );
-  }
-  // Ручка у свободного края полотна, на высоте, на которой её берут рукой
-  // (G207: «ну и на дверях ручки нарисуй»). Выступает на обе стороны: дверь
-  // открывают с той стороны, с которой подошли.
-  const handleAt = {
-    x: tip.x - leaf.x * VOLUME_HANDLE_EDGE_MM,
-    y: tip.y - leaf.y * VOLUME_HANDLE_EDGE_MM,
-  };
-  const bottom = Math.max(span.bottom, VOLUME_HANDLE_MM - VOLUME_HANDLE_TALL_MM / 2);
-  const top = Math.min(span.top, bottom + VOLUME_HANDLE_TALL_MM);
-  if (top > bottom) {
-    volumePrismFaces(
-      volumeBoxCorners(handleAt, leaf, VOLUME_HANDLE_LONG_MM, VOLUME_HANDLE_OUT_MM * 2),
-      bottom,
-      top,
-      VOLUME_HANDLE_RGB,
-      out,
-      { doorId },
-    );
+  const point = (along, across = 0) => ({
+    x: Number(wall.aMm.x) + u.x * along + n.x * side * across,
+    y: Number(wall.aMm.y) + u.y * along + n.y * side * across,
+  });
+  // Створки: у двупольной две по половине проёма от своих косяков, у остальных
+  // одна. Стороны открывания у двух створок общие — ровно как на плане.
+  const twin = motion === "swing" && openingLeavesOf(opening.kind) > 1;
+  const width = twin ? whole / 2 : whole;
+  const leaves = twin
+    ? [
+        { along: span.from, out: 1 },
+        { along: span.to, out: -1 },
+      ]
+    : [{ along: atStart ? span.from : span.to, out: atStart ? 1 : -1 }];
+  for (const plan of leaves) {
+    const root = point(plan.along);
+    // Куда смотрит полотно.
+    //
+    //   распашное раскрытое — прочь от стены на четверть оборота;
+    //   сдвижное и гармошка раскрытые — вдоль стены **за** косяк, то есть
+    //     полотно съезжает туда, куда показывала стрелка на плане;
+    //   портальное раскрытое — не рисуется вовсе: оно внутри стены, и это
+    //     самый честный вид «открыто», какой у него бывает;
+    //   закрытое любое — вдоль стены, в самом проёме.
+    if (open && motion === "pocket") continue;
+    const slid = open && (motion === "slide" || motion === "fold");
+    const leaf = open && motion === "swing" ? { x: n.x * side, y: n.y * side } : { x: u.x * plan.out, y: u.y * plan.out };
+    // Сложенная гармошка короче себя: четыре звена собираются в пакет у косяка.
+    const span2 = slid && motion === "fold" ? width / 2 : width;
+    const base = slid
+      ? { x: root.x - leaf.x * span2, y: root.y - leaf.y * span2 }
+      : root;
+    const tip = { x: base.x + leaf.x * span2, y: base.y + leaf.y * span2 };
+    if (openingGlazed(opening)) {
+      volumeGlassLeaf(base, leaf, span2, span, out, doorId);
+    } else {
+      out.push(
+        volumeFace(
+          [volumeAt(base, span.bottom), volumeAt(tip, span.bottom), volumeAt(tip, span.top), volumeAt(base, span.top)],
+          VOLUME_DOOR_RGB,
+          { both: true, doorId },
+        ),
+      );
+    }
+    // Ручка у свободного края полотна, на высоте, на которой её берут рукой
+    // (G207: «ну и на дверях ручки нарисуй»). Выступает на обе стороны: дверь
+    // открывают с той стороны, с которой подошли.
+    const handleAt = {
+      x: tip.x - leaf.x * VOLUME_HANDLE_EDGE_MM,
+      y: tip.y - leaf.y * VOLUME_HANDLE_EDGE_MM,
+    };
+    const bottom = Math.max(span.bottom, VOLUME_HANDLE_MM - VOLUME_HANDLE_TALL_MM / 2);
+    const top = Math.min(span.top, bottom + VOLUME_HANDLE_TALL_MM);
+    if (top > bottom) {
+      volumePrismFaces(
+        volumeBoxCorners(handleAt, leaf, VOLUME_HANDLE_LONG_MM, VOLUME_HANDLE_OUT_MM * 2),
+        bottom,
+        top,
+        VOLUME_HANDLE_RGB,
+        out,
+        { doorId },
+      );
+    }
   }
   return out;
 }

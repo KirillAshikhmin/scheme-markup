@@ -16,7 +16,6 @@ import {
   DEFAULT_VIEW,
   LINE_STYLES,
   OPENING_GLASS_FRAME_MM,
-  OPENING_KIND_GLASS_DOOR,
   SHAPE_NAMES,
   blockLabel,
   blockLabelParts,
@@ -37,7 +36,12 @@ import {
   markLabelLeader,
   markPointer,
   listedTypes,
+  openingFaceGrid,
+  openingFamilyOf,
+  openingGlazed,
   openingHasLeaf,
+  openingLeavesOf,
+  openingMotionOf,
   openingsInWall,
   outlinesInOrder,
   planFractionToMm,
@@ -4969,22 +4973,110 @@ export function drawingOpeningSpan(wall, opening) {
 }
 
 /**
- * Створка двери: петля, закрытое положение и кончик открытого.
+ * Створки проёма с полотном: где петля (или край полотна), где закрытое
+ * положение и где кончик открытого.
  *
- * Четыре сочетания петель и стороны — это четыре разные двери, и различают их
- * на чертеже именно по створке: с какого косяка она растёт и в какую сторону
- * стены открывается. Полотно рисуется раскрытым на четверть оборота — так его
- * рисуют на планах, и так видно, какой кусок пола дверь занимает.
+ * **Распашная, одна створка.** Четыре сочетания петель и стороны — это четыре
+ * разные двери, и различают их на чертеже именно по створке: с какого косяка
+ * она растёт и в какую сторону стены открывается. Полотно рисуется раскрытым
+ * на четверть оборота — так его рисуют на планах, и так видно, какой кусок пола
+ * дверь занимает.
+ *
+ * **Распашная, две створки** (таск 215: двустворчатая дверь, распашные ворота)
+ * — то же самое дважды: каждая створка шириной в половину проёма растёт от
+ * своего косяка и открывается на ту же сторону стены. Петли у такой двери стоят
+ * у обоих косяков, поэтому `hinge` её рисунка не меняет — и кольцо `Q`/`E` у
+ * неё из двух состояний, а не из четырёх (`openingDoorStates`).
+ *
+ * **Сдвижная, гармошка, портальная** — полотно не поворачивается, а едет: оно
+ * лежит **вдоль** стены, и признаков у него те же два. `swing` говорит, по
+ * какой стороне стены идёт полотно (у портальной — внутри самой стены), `hinge`
+ * — в какую сторону оно уходит, открываясь. Створка здесь не ручка поворота, а
+ * полоса, поэтому у неё `pivot: false`: ручку петли у такой двери не ставят —
+ * крутить нечего.
+ */
+export function drawingDoorLeaves(wall, opening) {
+  const span = drawingOpeningSpan(wall, opening);
+  if (!span || !(span.width > 0)) return [];
+  const motion = openingMotionOf(opening.kind);
+  const side = opening.swing === "right" ? -1 : 1;
+  const atStart = opening.hinge !== "end";
+  const along = (point, distance) => ({ x: point.x + span.u.x * distance, y: point.y + span.u.y * distance });
+  const across = (point, distance) => ({
+    x: point.x + span.n.x * side * distance,
+    y: point.y + span.n.y * side * distance,
+  });
+  if (motion === "swing") {
+    if (openingLeavesOf(opening.kind) > 1) {
+      const half = span.width / 2;
+      const middle = along(span.from, half);
+      return [span.from, span.to].map((hinge) => ({
+        motion,
+        // Петли у двупольной двери у обоих косяков: ручки петли у неё нет,
+        // переставлять нечего.
+        pivot: false,
+        hinge,
+        closed: middle,
+        tip: across(hinge, half),
+        radius: half,
+        side,
+        n: span.n,
+        u: span.u,
+      }));
+    }
+    const hinge = atStart ? span.from : span.to;
+    const closed = atStart ? span.to : span.from;
+    return [
+      {
+        motion,
+        pivot: true,
+        hinge,
+        closed,
+        tip: across(hinge, span.width),
+        radius: span.width,
+        side,
+        n: span.n,
+        u: span.u,
+      },
+    ];
+  }
+  if (!motion || motion === "lift") return [];
+  // Полотно, которое едет. Портальное лежит **в** стене (его карман — внутри
+  // неё), остальные — по её стороне: отступ откладывает отрисовка, потому что
+  // только она знает толщину стены в точках.
+  const head = atStart ? span.from : span.to;
+  const tail = atStart ? span.to : span.from;
+  return [
+    {
+      // Ручка у головы полотна есть: щелчок по ней переставляет сторону, в
+      // которую полотно уходит, — то же, что у петель распашной.
+      motion,
+      pivot: true,
+      hinge: head,
+      closed: tail,
+      tip: tail,
+      radius: span.width,
+      side,
+      n: span.n,
+      u: span.u,
+      // Куда уходит полотно: к началу стены или к её концу. Знак — вдоль `u`.
+      park: atStart ? -1 : 1,
+      inWall: motion === "pocket",
+    },
+  ];
+}
+
+/**
+ * Створка, за которую берут рукой: первая из `drawingDoorLeaves`.
+ *
+ * Ручки правки и попадание курсора спрашивают **одну** створку — ту, которая
+ * отвечает за состояние двери. У двустворчатой это створка у начала проёма:
+ * щелчок по её кончику переставляет сторону открывания обеих, потому что
+ * сторона у них общая.
  */
 export function drawingDoorLeaf(wall, opening) {
-  const span = drawingOpeningSpan(wall, opening);
-  if (!span || !(span.width > 0)) return null;
-  const atStart = opening.hinge !== "end";
-  const hinge = atStart ? span.from : span.to;
-  const closed = atStart ? span.to : span.from;
-  const side = opening.swing === "right" ? -1 : 1;
-  const tip = { x: hinge.x + span.n.x * side * span.width, y: hinge.y + span.n.y * side * span.width };
-  return { hinge, closed, tip, radius: span.width, side, n: span.n };
+  const leaves = drawingDoorLeaves(wall, opening);
+  return leaves.length > 0 ? leaves[0] : null;
 }
 
 
@@ -5331,7 +5423,9 @@ function drawDrawingHandles(ctx, bridge, { walls, objects, active, activeOpening
     if (!activeOpening || !openingHasLeaf(activeOpening.opening.kind)) return;
     const leaf = drawingDoorLeaf(activeOpening.wall, activeOpening.opening);
     if (!leaf) return;
-    handle(ctx, bridge.toScreen(leaf.hinge));
+    // Ручка петли — только там, где петлям есть что переставить: у двупольной
+    // двери они стоят у обоих косяков, и ручка обещала бы выбор, которого нет.
+    if (leaf.pivot) handle(ctx, bridge.toScreen(leaf.hinge));
     handle(ctx, bridge.toScreen(leaf.tip));
     return;
   }
@@ -5441,6 +5535,12 @@ function drawDrawingWall(ctx, bridge, wall, active) {
  * есть «с рамой, но не глухая, а по центру стекло» в плановой проекции, и это
  * тот же приём, которым на плане отличается окно: стекло — незакрашенное
  * место, обведённое по контуру.
+ *
+ * **Виды каталога** (таск 215) ложатся сюда без новой ветки на каждый: решают
+ * порода и движение полотна. Окно любого вида — та же нитка, а импосты
+ * отмечены короткими засечками поперёк просвета (у одинарного их нет, и кадр
+ * прежнего окна не изменился ни на вызов). Полотно, которое едет, лежит вдоль
+ * стены; роллетные и секционные ворота стоят полотном в самом проёме.
  */
 export function drawDrawingOpening(ctx, bridge, wall, opening, options = {}) {
   const span = drawingOpeningSpan(wall, opening);
@@ -5476,11 +5576,12 @@ export function drawDrawingOpening(ctx, bridge, wall, opening, options = {}) {
     ctx.lineTo(jamb.x - nx * half, jamb.y - ny * half);
     ctx.stroke();
   }
-  if (opening.kind === "window") {
+  if (openingFamilyOf(opening.kind) === "window") {
     ctx.beginPath();
     ctx.moveTo(from.x, from.y);
     ctx.lineTo(to.x, to.y);
     ctx.stroke();
+    drawDrawingImposts(ctx, opening, from, to, nx * half, ny * half);
   } else if (opening.kind === "arch") {
     ctx.setLineDash([5, 4]);
     ctx.beginPath();
@@ -5490,8 +5591,52 @@ export function drawDrawingOpening(ctx, bridge, wall, opening, options = {}) {
     ctx.setLineDash([]);
   } else if (openingHasLeaf(opening.kind)) {
     drawDrawingDoor(ctx, bridge, wall, opening, colour);
+  } else if (openingMotionOf(opening.kind) === "lift") {
+    // Роллетные и секционные ворота: полотно стоит **в проёме**, потому что
+    // уходит оно вверх — ни на плане, ни на полу от него ничего не меняется.
+    // Открытого положения у них нет вовсе, и это названо вслух
+    // (`openingHasLeaf` отвечает «нет»): полотно под перемычкой — не та
+    // геометрия, которую план показывает.
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(to.x, to.y);
+    ctx.stroke();
+    ctx.lineWidth = 1.5;
+    drawDrawingImposts(ctx, opening, from, to, nx * half, ny * half);
   }
   ctx.restore();
+}
+
+/**
+ * Импосты проёма на плане — короткие засечки поперёк просвета там, где
+ * делится остекление.
+ *
+ * Доли берутся у модели (`openingFaceGrid`), и это та же сетка, по которой
+ * проём делится на листе развёртки и в объёме: окно на плане ниткой, на листе
+ * тремя секциями и в объёме тремя полями стекла — одно и то же окно.
+ *
+ * Засечка не ставится, когда секции на экране ближе четырёх точек: на общем
+ * виде квартиры полоса засечек слилась бы в серое пятно и соврала бы про
+ * толщину линии.
+ */
+const DRAWING_IMPOST_MIN_PX = 4;
+
+function drawDrawingImposts(ctx, opening, from, to, ox, oy) {
+  const grid = openingFaceGrid(opening);
+  if (grid.xs.length === 0) return;
+  const span = Math.hypot(to.x - from.x, to.y - from.y);
+  if (span / (grid.xs.length + 1) < DRAWING_IMPOST_MIN_PX) return;
+  ctx.lineWidth = 1;
+  for (const part of grid.xs) {
+    const x = from.x + (to.x - from.x) * part;
+    const y = from.y + (to.y - from.y) * part;
+    ctx.beginPath();
+    ctx.moveTo(x + ox, y + oy);
+    ctx.lineTo(x - ox, y - oy);
+    ctx.stroke();
+  }
+  ctx.lineWidth = 1.5;
 }
 
 // Полотно стеклянной двери на плане тоньше рамы не бывает: при мелком масштабе
@@ -5500,39 +5645,135 @@ export function drawDrawingOpening(ctx, bridge, wall, opening, options = {}) {
 const DRAWING_GLASS_MIN_PX = 3;
 
 function drawDrawingDoor(ctx, bridge, wall, opening, colour) {
-  const leaf = drawingDoorLeaf(wall, opening);
-  if (!leaf) return;
-  const hinge = bridge.toScreen(leaf.hinge);
-  const closed = bridge.toScreen(leaf.closed);
-  const tip = bridge.toScreen(leaf.tip);
-  const radius = Math.hypot(tip.x - hinge.x, tip.y - hinge.y);
-  if (opening.kind === OPENING_KIND_GLASS_DOOR) {
-    drawDrawingGlassLeaf(ctx, hinge, tip, Math.max(DRAWING_GLASS_MIN_PX, OPENING_GLASS_FRAME_MM * bridge.pxPerMm), colour);
-  } else {
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = colour;
-    ctx.beginPath();
-    ctx.moveTo(hinge.x, hinge.y);
-    ctx.lineTo(tip.x, tip.y);
-    ctx.stroke();
-  }
-  if (radius > 1) {
-    const start = Math.atan2(closed.y - hinge.y, closed.x - hinge.x);
-    const end = Math.atan2(tip.y - hinge.y, tip.x - hinge.x);
-    // Короткая сторона дуги — та, по которой полотно и ходит: четверть
-    // оборота, а не три четверти вокруг косяка.
-    let sweep = end - start;
-    while (sweep > Math.PI) sweep -= Math.PI * 2;
-    while (sweep < -Math.PI) sweep += Math.PI * 2;
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 3]);
-    ctx.beginPath();
-    ctx.arc(hinge.x, hinge.y, radius, start, start + sweep, sweep < 0);
-    ctx.stroke();
-    ctx.setLineDash([]);
+  const glazed = openingGlazed(opening);
+  const frame = Math.max(DRAWING_GLASS_MIN_PX, OPENING_GLASS_FRAME_MM * bridge.pxPerMm);
+  for (const leaf of drawingDoorLeaves(wall, opening)) {
+    if (leaf.motion !== "swing") {
+      drawDrawingSlider(ctx, bridge, wall, opening, leaf, colour, glazed, frame);
+      continue;
+    }
+    const hinge = bridge.toScreen(leaf.hinge);
+    const closed = bridge.toScreen(leaf.closed);
+    const tip = bridge.toScreen(leaf.tip);
+    const radius = Math.hypot(tip.x - hinge.x, tip.y - hinge.y);
+    if (glazed) {
+      drawDrawingGlassLeaf(ctx, hinge, tip, frame, colour);
+    } else {
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = colour;
+      ctx.beginPath();
+      ctx.moveTo(hinge.x, hinge.y);
+      ctx.lineTo(tip.x, tip.y);
+      ctx.stroke();
+    }
+    if (radius > 1) {
+      const start = Math.atan2(closed.y - hinge.y, closed.x - hinge.x);
+      const end = Math.atan2(tip.y - hinge.y, tip.x - hinge.x);
+      // Короткая сторона дуги — та, по которой полотно и ходит: четверть
+      // оборота, а не три четверти вокруг косяка.
+      let sweep = end - start;
+      while (sweep > Math.PI) sweep -= Math.PI * 2;
+      while (sweep < -Math.PI) sweep += Math.PI * 2;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.arc(hinge.x, hinge.y, radius, start, start + sweep, sweep < 0);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
   }
   // Ручки петли и края створки — в последнем слое (`drawDrawingHandles`): здесь
   // они ложились под буквы углов, а кружок буквы ровно на конце стены и стоит.
+}
+
+/**
+ * **Полотно, которое едет** (таск 215): сдвижное, гармошка, портальное.
+ *
+ * Рисуется там, где оно лежит закрытым: вдоль стены, по стороне `swing`, —
+ * а не в плоскости проёма, потому что сдвижную дверь на планах рисуют именно
+ * накладной полосой: по ней видно, какой кусок стены нельзя занять мебелью и
+ * где не встанет выключатель. Стрелка показывает, куда полотно уходит.
+ *
+ *   **сдвижное** — прямая полоса и стрелка;
+ *   **гармошка** — та же полоса, сложенная в четыре звена: число звеньев то
+ *     же, что секций у её лица (`openingFaceGrid`), и второго числа для
+ *     гармошки в сборке нет;
+ *   **портальное** — полоса лежит **в** стене, а за косяком пунктиром показан
+ *     карман, куда полотно уезжает целиком: это и есть «слайдинг в стену».
+ */
+function drawDrawingSlider(ctx, bridge, wall, opening, leaf, colour, glazed, frame) {
+  const head = bridge.toScreen(leaf.hinge);
+  const tail = bridge.toScreen(leaf.closed);
+  const dx = tail.x - head.x;
+  const dy = tail.y - head.y;
+  const span = Math.hypot(dx, dy) || 1;
+  // Поперёк стены: накладное полотно лежит на её стороне, портальное — внутри.
+  const thick = Number(wall.thicknessMm) * bridge.pxPerMm;
+  const away = leaf.inWall ? 0 : (thick / 2 + Math.max(1.5, thick * 0.1)) * leaf.side;
+  const nx = (dy / span) * away;
+  const ny = (-dx / span) * away;
+  const from = { x: head.x + nx, y: head.y + ny };
+  const to = { x: tail.x + nx, y: tail.y + ny };
+  ctx.strokeStyle = colour;
+  if (leaf.motion === "fold") {
+    // Звенья гармошки: ломаная туда-обратно поперёк полосы. Амплитуда — та же
+    // мера, на которую полотно отодвинуто от стены, чтобы звенья не наехали на
+    // неё и не слились с её линией.
+    const parts = Math.max(2, openingFaceGrid(opening).xs.length + 1);
+    const amp = Math.max(2, Math.abs(away) || thick / 2);
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (let index = 0; index <= parts; index += 1) {
+      const part = index / parts;
+      const x = from.x + (to.x - from.x) * part + (index % 2 === 0 ? 0 : (-dy / span) * amp * leaf.side);
+      const y = from.y + (to.y - from.y) * part + (index % 2 === 0 ? 0 : (dx / span) * amp * leaf.side);
+      if (index === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  } else if (glazed) {
+    drawDrawingGlassLeaf(ctx, from, to, frame, colour);
+  } else {
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(to.x, to.y);
+    ctx.stroke();
+  }
+  // Карман портальной двери: прямоугольник в стене за тем косяком, в который
+  // уезжает полотно. Пунктиром — он внутри стены, его не видно.
+  if (leaf.inWall && span > 2) {
+    const ux = -dx / span;
+    const uy = -dy / span;
+    const px = (dy / span) * (thick / 2);
+    const py = (-dx / span) * (thick / 2);
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.moveTo(head.x + px, head.y + py);
+    ctx.lineTo(head.x + px + ux * span, head.y + py + uy * span);
+    ctx.lineTo(head.x - px + ux * span, head.y - py + uy * span);
+    ctx.lineTo(head.x - px, head.y - py);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  // Стрелка хода: от середины полосы к тому косяку, за который полотно уходит.
+  if (span > 12) {
+    const tipAt = { x: from.x + (to.x - from.x) * 0.08, y: from.y + (to.y - from.y) * 0.08 };
+    const back = { x: from.x + (to.x - from.x) * 0.42, y: from.y + (to.y - from.y) * 0.42 };
+    const wing = Math.min(6, span * 0.08);
+    const ax = (tipAt.x - back.x) / Math.hypot(tipAt.x - back.x, tipAt.y - back.y || 1);
+    const ay = (tipAt.y - back.y) / Math.hypot(tipAt.x - back.x, tipAt.y - back.y || 1);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(back.x, back.y);
+    ctx.lineTo(tipAt.x, tipAt.y);
+    ctx.moveTo(tipAt.x, tipAt.y);
+    ctx.lineTo(tipAt.x - ax * wing + ay * wing * 0.6, tipAt.y - ay * wing - ax * wing * 0.6);
+    ctx.moveTo(tipAt.x, tipAt.y);
+    ctx.lineTo(tipAt.x - ax * wing - ay * wing * 0.6, tipAt.y - ay * wing + ax * wing * 0.6);
+    ctx.stroke();
+  }
 }
 
 /**
@@ -5560,6 +5801,151 @@ function drawDrawingGlassLeaf(ctx, hinge, tip, thickness, colour) {
   ctx.fill();
   ctx.lineWidth = 1.5;
   ctx.strokeStyle = colour;
+  ctx.stroke();
+}
+
+// Секции проёма ближе этого друг к другу на листе не размечаются: у роллетных
+// ворот ламелей две дюжины, и на общем виде стены они слились бы в серое поле,
+// соврав про толщину линии. Та же мерка держит и плитку выбора сорока точек.
+const OPENING_FACE_MIN_PX = 3;
+// Рама стеклянного полотна рисуется, только когда внутри ещё остаётся стекло:
+// на мелком масштабе она съела бы полотно целиком, и честнее оставить проём
+// обведённым, чем обещать стекло, которого негде нарисовать.
+const OPENING_FACE_GLASS_RATIO = 2.5;
+
+/**
+ * **Лицо проёма** — один рисунок на развёртку и на плитку выбора (таск 215).
+ *
+ * Проём, в отличие от вещи чертежа, своей картинки не имеет: изображение ему
+ * заменяет это самое лицо — просвет, секции остекления, рама стеклянного
+ * полотна, засечка петель и знак хода полотна. Поэтому второго реестра
+ * «изображений проёма» в сборке нет: плитка выбора зовёт **эту** функцию, и
+ * человек, выбравший балконное окно по картинке, видит на листе ровно её.
+ *
+ * `face` — запись проёма с развёртки (`wallElevation`) или такая же, собранная
+ * по каталогу: `{kind, glazed, motion, leaves, grid, hinge}`. Петли и сторона в
+ * ней уже перевёрнуты под сторону взгляда — переворачивать их здесь второй раз
+ * нельзя.
+ *
+ * `options.paper` = `null` снимает бумагу под просветом: на тёмной плитке
+ * выбора светлый прямоугольник читался бы заливкой, а не стеклом.
+ */
+export function drawOpeningFace(ctx, box, face, options = {}) {
+  const unit = Number(options.unit) > 0 ? Number(options.unit) : 1;
+  const ink = options.ink || DRAWING_EDGE;
+  const paper = Object.prototype.hasOwnProperty.call(options, "paper") ? options.paper : DRAWING_PAPER;
+  const x = box.x;
+  const top = box.y;
+  const width = box.width;
+  const height = box.height;
+  // Точек на миллиметр: нужно раме стеклянного полотна — её ширина названа в
+  // миллиметрах и одна на все три поверхности.
+  const scale = Number(options.scale) > 0 ? Number(options.scale) : 0;
+  if (paper) {
+    ctx.fillStyle = paper;
+    ctx.fillRect(x, top, width, height);
+  }
+  ctx.lineWidth = 1.5 * unit;
+  ctx.strokeStyle = ink;
+  ctx.strokeRect(x, top, width, height);
+  // Стеклянная дверь (таск 180): на развёртку она смотрит лицом, и здесь видно
+  // ровно то, что просил заказчик, — рама по контуру, стекло в середине. Рама
+  // отложена внутрь на свою ширину, а не нарисована двойной линией на глаз:
+  // число одно на план, развёртку и объём.
+  let hole = { x, y: top, width, height };
+  if (face.glazed && scale > 0) {
+    const inset = OPENING_GLASS_FRAME_MM * scale;
+    if (width > inset * OPENING_FACE_GLASS_RATIO && height > inset * OPENING_FACE_GLASS_RATIO) {
+      ctx.lineWidth = 1 * unit;
+      ctx.strokeRect(x + inset, top + inset, width - inset * 2, height - inset * 2);
+      // Секции делят **стекло**, а не проём: импост у остеклённой двери стоит
+      // внутри рамы, и выводить его на коробку значило бы нарисовать рамку
+      // крестом поверх самой рамы.
+      hole = { x: x + inset, y: top + inset, width: width - inset * 2, height: height - inset * 2 };
+    }
+  }
+  const grid = face.grid || { xs: [], ys: [] };
+  drawOpeningFaceGrid(ctx, hole, grid, unit);
+  // Засечка петель — наклонная от верхнего косяка к нижнему, как её рисуют на
+  // развёртке. У двупольной двери их две, по створке на каждую: петли у неё
+  // стоят у обоих косяков, и одна засечка соврала бы про вторую створку.
+  if (face.hinge && face.motion === "swing") {
+    const leaves = Number(face.leaves) > 1 ? 2 : 1;
+    const part = width / leaves;
+    for (let index = 0; index < leaves; index += 1) {
+      const left = x + part * index;
+      // У одностворчатой петли там, где сказано; у двупольной — у своего косяка.
+      const atStart = leaves > 1 ? index === 0 : face.hinge === "start";
+      const hingeX = atStart ? left : left + part;
+      ctx.setLineDash([4 * unit, 3 * unit]);
+      ctx.lineWidth = 1 * unit;
+      ctx.beginPath();
+      ctx.moveTo(hingeX, top);
+      ctx.lineTo(atStart ? left + part : left, top + height / 2);
+      ctx.lineTo(hingeX, top + height);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+  if (face.motion && face.motion !== "swing") drawOpeningFaceMotion(ctx, box, face, ink, unit);
+}
+
+/** Импосты лица: вертикальные по долям ширины, горизонтальные — от низа. */
+function drawOpeningFaceGrid(ctx, hole, grid, unit) {
+  const xs = Array.isArray(grid.xs) ? grid.xs : [];
+  const ys = Array.isArray(grid.ys) ? grid.ys : [];
+  const draw = (parts, horizontal) => {
+    if (parts.length === 0) return;
+    const span = horizontal ? hole.height : hole.width;
+    if (span / (parts.length + 1) < OPENING_FACE_MIN_PX * unit) return;
+    ctx.lineWidth = 1 * unit;
+    for (const part of parts) {
+      ctx.beginPath();
+      if (horizontal) {
+        // Доли отсчитаны **от низа** просвета, а холст растёт вниз.
+        const y = hole.y + hole.height * (1 - part);
+        ctx.moveTo(hole.x, y);
+        ctx.lineTo(hole.x + hole.width, y);
+      } else {
+        const at = hole.x + hole.width * part;
+        ctx.moveTo(at, hole.y);
+        ctx.lineTo(at, hole.y + hole.height);
+      }
+      ctx.stroke();
+    }
+  };
+  draw(xs, false);
+  draw(ys, true);
+}
+
+/**
+ * Знак хода полотна на лице: стрелка. Сдвижное, гармошка и портальное едут
+ * вбок — в ту сторону, куда уходят; роллетное и секционное уходят вверх.
+ *
+ * Стрелка нужна именно здесь: на листе развёртки сдвижная дверь от распашной
+ * иначе не отличается ничем (засечки петель у неё нет), а на плитке выбора
+ * различать их человеку надо до клика.
+ */
+function drawOpeningFaceMotion(ctx, box, face, ink, unit) {
+  const up = face.motion === "lift";
+  const long = Math.min(up ? box.height : box.width, (up ? box.height : box.width) * 0.5);
+  if (long < 8 * unit) return;
+  const middle = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  // Куда смотрит стрелка: вверх — у поднимающегося полотна, иначе к тому
+  // косяку, за который полотно уходит.
+  const dir = up ? { x: 0, y: -1 } : { x: face.hinge === "end" ? 1 : -1, y: 0 };
+  const tip = { x: middle.x + dir.x * (long / 2), y: middle.y + dir.y * (long / 2) };
+  const tail = { x: middle.x - dir.x * (long / 2), y: middle.y - dir.y * (long / 2) };
+  const wing = Math.min(6 * unit, long * 0.25);
+  ctx.strokeStyle = ink;
+  ctx.lineWidth = 1 * unit;
+  ctx.beginPath();
+  ctx.moveTo(tail.x, tail.y);
+  ctx.lineTo(tip.x, tip.y);
+  ctx.moveTo(tip.x, tip.y);
+  ctx.lineTo(tip.x - dir.x * wing + dir.y * wing * 0.7, tip.y - dir.y * wing + dir.x * wing * 0.7);
+  ctx.moveTo(tip.x, tip.y);
+  ctx.lineTo(tip.x - dir.x * wing - dir.y * wing * 0.7, tip.y - dir.y * wing - dir.x * wing * 0.7);
   ctx.stroke();
 }
 
@@ -6129,42 +6515,16 @@ export function drawElevation(ctx, elevation, box, options = {}) {
     }
   }
 
-  // Проёмы: дырка в стене с косяками. У двери — засечка со стороны петель,
-  // как её рисуют на развёртке: наклонная от верхнего косяка к нижнему.
+  // Проёмы: дырка в стене с косяками, а внутри — лицо вида (таск 215): секции
+  // остекления, рама стеклянного полотна, засечка петель, знак хода полотна.
+  // Рисует его один `drawOpeningFace` — тот же, которым нарисована плитка
+  // выбора: человек выбирает проём по картинке и обязан увидеть на листе её же.
   for (const opening of elevation.openings) {
     const x = atX(opening.fromMm);
     const width = Math.max(thin, (opening.toMm - opening.fromMm) * scale);
     const top = atY(opening.topMm);
     const height = Math.max(thin, (opening.topMm - opening.floorMm) * scale);
-    ctx.fillStyle = DRAWING_PAPER;
-    ctx.fillRect(x, top, width, height);
-    ctx.lineWidth = 1.5 * unit;
-    ctx.strokeStyle = DRAWING_EDGE;
-    ctx.strokeRect(x, top, width, height);
-    // Стеклянная дверь (таск 180): на развёртку она смотрит лицом, и здесь
-    // видно ровно то, что просил заказчик, — рама по контуру, стекло в
-    // середине. Рама отложена внутрь на свою ширину, а не нарисована двойной
-    // линией на глаз: число одно на план, развёртку и объём.
-    if (opening.kind === OPENING_KIND_GLASS_DOOR) {
-      const inset = OPENING_GLASS_FRAME_MM * scale;
-      // Рама съела бы всё полотно на мелком масштабе — тогда стекла нет вовсе,
-      // и рисовать его незачем: дверь остаётся обведённым проёмом.
-      if (width > inset * 2.5 && height > inset * 2.5) {
-        ctx.lineWidth = 1 * unit;
-        ctx.strokeRect(x + inset, top + inset, width - inset * 2, height - inset * 2);
-      }
-    }
-    if (opening.hinge) {
-      const hingeX = opening.hinge === "start" ? x : x + width;
-      ctx.setLineDash([4 * unit, 3 * unit]);
-      ctx.lineWidth = 1 * unit;
-      ctx.beginPath();
-      ctx.moveTo(hingeX, top);
-      ctx.lineTo(opening.hinge === "start" ? x + width : x, top + height / 2);
-      ctx.lineTo(hingeX, top + height);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
+    drawOpeningFace(ctx, { x, y: top, width, height }, opening, { unit, scale });
     if (width < ELEVATION_LABEL_MIN_PX * unit) continue;
     // Низ и верх проёма — числами у его косяка: именно от них отмеряют.
     elevationText(ctx, String(opening.topMm), x + width / 2, top - 8 * unit, "center", unit);

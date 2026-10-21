@@ -207,10 +207,14 @@ test("состояние двери узнаётся, а чужое и пуст�
 // ——— стеклянная дверь — это дверь (G269) ———————————————————————————————
 
 test("полотно есть у двери и у стеклянной двери, и спрашивается это одним местом", () => {
-  assert.deepEqual(OPENING_DOOR_KINDS, [OPENING_KIND_DOOR, OPENING_KIND_GLASS_DOOR]);
-  for (const kind of OPENING_KINDS) {
-    assert.equal(openingHasLeaf(kind), kind === OPENING_KIND_DOOR || kind === OPENING_KIND_GLASS_DOOR, kind);
-  }
+  // Список вырос с таском 215 (каталог видов), и обе прежние двери в нём
+  // остались: дверь и стеклянная дверь — по-прежнему виды с полотном.
+  assert.ok(OPENING_DOOR_KINDS.includes(OPENING_KIND_DOOR));
+  assert.ok(OPENING_DOOR_KINDS.includes(OPENING_KIND_GLASS_DOOR));
+  // У окна, проёма и арки полотна нет и не появилось: прежние пять видов
+  // отвечают ровно то, что отвечали до каталога.
+  for (const kind of ["window", "opening", "arch"]) assert.equal(openingHasLeaf(kind), false, kind);
+  for (const kind of OPENING_DOOR_KINDS) assert.ok(OPENING_KINDS.includes(kind), kind);
   assert.equal(openingHasLeaf("люк"), false);
   assert.equal(openingHasLeaf(undefined), false);
   // Имя вида есть в словаре: забытое вышло бы в колонку по-английски.
