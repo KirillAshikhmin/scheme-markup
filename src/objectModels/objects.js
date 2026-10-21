@@ -18,7 +18,7 @@
 // (`objectCatalog.objectCatalogKeyByName`). Здесь этих слов больше нет
 // нарочно: один ключ — одно место, где он объявлен. Модель находят по ключу
 // (`objectModelByKey`), а имя в ключ переводит каталог.
-import { modelBox, modelCyl, modelParts, modelTube } from "./kit.js";
+import { modelBox, modelCyl, modelFront, modelParts, modelTube } from "./kit.js";
 import { MODELS_POWER } from "./power.js";
 
 // Стиральная и сушильная машины — **одна модель**, и это честнее двух.
@@ -358,6 +358,101 @@ export const MODELS_OBJECTS = {
     modelBox("postRight", { x: 0.42, width: 0.08, z: 0, height: 1, material: "dark" }),
     modelBox("panel", { x: -0.5, width: 1, y: -0.35, depth: 0.7, z: 0.05, height: 0.9 }),
     modelBox("cap", { x: -0.5, width: 1, y: -0.35, depth: 0.7, z: 0.95, height: 0.05, material: "light" }),
+  ),
+
+  // ——— инженерия таска 216 (G325) ———
+  //
+  // Пять вещей, к которым интегратор тянет линии. Все собраны по одному
+  // правилу: корпус плюс то, по чему вещь узнают в лицо, — и держатся трёх
+  // тел, потому что узнаётся каждая не деталью, а местом и габаритом.
+  //
+  // Слаботочный шкаф: корпус, дверца и полка с оборудованием. Дверца светлая и
+  // на всю высоту — этим он и отличается от силового щита, у которого лицо
+  // занято рядом автоматов.
+  rack: modelParts(
+    modelBox("case", { y: -0.3, depth: 0.8 }),
+    modelFront("door", 0.3, "light"),
+    modelBox("gear", { x: -0.38, width: 0.76, y: -0.46, depth: 0.5, z: 0.3, height: 0.2, material: "dark" }),
+  ),
+  // Котёл: корпус, панель управления светлой полосой вверху и два патрубка
+  // снизу. По патрубкам видно, что вещь не просто ящик на стене.
+  boiler: modelParts(
+    modelBox("case", { y: -0.2, depth: 0.7, z: 0.08, height: 0.92 }),
+    modelBox("panel", { x: -0.4, width: 0.8, y: -0.5, depth: 0.32, z: 0.6, height: 0.26, material: "light" }),
+    modelBox("pipes", { x: -0.34, width: 0.68, y: -0.3, depth: 0.3, z: 0, height: 0.08, material: "metal" }),
+  ),
+  // Бойлер: бак цилиндром и кронштейн к стене. Цилиндр здесь обязателен —
+  // круглый бок и есть то, чем бойлер отличается от шкафа.
+  waterHeater: modelParts(
+    modelCyl("tank", { x: -0.46, width: 0.92, y: -0.46, depth: 0.84, z: 0.04, height: 0.92 }),
+    modelBox("bracket", { x: -0.2, width: 0.4, y: 0.3, depth: 0.2, z: 0.2, height: 0.6, material: "metal" }),
+  ),
+  // Коллектор: шкаф, гребёнка поперёк и выход петель книзу.
+  manifold: modelParts(
+    modelBox("case", { y: -0.1, depth: 0.6 }),
+    modelBox("comb", { x: -0.4, width: 0.8, y: -0.5, depth: 0.4, z: 0.5, height: 0.14, material: "metal" }),
+    modelBox("loops", { x: -0.4, width: 0.8, y: -0.5, depth: 0.4, z: 0, height: 0.3, material: "dark" }),
+  ),
+  // Вентустановка: корпус и два патрубка по бокам — приток и вытяжка. Патрубки
+  // одним телом с каждой стороны: круглый воздуховод стоил бы десяти граней за
+  // штуку, а читается установка коробом с отводами.
+  ventUnit: modelParts(
+    modelBox("case", { x: -0.44, width: 0.88, y: -0.5, depth: 1, z: 0, height: 1 }),
+    modelBox("ductLeft", { x: -0.5, width: 0.06, y: -0.3, depth: 0.6, z: 0.3, height: 0.4, material: "metal" }),
+    modelBox("ductRight", { x: 0.44, width: 0.06, y: -0.3, depth: 0.6, z: 0.3, height: 0.4, material: "metal" }),
+  ),
+
+  // ——— обстановка таска 216 (G325) ———
+  //
+  // Камин: портал, тёмная топка в нём и полка сверху.
+  fireplace: modelParts(
+    modelBox("case", { z: 0, height: 0.92 }),
+    modelBox("firebox", { x: -0.34, width: 0.68, y: -0.5, depth: 0.5, z: 0.12, height: 0.5, material: "dark" }),
+    modelBox("mantel", { x: -0.5, width: 1, y: -0.5, depth: 1, z: 0.92, height: 0.08, material: "light" }),
+  ),
+  // Кухонный остров: светлая столешница, тумба под ней и цоколь. От стола его
+  // отличает глухая тумба — у стола под столешницей пусто.
+  kitchenIsland: modelParts(
+    modelBox("top", { z: 0.9, height: 0.1, material: "light" }),
+    modelBox("body", { x: -0.48, width: 0.96, y: -0.48, depth: 0.96, z: 0.08, height: 0.82 }),
+    modelBox("plinth", { x: -0.44, width: 0.88, y: -0.44, depth: 0.88, z: 0, height: 0.08, material: "dark" }),
+  ),
+  // Барная стойка: столешница, тумба и подножка у лица — за неё и держат ноги,
+  // сидя на барном табурете.
+  barCounter: modelParts(
+    modelBox("top", { x: -0.5, width: 1, y: -0.5, depth: 1, z: 0.93, height: 0.07, material: "light" }),
+    modelBox("body", { x: -0.46, width: 0.92, y: -0.2, depth: 0.7, z: 0, height: 0.93 }),
+    modelBox("footRail", { x: -0.46, width: 0.92, y: -0.46, depth: 0.1, z: 0.18, height: 0.06, material: "metal" }),
+  ),
+  // Зеркало: рама и стекло в ней. Стекло **не прозрачное**: сквозь зеркало не
+  // видно, в этом вся вещь, — оно светлое и холодное, как металл.
+  wallMirror: modelParts(
+    modelBox("frame", { y: 0, depth: 0.5 }),
+    modelBox("glass", { x: -0.44, width: 0.88, y: -0.5, depth: 0.5, z: 0.04, height: 0.92, material: "metal" }),
+  ),
+  // Ковёр: одна плита во весь габарит и кайма по краю. Двадцать миллиметров
+  // высоты — ровно столько, сколько ковёр и есть.
+  rug: modelParts(
+    modelBox("pile", { x: -0.5, width: 1, y: -0.5, depth: 1, z: 0, height: 0.7, material: "light" }),
+    modelBox("border", { x: -0.44, width: 0.88, y: -0.44, depth: 0.88, z: 0.7, height: 0.3 }),
+  ),
+  // Комод: корпус и три ящика светлыми полосами — ими он и отличается от
+  // тумбы, у которой ящиков два. Швы между ящиками **шире восьмой доли
+  // высоты** нарочно: отпечаток силуэта снимается сеткой 16 × 16, и шов тоньше
+  // клетки в него не попал бы — комод вышел бы на отпечатке той же тумбой.
+  chest: modelParts(
+    modelBox("case", { y: -0.3, depth: 0.8 }),
+    modelBox("drawerHigh", { x: -0.46, width: 0.92, y: -0.5, depth: 0.22, z: 0.7, height: 0.24, material: "light" }),
+    modelBox("drawerMid", { x: -0.46, width: 0.92, y: -0.5, depth: 0.22, z: 0.38, height: 0.24, material: "light" }),
+    modelBox("drawerLow", { x: -0.46, width: 0.92, y: -0.5, depth: 0.22, z: 0.06, height: 0.24, material: "light" }),
+  ),
+  // Стеллаж: боковины и две полки между ними. Полки видны насквозь — у шкафа
+  // на их месте сплошной фасад, и в кадре это две разные вещи.
+  shelving: modelParts(
+    modelBox("sideLeft", { x: -0.5, width: 0.06, z: 0, height: 1 }),
+    modelBox("sideRight", { x: 0.44, width: 0.06, z: 0, height: 1 }),
+    modelBox("shelfLow", { x: -0.44, width: 0.88, y: -0.4, depth: 0.8, z: 0.3, height: 0.06, material: "light" }),
+    modelBox("shelfHigh", { x: -0.44, width: 0.88, y: -0.4, depth: 0.8, z: 0.64, height: 0.06, material: "light" }),
   ),
 
   // ——— зелень и торшер (таск 216, G322) ———

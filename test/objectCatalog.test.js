@@ -2,7 +2,7 @@
 //
 // Что здесь держится:
 //
-//   1. **Состав каталога.** Сорок вещей в семи категориях (последняя —
+//   1. **Состав каталога.** Пятьдесят две вещи в семи категориях (последняя —
 //      «Транспорт», таск 204), у каждой имя в словаре, положительный габарит и
 //      известное место установки. Вещь, забытая в словаре, вышла бы в колонку
 //      своим ключом по-английски.
@@ -63,8 +63,8 @@ import {
   volumeStairs,
   volumeStep,
 } from "../src/volume.js";
-import { objectModelByKey } from "../src/objectModels/registry.js";
-import { objectViewByName } from "../src/objectViews/registry.js";
+import { objectModelByKey, objectModelClashes } from "../src/objectModels/registry.js";
+import { objectViewByName, objectViewClashes } from "../src/objectViews/registry.js";
 import { packProject, unpackProject } from "../src/projectFile.js";
 import { strings } from "../src/strings.js";
 
@@ -138,9 +138,9 @@ function place(scene, catalogKey, patch = {}) {
 
 // ——— состав каталога ————————————————————————————————————————————————————
 
-test("в каталоге сорок вещей, и каждая стоит ровно в одной категории", () => {
+test("в каталоге пятьдесят две вещи, и каждая стоит ровно в одной категории", () => {
   const keys = objectCatalogKeys();
-  assert.equal(keys.length, 40, "вещей в каталоге стало другое число: " + keys.length);
+  assert.equal(keys.length, 52, "вещей в каталоге стало другое число: " + keys.length);
   assert.equal(new Set(keys).size, keys.length, "ключ занят дважды");
   // Тринадцать из брифа заказчика — поимённо: список называли словами, и
   // пропажа любой из них должна краснеть, а не теряться в числе.
@@ -380,6 +380,62 @@ test("выход с лестницы — парный лестнице элем�
   assert.equal(objectCatalogKeyByName("Экран проектора"), "projectorScreen");
   assert.equal(objectCatalogKeyByName("Экран радиатора"), "radiator");
   assert.equal(objectCatalogKeyByName("Беговая дорожка"), "treadmill");
+});
+
+test("девятнадцать вещей таска 216 на месте, и каждая знает своё место установки", () => {
+  // Перечень заказчика (G322) и принятые им предложения (G325): «давай
+  // добавим что предложил». Поимённо — потому что список называли словами, и
+  // пропажа любой должна краснеть, а не теряться в числе.
+  const asked = {
+    railing: "structures",
+    fence: "structures",
+    stairsL: "structures",
+    stairsU: "structures",
+    stairsSpiral: "structures",
+    plant: "decor",
+    treePot: "decor",
+    floorLamp: "decor",
+  };
+  const offered = {
+    rack: "engineering",
+    boiler: "engineering",
+    waterHeater: "engineering",
+    manifold: "engineering",
+    ventUnit: "engineering",
+    fireplace: "decor",
+    wallMirror: "decor",
+    rug: "decor",
+    kitchenIsland: "furniture",
+    barCounter: "furniture",
+    chest: "furniture",
+    shelving: "furniture",
+  };
+  for (const [key, category] of Object.entries({ ...asked, ...offered })) {
+    const entry = objectCatalogEntry(key);
+    assert.ok(entry, "вещь таска 216 пропала: " + key);
+    assert.equal(entry.category, category, key + ": вещь ушла не в свой раздел");
+    assert.equal(entry.name, strings.schemeObjectKinds[key], key + ": имя не из словаря");
+    assert.equal(objectCatalogKeyByName(entry.name), key, key + ": имя не узнаётся своим ключом");
+  }
+  // Инженерия вся на стене и вся висит: котёл, бойлер и рэк на полу не стоят,
+  // и нулевая высота у них значила бы, что вещь поставили, а не повесили.
+  for (const key of Object.keys(offered).filter((key) => offered[key] === "engineering")) {
+    assert.equal(objectCatalogEntry(key).mount, "wall", key + ": инженерия должна висеть");
+    assert.ok(objectCatalogEntry(key).heightAboveFloorMm > 0, key + ": висит на нулевой высоте");
+  }
+  // Перила и забор — **полосы**: у них длина идёт по месту с поворотами.
+  for (const key of ["railing", "fence"]) {
+    assert.equal(objectCatalogDefaults(key).shape, "polyline", key + ": линейная вещь стала прямоугольником");
+  }
+  // Зеркало-вещь и «Подсветка зеркала»-метка — **разные ключи**: у метки своё
+  // круглое зеркало с подсветкой (таск 177), у вещи своё настенное в рост.
+  assert.ok(objectViewByName("wallMirror"), "у зеркала-вещи нет изображения");
+  assert.ok(objectViewByName("mirror"), "изображение подсветки зеркала пропало");
+  assert.notEqual(objectCatalogEntry("wallMirror").widthMm, 600, "вещь взяла габарит метки");
+  // И ни одного ключа дважды: реестры плоские, и вещь с именем метки затёрла
+  // бы ей тело.
+  assert.deepEqual(objectViewClashes(), []);
+  assert.deepEqual(objectModelClashes(), []);
 });
 
 test("пара лестница — выход стала точкой привязки сама, без правки привязки", () => {
