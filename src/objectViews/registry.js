@@ -70,17 +70,39 @@ import { VIEWS_THINGS } from "./things.js";
 // что изображения меток, и по той же причине, по какой в одном реестре живут
 // их модели (`objectModels/registry.js`). Имя записи там и тут одно — ключ
 // встроенного каталога, — и ни одного ключа два семейства не делят.
-const VIEW_FAMILIES = [VIEWS_POWER, VIEWS_LIGHT, VIEWS_CLIMATE, VIEWS_SENSE, VIEWS_NET, VIEWS_THINGS, VIEWS_OBJECTS];
+//
+// **Семья названа ключом** (таск 218): по ней сетка выбора изображения
+// раскладывает реестр разделами, и порядок разделов — порядок этого списка.
+// Второго списка семей в сборке быть не должно: реестр — хозяин того, какие
+// изображения есть и в каком они порядке.
+const VIEW_FAMILIES = [
+  ["power", VIEWS_POWER],
+  ["light", VIEWS_LIGHT],
+  ["climate", VIEWS_CLIMATE],
+  ["sense", VIEWS_SENSE],
+  ["net", VIEWS_NET],
+  ["things", VIEWS_THINGS],
+  ["objects", VIEWS_OBJECTS],
+];
+
+/** Ключи семей в порядке реестра. `objects` — вещи чертежа, остальные — метки. */
+export const OBJECT_VIEW_FAMILIES = VIEW_FAMILIES.map(([family]) => family);
+
+/** Семья вещей чертежа: её имена — ключи встроенного каталога, а не метки. */
+export const OBJECT_VIEW_FAMILY_OBJECTS = "objects";
 
 const ICONS = {};
 const VIEW_CLASHES = [];
 const BY_SHAPE = {};
-for (const family of VIEW_FAMILIES) {
-  for (const [name, icon] of Object.entries(family)) {
+const BY_FAMILY = {};
+for (const [family, icons] of VIEW_FAMILIES) {
+  BY_FAMILY[family] = [];
+  for (const [name, icon] of Object.entries(icons)) {
     // Два семейства, занявшие одно имя, молча затёрли бы друг друга — и у
     // метки оказалось бы изображение дивана. Список пустой держит тест.
     if (ICONS[name]) VIEW_CLASHES.push(name);
-    ICONS[name] = { name, ...icon };
+    ICONS[name] = { name, family, ...icon };
+    BY_FAMILY[family].push(name);
     for (const shape of icon.shapes || []) BY_SHAPE[shape] = name;
   }
 }
@@ -108,6 +130,16 @@ export function objectViewClashes() {
 /** Какие формы знаков уже разобраны по изображениям. */
 export function objectViewShapes() {
   return Object.keys(BY_SHAPE).sort();
+}
+
+/**
+ * Имена семьи в порядке объявления — для сетки выбора изображения (таск 218).
+ *
+ * Порядок именно объявления, а не алфавита: записи внутри файла семьи сложены
+ * смыслом (розетки, выключатели, щиты), и алфавит эту раскладку перетасовал бы.
+ */
+export function objectViewFamily(family) {
+  return [...(BY_FAMILY[family] || [])];
 }
 
 // Толщина контура — доля размера изображения, как у знаков на плане: тонкая линия
