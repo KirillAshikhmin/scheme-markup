@@ -694,7 +694,33 @@ export function setMarkPointer(project, markId, on) {
 // вообще есть. Двадцать пикселей — это 3,2 мм подписи и 5 мм значка.
 // Регулятор никуда не делся: это только начальное значение нового объекта,
 // у размеченных объектов свои числа уже записаны.
-const DEFAULT_VIEW = { markSize: DEFAULT_MARK_SIZE, labelSize: 20 };
+//
+// **Умолчание одно на всю сборку, и оно здесь** (находка 3 разбора механик).
+// Отдано наружу затем, что спрашивают его трое: отрисовка (`render.js`),
+// ползунки раздела «Размеры» (`panels/tools.js`) и ручки блока на холсте. До
+// этого у каждого стояли свои числа — 10 и 12, те самые прежние, которые
+// заказчик отверг, — и объект **без поля `view`** рисовался отвергнутым кеглем
+// и уезжал в печать. Путь к такому объекту живой: `createProject` поле
+// заводит, а чужой файл или сборка руками — нет (`autosave.adoptLoadedProject`
+// растекает `...source` и своего `view` не добавляет).
+//
+// Объект при этом не правится (G68): умолчание читается на кадре, в
+// `project.json` не попадает, и у кого свои числа записаны — у того не
+// меняется ничего.
+export const DEFAULT_VIEW = { markSize: DEFAULT_MARK_SIZE, labelSize: 20 };
+
+/**
+ * Размеры знака и подписи объекта: его собственные, а где их нет —
+ * умолчание. Единственная дверь к ним, и нужна она потому, что `view` у
+ * объекта может не быть вовсе, может быть пустым и может нести только одно
+ * число из двух.
+ */
+export function projectViewSizes(project) {
+  const view = project && project.view ? project.view : {};
+  const markSize = Number.isFinite(view.markSize) && view.markSize > 0 ? view.markSize : DEFAULT_VIEW.markSize;
+  const labelSize = Number.isFinite(view.labelSize) && view.labelSize > 0 ? view.labelSize : DEFAULT_VIEW.labelSize;
+  return { markSize, labelSize };
+}
 
 // Стартовый справочник — справочник рабочего объекта заказчика. Его слова:
 // «справочник типов в общий возьми из этого проекта». Комнаты он прислал

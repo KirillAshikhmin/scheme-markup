@@ -13,6 +13,7 @@ import {
   planPixelsPerMeter,
   projectSite,
   projectStamp,
+  projectViewSizes,
   roomsInOrder,
   schemeHeightPx,
   schemeWidthPx,
@@ -370,7 +371,7 @@ export function exportFitArea(project, scheme, options = {}) {
   if (!project || !scheme || options.fit === false) return { area: base, missed: [] };
 
   const plan = exportPlanSize(scheme);
-  const sizes = project.view || {};
+  const sizes = projectViewSizes(project);
   const view = { zoom: 1, offsetX: 0, offsetY: 0, markSize: sizes.markSize, labelSize: sizes.labelSize };
   const filter = options.filter || null;
   const radius = markRadius(view);
@@ -481,7 +482,7 @@ export async function schemePng(project, scheme, image, options = {}) {
   const ctx = monoOf(canvas.getContext("2d"), options.mono);
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  const sizes = project && project.view ? project.view : {};
+  const sizes = projectViewSizes(project);
   const view = {
     zoom: scale,
     offsetX: -area.x * scale,
@@ -1208,7 +1209,7 @@ export function gostSchemeSheet(project, scheme, options = {}) {
     filter: options.filter,
     fit: options.fit,
   });
-  const sizes = project && project.view ? project.view : {};
+  const sizes = projectViewSizes(project);
   const view = { zoom: 1, offsetX: 0, offsetY: 0, markSize: sizes.markSize, labelSize: sizes.labelSize };
   const layout = gostSheetLayout(
     { width: area.width, height: area.height },
@@ -1259,7 +1260,7 @@ export async function gostSchemePng(project, scheme, image, options = {}) {
   const ctx = monoOf(canvas.getContext("2d"), options.mono);
   drawGostFrame(ctx, plan.sheet, mm);
 
-  const sizes = project && project.view ? project.view : {};
+  const sizes = projectViewSizes(project);
   const zoom = plan.fit.scale * mm;
   const view = {
     zoom,

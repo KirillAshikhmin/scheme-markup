@@ -32,6 +32,7 @@ import {
   findScheme,
   findType,
   labelOf,
+  projectViewSizes,
   typeKindOf,
   schemesInOrder,
   updateProject,
@@ -645,7 +646,13 @@ export function createSizesFields(api) {
 
   function render() {
     const state = getState();
-    const sizes = state.project ? state.project.view : { markSize: 10, labelSize: 12 };
+    // Размеры — одной дверью (`projectViewSizes`). Здесь стояло
+    // `state.project ? state.project.view : {…}`, и защищалось это от «нет
+    // объекта», а не от «объект без поля `view`». На таком объекте `sizes`
+    // оказывался `undefined`, `sizes.markSize` бросал ошибку, `setState` её
+    // ловил — и вместо раздела «Размеры» человек получал английский текст
+    // исключения в плашке (находка 3 разбора механик).
+    const sizes = projectViewSizes(state.project);
     // ——— состав один и тот же во всех режимах (таск 193, G293) ————————
     //
     // Что в каком режиме меняет картинку — сказано в подсказках, а не

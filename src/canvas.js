@@ -29,6 +29,7 @@ import {
 } from "./gestures.js";
 import {
   DEFAULT_MARK_SIZE,
+  DEFAULT_VIEW,
   MARK_KIND_COMMENT,
   OUTLINE_MIN_POINTS,
   addMark,
@@ -3632,7 +3633,10 @@ function canvasDragTo(point, free) {
       // База — там, где подпись сейчас видна, а не там, где лежит её смещение:
       // подпись, отведённую раскладкой от соседа, нельзя дёргать обратно
       // в стандартное место в тот миг, когда за неё взялись мышью.
-      const size = view.markSize || 10;
+      // Умолчание — модельное (`DEFAULT_VIEW`), не своё число: здесь стояла
+      // десятка, отвергнутая заказчиком вместе с прежним кеглем подписи
+      // (находка 3 разбора механик).
+      const size = view.markSize || DEFAULT_VIEW.markSize;
       const seen = target ? labelBox(before, scheme, target, view, state.filter) : null;
       // Запасное место подписи — то же, куда её ставит отрисовка, когда её не
       // оттаскивали: мерка отступа берётся у неё (`LABEL_GAP`), а не повторяется.

@@ -10883,7 +10883,33 @@ function setMarkPointer(project, markId, on) {
 // вообще есть. Двадцать пикселей — это 3,2 мм подписи и 5 мм значка.
 // Регулятор никуда не делся: это только начальное значение нового объекта,
 // у размеченных объектов свои числа уже записаны.
+//
+// **Умолчание одно на всю сборку, и оно здесь** (находка 3 разбора механик).
+// Отдано наружу затем, что спрашивают его трое: отрисовка (`render.js`),
+// ползунки раздела «Размеры» (`panels/tools.js`) и ручки блока на холсте. До
+// этого у каждого стояли свои числа — 10 и 12, те самые прежние, которые
+// заказчик отверг, — и объект **без поля `view`** рисовался отвергнутым кеглем
+// и уезжал в печать. Путь к такому объекту живой: `createProject` поле
+// заводит, а чужой файл или сборка руками — нет (`autosave.adoptLoadedProject`
+// растекает `...source` и своего `view` не добавляет).
+//
+// Объект при этом не правится (G68): умолчание читается на кадре, в
+// `project.json` не попадает, и у кого свои числа записаны — у того не
+// меняется ничего.
 const DEFAULT_VIEW = { markSize: DEFAULT_MARK_SIZE, labelSize: 20 };
+
+/**
+ * Размеры знака и подписи объекта: его собственные, а где их нет —
+ * умолчание. Единственная дверь к ним, и нужна она потому, что `view` у
+ * объекта может не быть вовсе, может быть пустым и может нести только одно
+ * число из двух.
+ */
+function projectViewSizes(project) {
+  const view = project && project.view ? project.view : {};
+  const markSize = Number.isFinite(view.markSize) && view.markSize > 0 ? view.markSize : DEFAULT_VIEW.markSize;
+  const labelSize = Number.isFinite(view.labelSize) && view.labelSize > 0 ? view.labelSize : DEFAULT_VIEW.labelSize;
+  return { markSize, labelSize };
+}
 
 // Стартовый справочник — справочник рабочего объекта заказчика. Его слова:
 // «справочник типов в общий возьми из этого проекта». Комнаты он прислал
@@ -22943,7 +22969,16 @@ const GUIDE_DROP_ALPHA = 0.45;
 const GUIDE_WIDTH = 1;
 const GUIDE_ALPHA = 0.5;
 
-const RENDER_VIEW_DEFAULTS = { zoom: 1, offsetX: 0, offsetY: 0, markSize: 10, labelSize: 12 };
+// Размеры знака и подписи берутся у модели (`DEFAULT_VIEW`) — своих чисел тут
+// быть не должно: стояли свои, и объект без поля `view` рисовался прежним,
+// отвергнутым заказчиком кеглем (находка 3 разбора механик).
+const RENDER_VIEW_DEFAULTS = {
+  zoom: 1,
+  offsetX: 0,
+  offsetY: 0,
+  markSize: DEFAULT_VIEW.markSize,
+  labelSize: DEFAULT_VIEW.labelSize,
+};
 
 // Рамка легенды в высотах строки: отступ до текста, минимальная и предельная
 // ширина. Предел — чтобы длинный код не растянул легенду на полплана.
@@ -23495,6 +23530,13 @@ const JACK_HEIGHT = 0.75;
 function renderView(view) {
   const merged = { ...RENDER_VIEW_DEFAULTS, ...(view || {}) };
   if (!(merged.zoom > 0)) merged.zoom = 1;
+  // Негодный размер — это умолчание, а не `NaN`: растекание чужого `view`
+  // приносило `markSize: undefined`, и радиус знака отвечал `NaN` — обводка
+  // контура переставала замыкаться двойным кликом (таск 138). Холст от этого
+  // защищается у себя (`canvasViewOf`), но защита обязана стоять и здесь:
+  // выгрузка, лист ГОСТ и развёртка собирают `view` сами.
+  if (!(merged.markSize > 0)) merged.markSize = RENDER_VIEW_DEFAULTS.markSize;
+  if (!(merged.labelSize > 0)) merged.labelSize = RENDER_VIEW_DEFAULTS.labelSize;
   if (!merged.fontFamily) merged.fontFamily = fontFamilyOf(merged.fontKind || FONT_DRAFT);
   return merged;
 }
@@ -29088,6 +29130,7 @@ function drawScheme(ctx, {
 // снаружи вызывать незачем, но проверить нужно (геометрия, видимость, запас
 // попадания). Панели и экспорт берут только именованные экспорты выше.
 const renderInternals = {
+  renderView,
   shapeGeometry,
   MARK_STACK_REACH_RATIO,
   MARK_STACK_STEP_RATIO,
@@ -36591,7 +36634,10 @@ function canvasDragTo(point, free) {
       // База — там, где подпись сейчас видна, а не там, где лежит её смещение:
       // подпись, отведённую раскладкой от соседа, нельзя дёргать обратно
       // в стандартное место в тот миг, когда за неё взялись мышью.
-      const size = view.markSize || 10;
+      // Умолчание — модельное (`DEFAULT_VIEW`), не своё число: здесь стояла
+      // десятка, отвергнутая заказчиком вместе с прежним кеглем подписи
+      // (находка 3 разбора механик).
+      const size = view.markSize || DEFAULT_VIEW.markSize;
       const seen = target ? labelBox(before, scheme, target, view, state.filter) : null;
       // Запасное место подписи — то же, куда её ставит отрисовка, когда её не
       // оттаскивали: мерка отступа берётся у неё (`LABEL_GAP`), а не повторяется.
@@ -40628,7 +40674,7 @@ function exportFitArea(project, scheme, options = {}) {
   if (!project || !scheme || options.fit === false) return { area: base, missed: [] };
 
   const plan = exportPlanSize(scheme);
-  const sizes = project.view || {};
+  const sizes = projectViewSizes(project);
   const view = { zoom: 1, offsetX: 0, offsetY: 0, markSize: sizes.markSize, labelSize: sizes.labelSize };
   const filter = options.filter || null;
   const radius = markRadius(view);
@@ -40739,7 +40785,7 @@ async function schemePng(project, scheme, image, options = {}) {
   const ctx = monoOf(canvas.getContext("2d"), options.mono);
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  const sizes = project && project.view ? project.view : {};
+  const sizes = projectViewSizes(project);
   const view = {
     zoom: scale,
     offsetX: -area.x * scale,
@@ -41464,7 +41510,7 @@ function gostSchemeSheet(project, scheme, options = {}) {
     filter: options.filter,
     fit: options.fit,
   });
-  const sizes = project && project.view ? project.view : {};
+  const sizes = projectViewSizes(project);
   const view = { zoom: 1, offsetX: 0, offsetY: 0, markSize: sizes.markSize, labelSize: sizes.labelSize };
   const layout = gostSheetLayout(
     { width: area.width, height: area.height },
@@ -41515,7 +41561,7 @@ async function gostSchemePng(project, scheme, image, options = {}) {
   const ctx = monoOf(canvas.getContext("2d"), options.mono);
   drawGostFrame(ctx, plan.sheet, mm);
 
-  const sizes = project && project.view ? project.view : {};
+  const sizes = projectViewSizes(project);
   const zoom = plan.fit.scale * mm;
   const view = {
     zoom,
@@ -73662,7 +73708,13 @@ function createSizesFields(api) {
 
   function render() {
     const state = getState();
-    const sizes = state.project ? state.project.view : { markSize: 10, labelSize: 12 };
+    // Размеры — одной дверью (`projectViewSizes`). Здесь стояло
+    // `state.project ? state.project.view : {…}`, и защищалось это от «нет
+    // объекта», а не от «объект без поля `view`». На таком объекте `sizes`
+    // оказывался `undefined`, `sizes.markSize` бросал ошибку, `setState` её
+    // ловил — и вместо раздела «Размеры» человек получал английский текст
+    // исключения в плашке (находка 3 разбора механик).
+    const sizes = projectViewSizes(state.project);
     // ——— состав один и тот же во всех режимах (таск 193, G293) ————————
     //
     // Что в каком режиме меняет картинку — сказано в подсказках, а не

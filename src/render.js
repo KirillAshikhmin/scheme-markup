@@ -13,6 +13,7 @@
 import {
   BLOCK_LABEL_SEPARATOR,
   BLOCK_STEP_RATIO,
+  DEFAULT_VIEW,
   LINE_STYLES,
   OPENING_GLASS_FRAME_MM,
   OPENING_KIND_GLASS_DOOR,
@@ -216,7 +217,16 @@ const GUIDE_DROP_ALPHA = 0.45;
 const GUIDE_WIDTH = 1;
 const GUIDE_ALPHA = 0.5;
 
-const RENDER_VIEW_DEFAULTS = { zoom: 1, offsetX: 0, offsetY: 0, markSize: 10, labelSize: 12 };
+// Размеры знака и подписи берутся у модели (`DEFAULT_VIEW`) — своих чисел тут
+// быть не должно: стояли свои, и объект без поля `view` рисовался прежним,
+// отвергнутым заказчиком кеглем (находка 3 разбора механик).
+const RENDER_VIEW_DEFAULTS = {
+  zoom: 1,
+  offsetX: 0,
+  offsetY: 0,
+  markSize: DEFAULT_VIEW.markSize,
+  labelSize: DEFAULT_VIEW.labelSize,
+};
 
 // Рамка легенды в высотах строки: отступ до текста, минимальная и предельная
 // ширина. Предел — чтобы длинный код не растянул легенду на полплана.
@@ -769,6 +779,13 @@ const JACK_HEIGHT = 0.75;
 function renderView(view) {
   const merged = { ...RENDER_VIEW_DEFAULTS, ...(view || {}) };
   if (!(merged.zoom > 0)) merged.zoom = 1;
+  // Негодный размер — это умолчание, а не `NaN`: растекание чужого `view`
+  // приносило `markSize: undefined`, и радиус знака отвечал `NaN` — обводка
+  // контура переставала замыкаться двойным кликом (таск 138). Холст от этого
+  // защищается у себя (`canvasViewOf`), но защита обязана стоять и здесь:
+  // выгрузка, лист ГОСТ и развёртка собирают `view` сами.
+  if (!(merged.markSize > 0)) merged.markSize = RENDER_VIEW_DEFAULTS.markSize;
+  if (!(merged.labelSize > 0)) merged.labelSize = RENDER_VIEW_DEFAULTS.labelSize;
   if (!merged.fontFamily) merged.fontFamily = fontFamilyOf(merged.fontKind || FONT_DRAFT);
   return merged;
 }
@@ -6372,6 +6389,7 @@ export function drawScheme(ctx, {
 // снаружи вызывать незачем, но проверить нужно (геометрия, видимость, запас
 // попадания). Панели и экспорт берут только именованные экспорты выше.
 export const renderInternals = {
+  renderView,
   shapeGeometry,
   MARK_STACK_REACH_RATIO,
   MARK_STACK_STEP_RATIO,
