@@ -1044,6 +1044,36 @@
   padding: 4px 6px;
 }
 
+/* Строка предложения изображения (таск 218): точка, код, название типа и пара
+   картинок «нынешняя → предложенная» у правого края. Своя раскладка колонок
+   нужна ровно из-за этой пары: в общих трёх колонках картинки уезжали на
+   второй этаж под текст. */
+.warnings__row--view {
+  grid-template-columns: auto auto 1fr auto;
+}
+
+.warnings__views {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.warnings__viewArrow,
+.warnings__viewNone {
+  color: var(--panel-muted);
+  font-size: 12px;
+}
+
+/* Кнопка «Применить» в строке: держит правый край рядом с крестиком и, как он,
+   строку не растягивает. */
+.warnings__apply {
+  flex: none;
+  align-self: center;
+  padding: 3px 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .warnings__code {
   font-weight: 600;
 }

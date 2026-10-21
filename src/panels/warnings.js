@@ -21,6 +21,7 @@ import { layoutAllows, PANEL_IDS, registerPanel, reportAppError } from "../app.j
 import {
   acceptProblem,
   acceptedProblems,
+  applyTypeViewOffers,
   closeTypeKindReview,
   findGroup,
   findMark,
@@ -32,6 +33,7 @@ import {
   problemAccepted,
   typeKindOf,
   typeKindReview,
+  typeViewReview,
   unacceptProblem,
   updateType,
   validate,
@@ -43,6 +45,13 @@ import { uiButton, uiDialogDepth, uiEl, uiIcon, uiIconButton } from "./ui.js";
 import { marksCenteredView } from "./marks.js";
 // Переключатель вида типа — тот же, что в справочнике: два вида, две кнопки.
 import { typesKindSwitch } from "./types.js";
+// Картинка изображения в клетке — тот же кирпич, которым рисуются плитки
+// выбора: второго рисовальщика изображений в сборке быть не должно.
+import { objectTileIcon, TILE_INK } from "./objectPicker.js";
+
+// Картинка в строке предложения: мера меньше плитки выбора — в строке их две
+// рядом со стрелкой, и сорок точек развалили бы список на два этажа.
+const WARNING_VIEW_ICON = 22;
 
 // Кто виновник предупреждения. Код проблемы знает только `ref`, а что это за
 // идентификатор — знание здесь: в модели ссылка нарочно без типа, чтобы
@@ -55,6 +64,9 @@ export const WARNING_TARGETS = {
   // Повтор знака ведёт к первому типу под ним, похожий цвет — к категории:
   // смотреть пользователю на метки, а не на строку справочника.
   sharedShape: "type",
+  // Предложенное изображение ведёт к меткам типа: решая, менять ли картинку,
+  // человек смотрит на то, где эти метки стоят, а не на строку справочника.
+  typeViewOffer: "type",
   closeColors: "category",
   markWithoutType: "mark",
   markWithoutScheme: "mark",
@@ -185,6 +197,10 @@ export function warningWhere(project, place) {
 export function warningsModel(project) {
   if (!project) return { total: 0, level: "ok", groups: [], accepted: [] };
   const byCode = new Map();
+  // Что общая база предлагает типу (таск 218): строке мало текста — ей нужны
+  // имя изображения, чтобы нарисовать картинки «нынешнее → предложенное», и
+  // сам тип, чтобы применить. Спрашивается это один раз на весь список.
+  const offers = new Map(typeViewReview(project).map((row) => [row.typeId, row]));
   for (const problem of validate(project)) {
     // Принятое не показывается вовсе — и не пересчитывается заново: ключ
     // принятия нарочно не знает, сколько меток под предупреждением, иначе
@@ -205,6 +221,9 @@ export function warningsModel(project) {
       problem,
       place,
       where: warningWhere(project, place),
+      // Предложение общей базы: `{typeId, code, name, view, now}`. У остальных
+      // кодов его нет, и строка рисуется обычной.
+      offer: problem.code === "typeViewOffer" ? offers.get(problem.ref) || null : null,
     });
   }
   const groups = [...byCode.values()]
@@ -352,6 +371,27 @@ function mountWarningsPanel(host, api) {
     canvasCommit(project, next, strings.history.unacceptProblem);
   }
 
+  // ——— изображение из общей базы (таск 218) ————————————————————————————
+  //
+  // Применяет человек, и только нажатием: до него в объекте не меняется ни
+  // одного ключа (G68). `typeIds` не передан — применяется весь список, и это
+  // **один** шаг истории: одна отмена возвращает все шесть типов.
+
+  function applyViews(typeIds) {
+    const project = getState().project;
+    if (!project) return;
+    try {
+      const result = applyTypeViewOffers(project, typeIds);
+      if (result.applied.length === 0) return;
+      canvasCommit(project, result.project, strings.history[typeIds ? "typeView" : "typeViewAll"]);
+      if (result.applied.length > 1) {
+        api.notify(text("warnings.viewApplied", { count: result.applied.length }), "success");
+      }
+    } catch (error) {
+      reportAppError(error);
+    }
+  }
+
   function dismissKinds() {
     const project = getState().project;
     if (!project) return;
@@ -494,9 +534,69 @@ function mountWarningsPanel(host, api) {
     ]);
   }
 
+  // Строка предложения изображения (таск 218). Словом изображения не назвать —
+  // поэтому в строке стоят **две картинки**: нынешняя и предложенная, со
+  // стрелкой между ними. У «Ночника» нынешней нет вовсе, и на её месте стоит
+  // прочерк с подписью — так видно, что до правки на развёртке у него был
+  // условный знак.
+  //
+  // Применение — кнопкой; крестик рядом (`problemRow` его тоже ставит) закрывает
+  // строку ответом «так и задумано». Ни то, ни другое не делается само.
+  function viewRow(item) {
+    const offer = item.offer;
+    const color = viewRowColor(item);
+    return uiEl("div", { class: "warnings__line" }, [
+      uiEl(
+        "button",
+        {
+          class: "warnings__row warnings__row--warning warnings__row--view",
+          type: "button",
+          title: strings.warnings.hint,
+          on: { click: () => jump(item.place) },
+        },
+        [
+          levelDot(item.level),
+          uiEl("span", { class: "warnings__code", text: offer ? offer.code : "" }),
+          uiEl("span", { class: "warnings__text", text: offer ? offer.name : item.message }),
+          uiEl("span", { class: "warnings__views" }, [
+            offer && offer.now
+              ? objectTileIcon(offer.now, WARNING_VIEW_ICON, color)
+              : uiEl("span", { class: "warnings__viewNone", text: strings.warnings.viewNone }),
+            uiEl("span", { class: "warnings__viewArrow", text: "→", attrs: { "aria-hidden": "true" } }),
+            offer ? objectTileIcon(offer.view, WARNING_VIEW_ICON, color) : null,
+          ]),
+        ],
+      ),
+      uiButton(strings.warnings.viewApply, {
+        class: "ui-btn ui-btn--accent warnings__apply",
+        title: strings.warnings.viewApplyHint,
+        on: { click: () => applyViews(offer ? [offer.typeId] : null) },
+      }),
+      uiIconButton("close", {
+        class: "ui-btn warnings__accept",
+        label: strings.warnings.accept,
+        title: strings.warnings.acceptHint,
+        on: { click: () => accept(item.problem) },
+      }),
+    ]);
+  }
+
+  // Цвет картинок в строке — цвет категории типа: ровно та краска, которой
+  // изображение встанет на развёртку. Категории нет — цвет текста панели.
+  function viewRowColor(item) {
+    const project = getState().project;
+    const type = project && item.offer ? findType(project, item.offer.typeId) : null;
+    const category = type ? (project.categories || []).find((row) => row.id === type.categoryId) : null;
+    return category ? category.color : TILE_INK;
+  }
+
   function groupNode(group) {
     const single = group.count === 1;
-    const items = group.items.map((item) => (item.code === "typeKind" ? kindRow(item) : problemRow(item)));
+    const items = group.items.map((item) => {
+      if (item.code === "typeKind") return kindRow(item);
+      if (item.code === "typeViewOffer") return viewRow(item);
+      return problemRow(item);
+    });
     if (single && group.level !== "ask") return items[0];
     // Свёрнуто по умолчанию — в том числе вопросы о виде: полтора десятка
     // строк, развёрнутых самими собой, и были той простынёй, из-за которой
@@ -533,6 +633,21 @@ function mountWarningsPanel(host, api) {
           uiButton(strings.warnings.kindAll, {
             title: strings.warnings.kindAllHint,
             on: { click: () => dismissKinds() },
+          }),
+        ]),
+      );
+    }
+    // Предложения изображений (таск 218) — тем же устройством: объяснение
+    // сверху, «Применить все» внизу раскрытой группы. Закрыть разом то, чего
+    // не видел, нельзя — и применить разом тоже.
+    if (group.code === "typeViewOffer") {
+      body.prepend(uiEl("p", { class: "warnings__why warnings__kindHint", text: strings.warnings.viewHint }));
+      body.append(
+        uiEl("div", { class: "warnings__foot" }, [
+          uiButton(strings.warnings.viewApplyAll, {
+            class: "ui-btn ui-btn--accent",
+            title: strings.warnings.viewApplyAllHint,
+            on: { click: () => applyViews(null) },
           }),
         ]),
       );

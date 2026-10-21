@@ -52,8 +52,12 @@ export const TILE_INK = "#e6edf3";
 /**
  * Картинка вещи в клетке. Рисуется в точках устройства, а показывается в
  * точках страницы: на экране с удвоенной плотностью контур иначе размылся бы.
+ *
+ * `color` — краска контура; умолчание `TILE_INK` оставляет плитку плиткой.
+ * Справочник типов (таск 218) просит цвет категории: там изображение стоит в
+ * строке типа, и красится оно так же, как встанет на развёртку.
  */
-export function objectTileIcon(key, size = OBJECT_TILE_ICON) {
+export function objectTileIcon(key, size = OBJECT_TILE_ICON, color = TILE_INK) {
   const canvas = uiEl("canvas", { class: "objectTile__icon" });
   const ratio = typeof devicePixelRatio === "number" && devicePixelRatio > 0 ? Math.min(3, devicePixelRatio) : 1;
   canvas.width = Math.round(size * ratio);
@@ -62,7 +66,7 @@ export function objectTileIcon(key, size = OBJECT_TILE_ICON) {
   canvas.style.height = size + "px";
   const ctx = canvas.getContext ? canvas.getContext("2d") : null;
   const icon = objectViewByName(key);
-  if (ctx && icon) drawObjectView(ctx, icon, { x: 0, y: 0, width: canvas.width, height: canvas.height }, TILE_INK);
+  if (ctx && icon) drawObjectView(ctx, icon, { x: 0, y: 0, width: canvas.width, height: canvas.height }, color);
   return canvas;
 }
 
@@ -102,6 +106,19 @@ function plain(value) {
 }
 
 /**
+ * Подходит ли плитка под запрос: по имени вещи или по имени её раздела.
+ *
+ * **Одно правило на всю сетку плиток** (таск 218): сетку изображений в
+ * справочнике типов собирают из тех же кирпичей, и её разделы — свои. Разойдись
+ * правила — в одном окне половина плиток искалась бы иначе, чем другая.
+ */
+export function objectTileMatches(query, name, groupName) {
+  const needle = plain(query);
+  if (needle === "") return true;
+  return plain(name).includes(needle) || plain(groupName).includes(needle);
+}
+
+/**
  * Что показать в окне: категории по порядку каталога, в каждой — её вещи.
  *
  * `query` сужает выдачу, `key` — ключ вещи, которой стоит выделенное (или
@@ -110,15 +127,12 @@ function plain(value) {
  * заголовок держал бы колонку зря.
  */
 export function objectPickerGroups(query, { key } = {}) {
-  const needle = plain(query);
   const chosen = key || null;
   return OBJECT_CATEGORIES.map((category) => {
     const name = strings.schemeObjectCategories[category] || category;
-    const hay = plain(name);
     const entries = objectCatalogCategory(category).filter((entry) => {
       if (entry.legacy && entry.key !== chosen) return false;
-      if (needle === "") return true;
-      return plain(entry.name).includes(needle) || hay.includes(needle);
+      return objectTileMatches(query, entry.name, name);
     });
     return { category, name, entries };
   }).filter((group) => group.entries.length > 0);
@@ -167,12 +181,23 @@ export function objectPickerStep(columns, key, dx, dy) {
  *
  * `onPick(key)` зовётся кликом по плитке и Enter в поиске; что считать
  * выбранным, решает хозяин — он же присылает это `setKey`.
+ *
+ * **Что показать — тоже довод хозяина** (таск 218): `groups(query, {key})`
+ * отдаёт разделы с плитками, умолчание — каталог вещей чертежа. Так же, как
+ * `onPick`, это нужно было вынести, чтобы сетку изображений в справочнике типов
+ * не собирать второй раз: разделы у неё свои (семьи реестра плюс каталог), а
+ * раскладка колонок, поиск, клавиши и плитка — те же.
+ *
+ * У записи раздела могут стоять `title` (подсказка плитки целиком) и `offer`
+ * (пометка «это предлагает общая база»).
  */
 export function createObjectTiles(options = {}) {
   let key = options.key || null;
   let columns = [];
   const box = uiEl("div", { class: "picker__columns picker__columns--objects" });
   const node = uiEl("div", { class: "picker picker--objects" });
+  const groupsOf = typeof options.groups === "function" ? options.groups : objectPickerGroups;
+  const words = options.strings || strings.objectPicker;
   const pick = (next) => {
     if (next && typeof options.onPick === "function") options.onPick(next);
   };
@@ -182,8 +207,8 @@ export function createObjectTiles(options = {}) {
   };
 
   const search = uiPickSearch({
-    placeholder: strings.objectPicker.search,
-    title: strings.objectPicker.searchHint,
+    placeholder: words.search,
+    title: words.searchHint,
     onInput: () => render(),
     first: () => box.querySelector(".objectTile"),
     // Enter берёт первую найденную вещь — ключом, а не кликом по плитке:
@@ -195,14 +220,14 @@ export function createObjectTiles(options = {}) {
     return uiEl(
       "button",
       {
-        class: "objectTile" + (entry.key === key ? " is-on" : ""),
+        class: "objectTile" + (entry.key === key ? " is-on" : "") + (entry.offer ? " is-offer" : ""),
         type: "button",
-        title: entry.name,
+        title: entry.title || entry.name,
         attrs: { "data-key": entry.key, "aria-pressed": entry.key === key ? "true" : "false" },
         on: { click: () => pick(entry.key) },
       },
       [
-        objectTileIcon(entry.key),
+        objectTileIcon(entry.key, OBJECT_TILE_ICON, options.color),
         // Язык подписи назван в самой подписи: перенос по слогам
         // (`hyphens: auto`) работает только когда браузер знает язык.
         uiEl("span", { class: "objectTile__name", text: entry.name, attrs: { lang: "ru" } }),
@@ -221,13 +246,13 @@ export function createObjectTiles(options = {}) {
   }
 
   function render() {
-    const groups = objectPickerGroups(search.value, { key });
+    const groups = groupsOf(search.value, { key });
     const width = typeof window === "undefined" ? 0 : window.innerWidth;
     columns = pickerLayout(groups, objectPickerColumnLimit(width), objectPickerWeight);
     box.replaceChildren(
       ...columns.map((column) => uiEl("div", { class: "picker__column" }, column.map(categoryBlock))),
     );
-    if (groups.length === 0) box.append(uiEl("p", { class: "panel__empty", text: strings.objectPicker.empty }));
+    if (groups.length === 0) box.append(uiEl("p", { class: "panel__empty", text: words.empty }));
     // Ширину окна задаёт число получившихся колонок: нашлась одна категория
     // — окно узкое, и справа не остаётся пустого поля.
     node.style.setProperty("--picker-columns", String(Math.max(columns.length, 1)));

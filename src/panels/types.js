@@ -39,14 +39,30 @@ import {
   updateCategory,
   updateType,
   setTypeSizes,
+  setTypeView,
+  typeObjectView,
   typeSizes,
+  typeViewName,
+  typeViewOffer,
+  typeViewOwn,
 } from "../model.js";
 import { lineStyleIcon, shapeIcon, typeIcon, typeSignIcon, typeSignPlan } from "../render.js";
 import { canvasCommit } from "../canvas.js";
 import { colorPickerButton } from "./colorPicker.js";
 import { getSetting, setSetting } from "../store.js";
-import { uiButton, uiConfirm, uiEl, uiIconButton, uiModal } from "./ui.js";
+import { uiButton, uiConfirm, uiEl, uiIconButton, uiModal, uiPickCard } from "./ui.js";
 import { openEquipmentWindow } from "./equipment.js";
+// Сетка плиток с картинками — готовый кирпич окна выбора вещи (таск 187), и
+// второй её сборки в справочнике быть не должно: разойдись они, человек видел
+// бы в двух окнах два разных каталога.
+import { createObjectTiles, objectPickerGroups, objectTileIcon, objectTileMatches } from "./objectPicker.js";
+import { objectCatalogName } from "../objectCatalog.js";
+import {
+  objectViewByName,
+  objectViewFamily,
+  OBJECT_VIEW_FAMILIES,
+  OBJECT_VIEW_FAMILY_OBJECTS,
+} from "../objectViews/registry.js";
 
 export const TYPE_TEMPLATE_KEY = "typeTemplate";
 const TYPES_SWATCH_SIZE = 34;
@@ -77,6 +93,12 @@ function typesSnapshot(project) {
       // Каналы едут в шаблон вместе с типом: заведя у себя «ВВ — 2 канала»,
       // пользователь ждёт их и в следующем объекте.
       channels: typeChannels(project, type.id),
+      // Имя изображения — тоже (таск 218). Без него сохранённый шаблон **уносил
+      // бы** картинку: новый объект создаётся из шаблона, а не из встроенного
+      // справочника, и люстра в нём снова становилась бы шайбой. Выводить имя
+      // по знаку здесь нельзя — у типа его тогда не было, и этим он и
+      // отличается от типа, которому имя задали руками.
+      view: typeObjectView(type),
     })),
   };
 }
@@ -143,6 +165,10 @@ export function typesTemplateFrom(template) {
         Number.isInteger(type.channels) && type.channels >= 1 && type.channels <= TYPE_CHANNELS_MAX
           ? type.channels
           : TYPE_CHANNELS_DEFAULT,
+      // Имя изображения: шаблон мог быть сохранён и до таска 218, и с именем,
+      // которого в реестре больше нет. Неизвестное имя не едет — ключ, не
+      // рисующий ничего, хуже отсутствия ключа.
+      ...(objectViewByName(typeObjectView(type)) ? { view: typeObjectView(type) } : {}),
       order: index,
     }));
   if (categories.length === 0 || markTypes.length === 0) return null;
@@ -375,6 +401,179 @@ function typesLineButton({ lineStyle, color, allowInherit, inheritLineStyle, onP
     ],
   );
   return button;
+}
+
+// ——— изображение типа (таск 218, требование G327) ——————————————————————
+//
+// Четвёртая сетка справочника — после формы, цвета и начертания, и устроена она
+// так же: выбирают **по картинке**, а не по слову. Пятого окна выбора при этом
+// не заводится: скелет берётся кирпичами `ui.js` (таск 183), а сетка плиток —
+// готовым `createObjectTiles` (таск 187). Своего у этой сетки ровно одно:
+// разделы.
+//
+// **Разделов четырнадцать, плиток восемьдесят девять**, и делятся они надвое.
+// Шесть семей реестра — изображения меток (37 штук): им нужны человеческие
+// имена, и они дописаны в словарь (`strings.markViews`). Восемь разделов
+// каталога — вещи чертежа (52 штуки): имена и порядок у них уже есть, и берутся
+// они **тем же** `objectPickerGroups`, которым стоит шаг «Объекты» окна «Что
+// добавить». Выглядит эта половина в точности как там, и это нарочно: человек
+// уже знает, где у него лежит кровать.
+//
+// Почему вещи чертежа не спрятаны от метки: реестр один, и ключ изображения —
+// он же ключ тела в объёме. Радиатор, бойлер, коллектор, вентустановка и
+// полотенцесушитель — это ровно то, чем бывает метка инженерии, и спрятать их
+// значило бы решить за человека, что меткой это быть не может. Цена честная:
+// автомобиль и бассейн в сетке тоже стоят, но поиск сужает до раздела одним
+// словом.
+const TYPES_VIEW_BUTTON = 26;
+
+// Запись плитки: ключ, имя и две пометки. Подсказка собирается здесь, чтобы
+// обе половины сетки говорили о плитке одно и то же.
+function typesViewEntry(key, name, { offer, used } = {}) {
+  const parts = [name];
+  if (key === offer) parts.push(strings.dictionary.viewOfferBadge);
+  const codes = used && used.get ? used.get(key) : null;
+  if (codes && codes.length > 0) parts.push(text("dictionary.viewUsedBy", { codes: codes.join(", ") }));
+  return { key, name, title: parts.join(" · "), offer: key === offer };
+}
+
+/**
+ * Карта «имя изображения → коды типов объекта, которые к нему приходят».
+ *
+ * Нужна ровно для одного: показать, что изображение **общее**. Двенадцать типов
+ * света справочника делят один светильник сознательно, и выбор занятого
+ * изображения ни у кого ничего не отнимает — имя живёт у типа, а не у знака.
+ * Карта об этом и говорит: «сейчас у типов: Т, С, ПК…».
+ */
+export function typesViewsInUse(project) {
+  const used = new Map();
+  if (!project || !Array.isArray(project.markTypes)) return used;
+  for (const type of project.markTypes) {
+    const name = typeViewName(project, type.id);
+    if (!name) continue;
+    if (!used.has(name)) used.set(name, []);
+    used.get(name).push(type.code);
+  }
+  return used;
+}
+
+/**
+ * Разделы сетки изображений: семьи реестра, затем каталог вещей чертежа.
+ *
+ * `offer` — имя, которое предлагает общая база (плитка помечается пунктиром),
+ * `used` — карта «имя изображения → коды типов объекта, которые к нему
+ * приходят»: по ней видно, что изображение общее, и выбор его ни у кого не
+ * отнимает. `key` — нынешнее изображение типа: по нему плитка горит, и по нему
+ * в сетке остаётся спрятанная вещь прежней разметки.
+ */
+export function typeViewGroups(query, { key, offer, used } = {}) {
+  const groups = [];
+  for (const family of OBJECT_VIEW_FAMILIES) {
+    if (family === OBJECT_VIEW_FAMILY_OBJECTS) continue;
+    const name = strings.dictionary.viewFamilies[family] || family;
+    const entries = objectViewFamily(family)
+      .map((item) => typesViewEntry(item, strings.markViews[item] || item, { offer, used }))
+      .filter((entry) => objectTileMatches(query, entry.name, name));
+    if (entries.length > 0) groups.push({ category: family, name, entries });
+  }
+  for (const group of objectPickerGroups(query, { key })) {
+    groups.push({
+      ...group,
+      entries: group.entries.map((entry) => typesViewEntry(entry.key, entry.name, { offer, used })),
+    });
+  }
+  return groups;
+}
+
+/**
+ * Окно выбора изображения. Отдаёт `{view}` — имя или `null` («по знаку»); сам
+ * `null` в ответе значит «закрыли, ничего не меняем».
+ *
+ * «По знаку» стоит кнопкой под сеткой, а не плиткой в ней: это не изображение,
+ * а снятие своего имени — у знака изображения может не быть вовсе, и пустая
+ * клетка в сетке обещала бы картинку, которой нет.
+ */
+export function openTypesViewPicker({ code, view, offer, color, used } = {}) {
+  return new Promise((resolve) => {
+    let modal;
+    const tiles = createObjectTiles({
+      key: view || null,
+      color,
+      strings: {
+        search: strings.dictionary.viewSearch,
+        searchHint: strings.dictionary.viewSearchHint,
+        empty: strings.dictionary.viewEmpty,
+      },
+      groups: (query, options) => typeViewGroups(query, { ...options, offer, used }),
+      onPick: (picked) => {
+        modal.close();
+        resolve({ view: picked });
+      },
+    });
+    const body = uiEl("div", { class: "dict__viewPick" }, [
+      tiles.node,
+      uiEl("div", { class: "dict__viewFoot" }, [
+        uiButton(strings.dictionary.viewPickShape, {
+          title: strings.dictionary.viewPickShapeHint,
+          on: {
+            click: () => {
+              modal.close();
+              resolve({ view: null });
+            },
+          },
+        }),
+        uiEl("span", { class: "dict__viewHint", text: strings.dictionary.viewHint }),
+      ]),
+    ]);
+    modal = uiPickCard({
+      title: text("dictionary.viewTitle", { code }),
+      body,
+      // Широкая карточка — как у окна вещей: ширину внутри задаёт сетка колонок.
+      wide: true,
+      cancel: () => {
+        modal.close();
+        resolve(null);
+      },
+    });
+    tiles.focus();
+  });
+}
+
+/**
+ * Кнопка изображения в строке типа: на ней нарисовано то, чем тип встанет на
+ * развёртку, цветом его категории. Своего имени у типа нет — на кнопке стоит
+ * выведенное по знаку и подпись «по знаку»; нет и знака с изображением — стоит
+ * прочерк.
+ *
+ * Пунктирная пометка `is-offer` говорит, что общая база предлагает другое:
+ * строка справочника — второе место, где расхождение видно (первое — панель
+ * предупреждений), и пока оно не нажато, ничего не применено.
+ */
+function typesViewButton({ code, view, own, offer, color, used, onPick }) {
+  const name = view ? strings.markViews[view] || objectCatalogName(view) || view : null;
+  const hint = !view
+    ? strings.dictionary.viewNoneHint
+    : own
+      ? text("dictionary.viewOwnHint", { name })
+      : text("dictionary.viewShapeHint", { name });
+  const offerName = offer ? strings.markViews[offer] || objectCatalogName(offer) || offer : null;
+  return uiEl(
+    "button",
+    {
+      class: "dict__view" + (own ? " is-own" : "") + (offer ? " is-offer" : ""),
+      type: "button",
+      title: offer ? hint + " · " + text("dictionary.viewOfferHint", { name: offerName }) : hint,
+      on: {
+        click: async () => {
+          const picked = await openTypesViewPicker({ code, view, offer, color, used });
+          if (picked) onPick(picked.view);
+        },
+      },
+    },
+    view
+      ? [objectTileIcon(view, TYPES_VIEW_BUTTON, color)]
+      : [uiEl("span", { class: "dict__viewNone", text: strings.dictionary.viewButton })],
+  );
 }
 
 // Вид типа — переключатель в строке: точка или линия. Две кнопки, а не список:
@@ -864,7 +1063,7 @@ export function openTypesDictionary(api) {
     return button;
   }
 
-  function typeRow(type, count) {
+  function typeRow(type, count, used) {
     const category = findCategory(project(), type.categoryId);
     // Вид у объекта прежнего формата выведен по меткам, а не записан: читается
     // он одной функцией модели, чтобы справочник и холст не разошлись.
@@ -954,6 +1153,19 @@ export function openTypesDictionary(api) {
         value: typeChannels(project(), type.id),
         onChange: (value) =>
           commit((current) => updateType(current, type.id, { channels: value }).project, strings.history.editType),
+      }),
+      // Изображение (таск 218) — колонкой перед размерами, а не рядом со
+      // знаком: знак в начале строки про план, а изображение и размеры — про
+      // развёртку и объём, и читаются они вместе.
+      typesViewButton({
+        code: type.code,
+        view: typeViewName(project(), type.id),
+        own: Boolean(typeViewOwn(type)),
+        offer: (typeViewOffer(project(), type.id) || {}).view || null,
+        color: category ? category.color : TYPES_NO_COLOR,
+        used,
+        onPick: (view) =>
+          commit((current) => setTypeView(current, type.id, view).project, strings.history.typeView),
       }),
       // Умолчания размеров (таск 135, G192) — кнопкой, а не тремя полями в
       // строке: строка типа и так собирает восемь полей, а числа заполняют
@@ -1253,17 +1465,21 @@ export function openTypesDictionary(api) {
     }
     const counts = new Map();
     for (const mark of current.marks) counts.set(mark.typeId, (counts.get(mark.typeId) || 0) + 1);
+    // Кто к какому изображению приходит — одной картой на весь список: по ней
+    // в сетке выбора видно, что изображение общее. Считается здесь, а не в
+    // строке, чтобы на пятидесяти типах не считаться пятьдесят раз.
+    const used = typesViewsInUse(current);
     const typeRows = [];
     const shown = new Set();
     for (const { category, types } of typesInOrder(current)) {
       typeRows.push(uiEl("p", { class: "dict__group", text: category.name }));
       for (const type of types) {
         shown.add(type.id);
-        typeRows.push(typeRow(type, counts.get(type.id) || 0));
+        typeRows.push(typeRow(type, counts.get(type.id) || 0, used));
       }
     }
     for (const type of current.markTypes) {
-      if (!shown.has(type.id)) typeRows.push(typeRow(type, counts.get(type.id) || 0));
+      if (!shown.has(type.id)) typeRows.push(typeRow(type, counts.get(type.id) || 0, used));
     }
     if (typeRows.length === 0) typeRows.push(uiEl("p", { class: "panel__empty", text: strings.dictionary.noTypes }));
 
