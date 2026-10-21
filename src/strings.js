@@ -842,7 +842,7 @@ export const strings = {
     openingHingeUnknown: "Петли двери — у начала проёма или у его конца",
     openingSwingUnknown: "Дверь открывается на одну сторону стены или на другую",
     openingSwingOnlyDoor: "Сторона открывания бывает только у двери: у окна и арки полотна нет",
-    openingGlazedOnlyDoor: "Стеклянной бывает дверь: у окна и арки стеклить нечего",
+    openingGlazedOnlyDoor: "Стеклянной бывает дверь с цельным полотном: у окна и арки стеклить нечего, а звено гармошки у́же рамы",
     schemeObjectNotFound: "Объект схемы не найден",
     schemeObjectKindNotFound: "Вид объекта схемы не найден",
     schemeObjectKindInUse: "Вид «{name}» стоит у объектов схемы ({count}) — сперва смените им вид",

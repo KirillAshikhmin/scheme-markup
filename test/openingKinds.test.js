@@ -51,6 +51,7 @@ import {
   VOLUME_ARCH_SEGMENTS,
   VOLUME_FOLD_GAP_MM,
   VOLUME_FOLD_LEAF_MM,
+  VOLUME_SLIDE_GAP_MM,
   VOLUME_ROLL_MM,
   volumeDoorOpen,
   volumeInnerSide,
@@ -450,10 +451,20 @@ test("сдвижное полотно съезжает за косяк, порт
   const closed = leafOf(shut, scene.ids[0]).filter((face) => face.both);
   const moved = leafOf(open, scene.ids[0]).filter((face) => face.both);
   assert.equal(closed.length, 1, "закрытое полотно — одна грань");
+  assert.equal(moved.length, 1, "уехавшее полотно — та же одна грань");
   assert.ok(Math.min(...along(moved)) < Math.min(...along(closed)) - 100, "сдвижное не съехало");
-  // Съехало **вдоль** стены, а не поперёк: это не распашная.
-  const ys = moved.flatMap((face) => face.p.map((point) => point.y));
-  assert.ok(Math.max(...ys.map(Math.abs)) < 1, "сдвижное ушло от стены, а должно было съехать вдоль");
+  // Съехало **вдоль** стены, а не распахнулось: длина полотна по стене та же.
+  const span = (faces) => Math.max(...along(faces)) - Math.min(...along(faces));
+  assert.ok(Math.abs(span(moved) - span(closed)) < 1, "уехавшее полотно другой длины");
+  // И уехало **по стороне стены**, а не внутри неё (дефект D78): закрытое
+  // стоит в середине толщины, уехавшее — за гранью стены, на зазоре.
+  const across = (faces) => faces.flatMap((face) => face.p.map((point) => point.y));
+  assert.ok(Math.max(...across(closed).map(Math.abs)) < 1, "закрытое полотно ушло из проёма");
+  const wall = Number(scene.wall.thicknessMm) / 2;
+  for (const y of across(moved)) {
+    assert.ok(Math.abs(y) > wall, "уехавшее полотно осталось в стене: " + y);
+    assert.ok(Math.abs(Math.abs(y) - (wall + VOLUME_SLIDE_GAP_MM)) < 1, "полотно встало не на зазор: " + y);
+  }
   // Портальная уезжает в стену, и открытой её не видно вовсе — это самый
   // честный вид «открыто», какой у неё бывает.
   const pocket = one("doorPocket", { hinge: "start", swing: "left" });

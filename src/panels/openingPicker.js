@@ -28,6 +28,7 @@ import { openingArchGeometry, openingFaceGrid } from "../model.js";
 import { drawOpeningFace } from "../render.js";
 import { strings } from "../strings.js";
 import { uiEl, uiPickCard, uiPickKeys, uiPickSearch } from "./ui.js";
+import { objectTilesForQuery } from "./objectPicker.js";
 import {
   TILE_INK,
   objectPickerColumnLimit,
@@ -92,13 +93,6 @@ export function openingTileIcon(kind, size = OPENING_TILE_ICON) {
 
 // Терпимое сравнение, как у каталога вещей: регистр, «ё» и пробелы по краям не
 // считаются.
-function openingPlain(value) {
-  return String(value == null ? "" : value)
-    .trim()
-    .toLowerCase()
-    .replace(/ё/g, "е");
-}
-
 /**
  * Что показать в окне: разделы по порядку каталога, в каждом — его виды.
  *
@@ -108,26 +102,24 @@ function openingPlain(value) {
  * видеть, чем стоит проём на его чертеже, а подсветить вместо него похожий
  * значило бы соврать.
  *
- * Поиск идёт по имени вида и по имени раздела: «двер» показывает весь раздел,
- * «ролл» одну плитку.
+ * **Сужает выдачу общий `objectTilesForQuery`** — тот же, что у сетки вещей
+ * (таск 230): своего сравнения здесь было третье на сборку, и раздел отвечал
+ * наравне с видом. Теперь имя раздела отвечает только тогда, когда по именам
+ * видов не нашлось ничего: «двер» по-прежнему показывает весь раздел, а
+ * «проём» — одну плитку, а не раздел, в котором она вторая.
  */
 export function openingPickerGroups(query, { kind } = {}) {
-  const needle = openingPlain(query);
   const chosen = kind || null;
-  return OPENING_CATEGORIES.map((category) => {
-    const name = strings.openingCategories[category] || category;
-    const hay = openingPlain(name);
-    const entries = openingCatalogCategory(category)
-      .filter((entry) => {
-        if (entry.legacy && entry.kind !== chosen) return false;
-        if (needle === "") return true;
-        return openingPlain(entry.name).includes(needle) || hay.includes(needle);
-      })
+  const groups = OPENING_CATEGORIES.map((category) => ({
+    category,
+    name: strings.openingCategories[category] || category,
+    entries: openingCatalogCategory(category)
+      .filter((entry) => !entry.legacy || entry.kind === chosen)
       // Шаг стрелки и разметка плитки общие с вещами и ходят по `key`: у проёма
       // ключ — это его вид.
-      .map((entry) => ({ ...entry, key: entry.kind }));
-    return { category, name, entries };
-  }).filter((group) => group.entries.length > 0);
+      .map((entry) => ({ ...entry, key: entry.kind })),
+  }));
+  return objectTilesForQuery(query, groups);
 }
 
 /**

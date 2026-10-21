@@ -32,6 +32,7 @@
 // видеть, чем стоит вещь на его чертеже, а подсветить вместо неё похожую
 // значило бы соврать.
 import { objectCatalogCategory, OBJECT_CATEGORIES } from "../objectCatalog.js";
+import { queryHit } from "../model.js";
 import { drawObjectView, objectViewByName } from "../objectViews/registry.js";
 import { strings } from "../strings.js";
 import { uiEl, uiPickCard, uiPickKeys, uiPickSearch } from "./ui.js";
@@ -96,8 +97,7 @@ export function objectPickerWeight(group) {
 }
 
 // Терпимое сравнение, как у каталога: регистр, «ё» и пробелы по краям не
-// считаются. Поиск идёт по имени вещи и по имени её категории — «сантех»
-// показывает весь раздел, «хол» одну плитку.
+// считаются.
 function plain(value) {
   return String(value == null ? "" : value)
     .trim()
@@ -106,16 +106,46 @@ function plain(value) {
 }
 
 /**
- * Подходит ли плитка под запрос: по имени вещи или по имени её раздела.
+ * Подходит ли строка под запрос — **правилом сборки** (`queryHit`, находка 7
+ * разбора механик): с начала слова, а не серединой.
  *
- * **Одно правило на всю сетку плиток** (таск 218): сетку изображений в
- * справочнике типов собирают из тех же кирпичей, и её разделы — свои. Разойдись
- * правила — в одном окне половина плиток искалась бы иначе, чем другая.
+ * До таска 230 у сеток плиток было своё сравнение (`includes`), и это был
+ * седьмой угол, в котором поиск работал иначе, чем в остальных пяти окнах:
+ * запрос «техник» поднимал «Сантехнику» серединой слова. Правило совпадения на
+ * сборку одно; ранги у окон остаются свои.
  */
-export function objectTileMatches(query, name, groupName) {
+export function objectTileMatches(query, name) {
   const needle = plain(query);
   if (needle === "") return true;
-  return plain(name).includes(needle) || plain(groupName).includes(needle);
+  return queryHit(plain(name), needle);
+}
+
+/**
+ * **Что остаётся в сетке от запроса** — один ответ на все сетки плиток: вещи
+ * чертежа, виды проёмов и изображения типа.
+ *
+ * Имя раздела — тоже ответ: «сантех» показывает весь раздел, и это заведено
+ * нарочно (таск 154). Но **раздел отвечает только тогда, когда по именам вещей
+ * не нашлось ничего** (дефект D77, таск 230): до правки запрос «лифт» поднимал
+ * весь раздел «Лестницы и лифт», первой в выдаче стояла «Лестница прямая», и
+ * Enter ставил лестницу вместо лифта — поиск подменял вещь разделом.
+ *
+ * Почему так, а не «точное совпадение вперёд»: порядок плиток в разделе человек
+ * уже выучил, и переставлять их под запрос — значит каждый раз показывать новый
+ * каталог. А «нашлись вещи — показываем вещи» объясняется одной строкой и
+ * чинит не только точный запрос, но и «лиф».
+ */
+export function objectTilesForQuery(query, groups) {
+  const list = (Array.isArray(groups) ? groups : []).filter(
+    (group) => group && Array.isArray(group.entries) && group.entries.length > 0,
+  );
+  const needle = plain(query);
+  if (needle === "") return list;
+  const named = list
+    .map((group) => ({ ...group, entries: group.entries.filter((entry) => queryHit(plain(entry.name), needle)) }))
+    .filter((group) => group.entries.length > 0);
+  if (named.length > 0) return named;
+  return list.filter((group) => queryHit(plain(group.name), needle));
 }
 
 /**
@@ -127,15 +157,22 @@ export function objectTileMatches(query, name, groupName) {
  * заголовок держал бы колонку зря.
  */
 export function objectPickerGroups(query, { key } = {}) {
+  return objectTilesForQuery(query, objectPickerAllGroups({ key }));
+}
+
+/**
+ * Разделы каталога со всеми их вещами — **до** запроса. Сужает их общий
+ * `objectTilesForQuery`: сетке изображений (таск 218) нужны те же разделы
+ * рядом со своими семьями, и решать «вещи или раздел» надо один раз на всё
+ * окно, а не дважды по половинам.
+ */
+export function objectPickerAllGroups({ key } = {}) {
   const chosen = key || null;
-  return OBJECT_CATEGORIES.map((category) => {
-    const name = strings.schemeObjectCategories[category] || category;
-    const entries = objectCatalogCategory(category).filter((entry) => {
-      if (entry.legacy && entry.key !== chosen) return false;
-      return objectTileMatches(query, entry.name, name);
-    });
-    return { category, name, entries };
-  }).filter((group) => group.entries.length > 0);
+  return OBJECT_CATEGORIES.map((category) => ({
+    category,
+    name: strings.schemeObjectCategories[category] || category,
+    entries: objectCatalogCategory(category).filter((entry) => !entry.legacy || entry.key === chosen),
+  })).filter((group) => group.entries.length > 0);
 }
 
 /**

@@ -105,7 +105,13 @@ export function drawPickerNote(adding, settings = {}) {
     return text("drawPicker.noteOpening", {
       // Имя вида и отметка «стеклянная» — одним местом (`openingTitle`): в
       // плашке колонки и в этой строке проём обязан называться одинаково.
-      kind: openingTitle({ kind, glazed: openings.glazed === true }),
+      //
+      // Отметка спрашивается через `openingCanGlaze` — тем же вопросом, каким
+      // ставит её себе будущий проём: строка обещает **то, что встанет по
+      // клику**, а у гармошки отметки не будет (G347). Без этого она обещала бы
+      // «Дверь-гармошка, стеклянная» — ровно тот промах, который поймал живой
+      // прогон таска 215 на балконном окне.
+      kind: openingTitle({ kind, glazed: openings.glazed === true && openingCanGlaze(kind) }),
       width: sizes.widthMm,
       height: sizes.heightMm,
     });
