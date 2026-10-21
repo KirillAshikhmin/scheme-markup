@@ -27,10 +27,12 @@ import {
   PICKER_MODAL_SHARE,
 } from "../src/panels/typePicker.js";
 import { OBJECT_PICKER_COLUMN_MIN, OBJECT_PICKER_TILES_PER_ROW } from "../src/panels/objectPicker.js";
+import { UI_SIGN, UI_SIGN_SMALL } from "../src/panels/ui.js";
 
 const ELEVATION_CSS = readFileSync(new URL("../src/panels/elevation.css", import.meta.url), "utf8");
 const TYPE_PICKER_CSS = readFileSync(new URL("../src/panels/typePicker.css", import.meta.url), "utf8");
 const OBJECT_PICKER_CSS = readFileSync(new URL("../src/panels/objectPicker.css", import.meta.url), "utf8");
+const PANELS_CSS = readFileSync(new URL("../src/panels/panels.css", import.meta.url), "utf8");
 
 // Сколько раз кусок встречается в стиле. Ноль — расхождение: число в JS
 // поправили, а в стиле нет (или наоборот).
@@ -84,4 +86,16 @@ test("счёт колонок стиль не считает сам — он п�
   // снова начнёт жить своей арифметикой.
   assert.ok(count(TYPE_PICKER_CSS, "var(--picker-columns, 1)") >= 2);
   assert.ok(count(OBJECT_PICKER_CSS, "var(--picker-columns, 1)") >= 2);
+});
+
+test("клетка знака метки: ширина в стиле — та же, что длина образца линии", () => {
+  // Знак рисуется на холсте шириной `length`, а стоит в клетке шириной из
+  // стиля. Разойдись они — образец линии либо обрежется клеткой, либо вылезет
+  // из неё и сдвинет подпись только у линейных строк.
+  assert.equal(count(PANELS_CSS, "  width: " + UI_SIGN.length + "px;"), 1, "`.ui-sign` разошлась с UI_SIGN.length");
+  assert.equal(
+    count(PANELS_CSS, "  width: " + UI_SIGN_SMALL.length + "px;"),
+    1,
+    "`.ui-sign--small` разошлась с UI_SIGN_SMALL.length",
+  );
 });

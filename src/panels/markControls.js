@@ -18,8 +18,8 @@ import {
   schemesInOrder,
   typeChannels,
 } from "../model.js";
-import { shapeIcon } from "../render.js";
-import { uiButton, uiEl, uiPickCard, uiPickKeys, uiPickSearch } from "./ui.js";
+import { typeIcon } from "../render.js";
+import { UI_SIGN, uiButton, uiEl, uiPickCard, uiPickKeys, uiPickSearch, uiSignCell } from "./ui.js";
 import { filtersMarkRows } from "./filters.js";
 
 // Кандидаты: метки объекта в том же порядке, что и список сбоку, — схема за
@@ -215,8 +215,11 @@ export function openMarkPicker(project, options = {}) {
       // Где метка стоит: помещение, а для многоэтажного объекта — и схема.
       const where = [room ? room.name : "", manySchemes ? row.scheme.name : ""].filter(Boolean).join(" · ");
       return [
-        // Метка узнаётся так же, как на плане: обозначение, цвет, форма.
-        shapeIcon(row.style.shape, row.style.color, 20),
+        // Метка узнаётся так же, как на плане: обозначение, цвет и знак её
+        // типа — общей лестницей (таск 228, находка 15). Линейная метка в этом
+        // окне рисовалась точкой, и подопечную ленту приходилось искать
+        // по подписи.
+        uiSignCell(typeIcon(project, row.mark.typeId, UI_SIGN.size, UI_SIGN.length)),
         uiEl("span", { class: "controls-pick__label", text: row.label }),
         uiEl("span", { class: "controls-pick__name", text: row.type ? row.type.name : "" }),
         uiEl("span", { class: "controls-pick__room", text: where }),

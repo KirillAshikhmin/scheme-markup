@@ -49,9 +49,9 @@ import {
   wallNames,
   wallsOnScheme,
 } from "../model.js";
-import { planToScreen, shapeIcon } from "../render.js";
+import { planToScreen, typeIcon } from "../render.js";
 import { canvasCommit } from "../canvas.js";
-import { uiButton, uiEl, uiIconButton, uiModal, uiPrompt } from "./ui.js";
+import { UI_SIGN, uiButton, uiEl, uiIconButton, uiModal, uiPrompt, uiSignCell } from "./ui.js";
 // Прокрутка колонки одна на всю колонку (таск 194), и низ кадра закрывает не
 // только кнопка смыкания, но и рейка заголовков. Кто прокручивается, сколько
 // закрыто накладкой и какова рейка — общий счёт, свой у списка быть не должен.
@@ -1035,7 +1035,12 @@ function mountMarksPanel(host, api) {
           // Галочка раскрытия — одна и та же в обоих видах: по ней видно,
           // свёрнута строка или раскрыта, и куда нажать.
           uiEl("span", { class: "mark-row__toggle" }),
-          shapeIcon(view.style.shape, view.style.color, 20),
+          // Знак метки — общей лестницей `render.typeIcon` (таск 228, находка
+          // 15): у точечного типа фигура, у линейного образец его начертания.
+          // Прежде строка звала `shapeIcon` сама, и человек, искавший в списке
+          // свою ленту подсветки, видел у неё точку, тогда как в справочнике у
+          // неё штрих. Клетка постоянной ширины — одна на оба вида.
+          uiSignCell(typeIcon(state.project, mark.typeId, UI_SIGN.size, UI_SIGN.length)),
           // Код и номер — одним куском, вплотную. Слова заказчика: «в
           // развёрнутой карточке метки цифру метки прижми к её букве, а то там
           // большое расстояние». Раньше поле номера стояло у правого края, и
@@ -1074,7 +1079,7 @@ function mountMarksPanel(host, api) {
         ])
       : uiEl("div", { class: "mark-row__head" }, [
           uiEl("span", { class: "mark-row__toggle" }),
-          shapeIcon(view.style.shape, view.style.color, 20),
+          uiSignCell(typeIcon(state.project, mark.typeId, UI_SIGN.size, UI_SIGN.length)),
           uiEl("span", { class: "mark-row__label", text: view.label }),
           badge,
         ]);

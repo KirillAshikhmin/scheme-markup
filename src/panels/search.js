@@ -6,10 +6,10 @@
 // и заведён. Подбор вариантов живёт в `model.searchProject`, здесь только
 // список, клавиши и прыжок.
 import { layoutAllows, PANEL_IDS, registerPanel } from "../app.js";
-import { findMark, findScheme, searchProject, styleOf } from "../model.js";
+import { findMark, findScheme, searchProject } from "../model.js";
 import { strings, text } from "../strings.js";
-import { uiDialogDepth, uiEl, uiFieldTarget, uiIconButton } from "./ui.js";
-import { shapeIcon } from "../render.js";
+import { UI_SIGN_SMALL, uiDialogDepth, uiEl, uiFieldTarget, uiIconButton, uiSignCell } from "./ui.js";
+import { typeIcon } from "../render.js";
 // Подводит холст к метке — то же самое делает клик по строке списка меток.
 import { marksCenteredView } from "./marks.js";
 
@@ -18,10 +18,11 @@ import { marksCenteredView } from "./marks.js";
 export const SEARCH_LIMIT = 30;
 
 function searchRowNode(project, row, active, onPick, onHover) {
-  const style = styleOf(project, row.typeId);
   const where = [row.roomName || strings.search.noRoom, row.schemeName].filter(Boolean).join(" · ");
   const parts = [
-    shapeIcon(style.shape, style.color, 16),
+    // Знак — общей лестницей (таск 228, находка 15): у линейного типа образец
+    // его начертания, а не точка. Выдачу читают, сверяя её со справочником.
+    uiSignCell(typeIcon(project, row.typeId, UI_SIGN_SMALL.size, UI_SIGN_SMALL.length), { small: true }),
     uiEl("span", { class: "search__label", text: row.label }),
     uiEl("span", { class: "search__type", text: row.typeName }),
     uiEl("span", { class: "search__where", text: where }),

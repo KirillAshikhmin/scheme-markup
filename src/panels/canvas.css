@@ -433,11 +433,6 @@
   border-bottom: 1px solid var(--canvas-line);
 }
 
-.mark-card__icon {
-  display: inline-flex;
-  flex: none;
-}
-
 .mark-card__label {
   font-weight: 600;
   font-size: 15px;

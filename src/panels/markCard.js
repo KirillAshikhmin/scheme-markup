@@ -31,10 +31,10 @@ import {
   styleOf,
 } from "../model.js";
 import { canvasEditCommentText, canvasOnScreen } from "../canvas.js";
-import { planToScreen, shapeIcon } from "../render.js";
+import { planToScreen, typeIconPlan, typeSignIcon } from "../render.js";
 import { getSetting, setSetting } from "../store.js";
 import { strings } from "../strings.js";
-import { uiButton, uiEl, uiIcon, uiIconButton } from "./ui.js";
+import { UI_SIGN, UI_SIGN_SMALL, uiButton, uiEl, uiIcon, uiIconButton, uiSignCell } from "./ui.js";
 import { marksControllerIndex, marksLinkedText, marksLinkedTitle, marksRowModel } from "./marks.js";
 
 // Отступ между меткой и верхним краем карточки: метка должна остаться видна
@@ -127,6 +127,9 @@ export function markCardModel(project, markId) {
       code: view.code,
       typeName: view.typeName,
       style: view.style,
+      // План знака (таск 228): карточку собирают два хозяина — план и объём, —
+      // и считать его дважды значило бы снова развести знак по поверхностям.
+      sign: typeIconPlan(project, mark.typeId),
       kind: mark.kind,
       comment: true,
       pointer: markPointer(mark),
@@ -164,6 +167,7 @@ export function markCardModel(project, markId) {
     code: view.code,
     typeName: view.typeName,
     style: view.style,
+    sign: typeIconPlan(project, mark.typeId),
     kind: MARK_KINDS.includes(mark.kind) ? mark.kind : "point",
     comment: false,
     pointer: false,
@@ -194,7 +198,9 @@ export function markCardShift(markY, cardTop, gap = MARK_CARD_GAP) {
  */
 export function markCardParts(model, { headButton = null, extra = null } = {}) {
   const head = uiEl("div", { class: "mark-card__head" }, [
-    uiEl("span", { class: "mark-card__icon" }, shapeIcon(model.style.shape, model.style.color, 20)),
+    // Знак — общей лестницей (таск 228, находка 15): у линейной метки в
+    // карточке стояла точка, хотя в справочнике у её типа штрих.
+    uiSignCell(typeSignIcon(model.sign, UI_SIGN.size, UI_SIGN.length)),
     uiEl("span", { class: "mark-card__label", text: model.label }),
     uiEl("span", { class: "mark-card__type", text: model.code + " — " + model.typeName }),
     ...(headButton ? [headButton] : []),
@@ -263,7 +269,7 @@ function mountMarkCard(host, api) {
             on: { click: () => flip(false) },
           },
           [
-            uiEl("span", { class: "mark-card__icon" }, shapeIcon(model.style.shape, model.style.color, 16)),
+            uiSignCell(typeSignIcon(model.sign, UI_SIGN_SMALL.size, UI_SIGN_SMALL.length), { small: true }),
             uiEl("span", { class: "mark-card__label", text: model.label }),
             uiIcon("chevron"),
           ],

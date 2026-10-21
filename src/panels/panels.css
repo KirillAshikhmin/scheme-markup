@@ -94,6 +94,22 @@
   margin-bottom: 10px;
 }
 
+/* Клетка знака метки в строке списка (`uiSignCell`, таск 228): ширина одна на
+   фигуру точечного типа и на образец линии линейного, чтобы строки стояли
+   колонка в колонку. Числа принадлежат JS (`UI_SIGN`, `UI_SIGN_SMALL` в
+   ui.js), здесь они повторены — повтор держит test/cssMeasures.test.js. */
+.ui-sign {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+}
+
+.ui-sign--small {
+  width: 32px;
+}
+
 .ui-select,
 .ui-input {
   font: inherit;
