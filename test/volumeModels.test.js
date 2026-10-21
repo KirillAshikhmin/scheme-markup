@@ -62,6 +62,7 @@ import {
   objectModelKeys,
 } from "../src/objectModels/registry.js";
 import {
+  VOLUME_MARK_LIFT_MM,
   VOLUME_CLEAR_ALPHAS,
   VOLUME_EYE_MM,
   VOLUME_OBJECT_RGB,
@@ -1290,9 +1291,11 @@ test("метка в воздухе: модель висит под потолк�
   assert.equal(place.model.key, "lamp");
   const prisms = volumeModelPrisms(place.frame, place.model.parts);
   const tops = prisms.map((prism) => prism.topMm);
-  assert.equal(Math.max(...tops), 2700, "подвес упирается в потолок");
+  // Потолок 2700, и вещь висит на зазор ниже (`VOLUME_MARK_LIFT_MM`, таск
+  // 211): совпавшие плоскости в кадре порядок решать не умеют.
+  assert.equal(Math.max(...tops), 2700 - VOLUME_MARK_LIFT_MM, "подвес под самым потолком");
   const shade = prisms.find((prism) => prism.name === "shade");
-  assert.equal(shade.bottomMm, 2400, "плафон свисает на выступ люстры");
+  assert.equal(shade.bottomMm, 2400 - VOLUME_MARK_LIFT_MM, "плафон свисает на выступ люстры");
   assert.ok(shade.corners.length === MODEL_CYL_SIDES);
 });
 
@@ -1325,8 +1328,10 @@ test("точечный светильник и люстра: одно описа
   };
   const spot = sizeOf("Т");
   const chandelier = sizeOf("ЛЮ");
-  assert.equal(spot.drop, 2, "точечный сидит в потолке: выступ у него нулевой");
-  assert.equal(chandelier.drop, 300, "люстра свисает на свой выступ");
+  // Свес считается от потолка, а вещь висит на зазор ниже него (таск 211) —
+  // отсюда лишние два миллиметра у обоих.
+  assert.equal(spot.drop, 2 + VOLUME_MARK_LIFT_MM, "точечный сидит в потолке: выступ у него нулевой");
+  assert.equal(chandelier.drop, 300 + VOLUME_MARK_LIFT_MM, "люстра свисает на свой выступ");
   assert.ok(chandelier.width > spot.width * 4, "и шире впятеро: " + chandelier.width + " против " + spot.width);
   assert.deepEqual(styleOf(scene.project, scene.project.markTypes.find((item) => item.code === "Т").id).shape, "circle-cross");
 });
