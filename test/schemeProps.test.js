@@ -254,13 +254,15 @@ test("лестница предлагается точкой: середина �
   const found = schemeAnchorCandidates(box.project, box.lower);
   assert.equal(found.length, 1);
   assert.equal(found[0].key, "stairs");
-  assert.equal(found[0].name, "Лестница");
+  assert.equal(found[0].name, strings.schemeObjectKinds.stairs, "имя марша берётся из словаря");
   // Середина габарита, а не угол: у прямоугольника это его `atMm`.
   assert.deepEqual(found[0].atMm, { x: 3200, y: 4500 });
   // Выход с лестницы — вторая половина пары (таск 204). Ключ стоит в списке
   // заранее: придёт запись в каталог — выход начнёт предлагаться сам, без
   // правки привязки.
-  assert.deepEqual(SCHEME_ANCHOR_OBJECT_KEYS, ["stairs", "stairsExit"]);
+  // Марш с таска 216 не один, а четыре вида (G322), и все они — лестничная
+  // клетка: по этому же списку объём узнаёт лестницу и переводит по этажам.
+  assert.deepEqual(SCHEME_ANCHOR_OBJECT_KEYS, ["stairs", "stairsL", "stairsU", "stairsSpiral", "stairsExit"]);
   // Лестницы нет вовсе — пустой список, а не догадка.
   const bare = scene();
   assert.deepEqual(schemeAnchorCandidates(bare.project, bare.schemeId), []);

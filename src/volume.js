@@ -65,6 +65,8 @@ import {
   projectCoords,
   projectTopAzimuth,
   SCHEME_ANCHOR_OBJECT_KEYS,
+  SCHEME_STAIR_EXIT_KEY,
+  SCHEME_STAIR_OBJECT_KEYS,
   schemeAnchorOriginMm,
   schemeFloorOf,
   schemeObjectCorners,
@@ -2281,8 +2283,14 @@ export function volumeStairLanding(scene, atMm = null, headMm = VOLUME_HEAD_MM, 
   // спустились от выхода — сошли у марша. Парной нет — годится любая вещь
   // лестничной клетки: другого места, где лестница выходит на этаж, всё равно
   // не нарисовано.
-  const want = fromKey === "stairsExit" ? "stairs" : "stairsExit";
-  const paired = all.filter((place) => place.key === want);
+  //
+  // Маршей с таска 216 четыре вида (прямой, Г-образный, П-образный,
+  // спиральный), а выход один — поэтому пара спрашивается **стороной**, а не
+  // равенством ключей: сверь я ключ с одним словом `stairs`, и спустившийся от
+  // выхода сходил бы только у прямого марша, а у спирального оказывался бы
+  // посреди комнаты.
+  const fromExit = fromKey === SCHEME_STAIR_EXIT_KEY;
+  const paired = all.filter((place) => (place.key === SCHEME_STAIR_EXIT_KEY) !== fromExit);
   const places = paired.length > 0 ? paired : all;
   let best = places[0];
   if (places.length > 1 && atMm) {
@@ -2334,7 +2342,7 @@ export function volumeStairLanding(scene, atMm = null, headMm = VOLUME_HEAD_MM, 
     y: spot.y,
     yaw: Math.atan2(spot.y - centre.y, spot.x - centre.x),
     objectId: best.objectId,
-    key: best.key || "stairs",
+    key: best.key || SCHEME_STAIR_OBJECT_KEYS[0],
     // Встали ли у парной вещи: `false` — её на этаже не нарисовано, и площадка
     // взята у того, что нашлось.
     paired: paired.length > 0,

@@ -34,8 +34,12 @@ import {
   projectCoords,
   projectTopAzimuth,
   setProjectSite,
+  SCHEME_ANCHOR_OBJECT_KEYS,
   SCHEME_FLOOR_MAX,
   SCHEME_FLOOR_MIN,
+  SCHEME_STAIR_EXIT_KEY,
+  SCHEME_STAIR_OBJECT_KEYS,
+  schemeAnchorCandidates,
   ensureSchemeObjectKinds,
   findMark,
   findScheme,
@@ -61,6 +65,7 @@ import {
 } from "../src/model.js";
 import { MARK_BOX_FRAME_DEPTH_MM, MARK_BOX_FRAME_MM } from "../src/markBox.js";
 import { objectViewByName, objectViewNames, objectViewShapes } from "../src/objectViews/registry.js";
+import { objectCatalogEntry } from "../src/objectCatalog.js";
 import { objectCatalogKeyByName } from "../src/objectCatalog.js";
 import {
   VOLUME_BODY_MM,
@@ -5448,7 +5453,7 @@ test("изображение не встаёт вверх ногами: низ �
 //      номера она не этаж, без чертежа — тупик.
 
 function stairsKindId(project) {
-  return schemeObjectKindsInOrder(project).find((kind) => kind.name === "Лестница").id;
+  return schemeObjectKindsInOrder(project).find((kind) => kind.name === strings.schemeObjectKinds.stairs).id;
 }
 
 // Комната с лестницей у левой стены: марш 1100 × 2700, как в стартовых
@@ -6250,6 +6255,69 @@ test("поднялись по маршу — вышли у выхода, спу�
   // спрашивается то же самое (таск 204).
   const near = volumeStairNear(scene.stairs, { x: 1200, y: 0 });
   assert.equal(near.stair.key, "stairsExit");
+});
+
+test("четыре вида марша — одна лестничная клетка: переход, прибытие и точка привязки (таск 216)", () => {
+  // Главный риск таска 216: маршей стало четыре (прямой, Г-образный,
+  // П-образный, спиральный), а узнают лестницу **по списку ключей**, и список
+  // один на сборку. Заведи вид мимо списка — он выглядел бы лестницей и не
+  // работал как лестница: ни перехода по этажам, ни точки привязки.
+  for (const key of SCHEME_STAIR_OBJECT_KEYS) {
+    assert.ok(objectCatalogEntry(key), key + ": марша нет в каталоге");
+    assert.ok(SCHEME_ANCHOR_OBJECT_KEYS.includes(key), key + ": марш не попал в лестничную клетку");
+  }
+  assert.ok(SCHEME_ANCHOR_OBJECT_KEYS.includes(SCHEME_STAIR_EXIT_KEY), "выход выпал из лестничной клетки");
+
+  // Спиральный марш на нижнем этаже и выход — объём обязан увидеть обоих.
+  const base = stairScene();
+  let project = base.project;
+  const spiral = addSchemeObject(project, {
+    schemeId: base.schemeId,
+    catalogKey: "stairsSpiral",
+    shape: "rect",
+    atMm: { x: 1200, y: -1400 },
+    widthMm: 1600,
+    depthMm: 1600,
+    turnDeg: 0,
+    heightAboveFloorMm: 0,
+  });
+  project = spiral.project;
+  const exit = addSchemeObject(project, {
+    schemeId: base.schemeId,
+    catalogKey: "stairsExit",
+    shape: "rect",
+    atMm: { x: 1200, y: 1400 },
+    widthMm: 1100,
+    depthMm: 2700,
+    turnDeg: 0,
+    heightAboveFloorMm: 0,
+  });
+  project = exit.project;
+  const scene = volumeScene(project, base.schemeId);
+  assert.deepEqual(
+    scene.stairs.map((place) => place.key).sort(),
+    ["stairs", "stairsExit", "stairsSpiral"],
+    "спиральный марш не стал вещью лестничной клетки",
+  );
+  // **Спустились от выхода — сходят у марша, и у любого.** Сверяйся пара с
+  // одним словом `stairs`, спиральный марш остался бы без прибытия: здесь он
+  // ближе к выходу, и выбран обязан быть он.
+  const down = volumeStairLanding(scene, { x: 1200, y: 1200 }, VOLUME_HEAD_MM, SCHEME_STAIR_EXIT_KEY);
+  assert.equal(down.objectId, spiral.schemeObject.id, "от выхода сошли не у ближнего марша");
+  assert.equal(down.key, "stairsSpiral");
+  assert.equal(down.paired, true, "спиральный марш не признан парой выходу");
+  // Поднялись по спиральному — вышли у выхода, как и с любого другого марша.
+  const up = volumeStairLanding(scene, { x: 1200, y: -1400 }, VOLUME_HEAD_MM, "stairsSpiral");
+  assert.equal(up.objectId, exit.schemeObject.id);
+  assert.equal(up.key, SCHEME_STAIR_EXIT_KEY);
+  // И точкой привязки предлагаются все четыре вида: список у привязки и у
+  // перехода один и тот же (таск 205).
+  const candidates = schemeAnchorCandidates(project, base.schemeId);
+  assert.deepEqual(
+    candidates.map((item) => item.key).sort(),
+    ["stairs", "stairsExit", "stairsSpiral"],
+    "привязка узнала не все вещи лестничной клетки",
+  );
 });
 
 test("привязка схем доезжает до стопки: этажи совмещаются по точке, а не по нулю", () => {
