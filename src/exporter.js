@@ -39,6 +39,7 @@ import { projectFileName, writeZip } from "./projectFile.js";
 import { pngWithDpi } from "./pngDpi.js";
 import { tableSections, tableRowCount } from "./tables.js";
 import {
+  GOST_DPI_SCALE_DEFAULT,
   GOST_LINE_MM,
   GOST_TABLE_ROW_MM,
   GOST_THIN_MM,
@@ -58,8 +59,11 @@ import {
 import { strings, text } from "./strings.js";
 
 export const EXPORT_SCALES = [1, 2, 4];
-// Разрешение печати, по которому пиксели пересчитываются в миллиметры.
-export const EXPORT_DPI = 300;
+// Разрешение печати, по которому пиксели пересчитываются в миллиметры. Число не
+// своё: те же 300 dpi — это 2× базы листа ГОСТ, и хозяин у них один
+// (`gostSheet.GOST_DPI_SCALE_DEFAULT`, таск 228). Направление единственно
+// возможное: лист нижний слой, и тянуть он из выгрузки не может.
+export const EXPORT_DPI = gostDpi(GOST_DPI_SCALE_DEFAULT);
 // Предел стороны холста в браузерах: за ним toBlob молча отдаёт пустое.
 const EXPORT_MAX_SIDE = 16384;
 const EXPORT_MM_PER_INCH = 25.4;

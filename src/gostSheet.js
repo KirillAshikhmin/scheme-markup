@@ -57,13 +57,24 @@ export const GOST_MIN_TEXT_MM = 2.5;
 // привычные 300 dpi, на которых считалась подпись размера у прежних выгрузок.
 export const GOST_DPI_BASE = 150;
 
+// Множитель, по которому считается запасное разрешение: 2× и есть те самые
+// 300 dpi. Хозяин числа **здесь**, и `exporter.EXPORT_DPI` берёт его отсюда, а
+// не повторяет (таск 228, находка 12): обратное направление невозможно — лист
+// ГОСТ нижний слой, выгрузка тянет из него, а не он из выгрузки.
+export const GOST_DPI_SCALE_DEFAULT = 2;
+
 export function gostDpi(scale) {
   return GOST_DPI_BASE * (scale > 0 ? scale : 1);
 }
 
+// Миллиметров в дюйме. Повторено в `exporter.js`, `pdf.js` и `pngDpi.js`
+// нарочно: число физическое и измениться не может, а связывать четыре модуля
+// ради него значило бы завести зависимость там, где её нет.
+const GOST_MM_PER_INCH = 25.4;
+
 // Пикселей в миллиметре при заданном разрешении.
 export function gostPixelsPerMm(dpi) {
-  return (dpi > 0 ? dpi : 300) / 25.4;
+  return (dpi > 0 ? dpi : gostDpi(GOST_DPI_SCALE_DEFAULT)) / GOST_MM_PER_INCH;
 }
 
 /**
