@@ -1858,9 +1858,42 @@ function pick(source, allowed) {
 
 // ——— метки ———————————————————————————————————————————————————————————
 
+/**
+ * Точки метки или контура: числа и **доли плана**, то есть 0…1 (дефект D73).
+ *
+ * Зажим стоит здесь, в единственном месте, через которое точки попадают в
+ * объект: `addMark`, `updateMark` и всё, что ходит через них, — перенос
+ * вершины, вставка, продолжение линии, вставка копии, контур помещения.
+ *
+ * **Почему зажимать, а не отказывать в клике за планом.** Доля вне 0…1 — не
+ * доля ни от чего: её одинаково не ждут ни попадание по клику, ни выгрузка, ни
+ * объём, ни мост в миллиметры. Главное — такая метка **не печатается**: лист
+ * ГОСТ, PNG и архив рисуют прямоугольник плана, и метка остаётся в таблице, в
+ * CSV и в нумерации, а на бумаге её нет. Это и есть тихая потеря работы.
+ * Отказать в клике было бы честно на схеме с подложкой, где край плана видно,
+ * и нечестно на схеме без неё: там не нарисовано ничего, край запасного
+ * квадрата невидим, и поле молча отказывало бы в клике по пустому месту.
+ * Поэтому метка встаёт у края — там, где её видно и откуда её можно утащить
+ * рукой, — а о том, что её прижало, сказано словом (`markPinned`).
+ *
+ * **Чужую метку, уже лежащую за планом, это не двигает** (G68): зажим стоит на
+ * входе, а не проходом по объекту. Открытый файл прежней разметки остаётся
+ * байт в байт тем же, пока человек сам не возьмёт метку рукой.
+ */
 function normalizePoints(points) {
   if (!Array.isArray(points) || points.length === 0) throw modelError("noPoints");
-  return points.map((point) => ({ x: Number(point.x), y: Number(point.y) }));
+  return points.map((point) => ({ x: clampFraction(Number(point.x)), y: clampFraction(Number(point.y)) }));
+}
+
+/** Была ли точка за планом до зажима — об этом говорят вслух. */
+function pointOutsidePlan(point) {
+  const x = Number(point && point.x);
+  const y = Number(point && point.y);
+  return !(x >= 0 && x <= 1) || !(y >= 0 && y <= 1);
+}
+
+function pointsOutsidePlan(points) {
+  return Array.isArray(points) && points.some(pointOutsidePlan);
 }
 
 // Самый большой номер, выданный меткам этого кода типа.
@@ -1961,7 +1994,10 @@ export function addMark(project, { schemeId, typeId, kind = "point", points, blo
   }
 
   const next = withProject(project, { marks: [...project.marks, ...created], groups, counters });
-  return { project: next, mark: created[0], marks: created, group };
+  // `pinned` — метку поставили за планом, и её прижало к краю (дефект D73).
+  // Сказать об этом обязан вызывающий: молча метка встала бы не туда, куда
+  // щёлкнули, и человек списал бы это на дрожь руки.
+  return { project: next, mark: created[0], marks: created, group, pinned: pointsOutsidePlan(points) };
 }
 
 // ——— обозначения —————————————————————————————————————————————————————
@@ -3170,6 +3206,9 @@ export function pasteMark(project, snapshot, { schemeId, point } = {}) {
     const value = snapshot[field];
     if (value !== null && value !== undefined && value !== "") patch[field] = value;
   }
+  // Про зажим у вставки своего слова нет, и оно ей не нужно: `markShapeAt`
+  // двигает **всю** копию целиком, пока она не войдёт в план, — правило
+  // старше таска 222 и лучше поточечного зажима, потому что не плющит форму.
   if (Object.keys(patch).length === 0) return { project: result.project, mark: result.mark };
   const updated = updateMark(result.project, result.mark.id, patch);
   return { project: updated.project, mark: updated.mark };

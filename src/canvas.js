@@ -1232,6 +1232,25 @@ function canvasFail(error) {
   reportAppError(error);
 }
 
+/**
+ * Метку поставили за планом, и модель прижала её к краю (дефект D73) — сказать
+ * об этом надо словом. Дверь одна на обе постановки — точку и линию; две копии
+ * правила разошлись бы, а повод у них один. Вставка копии сюда не ходит: её
+ * `markShapeAt` двигает целиком, пока она не войдёт в план, и за краем копия
+ * не оказывается никогда.
+ *
+ * Говорится **один раз на вход в занятие** — той же меркой и в том же месте,
+ * что молчаливый клик таска 217: человек, который ведёт мышь по краю плана, не
+ * должен читать одну и ту же строку на каждую метку.
+ */
+let canvasPinnedSaid = false;
+
+function canvasSayPinned(result) {
+  if (!result || !result.pinned || canvasPinnedSaid) return;
+  canvasPinnedSaid = true;
+  canvasApi.notify(strings.canvas.markPinned, "info");
+}
+
 function canvasPlacePoint(plan) {
   const state = canvasState();
   if (!state.activeTypeId) {
@@ -1250,6 +1269,7 @@ function canvasPlacePoint(plan) {
       points: [canvasGuideSnap(plan)],
     });
     canvasCommit(state.project, result.project, strings.history.addMark, { selection: [result.mark.id] });
+    canvasSayPinned(result);
   } catch (error) {
     canvasFail(error);
   }
@@ -2471,6 +2491,7 @@ function canvasLineFinish(closed, typeId) {
     if (closed) project = updateMark(project, result.mark.id, { closed: true }).project;
     canvasDraft = null;
     canvasCommit(state.project, project, strings.history.addLine, { selection: [result.mark.id] });
+    canvasSayPinned(result);
     return result.mark.id;
   } catch (error) {
     canvasCancelDraft();
@@ -4464,8 +4485,11 @@ function mountCanvas(host, api) {
     if ("mode" in changed) {
       canvasSyncCursor();
       // Новое занятие — молчание начинается заново (таск 217, D66): про
-      // пустой клик говорится один раз на каждый вход в «Выделение».
+      // пустой клик говорится один раз на каждый вход в «Выделение». По той же
+      // мерке и по тому же поводу — слова о метке, прижатой к краю плана
+      // (таск 222, D73).
       canvasSilentSaid = false;
+      canvasPinnedSaid = false;
       // Режим, у которого нет своей кнопки, говорит о себе сам — кто бы его ни
       // включил. См. `CANVAS_MODE_NOTES`.
       const said = CANVAS_MODE_NOTES[state.mode];
