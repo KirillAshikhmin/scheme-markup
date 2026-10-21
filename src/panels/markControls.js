@@ -12,6 +12,8 @@ import {
   findRoom,
   labelOf,
   markControlLinks,
+  queryHit,
+  queryNeedle,
   roomsInOrder,
   schemesInOrder,
   typeChannels,
@@ -57,30 +59,15 @@ function markControlsHaystack(row) {
     .toLowerCase();
 }
 
-// Буква или цифра — то, что считается серединой слова. Всё остальное
-// (пробел, дефис, точка) — граница: «12» обязано находить «L-12».
-const MARK_SEARCH_LETTER = /[0-9a-zа-яё]/;
-
-// Запрос ловится с начала слова, а не где попало в строке. Правило не
-// украшение: одна буква «В» при поиске серединой строки поднимала весь свет —
-// «с-в-етильник», — а Enter отмечает первую строку, и первой оказывалась не
-// та. С начала слова «В» — это выключатели, «свет» — светильники, «12» —
-// «L-12» из комментария.
-function markControlsHit(haystack, needle) {
-  let at = haystack.indexOf(needle);
-  while (at >= 0) {
-    if (at === 0 || !MARK_SEARCH_LETTER.test(haystack[at - 1])) return true;
-    at = haystack.indexOf(needle, at + 1);
-  }
-  return false;
-}
-
 // Подходит ли строка под запрос. Пустой запрос подходит всему: поиск сужает
 // список, а не заменяет его.
+//
+// Правило «с начала слова» выучено здесь (одна буква «В» поднимала весь свет),
+// а живёт теперь в модели — `queryHit`, одна на все пять окон сборки (находка
+// 7 разбора механик). Своего правила тут больше нет: разойдись они опять, и
+// Enter снова отмечал бы не ту строку, что стоит первой.
 export function markControlsMatches(row, query) {
-  const needle = String(query == null ? "" : query).trim().toLowerCase();
-  if (!needle) return true;
-  return markControlsHit(markControlsHaystack(row), needle);
+  return queryHit(markControlsHaystack(row), queryNeedle(query));
 }
 
 // Сколько отмеченных меток не видно в показанных строках. Отдельной функцией,

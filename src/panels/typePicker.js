@@ -21,6 +21,8 @@ import {
   findType,
   codeProblem,
   matchTypeExactly,
+  queryHit,
+  queryNeedle,
   searchTypes,
   typeKindOf,
   CODE_MAX_LENGTH,
@@ -160,18 +162,20 @@ function pickerKindNote(kind) {
  * Подходит ли встроенный комментарий под набранное в поиске.
  *
  * Плашка стоит под таблицей и ведёт себя как её строки: поиск сужает окно, и
- * «розетка» не должна оставлять на экране комментарий. Правило то же, что у
- * `searchTypes`, но своё: встроенного типа в справочнике нет, и спросить
- * модель о нём нельзя.
+ * «розетка» не должна оставлять на экране комментарий. Спросить `searchTypes`
+ * о нём нельзя — встроенного типа в справочнике нет, — но **правило
+ * совпадения берётся у модели** (`queryHit`, находка 7 разбора механик):
+ * своего здесь было третье, и плашка ловилась серединой слова, когда строки
+ * таблицы рядом уже нет.
  */
 export function pickerCommentMatches(project, query) {
-  const needle = String(query == null ? "" : query).trim().toLowerCase();
+  const needle = queryNeedle(query);
   if (!needle) return true;
   const type = findType(project, COMMENT_TYPE_ID);
   return (
-    type.code.toLowerCase().startsWith(needle) ||
-    type.name.toLowerCase().includes(needle) ||
-    strings.picker.builtinComment.toLowerCase().includes(needle)
+    queryHit(type.code.toLowerCase(), needle) ||
+    queryHit(type.name.toLowerCase(), needle) ||
+    queryHit(strings.picker.builtinComment.toLowerCase(), needle)
   );
 }
 

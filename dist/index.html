@@ -8959,7 +8959,12 @@ const strings = {
     // Пустая выдача поиска. Две разные: «нет нигде» и «нет здесь, а в других
     // помещениях есть» — во втором случае окно предлагает снять фильтр, а не
     // оставляет гадать, какой из двух фильтров виноват.
-    searchEmpty: "По запросу ничего не нашлось",
+    //
+    // Слова — те же, что в поиске шапки и в окне выбора модели (находка 7
+    // разбора механик): один и тот же ответ, сказанный в соседних окнах
+    // по-разному, человек читает как два разных. Оговорки у окна типов
+    // («введите код нового типа») и у окна вещей — про дело и остались.
+    searchEmpty: "Ничего не нашлось",
     foundElsewhere: "В этом помещении ничего не нашлось. В других помещениях — {count}",
     allRooms: "Показать все помещения",
     chosen: "Отмечено: {count}",
@@ -11261,6 +11266,51 @@ function createProject(template) {
 }
 
 // ——— поиск ———————————————————————————————————————————————————————————
+
+// Буква или цифра — середина слова. Всё остальное (пробел, дефис, точка,
+// скобка) — граница: «12» обязано находить «L-12».
+const QUERY_LETTER = /[0-9a-zа-яё]/;
+
+/**
+ * **Одно правило поиска по строке на всю сборку** (находка 7 разбора механик):
+ * запрос ловится **с начала слова**, а не где попало в строке.
+ *
+ * Правило не украшение, и выучено оно дорого: одна буква «В» при поиске
+ * серединой строки поднимала весь свет — «с-в-етильник», — а Enter отмечает
+ * первую строку, и первой оказывалась не та. С начала слова «В» — это
+ * выключатели, «свет» — светильники, «12» — «L-12» из комментария.
+ *
+ * До сведения правил было четыре на пять окон, и урок был применён в одном:
+ * поиск в шапке, окно выбора типа, окно выбора модели оборудования и фильтр
+ * списка меток искали серединой строки. Ранги при этом у окон **свои** и
+ * сводить их не надо: у типа код сильнее названия, в поиске по объекту
+ * обозначение сильнее помещения — это про дело, а не про расхождение.
+ *
+ * `haystack` и `needle` — уже приведённые к нижнему регистру.
+ */
+function queryHit(haystack, needle) {
+  if (!needle) return true;
+  if (!haystack) return false;
+  let at = haystack.indexOf(needle);
+  while (at >= 0) {
+    if (at === 0 || !QUERY_LETTER.test(haystack[at - 1])) return true;
+    at = haystack.indexOf(needle, at + 1);
+  }
+  return false;
+}
+
+/** Запрос в приведённом виде: без краёв и без регистра. Пустой — «всё». */
+function queryNeedle(query) {
+  return String(query == null ? "" : query).trim().toLowerCase();
+}
+
+/**
+ * Подходит ли строка под запрос. Та же `queryHit`, но принимает строку и
+ * запрос как они есть — так зовут из панелей.
+ */
+function queryMatches(value, query) {
+  return queryHit(String(value == null ? "" : value).toLowerCase(), queryNeedle(query));
+}
 function findScheme(project, schemeId) {
   return project.schemes.find((scheme) => scheme.id === schemeId) || null;
 }
@@ -11747,15 +11797,19 @@ function typesInOrder(project) {
     .filter((group) => group.types.length > 0);
 }
 
-// Поиск типа по строке из окна «Тип метки»: по коду с начала и по названию
-// в любом месте, без учёта регистра. Точное совпадение кода идёт первым —
-// и в своей категории, и среди категорий: «Р» — это Розетка, а не «Подсветка
-// кровати», где та же буква стоит в середине названия. Порядок всего
-// остального — порядок справочника, своей сортировки здесь нет.
-// Пустой запрос отдаёт справочник целиком.
+// Поиск типа по строке из окна «Тип метки»: по коду и по названию с начала
+// слова, без учёта регистра (`queryHit` — одно правило на всю сборку). Точное
+// совпадение кода идёт первым — и в своей категории, и среди категорий: «Р» —
+// это Розетка, а не «Подсветка кровати», где та же буква стоит в середине
+// названия. Порядок всего остального — порядок справочника, своей сортировки
+// здесь нет. Пустой запрос отдаёт справочник целиком.
+//
+// По названию искалось серединой строки (находка 7): «в» поднимало весь свет,
+// и Enter отмечал не ту строку. Код искался с начала строки, а теперь — с
+// начала слова: у кода вроде «L-12» запрос «12» наконец находит его сам.
 function typeMatchesQuery(type, needle) {
   if (!needle) return true;
-  return type.code.toLowerCase().startsWith(needle) || type.name.toLowerCase().includes(needle);
+  return queryHit(type.code.toLowerCase(), needle) || queryHit(type.name.toLowerCase(), needle);
 }
 
 // Сила совпадения. Точным считается не только код, но и название целиком:
@@ -13021,7 +13075,10 @@ function searchProject(project, query) {
     for (const item of SEARCH_FIELDS) {
       const value = values[item.field];
       const lower = value.toLowerCase();
-      if (!lower || !lower.includes(needle)) continue;
+      // С начала слова, а не серединой строки (`queryHit`, находка 7): «в» в
+      // поиске шапки поднимало весь свет — ровно то, что в окне связей уже
+      // признали бедой и починили.
+      if (!lower || !queryHit(lower, needle)) continue;
       // Точное совпадение сильнее начала строки, начало — сильнее середины.
       const closeness = lower === needle ? 0 : lower.startsWith(needle) ? 1 : 2;
       const rank = item.rank + closeness;
@@ -17886,9 +17943,16 @@ function equipmentTypeOf(project, equipmentId) {
 // названием, производителем или артикулом, точное совпадение идёт первым.
 // Правило поиска живёт здесь, а не в панели: разойдись они — Enter в окне
 // брал бы не ту строку, что стоит первой.
+//
+// Совпадение — с начала слова (`queryHit`, находка 7), одним правилом со
+// всеми окнами. Серединой артикула искать нельзя по той же причине, по
+// которой нельзя серединой названия: «12» подняло бы всё, где эти цифры
+// встретились, а Enter берёт первую строку. Начало слова у артикула живое:
+// у «ABB 2CKA001» запрос «2cka» находит его, а разделитель внутри артикула
+// («GW-1234») делит его на слова и находится оба куска.
 function equipmentMatches(item, needle) {
   if (!needle) return true;
-  return [item.name, item.vendor, item.code].some((value) => String(value || "").toLowerCase().includes(needle));
+  return [item.name, item.vendor, item.code].some((value) => queryHit(String(value || "").toLowerCase(), needle));
 }
 
 function equipmentExactRank(item, needle) {
@@ -25236,13 +25300,17 @@ function markVisible(project, mark, filter) {
     }
   }
   if (filter.roomId && mark.roomId !== filter.roomId) return false;
-  const query = (filter.query || "").trim().toLowerCase();
+  const query = queryNeedle(filter.query);
   if (!query) return true;
   const haystack = [labelOf(project, mark.id), mark.location, mark.original]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
-  return haystack.includes(query);
+  // Правило одно на все окна (`queryHit`, находка 7): с начала слова. Поле
+  // фильтра сужает **и план, и список меток**, и искало оно серединой строки —
+  // пятое место в сборке, где один и тот же вопрос решался по-своему, и в
+  // разборе оно не названо.
+  return queryHit(haystack, query);
 }
 function visibleMarks(project, scheme, filter) {
   if (!project || !scheme) return [];
@@ -44050,18 +44118,20 @@ function pickerKindNote(kind) {
  * Подходит ли встроенный комментарий под набранное в поиске.
  *
  * Плашка стоит под таблицей и ведёт себя как её строки: поиск сужает окно, и
- * «розетка» не должна оставлять на экране комментарий. Правило то же, что у
- * `searchTypes`, но своё: встроенного типа в справочнике нет, и спросить
- * модель о нём нельзя.
+ * «розетка» не должна оставлять на экране комментарий. Спросить `searchTypes`
+ * о нём нельзя — встроенного типа в справочнике нет, — но **правило
+ * совпадения берётся у модели** (`queryHit`, находка 7 разбора механик):
+ * своего здесь было третье, и плашка ловилась серединой слова, когда строки
+ * таблицы рядом уже нет.
  */
 function pickerCommentMatches(project, query) {
-  const needle = String(query == null ? "" : query).trim().toLowerCase();
+  const needle = queryNeedle(query);
   if (!needle) return true;
   const type = findType(project, COMMENT_TYPE_ID);
   return (
-    type.code.toLowerCase().startsWith(needle) ||
-    type.name.toLowerCase().includes(needle) ||
-    strings.picker.builtinComment.toLowerCase().includes(needle)
+    queryHit(type.code.toLowerCase(), needle) ||
+    queryHit(type.name.toLowerCase(), needle) ||
+    queryHit(strings.picker.builtinComment.toLowerCase(), needle)
   );
 }
 
@@ -45487,30 +45557,15 @@ function markControlsHaystack(row) {
     .toLowerCase();
 }
 
-// Буква или цифра — то, что считается серединой слова. Всё остальное
-// (пробел, дефис, точка) — граница: «12» обязано находить «L-12».
-const MARK_SEARCH_LETTER = /[0-9a-zа-яё]/;
-
-// Запрос ловится с начала слова, а не где попало в строке. Правило не
-// украшение: одна буква «В» при поиске серединой строки поднимала весь свет —
-// «с-в-етильник», — а Enter отмечает первую строку, и первой оказывалась не
-// та. С начала слова «В» — это выключатели, «свет» — светильники, «12» —
-// «L-12» из комментария.
-function markControlsHit(haystack, needle) {
-  let at = haystack.indexOf(needle);
-  while (at >= 0) {
-    if (at === 0 || !MARK_SEARCH_LETTER.test(haystack[at - 1])) return true;
-    at = haystack.indexOf(needle, at + 1);
-  }
-  return false;
-}
-
 // Подходит ли строка под запрос. Пустой запрос подходит всему: поиск сужает
 // список, а не заменяет его.
+//
+// Правило «с начала слова» выучено здесь (одна буква «В» поднимала весь свет),
+// а живёт теперь в модели — `queryHit`, одна на все пять окон сборки (находка
+// 7 разбора механик). Своего правила тут больше нет: разойдись они опять, и
+// Enter снова отмечал бы не ту строку, что стоит первой.
 function markControlsMatches(row, query) {
-  const needle = String(query == null ? "" : query).trim().toLowerCase();
-  if (!needle) return true;
-  return markControlsHit(markControlsHaystack(row), needle);
+  return queryHit(markControlsHaystack(row), queryNeedle(query));
 }
 
 // Сколько отмеченных меток не видно в показанных строках. Отдельной функцией,
@@ -52385,6 +52440,12 @@ function mountMarksPanel(host, api) {
       // появилась с комментариями (G167): плашки на схеме стоят, а в списке их
       // нет по их природе, и без этой строки человек решил бы, что работа
       // пропала.
+      //
+      // «Ничего не нашлось» этой строке **не годится** и в единое слово о
+      // пустом поиске не сводилась (находка 7 разбора механик): сужают список
+      // здесь трое — галочки типов, помещение и строка поиска, — и сказать
+      // «ничего не нашлось» значило бы указать на поиск, когда виновата
+      // снятая галочка.
       const onlyComments =
         total === 0 && state.project.marks.some((mark) => mark.schemeId === state.schemeId);
       list.replaceChildren(

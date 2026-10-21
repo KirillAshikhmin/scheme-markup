@@ -44,6 +44,8 @@ import {
   planOriginOf,
   planPixelsPerMeter,
   pointInOutline,
+  queryHit,
+  queryNeedle,
   roomHasFloor,
   schemeHeightPx,
   schemeObjectCorners,
@@ -2487,13 +2489,17 @@ function markVisible(project, mark, filter) {
     }
   }
   if (filter.roomId && mark.roomId !== filter.roomId) return false;
-  const query = (filter.query || "").trim().toLowerCase();
+  const query = queryNeedle(filter.query);
   if (!query) return true;
   const haystack = [labelOf(project, mark.id), mark.location, mark.original]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
-  return haystack.includes(query);
+  // Правило одно на все окна (`queryHit`, находка 7): с начала слова. Поле
+  // фильтра сужает **и план, и список меток**, и искало оно серединой строки —
+  // пятое место в сборке, где один и тот же вопрос решался по-своему, и в
+  // разборе оно не названо.
+  return queryHit(haystack, query);
 }
 
 export function visibleMarks(project, scheme, filter) {

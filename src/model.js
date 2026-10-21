@@ -1075,6 +1075,51 @@ export function createProject(template) {
 
 // ——— поиск ———————————————————————————————————————————————————————————
 
+// Буква или цифра — середина слова. Всё остальное (пробел, дефис, точка,
+// скобка) — граница: «12» обязано находить «L-12».
+const QUERY_LETTER = /[0-9a-zа-яё]/;
+
+/**
+ * **Одно правило поиска по строке на всю сборку** (находка 7 разбора механик):
+ * запрос ловится **с начала слова**, а не где попало в строке.
+ *
+ * Правило не украшение, и выучено оно дорого: одна буква «В» при поиске
+ * серединой строки поднимала весь свет — «с-в-етильник», — а Enter отмечает
+ * первую строку, и первой оказывалась не та. С начала слова «В» — это
+ * выключатели, «свет» — светильники, «12» — «L-12» из комментария.
+ *
+ * До сведения правил было четыре на пять окон, и урок был применён в одном:
+ * поиск в шапке, окно выбора типа, окно выбора модели оборудования и фильтр
+ * списка меток искали серединой строки. Ранги при этом у окон **свои** и
+ * сводить их не надо: у типа код сильнее названия, в поиске по объекту
+ * обозначение сильнее помещения — это про дело, а не про расхождение.
+ *
+ * `haystack` и `needle` — уже приведённые к нижнему регистру.
+ */
+export function queryHit(haystack, needle) {
+  if (!needle) return true;
+  if (!haystack) return false;
+  let at = haystack.indexOf(needle);
+  while (at >= 0) {
+    if (at === 0 || !QUERY_LETTER.test(haystack[at - 1])) return true;
+    at = haystack.indexOf(needle, at + 1);
+  }
+  return false;
+}
+
+/** Запрос в приведённом виде: без краёв и без регистра. Пустой — «всё». */
+export function queryNeedle(query) {
+  return String(query == null ? "" : query).trim().toLowerCase();
+}
+
+/**
+ * Подходит ли строка под запрос. Та же `queryHit`, но принимает строку и
+ * запрос как они есть — так зовут из панелей.
+ */
+export function queryMatches(value, query) {
+  return queryHit(String(value == null ? "" : value).toLowerCase(), queryNeedle(query));
+}
+
 export function findScheme(project, schemeId) {
   return project.schemes.find((scheme) => scheme.id === schemeId) || null;
 }
@@ -1572,15 +1617,19 @@ export function typesInOrder(project) {
     .filter((group) => group.types.length > 0);
 }
 
-// Поиск типа по строке из окна «Тип метки»: по коду с начала и по названию
-// в любом месте, без учёта регистра. Точное совпадение кода идёт первым —
-// и в своей категории, и среди категорий: «Р» — это Розетка, а не «Подсветка
-// кровати», где та же буква стоит в середине названия. Порядок всего
-// остального — порядок справочника, своей сортировки здесь нет.
-// Пустой запрос отдаёт справочник целиком.
+// Поиск типа по строке из окна «Тип метки»: по коду и по названию с начала
+// слова, без учёта регистра (`queryHit` — одно правило на всю сборку). Точное
+// совпадение кода идёт первым — и в своей категории, и среди категорий: «Р» —
+// это Розетка, а не «Подсветка кровати», где та же буква стоит в середине
+// названия. Порядок всего остального — порядок справочника, своей сортировки
+// здесь нет. Пустой запрос отдаёт справочник целиком.
+//
+// По названию искалось серединой строки (находка 7): «в» поднимало весь свет,
+// и Enter отмечал не ту строку. Код искался с начала строки, а теперь — с
+// начала слова: у кода вроде «L-12» запрос «12» наконец находит его сам.
 function typeMatchesQuery(type, needle) {
   if (!needle) return true;
-  return type.code.toLowerCase().startsWith(needle) || type.name.toLowerCase().includes(needle);
+  return queryHit(type.code.toLowerCase(), needle) || queryHit(type.name.toLowerCase(), needle);
 }
 
 // Сила совпадения. Точным считается не только код, но и название целиком:
@@ -2852,7 +2901,10 @@ export function searchProject(project, query) {
     for (const item of SEARCH_FIELDS) {
       const value = values[item.field];
       const lower = value.toLowerCase();
-      if (!lower || !lower.includes(needle)) continue;
+      // С начала слова, а не серединой строки (`queryHit`, находка 7): «в» в
+      // поиске шапки поднимало весь свет — ровно то, что в окне связей уже
+      // признали бедой и починили.
+      if (!lower || !queryHit(lower, needle)) continue;
       // Точное совпадение сильнее начала строки, начало — сильнее середины.
       const closeness = lower === needle ? 0 : lower.startsWith(needle) ? 1 : 2;
       const rank = item.rank + closeness;
@@ -7774,9 +7826,16 @@ export function equipmentTypeOf(project, equipmentId) {
 // названием, производителем или артикулом, точное совпадение идёт первым.
 // Правило поиска живёт здесь, а не в панели: разойдись они — Enter в окне
 // брал бы не ту строку, что стоит первой.
+//
+// Совпадение — с начала слова (`queryHit`, находка 7), одним правилом со
+// всеми окнами. Серединой артикула искать нельзя по той же причине, по
+// которой нельзя серединой названия: «12» подняло бы всё, где эти цифры
+// встретились, а Enter берёт первую строку. Начало слова у артикула живое:
+// у «ABB 2CKA001» запрос «2cka» находит его, а разделитель внутри артикула
+// («GW-1234») делит его на слова и находится оба куска.
 function equipmentMatches(item, needle) {
   if (!needle) return true;
-  return [item.name, item.vendor, item.code].some((value) => String(value || "").toLowerCase().includes(needle));
+  return [item.name, item.vendor, item.code].some((value) => queryHit(String(value || "").toLowerCase(), needle));
 }
 
 function equipmentExactRank(item, needle) {
