@@ -124,6 +124,7 @@ import {
   openingTitle,
   openingsInWall,
   planFractionToMm,
+  planHasScale,
   planOriginOf,
   planPixelsPerMeter,
   planSizeMeters,
@@ -776,41 +777,76 @@ export function workshopInitialTool(project, schemeId) {
 // заданы в пикселях плана, и у фотографии плана квартиры их примерно тысяча на
 // десять метров. Возьми пиксель в миллиметр — метки стали бы в десять раз
 // мельче подписей, и раскладка подписей поехала бы на всех схемах разом.
+//
+// **Свой размер схемы старше листа** (таск 222, G333; слова заказчика: «сейчас
+// нет схем без подложки у меня в работе, так что сделай как должно быть»).
+// Бывает схема без подложки, у которой размер и калибровка уже есть — пришла
+// из старого файла или из прежней разметки. До таска 222 лист перетирал и то и
+// другое: размер становился 4000 × 3000, а **метры менялись молча** — длины,
+// по которым заказывают ленту, после первой же стены начинали значить другое.
+// Теперь лист добавляет только недостающее: нет размера — даёт свой, нет
+// калибровки — объявляет пиксель сантиметром (`mmPerPx`) **от того размера,
+// который у схемы есть**, нет привязки — ставит нуль в середину. У листа
+// 4000 × 3000 это те же сорок метров, что и были; у плана на 1200 точек —
+// двенадцать метров, то есть ровно `WORKSHOP_EMPTY_MM`, квартира по фасаду.
+// Постоянная здесь не «сорок метров», а сантиметр в пикселе.
 export const WORKSHOP_SHEET = { width: 4000, height: 3000, mmPerPx: 10 };
 
 /**
- * Завести лист у схемы без подложки, если его ещё нет. Возвращает тот же
- * объект по ссылке, когда заводить нечего: ни лишнего шага истории, ни
+ * Дать схеме без подложки систему координат, если её ещё нет. Возвращает тот
+ * же объект по ссылке, когда давать нечего: ни лишнего шага истории, ни
  * `updatedAt` на пустом месте (G68).
+ *
+ * **Добавляется только недостающее, по частям** (таск 222, G333). Части три —
+ * размер, калибровка, привязка, — и у каждой свой вопрос «а есть ли она уже».
+ * Прежняя проверка была одна на все три и всё-или-ничего: не хватало привязки
+ * — перезаписывались и размер, и калибровка. Своё старше выданного: размер и
+ * метры задал человек или прежняя разметка, а лист — умолчание для пустой
+ * схемы.
  *
  * `marks` — сколько меток лист забрал себе из запасного квадрата (дефект
  * D67). Доли до листа считались от `SCHEME_FALLBACK_PX`, а с листом значили бы
  * другое место, поэтому размер схема получает **не** `updateScheme`, а
  * `model.resizeSchemePlan`: он один знает правило «пиксель плана остаётся тем
  * же пикселем». Число идёт наружу, чтобы о пересчёте сказать словом: лист
- * заводится молча, а молчать о переехавших метках нельзя.
+ * заводится молча, а молчать о переехавших метках нельзя. Схеме со своим
+ * размером пересчитывать нечего — её доли и так считались от него, и `marks`
+ * у неё ноль.
  */
 export function workshopEnsureSheet(project, schemeId) {
   const scheme = findScheme(project, schemeId);
   if (!scheme || scheme.imageId) return { project, added: false, marks: 0 };
-  if (Number(scheme.width) > 0 && Number(scheme.height) > 0 && planOriginOf(project, schemeId)) {
-    return { project, added: false, marks: 0 };
+  const hasSize = Number(scheme.width) > 0 && Number(scheme.height) > 0;
+  const hasScale = planHasScale(project, schemeId);
+  const hasOrigin = Boolean(planOriginOf(project, schemeId));
+  if (hasSize && hasScale && hasOrigin) return { project, added: false, marks: 0 };
+  let next = project;
+  let marks = 0;
+  if (!hasSize) {
+    const resized = resizeSchemePlan(project, schemeId, {
+      width: WORKSHOP_SHEET.width,
+      height: WORKSHOP_SHEET.height,
+    });
+    next = resized.project;
+    marks = resized.marks;
   }
-  const resized = resizeSchemePlan(project, schemeId, {
-    width: WORKSHOP_SHEET.width,
-    height: WORKSHOP_SHEET.height,
-  });
-  let next = resized.project;
-  // Калибровка: четверть ширины листа объявлена десятью метрами. При ширине
-  // 4000 это 1000 пикселей на 10 м, то есть сто пикселей на метр и сантиметр
-  // на пиксель — ровно то, что обещано выше.
-  next = setPlanScale(next, schemeId, {
-    a: { x: 0.25, y: 0.5 },
-    b: { x: 0.5, y: 0.5 },
-    meters: (WORKSHOP_SHEET.width / 4) * (WORKSHOP_SHEET.mmPerPx / 1000),
-  }).project;
-  next = setPlanOrigin(next, schemeId, { at: WORKSHOP_ORIGIN_AT, turn: 0 }).project;
-  return { project: next, added: true, marks: resized.marks };
+  if (!hasScale) {
+    // Калибровка: четверть ширины плана объявлена её же сантиметрами. При
+    // ширине 4000 это 1000 пикселей на 10 м, то есть сто пикселей на метр и
+    // сантиметр на пиксель — ровно то, что обещано выше; при ширине 1200 это
+    // 300 пикселей на 3 м, и пиксель снова сантиметр.
+    const width = Number(findScheme(next, schemeId).width);
+    next = setPlanScale(next, schemeId, {
+      a: { x: 0.25, y: 0.5 },
+      b: { x: 0.5, y: 0.5 },
+      meters: (width / 4) * (WORKSHOP_SHEET.mmPerPx / 1000),
+    }).project;
+  }
+  // Нуль чертежа — середина плана, какого бы размера он ни был: это
+  // единственная точка, которая существует до того, как человек куда-то
+  // показал.
+  if (!hasOrigin) next = setPlanOrigin(next, schemeId, { at: WORKSHOP_ORIGIN_AT, turn: 0 }).project;
+  return { project: next, added: true, marks };
 }
 
 /**

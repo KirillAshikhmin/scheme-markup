@@ -32,6 +32,7 @@ import { fileURLToPath } from "node:url";
 import {
   OPENING_KINDS,
   SCHEME_OBJECT_SHAPES,
+  addMark,
   addOpening,
   addRoom,
   addScheme,
@@ -39,6 +40,7 @@ import {
   createProject,
   drawingBoundsMm,
   ensureSchemeObjectKinds,
+  findMark,
   findSchemeObject,
   findScheme,
   openingsInWall,
@@ -274,6 +276,87 @@ test("лист заводится один раз и не переставляе
 test("лист не трогает схему с подложкой", () => {
   const base = planProject();
   assert.equal(workshopEnsureSheet(base.project, base.schemeId).project, base.project);
+});
+
+// ——— свой размер схемы старше листа (таск 222, G333) ————————————————————
+//
+// Схема без подложки, у которой размер и калибровка уже есть, — так приходят
+// старые файлы. До таска 222 лист перетирал и то и другое: размер становился
+// 4000 × 3000, а метры менялись молча, и длины, по которым заказывают ленту,
+// после первой же стены значили другое. Лист добавляет только недостающее.
+
+// Схема без подложки, но со своим размером: ни калибровки, ни привязки.
+function sizedBlank(width = 1200, height = 900) {
+  const added = addScheme(createProject(), { name: "из старого файла", width, height });
+  return { project: added.project, schemeId: added.scheme.id };
+}
+
+test("свой размер схема оставляет себе — лист добавляет только недостающее", () => {
+  const base = sizedBlank();
+  // Метка на такой схеме уже стоит в долях **своего** размера: её не двигают.
+  const placed = addMark(base.project, {
+    schemeId: base.schemeId,
+    typeId: base.project.markTypes[0].id,
+    points: [{ x: 0.25, y: 0.75 }],
+  });
+  const ready = workshopEnsureSheet(placed.project, base.schemeId);
+  assert.equal(ready.added, true);
+  assert.equal(ready.marks, 0, "пересчитывать нечего: доли и так считались от своего размера");
+  assert.deepEqual(
+    findMark(ready.project, placed.mark.id).points[0],
+    { x: 0.25, y: 0.75 },
+    "метку сдвинули вместе с размером",
+  );
+  const scheme = findScheme(ready.project, base.schemeId);
+  assert.equal(scheme.width, 1200, "свой размер перетёрли листом");
+  assert.equal(scheme.height, 900);
+  // Пиксель остаётся сантиметром, какого бы размера ни был план: 1200 точек —
+  // двенадцать метров, ровно `WORKSHOP_EMPTY_MM` по широкой стороне.
+  assert.equal(planPixelsPerMeter(ready.project, base.schemeId), 1000 / WORKSHOP_SHEET.mmPerPx);
+  assert.deepEqual(planSizeMeters(ready.project, base.schemeId), { width: 12, height: 9 });
+  assert.deepEqual(planOriginOf(ready.project, base.schemeId), { at: WORKSHOP_ORIGIN_AT, turn: 0 });
+});
+
+test("своя калибровка переживает первую стену — метры молча не меняются", () => {
+  // Это и есть цена вопроса: по этим метрам заказывают ленту.
+  const base = sizedBlank();
+  const own = setPlanScale(base.project, base.schemeId, {
+    a: { x: 0.1, y: 0.5 },
+    b: { x: 0.6, y: 0.5 },
+    meters: 3,
+  }).project;
+  const perMeter = planPixelsPerMeter(own, base.schemeId);
+  const drawn = workshopAddChain(own, base.schemeId, ROOM, 100);
+  assert.equal(planPixelsPerMeter(drawn.project, base.schemeId), perMeter, "метры схемы переписал лист");
+  assert.equal(findScheme(drawn.project, base.schemeId).width, 1200);
+  // Привязки у неё не было — её и добавили, одну.
+  assert.deepEqual(planOriginOf(drawn.project, base.schemeId), { at: WORKSHOP_ORIGIN_AT, turn: 0 });
+  assert.equal(drawn.added, 4);
+});
+
+test("пустая схема получает лист ровно как прежде", () => {
+  // G333 не трогает главный случай: у схемы без своего размера всё по-старому.
+  const base = blankProject();
+  const ready = workshopEnsureSheet(base.project, base.schemeId);
+  const scheme = findScheme(ready.project, base.schemeId);
+  assert.equal(scheme.width, WORKSHOP_SHEET.width);
+  assert.equal(scheme.height, WORKSHOP_SHEET.height);
+  assert.equal(planPixelsPerMeter(ready.project, base.schemeId), 1000 / WORKSHOP_SHEET.mmPerPx);
+  assert.deepEqual(planSizeMeters(ready.project, base.schemeId), { width: 40, height: 30 });
+});
+
+test("G68: объект прежней сборки со своим размером не меняет ни размера, ни меток", () => {
+  const project = JSON.parse(LEGACY_DRAWING_TEXT);
+  const schemeId = project.schemes[0].id;
+  assert.ok(!project.schemes[0].imageId, "фикстура обязана быть без подложки");
+  assert.equal(project.schemes[0].width, 1200);
+  const marksBefore = JSON.stringify(project.marks);
+  const drawn = workshopAddChain(project, schemeId, [{ x: 0, y: 0 }, { x: 1000, y: 0 }], 100);
+  const scheme = findScheme(drawn.project, schemeId);
+  assert.equal(scheme.width, 1200, "размер чужой схемы перетёрли листом");
+  assert.equal(scheme.height, 900);
+  assert.equal(JSON.stringify(drawn.project.marks), marksBefore, "метки чужого объекта сдвинулись");
+  assert.equal(drawn.marks, 0);
 });
 
 test("метка на листе доезжает до тех же миллиметров, что стена", () => {
