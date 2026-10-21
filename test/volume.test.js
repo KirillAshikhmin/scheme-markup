@@ -35,10 +35,12 @@ import {
   projectTopAzimuth,
   setProjectSite,
   SCHEME_ANCHOR_OBJECT_KEYS,
+  SCHEME_LIFT_KEY,
   SCHEME_FLOOR_MAX,
   SCHEME_FLOOR_MIN,
   SCHEME_STAIR_EXIT_KEY,
   SCHEME_STAIR_OBJECT_KEYS,
+  schemeStairArrivalKeys,
   schemeAnchorCandidates,
   ensureSchemeObjectKinds,
   findMark,
@@ -294,6 +296,7 @@ import {
   volumePadVector,
   volumeFloorAction,
   volumeFloorName,
+  volumeFloorWord,
   volumeTitle,
   volumeTypingTarget,
   volumeViewSwitch,
@@ -5971,12 +5974,22 @@ test("у лестницы окно предлагает этаж, а без не
   // видит нарисованную лестницу.
   const dead = volumeFloorAction(stair, [], null);
   assert.equal(dead.kind, "none");
-  assert.equal(dead.hint, strings.volume.stairNoFloors);
+  assert.equal(dead.hint, text("volume.stairNoFloors", { what: strings.volume.stairWord }));
   // Лестница и этажи — обычный переход таска 149.
   const up = volumeFloorAction(stair, floors, null);
   assert.equal(up.kind, "stair");
   assert.equal(up.label, strings.volume.stairButton);
-  assert.equal(up.hint, strings.volume.stairNear);
+  assert.equal(up.hint, text("volume.stairNear", { what: strings.volume.stairWord }));
+  // **Лифт — тот же переход и то же окно** (таск 224, G316): правило не
+  // ветвится, меняется только слово, которым названо то, у чего стоят.
+  const lift = volumeFloorAction({ objectId: "l", key: SCHEME_LIFT_KEY }, floors, null);
+  assert.equal(lift.kind, up.kind, "у лифта завёлся свой вид действия");
+  assert.equal(lift.label, up.label, "у лифта своя кнопка");
+  assert.equal(lift.hint, text("volume.stairNear", { what: strings.volume.liftWord }));
+  assert.equal(volumeFloorWord(SCHEME_LIFT_KEY), strings.volume.liftWord);
+  assert.equal(volumeFloorWord(SCHEME_LIFT_KEY, true), strings.volume.liftWordAt);
+  assert.equal(volumeFloorWord("stairsSpiral"), strings.volume.stairWord, "спиральный марш — тоже лестница");
+  assert.equal(volumeFloorWord(SCHEME_STAIR_EXIT_KEY, true), strings.volume.stairWordAt);
   // Лестницы нет, а пришли мы сюда переходом — возврат (G216).
   const back = volumeFloorAction(null, [], { schemeId: "s1", name: "1 этаж", floor: 1 });
   assert.equal(back.kind, "back");
@@ -6091,7 +6104,7 @@ test("текст подсказки говорит про тот вид и то 
   assert.ok(!touch.includes(strings.volume.hintGrab) && !touch.includes(strings.volume.hintLocked), touch);
   // Двери и лестница дописываются теми же строками, что и прежде.
   const full = volumeHintText({ ...base, doors: ["d1"], stair: { objectId: "s" }, floors: [{ floor: 2 }] });
-  assert.ok(full.includes(strings.volume.stairNear), full);
+  assert.ok(full.includes(text("volume.stairNear", { what: strings.volume.stairWord })), full);
   // Возврат с этажа без лестницы (G216) говорится в той же строке.
   const back = volumeHintText({ ...base, back: { schemeId: "s", name: "1 этаж", floor: 1 } });
   assert.ok(back.includes(strings.volume.backLine), back);
@@ -6627,6 +6640,64 @@ test("четыре вида марша — одна лестничная кле�
     candidates.map((item) => item.key).sort(),
     ["stairs", "stairsExit", "stairsSpiral"],
     "привязка узнала не все вещи лестничной клетки",
+  );
+});
+
+test("лифт — та же клетка и то же окно, но приезжают им в лифт (таск 224)", () => {
+  // Решение таска: лифт переводит по этажам, как лестница, — значит он вещь
+  // лестничной клетки, а не картинка. Пары у него нет: шахта на каждом этаже
+  // одна и та же, поэтому ключ один, и уехавший лифтом приезжает в лифт.
+  assert.deepEqual(schemeStairArrivalKeys(SCHEME_LIFT_KEY), [SCHEME_LIFT_KEY]);
+  assert.deepEqual(schemeStairArrivalKeys(SCHEME_STAIR_EXIT_KEY), SCHEME_STAIR_OBJECT_KEYS);
+  assert.deepEqual(schemeStairArrivalKeys("stairsSpiral"), [SCHEME_STAIR_EXIT_KEY]);
+
+  const base = stairScene();
+  let project = base.project;
+  const lift = addSchemeObject(project, {
+    schemeId: base.schemeId,
+    catalogKey: SCHEME_LIFT_KEY,
+    shape: "rect",
+    atMm: { x: 1200, y: -1200 },
+    widthMm: 1200,
+    depthMm: 1400,
+    turnDeg: 0,
+    heightAboveFloorMm: 0,
+  });
+  project = lift.project;
+  const exit = addSchemeObject(project, {
+    schemeId: base.schemeId,
+    catalogKey: SCHEME_STAIR_EXIT_KEY,
+    shape: "rect",
+    atMm: { x: 1200, y: 1200 },
+    widthMm: 1100,
+    depthMm: 2700,
+    turnDeg: 0,
+    heightAboveFloorMm: 0,
+  });
+  project = exit.project;
+  const scene = volumeScene(project, base.schemeId);
+  // Объём узнаёт лифт сам — по тому же списку ключей, что лестницу.
+  assert.ok(
+    scene.stairs.some((place) => place.key === SCHEME_LIFT_KEY),
+    "лифт не стал вещью лестничной клетки",
+  );
+  // **Приехали лифтом — вышли у лифта**, хотя на этаже есть и выход с лестницы,
+  // и он к месту ухода не дальше. Сверяйся пара «марш ↔ выход», человек вышел
+  // бы из шахты посреди лестничного проёма.
+  const byLift = volumeStairLanding(scene, { x: 1200, y: -1200 }, VOLUME_HEAD_MM, SCHEME_LIFT_KEY);
+  assert.equal(byLift.objectId, lift.schemeObject.id);
+  assert.equal(byLift.key, SCHEME_LIFT_KEY);
+  assert.equal(byLift.paired, true);
+  // А лестница своё прибытие не потеряла: маршем ушли — в выход пришли.
+  const byStairs = volumeStairLanding(scene, { x: -1200, y: 0 }, VOLUME_HEAD_MM, "stairs");
+  assert.equal(byStairs.objectId, exit.schemeObject.id);
+  // Подошли к лифту — тот же вопрос, что у лестницы: окно одно (G316).
+  const near = volumeStairNear(scene.stairs, { x: 1200, y: -1200 });
+  assert.equal(near.stair.key, SCHEME_LIFT_KEY);
+  // И точкой привязки лифт предлагается наравне с маршами.
+  assert.ok(
+    schemeAnchorCandidates(project, base.schemeId).some((item) => item.key === SCHEME_LIFT_KEY),
+    "лифт не предлагается точкой привязки",
   );
 });
 

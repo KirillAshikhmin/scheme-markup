@@ -262,7 +262,16 @@ test("лестница предлагается точкой: середина �
   // правки привязки.
   // Марш с таска 216 не один, а четыре вида (G322), и все они — лестничная
   // клетка: по этому же списку объём узнаёт лестницу и переводит по этажам.
-  assert.deepEqual(SCHEME_ANCHOR_OBJECT_KEYS, ["stairs", "stairsL", "stairsU", "stairsSpiral", "stairsExit"]);
+  // Лифт с таска 224 — третья вещь клетки, и точкой привязки он предлагается
+  // наравне: пятно шахты совпадает на всех этажах по самому устройству лифта.
+  assert.deepEqual(SCHEME_ANCHOR_OBJECT_KEYS, [
+    "stairs",
+    "stairsL",
+    "stairsU",
+    "stairsSpiral",
+    "stairsExit",
+    "lift",
+  ]);
   // Лестницы нет вовсе — пустой список, а не догадка.
   const bare = scene();
   assert.deepEqual(schemeAnchorCandidates(bare.project, bare.schemeId), []);

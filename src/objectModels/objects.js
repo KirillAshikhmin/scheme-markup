@@ -332,6 +332,72 @@ export const MODELS_OBJECTS = {
     modelBox("stepWest", { x: -0.5, width: 0.42, y: -0.12, depth: 0.24, z: 0.78, height: 0.14 }),
   ),
 
+  // ——— лифт и ворота (таск 224, G336) ———
+  //
+  // Лифт: две стенки шахты, кабина между ними и дверь на лице.
+  //
+  // **Шахта не сплошной коробкой нарочно.** Коробка во весь габарит и во всю
+  // высоту помещения — это колонна, буква в букву: один и тот же силуэт с трёх
+  // сторон (это и поймал тест различимости). Две стенки с проёмом между ними
+  // читаются шахтой, а кабина с дверью говорят, что в ней ездят.
+  //
+  // Дверь стоит **на лице габарита**, а кабина отодвинута вглубь: плоскости не
+  // совпадают, и порядок тел в кадре ничего не решает — та же оговорка, что у
+  // рамы со стеклом в двери (таск 180).
+  lift: modelParts(
+    modelBox("wallLeft", { x: -0.5, width: 0.08, z: 0, height: 1 }),
+    modelBox("wallRight", { x: 0.42, width: 0.08, z: 0, height: 1 }),
+    modelBox("cabin", { x: -0.36, width: 0.72, y: -0.3, depth: 0.66, z: 0.05, height: 0.7, material: "light" }),
+    modelBox("door", { x: -0.3, width: 0.6, y: -0.5, depth: 0.08, z: 0, height: 0.8, material: "metal" }),
+  ),
+  // Ворота с калиткой: столбы, полотно створки и полотно калитки. Калитка
+  // уже и ниже — ровно этим ворота и отличаются от забора, у которого полотно
+  // одно на весь габарит.
+  gate: modelParts(
+    modelBox("postLeft", { x: -0.5, width: 0.05, z: 0, height: 1, material: "dark" }),
+    modelBox("postMid", { x: 0.2, width: 0.05, z: 0, height: 1, material: "dark" }),
+    modelBox("postRight", { x: 0.45, width: 0.05, z: 0, height: 1, material: "dark" }),
+    modelBox("leaf", { x: -0.45, width: 0.65, y: -0.3, depth: 0.6, z: 0.04, height: 0.9 }),
+    modelBox("wicket", { x: 0.25, width: 0.2, y: -0.3, depth: 0.6, z: 0.04, height: 0.84, material: "light" }),
+  ),
+
+  // ——— электрика и инженерия таска 224 (G336) ———
+  //
+  // Наружный блок кондиционера: корпус, решётка вентилятора лежачим цилиндром
+  // на лице и кронштейн у стены. Лежачий цилиндр здесь обязателен — круг
+  // вентилятора и есть то, по чему блок узнают.
+  acOutdoor: modelParts(
+    modelBox("case", { y: -0.3, depth: 0.8 }),
+    modelTube("fan", { axis: "y", x: -0.3, width: 0.6, y: -0.5, depth: 0.12, z: 0.12, height: 0.76, material: "metal" }),
+    modelBox("bracket", { x: -0.4, width: 0.8, y: 0.4, depth: 0.1, z: 0.1, height: 0.1, material: "dark" }),
+  ),
+  // Насосная группа: бак гидроаккумулятора цилиндром, насос рядом и рама под
+  // ними. Бак светлый и выше всех — он и есть силуэт этой вещи.
+  pumpUnit: modelParts(
+    modelCyl("tank", { x: -0.5, width: 0.56, y: -0.4, depth: 0.8, z: 0.1, height: 0.9, material: "light" }),
+    modelBox("pump", { x: 0.1, width: 0.36, y: -0.3, depth: 0.6, z: 0.1, height: 0.4, material: "metal" }),
+    modelBox("frame", { z: 0, height: 0.1, material: "dark" }),
+  ),
+  // Генератор: кожух, решётка забора воздуха сбоку и выхлопная труба сверху.
+  generator: modelParts(
+    modelBox("case", { z: 0, height: 0.9 }),
+    modelBox("grille", { x: -0.46, width: 0.3, y: -0.5, depth: 0.08, z: 0.2, height: 0.5, material: "light" }),
+    modelBox("exhaust", { x: 0.26, width: 0.1, y: 0.1, depth: 0.1, z: 0.9, height: 0.1, material: "metal" }),
+  ),
+  // ИБП: шкаф, светлая панель вверху и тёмные батареи внизу — по ним он и
+  // отличается от слаботочного шкафа с его полками.
+  ups: modelParts(
+    modelBox("case", { y: -0.3, depth: 0.8 }),
+    modelBox("panel", { x: -0.42, width: 0.84, y: -0.5, depth: 0.24, z: 0.74, height: 0.2, material: "light" }),
+    modelBox("batteries", { x: -0.42, width: 0.84, y: -0.5, depth: 0.24, z: 0.06, height: 0.6, material: "dark" }),
+  ),
+  // Зарядная станция: бокс, светлое окно разъёма и кабель на держателе сбоку.
+  evCharger: modelParts(
+    modelBox("case", { y: -0.2, depth: 0.7 }),
+    modelBox("face", { x: -0.36, width: 0.72, y: -0.5, depth: 0.3, z: 0.3, height: 0.5, material: "light" }),
+    modelBox("cable", { x: 0.3, width: 0.16, y: -0.5, depth: 0.3, z: 0, height: 0.3, material: "dark" }),
+  ),
+
   // ——— перила и забор (таск 216, G322) ———
   //
   // В каталоге обе вещи — **полосы**, а полосу объём рисует призмой по

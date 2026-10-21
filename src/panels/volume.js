@@ -46,6 +46,7 @@ import { exportDownload, exportFileName, viewPng } from "../exporter.js";
 import { MARK_LIST_SHOWN, markNamedList, markSpareLine, markSpareTitle } from "../markSpare.js";
 import { gesturePinchOf, gesturePinchStep, gestureWheel } from "../gestures.js";
 import {
+  SCHEME_LIFT_KEY,
   WALL_HEIGHT_FALLBACK_MM,
   findRoom,
   findScheme,
@@ -759,6 +760,23 @@ export function volumeFloorName(where) {
 }
 
 /**
+ * **Каким словом назвать то, у чего стоят** — лестницей или лифтом (таск 224).
+ *
+ * Окно перехода и его механика **одни на обоих** (G316, слова заказчика:
+ * «сделай что бы она одна была»), и второго пути здесь нет: меняется
+ * существительное, а не правило. Падеж берётся по месту подстановки — «рядом
+ * лестница», но «вышли у лестницы».
+ *
+ * Все четыре марша и выход с лестницы — «лестница»: для того, кто идёт, они
+ * одно и то же, а вид марша виден глазами.
+ */
+export function volumeFloorWord(key, at = false) {
+  const lift = key === SCHEME_LIFT_KEY;
+  if (at) return lift ? strings.volume.liftWordAt : strings.volume.stairWordAt;
+  return lift ? strings.volume.liftWord : strings.volume.stairWord;
+}
+
+/**
  * Что окно предлагает сделать с этажами: подняться по лестнице под рукой или
  * вернуться туда, откуда пришёл (G216).
  *
@@ -786,14 +804,15 @@ export function volumeFloorName(where) {
  */
 export function volumeFloorAction(stair, options, back) {
   if (stair) {
+    const what = volumeFloorWord(stair.key);
     if (!options || options.length === 0) {
-      return { kind: "none", label: "", title: "", hint: strings.volume.stairNoFloors };
+      return { kind: "none", label: "", title: "", hint: text("volume.stairNoFloors", { what }) };
     }
     return {
       kind: "stair",
       label: strings.volume.stairButton,
       title: strings.volume.stairButtonHint,
-      hint: strings.volume.stairNear,
+      hint: text("volume.stairNear", { what }),
     };
   }
   if (back) {
@@ -3023,7 +3042,7 @@ function createVolume({ api, hosts }) {
     sync();
     notify(
       landing
-        ? text("volume.stairArrived", { floor: option.floor })
+        ? text("volume.stairArrived", { floor: option.floor, what: volumeFloorWord(landing.key, true) })
         : text("volume.stairArrivedPlain", { floor: option.floor }),
       "info",
     );
