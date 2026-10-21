@@ -127,6 +127,7 @@ import {
   planOriginOf,
   planPixelsPerMeter,
   planSizeMeters,
+  resizeSchemePlan,
   roomsInOrder,
   schemeAnchorOf,
   schemeAnchorOriginMm,
@@ -145,7 +146,6 @@ import {
   setSchemeAnchor,
   setSchemeWallHeight,
   updateOpening,
-  updateScheme,
   updateSchemeObject,
   updateWall,
   wallLengthMm,
@@ -781,17 +781,25 @@ export const WORKSHOP_SHEET = { width: 4000, height: 3000, mmPerPx: 10 };
  * Завести лист у схемы без подложки, если его ещё нет. Возвращает тот же
  * объект по ссылке, когда заводить нечего: ни лишнего шага истории, ни
  * `updatedAt` на пустом месте (G68).
+ *
+ * `marks` — сколько меток лист забрал себе из запасного квадрата (дефект
+ * D67). Доли до листа считались от `SCHEME_FALLBACK_PX`, а с листом значили бы
+ * другое место, поэтому размер схема получает **не** `updateScheme`, а
+ * `model.resizeSchemePlan`: он один знает правило «пиксель плана остаётся тем
+ * же пикселем». Число идёт наружу, чтобы о пересчёте сказать словом: лист
+ * заводится молча, а молчать о переехавших метках нельзя.
  */
 export function workshopEnsureSheet(project, schemeId) {
   const scheme = findScheme(project, schemeId);
-  if (!scheme || scheme.imageId) return { project, added: false };
+  if (!scheme || scheme.imageId) return { project, added: false, marks: 0 };
   if (Number(scheme.width) > 0 && Number(scheme.height) > 0 && planOriginOf(project, schemeId)) {
-    return { project, added: false };
+    return { project, added: false, marks: 0 };
   }
-  let next = updateScheme(project, schemeId, {
+  const resized = resizeSchemePlan(project, schemeId, {
     width: WORKSHOP_SHEET.width,
     height: WORKSHOP_SHEET.height,
-  }).project;
+  });
+  let next = resized.project;
   // Калибровка: четверть ширины листа объявлена десятью метрами. При ширине
   // 4000 это 1000 пикселей на 10 м, то есть сто пикселей на метр и сантиметр
   // на пиксель — ровно то, что обещано выше.
@@ -801,7 +809,7 @@ export function workshopEnsureSheet(project, schemeId) {
     meters: (WORKSHOP_SHEET.width / 4) * (WORKSHOP_SHEET.mmPerPx / 1000),
   }).project;
   next = setPlanOrigin(next, schemeId, { at: WORKSHOP_ORIGIN_AT, turn: 0 }).project;
-  return { project: next, added: true };
+  return { project: next, added: true, marks: resized.marks };
 }
 
 /**
@@ -818,11 +826,13 @@ export function workshopEnsureSheet(project, schemeId) {
  */
 export function workshopAddChain(project, schemeId, pointsMm, thicknessMm) {
   const segments = workshopChain(pointsMm);
-  if (segments.length === 0) return { project, added: 0, origin: false };
+  if (segments.length === 0) return { project, added: 0, origin: false, marks: 0 };
   // Лист схемы без подложки заводится тем же шагом, что первая стена: без него
   // чертёж не выйдет на холст, а заводить его отдельной кнопкой человеку
-  // незачем — он про него не думает.
-  let next = workshopEnsureSheet(project, schemeId).project;
+  // незачем — он про него не думает. Тем же шагом переносятся и метки,
+  // поставленные до листа (дефект D67): `marks` — сколько их было.
+  const sheet = workshopEnsureSheet(project, schemeId);
+  let next = sheet.project;
   let origin = false;
   if (workshopPlacement(next, schemeId).pending) {
     next = workshopAttachOrigin(next, schemeId).project;
@@ -831,7 +841,7 @@ export function workshopAddChain(project, schemeId, pointsMm, thicknessMm) {
   for (const segment of segments) {
     next = addWall(next, { schemeId, aMm: segment.aMm, bMm: segment.bMm, thicknessMm }).project;
   }
-  return { project: next, added: segments.length, origin };
+  return { project: next, added: segments.length, origin, marks: sheet.marks };
 }
 
 /**
@@ -2660,6 +2670,10 @@ function createWorkshop({ api, hosts }) {
       commit(result.project, strings.history.wallChain);
       const said =
         (result.origin ? " " + strings.workshop.originSet : "") +
+        // Лист заведён тем же шагом, и метки, стоявшие до него, пересчитаны
+        // (дефект D67). Молчать об этом нельзя: человек в эту минуту смотрит
+        // в чертёж, меток на нём нет, и узнать о правке ему больше негде.
+        (result.marks > 0 ? " " + text("workshop.sheetMarks", { count: result.marks }) : "") +
         (options.settled ? " " + strings.workshop.draftSettled : "");
       notify(text("workshop.chainAdded", { count: result.added }) + said, "success");
     } catch (error) {
@@ -3034,8 +3048,12 @@ function createWorkshop({ api, hosts }) {
   // габариты лежат в сборке, а в объект пишется один ключ. Прежние виды в
   // чужом объекте при этом остаются на месте — ни одной записи их справочника
   // сборка не трогает (G68).
+  //
+  // Лист у схемы без подложки заводит **вещь тоже**, а не только первая стена,
+  // и вместе с листом переносятся метки (дефект D67). Поэтому отдаётся весь
+  // ответ: о пересчёте надо сказать словом, а не выбросить его число.
   function withSheet() {
-    return workshopEnsureSheet(project(), schemeId).project;
+    return workshopEnsureSheet(project(), schemeId);
   }
 
   /**
@@ -3208,7 +3226,8 @@ function createWorkshop({ api, hosts }) {
    * второй способ, а не замена первому).
    */
   function placeObject(pointMm, pointsMm, rect) {
-    const ready = withSheet();
+    const sheet = withSheet();
+    const ready = sheet.project;
     const sizes = objectSizes(null);
     const fields = rect
       ? { shape: "rect", ...rect }
@@ -3228,6 +3247,9 @@ function createWorkshop({ api, hosts }) {
       // Как и проём, поставленный объект себя не выделяет: иначе выбор вещи в
       // колонке стал бы правкой только что поставленной.
       commit(added.project, strings.history.objectAdd);
+      // О самой вещи плашки нет нарочно — она видна на чертеже. А вот
+      // пересчёт меток под лист не виден ничем (дефект D67), и он говорит.
+      if (sheet.marks > 0) notify(text("workshop.sheetMarks", { count: sheet.marks }), "success");
       return added.schemeObject;
     } catch (error) {
       fail(error);
