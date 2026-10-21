@@ -42,16 +42,20 @@ function measure(name) {
 }
 
 test("у каждой колонки строки справочника есть своя мера", () => {
-  for (const name of ["gap", "act", "count", "code", "sizes", "sign"]) {
+  for (const name of ["gap", "act", "count", "code", "sizes", "sign", "view"]) {
     assert.ok(measure(name) > 0, "мера --dict-" + name + " потерялась");
   }
   // Колонки, которые не тянутся: значок, код, выбор категории, вид, знак,
-  // каналы, размеры, счётчик и кнопки конца строки. Тянуться в строке имеет
-  // право ровно одно поле — название типа.
+  // каналы, изображение, размеры, счётчик и кнопки конца строки. Тянуться в
+  // строке имеет право ровно одно поле — название типа.
   const fixed = {
     ".dict__badge": "width: 48px",
     ".dict__row .dict__code": "width: var(--dict-code)",
     ".dict__row .dict__channels": "width: 56px",
+    // Кнопка изображения (таск 218) — такая же колонка: у типа без своего имени
+    // на ней стоит подпись «по знаку», и по её длине колонка ехала бы от строки
+    // к строке ровно так, как ехала колонка размеров (D30).
+    ".dict__view": "width: var(--dict-view)",
     ".dict__sizes": "width: var(--dict-sizes)",
     ".dict__count": "width: var(--dict-count)",
     ".dict__act": "width: var(--dict-act)",
@@ -91,7 +95,16 @@ test("строка добавления считает весь хвост ст�
   // поля строки добавления станут шире полей строк типов ровно на неё.
   const body = ruleBody(".dict__add");
   assert.ok(body, "правило .dict__add пропало");
-  for (const part of ["var(--dict-sizes)", "var(--dict-count)", "var(--dict-act) * 2", "var(--dict-gap) * 3"]) {
+  // Колонка изображения (таск 218) встала в хвост перед размерами, и промежуток
+  // с ней стал четвёртым: пропусти их в счёте — и поля строки добавления снова
+  // уехали бы от строк типов, теперь на 70 точек.
+  for (const part of [
+    "var(--dict-view)",
+    "var(--dict-sizes)",
+    "var(--dict-count)",
+    "var(--dict-act) * 2",
+    "var(--dict-gap) * 4",
+  ]) {
     assert.ok(body.includes(part), ".dict__add: в хвосте не посчитано " + part);
   }
   // Строка добавления категории считает свой хвост — он другой: знак и

@@ -108,6 +108,9 @@ test("Enter окон поиска назван, и там, где он дела�
     strings.search.title,
     strings.picker.searchHint,
     strings.objectPicker.searchHint,
+    // Сетка изображений в справочнике типов (таск 218) стоит на том же
+    // `uiPickSearch` — значит и жест у неё тот же, и сказан теми же словами.
+    strings.dictionary.viewSearchHint,
     strings.equipmentPicker.searchHint,
     strings.controls.searchHint,
     strings.controls.searchHintOne,
@@ -128,9 +131,22 @@ test("Enter окон поиска назван, и там, где он дела�
 test("подсказка поиска доезжает до поля, а не лежит в словаре мёртвой", () => {
   for (const [name, key] of [
     [join("panels", "typePicker.js"), "strings.picker.searchHint"],
-    [join("panels", "objectPicker.js"), "strings.objectPicker.searchHint"],
     [join("panels", "equipmentPicker.js"), "strings.equipmentPicker.searchHint"],
   ]) {
     assert.ok(read(name).includes("title: " + key), name + ": подсказка поиска не прокинута в поле");
   }
+  // Сетка плиток (таск 187) с таска 218 служит двум хозяевам: окну вещей и
+  // сетке изображений в справочнике типов. Слова ей присылает хозяин, поэтому
+  // в поле едет `words.searchHint`, а проверять надо обе двери — иначе
+  // подсказка одного из окон тихо осталась бы в словаре.
+  const tiles = read(join("panels", "objectPicker.js"));
+  assert.ok(tiles.includes("title: words.searchHint"), "сетка плиток не прокидывает подсказку в поле");
+  assert.ok(
+    tiles.includes("options.strings || strings.objectPicker"),
+    "окно вещей перестало отдавать сетке свои слова",
+  );
+  assert.ok(
+    read(join("panels", "types.js")).includes("searchHint: strings.dictionary.viewSearchHint"),
+    "сетка изображений не отдаёт свою подсказку",
+  );
 });
