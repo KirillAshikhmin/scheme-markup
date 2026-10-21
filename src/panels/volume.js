@@ -1548,26 +1548,26 @@ function createVolume({ api, hosts }) {
    * Поставить взгляд из общей записи. `false` — взгляда в ней нет, и кадр
    * решает тот, кто звал (первый вход открывает объём всей схемой, таск 146).
    *
-   * Обзор ставится **целиком**: точка пола под взглядом — там, где стоит
-   * человек, углы и мера — сохранённые. Той же дверью (`aroundFrame`), что
-   * кнопки «Обзор» и «Вся схема», — второго способа посадить камеру в сборке
-   * нет, и заводить его ради памяти нельзя.
+   * Обзор ставится **целиком**: глаз — туда же относительно человека, где он
+   * и стоял, углы — сохранённые. Той же дверью (`aroundSet`), которой живёт
+   * весь обзор, — второго способа посадить камеру в сборке нет, и заводить его
+   * ради памяти нельзя. Глаза в записи нет (запись старая или от первого лица)
+   * — берутся одни углы, камера остаётся там, где её поставил кадр.
    */
   function lookArrive(look, at) {
     if (!look) return false;
+    const pitch = volumeClampPitch(look.pitch);
     if (look.view === "person") {
       person.yaw = look.yaw;
-      person.pitch = volumeClampPitch(look.pitch);
+      person.pitch = pitch;
       if (view !== "person") {
         view = "person";
         riseStop();
       }
       return true;
     }
-    const pitch = volumeClampPitch(look.pitch);
-    // Мера — докуда взгляд достаёт до пола; цель берём на полу, и тогда
-    // `volumeAroundReach` вернёт ровно её (обратный ход того же счёта).
-    aroundFrame({ x: at.x, y: at.y, z: 0 }, look.yaw, pitch, look.reach || around.distance);
+    if (look.eye) aroundSet({ x: at.x + look.eye.dx, y: at.y + look.eye.dy, z: look.eye.z }, look.yaw, pitch);
+    else aroundTurn(look.yaw, pitch);
     if (view !== "around") {
       view = "around";
       riseStop();
@@ -1606,13 +1606,19 @@ function createVolume({ api, hosts }) {
    * к тому, которым уходил. Переключит вид руками — получит умолчание этого
    * вида, как и сегодня.
    *
-   * У обзора записана ещё и мера (`reach`) — докуда взгляд достаёт до пола.
-   * Одного направления мало: тот же угол с другой высоты показывает другую
-   * картинку.
+   * У обзора записан ещё и сам глаз — **смещением от человека** и своей
+   * высотой. Одних углов там мало: обзор вертится и летает на месте, его
+   * камера живёт отдельно от тела, и повернувшийся да отошедший смотрит на дом
+   * со стороны, а не на себя. Разбор, почему смещением, — в `screenPlace.js`.
    */
   function lookNow() {
     if (view === "person") return { view: "person", yaw: person.yaw, pitch: person.pitch };
-    return { view: "around", yaw: around.yaw, pitch: around.pitch, reach: around.distance };
+    return {
+      view: "around",
+      yaw: around.yaw,
+      pitch: around.pitch,
+      eye: { dx: around.eye.x - person.x, dy: around.eye.y - person.y, z: around.eye.z },
+    };
   }
 
   function viewport() {
@@ -3848,12 +3854,6 @@ function createVolume({ api, hosts }) {
   document.addEventListener("pointerlockchange", onLockChange);
   for (const name of FULLSCREEN_EVENTS) document.addEventListener(name, onFullscreenChange);
 
-  volumeParamsArrive(Date.now());
-  refreshHour();
-  syncClock();
-  syncStanceWords();
-  sync();
-  resize();
   // Первый вход в режим: человек встаёт туда, где была середина поля, с
   // которого пришли (G276). Обзор при этом по-прежнему открывается **всей
   // схемой** — это решение таска 146 («показать заказчику» начинается с общего
@@ -3864,7 +3864,19 @@ function createVolume({ api, hosts }) {
   // откуда ушёл, и показывать ему вместо этого общий вид — значит забыть то,
   // что он просил запомнить. Кнопки «Обзор» и «Вся схема» при этом как были:
   // они возвращают взгляд к умолчанию по нажатию, и память им не перечит.
+  //
+  // **Встать надо до первого кадра.** Кадр говорит общей записи, где камера
+  // (`placeHere`), и, нарисованный раньше, он успевал перебить поднятый из
+  // памяти взгляд своим — тем, с которого поверхность начинается. Живой прогон
+  // таска 227 поймал это на первом лице: вид возвращался обзором, потому что
+  // читалась уже затёртая запись.
   const looked = placeArrive(getState());
+  volumeParamsArrive(Date.now());
+  refreshHour();
+  syncClock();
+  syncStanceWords();
+  sync();
+  resize();
   if (!scene.empty && !looked) fit();
   if (typeof stage.focus === "function") stage.focus({ preventScroll: true });
   return { destroy };

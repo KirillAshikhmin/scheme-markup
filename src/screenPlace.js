@@ -228,11 +228,21 @@ export function screenPlaceFrom(value) {
 
 // ——— взгляд камеры объёма (таск 227, G339) ———————————————————————————————
 //
-// `{view, yaw, pitch, reach}`: каким глазом смотрели (первым лицом или
-// обзором), рысканье и наклон в радианах, а у обзора ещё и мера — докуда он
-// достаёт до пола. Меру держим потому, что **одного направления мало**: тот же
-// угол с другой высоты показывает другую картинку, и «смотрит туда же» без неё
-// не получается. У первого лица меры нет: там высота глаза — это стойка.
+// `{view, yaw, pitch, eye}`: каким глазом смотрели (первым лицом или обзором),
+// рысканье и наклон в радианах, а у обзора ещё и где стоит сам глаз.
+//
+// **Почему у обзора мало одних углов.** Обзор вертится и летает на месте: его
+// камера живёт отдельно от тела, и человек, повернувшись и отойдя, смотрит на
+// дом со стороны, а не на себя. В записи же `x, y` — место **человека** (это
+// G276: центр плана и есть место камеры-тела). Поэтому глаз хранится
+// **смещением от человека** и своей высотой: вернувшись, камера встаёт туда
+// же относительно тела, где и стояла. Смещением, а не точкой на плане, потому
+// что тело к этому мигу могло переехать — его двигают и схема, и чертёж, и
+// выталкивание из стены на входе (D39); камера обязана ехать за телом, а не
+// оставаться висеть над чужой комнатой.
+//
+// У первого лица глаза в записи нет вовсе: там камера и есть тело, а высота
+// глаза — стойка (G234), которая в память не ходит.
 export const SCREEN_LOOK_VIEWS = ["person", "around"];
 
 /** Что годится во взгляд. Мусор отбрасывается молча, как и всё в этой записи. */
@@ -243,14 +253,24 @@ export function screenPlaceLookFrom(value) {
   const pitch = Number(value.pitch);
   if (!Number.isFinite(yaw) || !Number.isFinite(pitch)) return null;
   const look = { view: value.view, yaw, pitch };
-  const reach = Number(value.reach);
-  if (look.view === "around" && Number.isFinite(reach) && reach > 0) look.reach = reach;
+  const eye = value.eye;
+  if (look.view === "around" && eye && typeof eye === "object") {
+    const dx = Number(eye.dx);
+    const dy = Number(eye.dy);
+    const z = Number(eye.z);
+    if (Number.isFinite(dx) && Number.isFinite(dy) && Number.isFinite(z)) look.eye = { dx, dy, z };
+  }
   return look;
 }
 
+function sameEye(a, b) {
+  if (!a || !b) return !a && !b;
+  return a.dx === b.dx && a.dy === b.dy && a.z === b.z;
+}
+
 function sameLook(a, b) {
-  if (!a || !b) return a === b || (!a && !b);
-  return a.view === b.view && a.yaw === b.yaw && a.pitch === b.pitch && (a.reach || null) === (b.reach || null);
+  if (!a || !b) return !a && !b;
+  return a.view === b.view && a.yaw === b.yaw && a.pitch === b.pitch && sameEye(a.eye, b.eye);
 }
 
 /** Что кладётся в настройки: только числа, и округлённые. */
@@ -269,7 +289,14 @@ export function screenPlaceStored(value) {
       yaw: Math.round(next.look.yaw * 1e4) / 1e4,
       pitch: Math.round(next.look.pitch * 1e4) / 1e4,
     };
-    if (next.look.reach) stored.look.reach = Math.round(next.look.reach);
+    // Глаз — в целых миллиметрах: доля миллиметра на экране не видна.
+    if (next.look.eye) {
+      stored.look.eye = {
+        dx: Math.round(next.look.eye.dx),
+        dy: Math.round(next.look.eye.dy),
+        z: Math.round(next.look.eye.z),
+      };
+    }
   }
   return stored;
 }

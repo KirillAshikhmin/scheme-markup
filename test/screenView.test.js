@@ -513,24 +513,24 @@ test("G339: что годится во взгляд, а что отбрасыв�
     yaw: 1.5,
     pitch: -0.2,
   });
-  // Мера — только у обзора: у первого лица высота глаза это стойка, а не число.
-  assert.deepEqual(screenPlaceLookFrom({ view: "person", yaw: 0, pitch: 0, reach: 9000 }), {
+  // Глаз — только у обзора: у первого лица камера и есть тело.
+  assert.deepEqual(screenPlaceLookFrom({ view: "person", yaw: 0, pitch: 0, eye: { dx: 1, dy: 2, z: 3 } }), {
     view: "person",
     yaw: 0,
     pitch: 0,
   });
-  assert.deepEqual(screenPlaceLookFrom({ view: "around", yaw: 0.5, pitch: -0.7, reach: 9000 }), {
+  assert.deepEqual(screenPlaceLookFrom({ view: "around", yaw: 0.5, pitch: -0.7, eye: { dx: -4000, dy: 1500, z: 9000 } }), {
     view: "around",
     yaw: 0.5,
     pitch: -0.7,
-    reach: 9000,
+    eye: { dx: -4000, dy: 1500, z: 9000 },
   });
   for (const bad of [null, {}, "строка", { view: "сбоку", yaw: 0, pitch: 0 }, { view: "person", yaw: "абв", pitch: 0 }]) {
     assert.equal(screenPlaceLookFrom(bad), null, "принято негодное: " + JSON.stringify(bad));
   }
-  // Негодная мера не роняет взгляд: направление читается, а мера остаётся той,
-  // которую посчитает сам обзор.
-  assert.deepEqual(screenPlaceLookFrom({ view: "around", yaw: 0, pitch: -0.5, reach: -1 }), {
+  // Негодный глаз не роняет взгляд: направление читается, а камера остаётся
+  // там, где её поставил кадр.
+  assert.deepEqual(screenPlaceLookFrom({ view: "around", yaw: 0, pitch: -0.5, eye: { dx: "абв", dy: 0, z: 0 } }), {
     view: "around",
     yaw: 0,
     pitch: -0.5,
@@ -542,13 +542,13 @@ test("G339: взгляд ложится в настройки округлённ
     x: 10.4,
     y: -20.6,
     pxPerMm: 0.1,
-    look: { view: "around", yaw: 1.23456789, pitch: -0.73299999, reach: 9123.7 },
+    look: { view: "around", yaw: 1.23456789, pitch: -0.73299999, eye: { dx: -4000.4, dy: 1500.6, z: 9123.7 } },
   });
   assert.deepEqual(stored, {
     x: 10,
     y: -21,
     pxPerMm: 0.1,
-    look: { view: "around", yaw: 1.2346, pitch: -0.733, reach: 9124 },
+    look: { view: "around", yaw: 1.2346, pitch: -0.733, eye: { dx: -4000, dy: 1501, z: 9124 } },
   });
   // Поднимается то же самое: круг «записали — прочитали» ничего не теряет.
   assert.deepEqual(screenPlaceFrom(stored).look, stored.look);
@@ -574,14 +574,14 @@ test("G339: плоские поля взгляд берегут, объём бе
   assert.deepEqual(screenPlaceOf("с-1").look, { view: "person", yaw: 1, pitch: -0.1 });
   // Вернулись в объём: он пишет новый взгляд, а масштаб плоских бережёт.
   screenPlaceScreen("volume");
-  screenPlaceSet("volume", "с-1", { x: 500, y: 600 }, { look: { view: "around", yaw: 2, pitch: -0.7, reach: 8000 } });
-  assert.deepEqual(screenPlaceOf("с-1").look, { view: "around", yaw: 2, pitch: -0.7, reach: 8000 });
+  screenPlaceSet("volume", "с-1", { x: 500, y: 600 }, { look: { view: "around", yaw: 2, pitch: -0.7, eye: { dx: -3000, dy: 0, z: 7000 } } });
+  assert.deepEqual(screenPlaceOf("с-1").look, { view: "around", yaw: 2, pitch: -0.7, eye: { dx: -3000, dy: 0, z: 7000 } });
   assert.equal(screenPlaceOf("с-1").pxPerMm, 0.4, "объём отнял у плоских масштаб");
   // Правило T210 цело: запись из погасшего объёма не проходит вовсе — ни
   // местом, ни взглядом.
   screenPlaceScreen("scheme");
   screenPlaceSet("volume", "с-1", { x: -9, y: -9 }, { look: { view: "person", yaw: 9, pitch: 0 } });
-  assert.deepEqual(screenPlaceOf("с-1").look, { view: "around", yaw: 2, pitch: -0.7, reach: 8000 });
+  assert.deepEqual(screenPlaceOf("с-1").look, { view: "around", yaw: 2, pitch: -0.7, eye: { dx: -3000, dy: 0, z: 7000 } });
   assert.equal(screenPlaceOf("с-1").x, 500);
   // Другая схема — другая камера: чужой взгляд на этаж не переезжает.
   screenPlaceSet("scheme", "с-2", { x: 0, y: 0 }, { pxPerMm: 0.4 });
@@ -593,7 +593,7 @@ test("G339: плоские поля взгляд берегут, объём бе
 test("G339: взгляд поднимается из памяти вместе с местом — одной записью", () => {
   screenPlaceForget();
   screenPlaceScreen("scheme");
-  const saved = { x: 4000, y: -2000, pxPerMm: 0.5, look: { view: "around", yaw: 1.5708, pitch: -0.733, reach: 9000 } };
+  const saved = { x: 4000, y: -2000, pxPerMm: 0.5, look: { view: "around", yaw: 1.5708, pitch: -0.733, eye: { dx: -5000, dy: 2000, z: 9000 } } };
   assert.ok(screenPlaceRestore("с-1", saved) > 0);
   const place = screenPlaceOf("с-1");
   assert.deepEqual({ x: place.x, y: place.y, pxPerMm: place.pxPerMm }, { x: 4000, y: -2000, pxPerMm: 0.5 });
