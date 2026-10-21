@@ -1316,11 +1316,24 @@ export function volumeRoomLight(room, options = {}) {
       if (Math.abs(vectors.u.x * e.x + vectors.u.y * e.y) < limit) continue;
       const half = Number(wall.thicknessMm) / 2;
       const axis = (Number(wall.aMm.x) - a.x) * m.x + (Number(wall.aMm.y) - a.y) * m.y;
-      // Ближняя из двух граней стены: та, что отстоит от ребра меньше.
-      const off = Math.abs(axis - half) <= Math.abs(axis + half) ? axis - half : axis + half;
-      if (Math.abs(off) > VOLUME_FLOOR_LAP) continue;
-      if (found && Math.abs(off) >= Math.abs(found.offMm)) continue;
-      found = { offMm: off, wall, vectors, half };
+      // **Прямая ребра обязана идти по телу стены** (плюс напуск по краям). Это
+      // мерка `volumeWallCovers` «та же стена», только про одну стену и ребро, и
+      // она терпит ровно то, что человек делает рукой: обводит то по внутренней
+      // грани, то по оси стены. На объекте заказчика по осям обведено 17 рёбер
+      // из 80 — у стены 250 мм это промах в 125, и порог в один напуск пола их
+      // всех отбрасывал.
+      if (Math.abs(axis) > half + VOLUME_FLOOR_LAP) continue;
+      // Стена должна стоять **вдоль этого ребра**, а не в другом конце дома:
+      // отступы её концов, снесённые на ребро, обязаны его перекрывать.
+      const from = (Number(wall.aMm.x) - a.x) * e.x + (Number(wall.aMm.y) - a.y) * e.y;
+      const to = from + vectors.len * vectorsAlong(vectors.u, e);
+      if (Math.min(Math.max(from, to), len) - Math.max(Math.min(from, to), 0) <= 1) continue;
+      if (found && Math.abs(axis) >= Math.abs(found.axisMm)) continue;
+      // Грань, которой стена смотрит **в это помещение**: она лежит со стороны
+      // внутренней нормали ребра, а не та, что просто ближе. Контур, обведённый
+      // по оси, и контур, обведённый по дальней грани, дают одну и ту же стену и
+      // одну и ту же её поверхность — настоящую.
+      found = { offMm: axis - half, axisMm: axis, wall, vectors, half };
     }
     if (!found) {
       edges.push(null);
@@ -1383,6 +1396,31 @@ export function volumeRoomLight(room, options = {}) {
     edges.push({ offMm: found.offMm, tiles, holes });
   }
   return { pointsMm: points, edges };
+}
+
+/**
+ * Перенос помещения света на сдвиг привязки (таск 205): в стопке этажей чужой
+ * этаж стоит в своих координатах, и свет обязан переехать вместе с ним.
+ *
+ * Переносится **только контур**: отступы кусков стены и просветов считаны вдоль
+ * ребра, а смещение грани — поперёк, и от переноса ни одно из этих чисел не
+ * меняется. Комната за проёмом переезжает тем же счётом — второй шаг света
+ * (G332) живёт на том же этаже, что первый.
+ */
+export function volumeShiftRoomLight(light, shiftMm) {
+  if (!light) return null;
+  if (!shiftMm || (!shiftMm.x && !shiftMm.y)) return light;
+  return {
+    pointsMm: volumeShiftPoints(light.pointsMm, shiftMm),
+    edges: (light.edges || []).map((edge) => {
+      if (!edge) return null;
+      if (edge.holes.length === 0) return edge;
+      return {
+        ...edge,
+        holes: edge.holes.map((hole) => ({ ...hole, beyond: volumeShiftRoomLight(hole.beyond, shiftMm) })),
+      };
+    }),
+  };
 }
 
 /** Навстречу ли идут два единичных направления: `1` или `−1`. */
@@ -3866,8 +3904,8 @@ export function volumeStackScene(project, plan, optionsOf) {
       sunSpots.push({
         ...spot,
         aMm: { x: spot.aMm.x + item.shiftMm.x, y: spot.aMm.y + item.shiftMm.y },
-        left: spot.left ? volumeShiftPoints(spot.left, item.shiftMm) : null,
-        right: spot.right ? volumeShiftPoints(spot.right, item.shiftMm) : null,
+        left: volumeShiftRoomLight(spot.left, item.shiftMm),
+        right: volumeShiftRoomLight(spot.right, item.shiftMm),
         baseMm: item.baseMm,
       });
     }

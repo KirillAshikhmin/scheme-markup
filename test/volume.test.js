@@ -6652,6 +6652,17 @@ test("привязка схем доезжает до стопки: этажи �
   assert.ok(far, "сцена собралась");
   assert.deepEqual(volumeSchemeOriginMm(project, house.first), { x: -1000, y: -500 });
   assert.deepEqual(volumeSchemeOriginMm(project, house.third), { x: 0, y: 0 }, "без привязки — ноль");
+  // Свет чужого этажа переезжает вместе с ним: и контур, которым пятно
+  // обрезано, и стены по его рёбрам (`volumeShiftRoomLight`).
+  const spot = stack.sunSpots.find((item) => item.baseMm !== 0 && (item.left || item.right));
+  if (spot) {
+    const room = spot.left || spot.right;
+    assert.ok(Array.isArray(room.pointsMm), "контур чужого этажа потерял форму");
+    assert.ok(Array.isArray(room.edges), "стены по рёбрам чужого этажа потерялись");
+  }
+  const own = stack.sunSpots.find((item) => item.baseMm === 0 && (item.left || item.right));
+  const light = own && (own.left || own.right);
+  assert.ok(light && Array.isArray(light.edges), "свой этаж стоит на месте и стены знает");
 });
 
 // ——— пол помещения в объёме (таск 209, G317, дефект D60) ————————————————
