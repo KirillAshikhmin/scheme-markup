@@ -55,7 +55,7 @@ import { openEquipmentWindow } from "./equipment.js";
 // Сетка плиток с картинками — готовый кирпич окна выбора вещи (таск 187), и
 // второй её сборки в справочнике быть не должно: разойдись они, человек видел
 // бы в двух окнах два разных каталога.
-import { createObjectTiles, objectPickerGroups, objectTileIcon, objectTileMatches } from "./objectPicker.js";
+import { createObjectTiles, objectPickerAllGroups, objectTileIcon, objectTilesForQuery } from "./objectPicker.js";
 import { objectCatalogName } from "../objectCatalog.js";
 import {
   objectViewByName,
@@ -415,8 +415,8 @@ function typesLineButton({ lineStyle, color, allowInherit, inheritLineStyle, onP
 // Шесть семей реестра — изображения меток (37 штук): им нужны человеческие
 // имена, и они дописаны в словарь (`strings.markViews`). Восемь разделов
 // каталога — вещи чертежа (52 штуки): имена и порядок у них уже есть, и берутся
-// они **тем же** `objectPickerGroups`, которым стоит шаг «Объекты» окна «Что
-// добавить». Выглядит эта половина в точности как там, и это нарочно: человек
+// они **тем же** каталогом (`objectPickerAllGroups`), которым стоит шаг
+// «Объекты» окна «Что добавить»; сужает выдачу общий `objectTilesForQuery`. Выглядит эта половина в точности как там, и это нарочно: человек
 // уже знает, где у него лежит кровать.
 //
 // Почему вещи чертежа не спрятаны от метки: реестр один, и ключ изображения —
@@ -471,18 +471,21 @@ export function typeViewGroups(query, { key, offer, used } = {}) {
   for (const family of OBJECT_VIEW_FAMILIES) {
     if (family === OBJECT_VIEW_FAMILY_OBJECTS) continue;
     const name = strings.dictionary.viewFamilies[family] || family;
-    const entries = objectViewFamily(family)
-      .map((item) => typesViewEntry(item, strings.markViews[item] || item, { offer, used }))
-      .filter((entry) => objectTileMatches(query, entry.name, name));
+    const entries = objectViewFamily(family).map((item) =>
+      typesViewEntry(item, strings.markViews[item] || item, { offer, used }),
+    );
     if (entries.length > 0) groups.push({ category: family, name, entries });
   }
-  for (const group of objectPickerGroups(query, { key })) {
+  for (const group of objectPickerAllGroups({ key })) {
     groups.push({
       ...group,
       entries: group.entries.map((entry) => typesViewEntry(entry.key, entry.name, { offer, used })),
     });
   }
-  return groups;
+  // Запрос сужает **всё окно разом** (таск 230): семьи реестра и разделы
+  // каталога стоят в одной сетке, и решать «нашлись имена или отвечает
+  // раздел» по половинам нельзя — вышло бы два разных ответа в одном окне.
+  return objectTilesForQuery(query, groups);
 }
 
 /**

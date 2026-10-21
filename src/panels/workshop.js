@@ -5153,9 +5153,16 @@ function createWorkshop({ api, hosts }) {
     openingKindButton.title = strings.workshop.openingChangeHint;
     // Отметка «стеклянная» — только у видов, которые ею бывают: у окна и арки
     // стеклить нечего, и пустая галочка обещала бы выбор, которого нет.
-    const canGlaze = openingCanGlaze(kind);
-    glazeRow.hidden = !canGlaze;
-    if (canGlaze) glazeBox.checked = openingGlazed(opening);
+    //
+    // **Поставленная отметка показывается и там, где её больше не предлагают**
+    // (таск 230, G347): у гармошки, размеченной стеклянной прежней сборкой,
+    // галочка стоит и её видно — иначе стекло осталось бы в чертеже молча, без
+    // способа его снять. Снять человек может, вернуть — нет: та же
+    // односторонняя дорога, что у стеклянной двери прежней разметки.
+    const glazed = openingGlazed(opening);
+    const showGlaze = openingCanGlaze(kind) || glazed;
+    glazeRow.hidden = !showGlaze;
+    if (showGlaze) glazeBox.checked = glazed;
     fieldValue(openingWidth, opening.widthMm);
     fieldValue(openingHeight, opening.heightMm);
     fieldValue(openingFloor, opening.heightAboveFloorMm);
