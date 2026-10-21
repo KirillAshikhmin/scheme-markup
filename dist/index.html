@@ -8339,9 +8339,19 @@ const strings = {
       "Полоса рисуется цепочкой, как стена: клик — вершина, длина видна над отрезком, двойной клик или Enter — конец. Backspace — убрать последнюю, Esc — отменить, ещё раз — выйти из добавления. Ctrl+Z — отмена.",
     hintEdit:
       "Клик выделяет. Вершина тянется за ручку, стена — за середину, проём — вдоль своей стены, объект — целиком или за углы. У полосы ручка на середине отрезка разбивает его, ручка за концом продолжает, двойной клик по вершине убирает. Ручка перед вещью поворачивает её: клик — четверть оборота, рука — кратно 15°. Delete убирает выделенное, Esc снимает выделение. Ctrl+Z — отмена.",
+    // Клавиши вида — одной строкой ко **всем** подсказкам чертежа (дефект D68):
+    // от занятия они не зависят, а до таска 220 стрелки и «+»/«−» не были
+    // названы нигде — при том что стрелки работали, а «+» не работал вовсе.
+    // Слова те же, что на плане (`canvas.hintSelect`): одно дело — одни слова.
+    hintView: "Стрелки листают чертёж, как прокрутка, удержание разгоняет ход; «+» и «−» меняют масштаб.",
     chainAdded: "Цепочка из {count} стен",
     bandAdded: "Полоса объекта по {count} вершинам",
     originSet: "Начало координат чертежа — середина подложки",
+    // Лист схемы без подложки заводится молча — отдельной кнопкой он человеку
+    // не нужен. А вот о метках, поставленных до листа, молчать нельзя (дефект
+    // D67): их доли считались от запасного квадрата и пересчитаны под лист.
+    // Сказать надо главное — что на плане они не сдвинулись.
+    sheetMarks: "У схемы появился лист, и метки остались на своих местах: {count}",
     // Начатое при смене занятия (таск 172). Дописывается к известию о том, что
     // встало: одна плашка на одно событие, а «Ctrl+Z отменит» в ней потому,
     // что дочерченного человек не просил — он просил другое занятие.
@@ -14084,6 +14094,10 @@ function requireMark(project, markId) {
  * блока), а каноническая пара функций была приватной в `render.js` — и поэтому
  * её переписывали заново вместо того, чтобы позвать. Модель — нижний слой:
  * позвать её может любой, а она не зовёт никого.
+ *
+ * **Запасной размер — обещание, а не правда**, и однажды оно становится
+ * правдой: у схемы появляется свой размер. Всё, что было поставлено до этого,
+ * переносит `resizeSchemePlan` — см. её абзац ниже (дефект D67).
  */
 const SCHEME_FALLBACK_PX = 1000;
 function schemeWidthPx(scheme) {
@@ -14091,6 +14105,100 @@ function schemeWidthPx(scheme) {
 }
 function schemeHeightPx(scheme) {
   return scheme && scheme.height > 0 ? scheme.height : SCHEME_FALLBACK_PX;
+}
+
+/**
+ * **У плана появился (или сменился) свой размер — и всё остаётся на своих
+ * пикселях плана.** Дефект D67, найден исполнителем таска 217.
+ *
+ * Схема без подложки заводится нулями, и доля метки до этой минуты считалась
+ * от запасного квадрата `SCHEME_FALLBACK_PX` — тысяча на тысячу. Первая стена
+ * (или первая вещь) заводит схеме лист 4000 × 3000, и та же доля начинает
+ * значить другое место: 0,56 была 560-м пикселем квадрата, а стала 2240-м
+ * пикселем листа. Замер таска 217: три метки в 60–70 точках друг от друга
+ * оказались в 2,4 м и 1,2 м, да ещё и с перекошенной пропорцией — лист 4:3
+ * против квадрата 1:1.
+ *
+ * **Правило пересчёта одно: расстояние в пикселях плана не меняется.** План
+ * растёт вокруг своей середины, и доля каждой точки пересчитывается так, чтобы
+ * её отступ от середины в пикселях остался прежним:
+ *
+ *     доля′ = ½ + (доля − ½) · прежний размер / новый
+ *
+ * Отсюда и главное свойство: между любыми двумя точками было столько же
+ * пикселей плана, сколько стало. Почему мерить надо в пикселях, а не в долях:
+ * в пикселях плана задано всё остальное — размер знака, смещение подписи, шаг
+ * блока, порог попадания по клику. Сохрани долю — метки остались бы на своих
+ * долях, а подписи, знаки и блоки, вчетверо мельче плана, разъехались бы по
+ * всему листу; сохрани пиксель — не меняется ни одно из этих чисел, и
+ * пересчитывать их не приходится вовсе. Взаимная геометрия точек при этом
+ * точная: каждая ось делится на свой множитель, и прямоугольник остаётся
+ * прямоугольником, а не перекашивается 4:3.
+ *
+ * Почему вокруг середины, а не от угла: середина листа — это начало координат
+ * чертежа (`WORKSHOP_ORIGIN_AT`), то есть то самое место, вокруг которого
+ * человек в эту минуту рисует первые стены. От угла метки уехали бы за
+ * пятнадцать метров от чертежа — формально «на своём пикселе», а по делу в
+ * пустое поле.
+ *
+ * Пересчитывается **всё, что задано долями этого плана**: точки меток, точки
+ * контуров помещений, направляющие (у горизонтальной доля — от высоты, у
+ * вертикальной — от ширины), точки калибровки и привязка чертежа. Калибровку
+ * это не портит: пиксельная длина отрезка и метры те же — значит и px/м тот
+ * же. Пиксельные величины (смещения подписей) не трогаются ни одна — ровно
+ * потому, что пиксель остался собой.
+ *
+ * Размер тот же — возвращается **тот же объект по ссылке**: ни шага истории,
+ * ни `updatedAt` на пустом месте (G68).
+ */
+function resizeSchemePlan(project, schemeId, { width, height } = {}) {
+  const scheme = requireScheme(project, schemeId);
+  const nextWidth = Math.round(Number(width));
+  const nextHeight = Math.round(Number(height));
+  if (!(nextWidth > 0) || !(nextHeight > 0)) throw modelError("planSizeInvalid");
+  // Доли считались от того размера, который за схемой числился: у схемы без
+  // своего — от запасного.
+  const kx = schemeWidthPx(scheme) / nextWidth;
+  const ky = schemeHeightPx(scheme) / nextHeight;
+  if (kx === 1 && ky === 1) return { project, scheme, marks: 0, outlines: 0, changed: false };
+  const keep = (value, k) => 0.5 + (Number(value) - 0.5) * k;
+  const keepPoint = (point) => ({ x: clampFraction(keep(point.x, kx)), y: clampFraction(keep(point.y, ky)) });
+  let next = updateScheme(project, schemeId, { width: nextWidth, height: nextHeight }).project;
+  const marks = project.marks.filter((mark) => mark.schemeId === schemeId);
+  for (const mark of marks) {
+    next = updateMark(next, mark.id, { points: (mark.points || []).map(keepPoint) }).project;
+  }
+  const outlines = outlinesOf(project).filter((outline) => outline.schemeId === schemeId);
+  for (const outline of outlines) {
+    next = updateOutline(next, outline.id, { points: (outline.points || []).map(keepPoint) }).project;
+  }
+  const guides = schemeGuides(project, schemeId);
+  if (guides.length > 0) {
+    next = withGuides(
+      next,
+      schemeId,
+      guides.map((guide) => ({ ...guide, at: clampFraction(keep(guide.at, guide.axis === "h" ? ky : kx)) })),
+    );
+  }
+  const scale = planScaleOf(project, schemeId);
+  if (scale) {
+    next = setPlanScale(next, schemeId, { a: keepPoint(scale.a), b: keepPoint(scale.b), meters: scale.meters }).project;
+  }
+  const origin = planOriginOf(project, schemeId);
+  if (origin) {
+    // Якорь чертежа к краю плана **не** прижимается — причина у `setPlanOrigin`.
+    next = setPlanOrigin(next, schemeId, {
+      at: { x: keep(origin.at.x, kx), y: keep(origin.at.y, ky) },
+      turn: origin.turn,
+    }).project;
+  }
+  return {
+    project: next,
+    scheme: findScheme(next, schemeId),
+    marks: marks.length,
+    outlines: outlines.length,
+    changed: true,
+  };
 }
 function addScheme(project, { name, imageId = null, width = 0, height = 0 } = {}) {
   const scheme = {
@@ -35992,7 +36100,8 @@ const CANVAS_PAN_RAMP_MS = 1300;
 // Потолок шага кадра: вкладку свернули на минуту — план не должен улететь.
 // Тоже отдан наружу — у чертежа свой цикл кадров, но мерка общая.
 const CANVAS_PAN_FRAME_MS = 64;
-// Во сколько раз «+» и «−» меняют масштаб за нажатие.
+// Во сколько раз «+» и «−» меняют масштаб за нажатие. Мерка одна на план и на
+// чертёж — читают её обе поверхности через `canvasZoomKey` (дефект D68).
 const CANVAS_ZOOM_KEY_STEP = 1.2;
 
 // Куда едет вид по каждой стрелке. Числа — знак прибавки к смещению холста,
@@ -36642,8 +36751,15 @@ function canvasPanRelease(code) {
   canvasPanFrame = 0;
 }
 
-// «+» на основном ряду — это Shift и «=», поэтому «=» увеличивает тоже;
-// на цифровой клавиатуре свои клавиши. Ноль означает «не про масштаб».
+/**
+ * Во сколько раз это нажатие меняет масштаб. Ноль означает «не про масштаб».
+ *
+ * «+» на основном ряду — это Shift и «=», поэтому «=» увеличивает тоже; на
+ * цифровой клавиатуре свои клавиши. Набор клавиш и шаг — **одна мерка на две
+ * поверхности** (дефект D68, таск 220): чертёж зовёт эту же функцию, как он
+ * уже зовёт `canvasPanVector` и `canvasPanSpeed` для стрелок. Второй список
+ * кодов разошёлся бы с этим на `NumpadAdd` в тот же день, когда его написали.
+ */
 function canvasZoomKey(event) {
   if (event.code === "Equal" || event.code === "NumpadAdd" || event.key === "+" || event.key === "=") {
     return CANVAS_ZOOM_KEY_STEP;
@@ -39976,7 +40092,8 @@ function canvasKeyDown(event) {
   }
   // Дальше всё — про план под рукой: метки, типы, ход и масштаб. На экране
   // может стоять чертёж или объём, и там те же клавиши заняты своим (таск
-  // 153): стрелки в объёме ходят, «+» в чертеже не значит ничего.
+  // 153): стрелки в объёме ходят, а «+» в чертеже меняет масштаб чертежа — тем
+  // же шагом и той же `canvasZoomKey`, но своим видом (дефект D68, таск 220).
   //
   // Отмена и возврат выше этой границы нарочно: они про объект, а не про
   // режим, живут в шапке и обязаны работать во всех трёх.
@@ -70888,17 +71005,25 @@ const WORKSHOP_SHEET = { width: 4000, height: 3000, mmPerPx: 10 };
  * Завести лист у схемы без подложки, если его ещё нет. Возвращает тот же
  * объект по ссылке, когда заводить нечего: ни лишнего шага истории, ни
  * `updatedAt` на пустом месте (G68).
+ *
+ * `marks` — сколько меток лист забрал себе из запасного квадрата (дефект
+ * D67). Доли до листа считались от `SCHEME_FALLBACK_PX`, а с листом значили бы
+ * другое место, поэтому размер схема получает **не** `updateScheme`, а
+ * `model.resizeSchemePlan`: он один знает правило «пиксель плана остаётся тем
+ * же пикселем». Число идёт наружу, чтобы о пересчёте сказать словом: лист
+ * заводится молча, а молчать о переехавших метках нельзя.
  */
 function workshopEnsureSheet(project, schemeId) {
   const scheme = findScheme(project, schemeId);
-  if (!scheme || scheme.imageId) return { project, added: false };
+  if (!scheme || scheme.imageId) return { project, added: false, marks: 0 };
   if (Number(scheme.width) > 0 && Number(scheme.height) > 0 && planOriginOf(project, schemeId)) {
-    return { project, added: false };
+    return { project, added: false, marks: 0 };
   }
-  let next = updateScheme(project, schemeId, {
+  const resized = resizeSchemePlan(project, schemeId, {
     width: WORKSHOP_SHEET.width,
     height: WORKSHOP_SHEET.height,
-  }).project;
+  });
+  let next = resized.project;
   // Калибровка: четверть ширины листа объявлена десятью метрами. При ширине
   // 4000 это 1000 пикселей на 10 м, то есть сто пикселей на метр и сантиметр
   // на пиксель — ровно то, что обещано выше.
@@ -70908,7 +71033,7 @@ function workshopEnsureSheet(project, schemeId) {
     meters: (WORKSHOP_SHEET.width / 4) * (WORKSHOP_SHEET.mmPerPx / 1000),
   }).project;
   next = setPlanOrigin(next, schemeId, { at: WORKSHOP_ORIGIN_AT, turn: 0 }).project;
-  return { project: next, added: true };
+  return { project: next, added: true, marks: resized.marks };
 }
 
 /**
@@ -70925,11 +71050,13 @@ function workshopEnsureSheet(project, schemeId) {
  */
 function workshopAddChain(project, schemeId, pointsMm, thicknessMm) {
   const segments = workshopChain(pointsMm);
-  if (segments.length === 0) return { project, added: 0, origin: false };
+  if (segments.length === 0) return { project, added: 0, origin: false, marks: 0 };
   // Лист схемы без подложки заводится тем же шагом, что первая стена: без него
   // чертёж не выйдет на холст, а заводить его отдельной кнопкой человеку
-  // незачем — он про него не думает.
-  let next = workshopEnsureSheet(project, schemeId).project;
+  // незачем — он про него не думает. Тем же шагом переносятся и метки,
+  // поставленные до листа (дефект D67): `marks` — сколько их было.
+  const sheet = workshopEnsureSheet(project, schemeId);
+  let next = sheet.project;
   let origin = false;
   if (workshopPlacement(next, schemeId).pending) {
     next = workshopAttachOrigin(next, schemeId).project;
@@ -70938,7 +71065,7 @@ function workshopAddChain(project, schemeId, pointsMm, thicknessMm) {
   for (const segment of segments) {
     next = addWall(next, { schemeId, aMm: segment.aMm, bMm: segment.bMm, thicknessMm }).project;
   }
-  return { project: next, added: segments.length, origin };
+  return { project: next, added: segments.length, origin, marks: sheet.marks };
 }
 
 /**
@@ -71836,8 +71963,19 @@ function workshopFitView(extent, viewport, max = WORKSHOP_ZOOM_MAX) {
  * минуты, как занятий стало три: про «вершину цепочки» читал человек, который
  * в это время ставил окно в стену. Чистая и вынесена наружу ради теста:
  * пропущенное занятие молча показало бы чужие слова.
+ *
+ * **Про стрелки и «+»/«−» дописано одной строкой на все занятия** (дефект D68,
+ * таск 220, правило таска 213 «горячий ключ, о котором негде прочитать, всё
+ * равно что его нет»). Клавиши эти от занятия не зависят вовсе — они про вид
+ * поля, — и шесть копий в шести подсказках разошлись бы на первой же правке.
+ * Привычные слова занятий при этом не переписаны ни в одном: про колесо и
+ * Shift там сказано своим языком с самого начала (правило таска 182).
  */
 function workshopHint(tool, way) {
+  return workshopHintSubject(tool, way) + " " + strings.workshop.hintView;
+}
+
+function workshopHintSubject(tool, way) {
   if (tool === "openings") return strings.workshop.hintOpenings;
   if (tool === "objects") {
     // Способов поставить объект три, и жесты у них разные (таск 137): про
@@ -72763,6 +72901,10 @@ function createWorkshop({ api, hosts }) {
       commit(result.project, strings.history.wallChain);
       const said =
         (result.origin ? " " + strings.workshop.originSet : "") +
+        // Лист заведён тем же шагом, и метки, стоявшие до него, пересчитаны
+        // (дефект D67). Молчать об этом нельзя: человек в эту минуту смотрит
+        // в чертёж, меток на нём нет, и узнать о правке ему больше негде.
+        (result.marks > 0 ? " " + text("workshop.sheetMarks", { count: result.marks }) : "") +
         (options.settled ? " " + strings.workshop.draftSettled : "");
       notify(text("workshop.chainAdded", { count: result.added }) + said, "success");
     } catch (error) {
@@ -73137,8 +73279,12 @@ function createWorkshop({ api, hosts }) {
   // габариты лежат в сборке, а в объект пишется один ключ. Прежние виды в
   // чужом объекте при этом остаются на месте — ни одной записи их справочника
   // сборка не трогает (G68).
+  //
+  // Лист у схемы без подложки заводит **вещь тоже**, а не только первая стена,
+  // и вместе с листом переносятся метки (дефект D67). Поэтому отдаётся весь
+  // ответ: о пересчёте надо сказать словом, а не выбросить его число.
   function withSheet() {
-    return workshopEnsureSheet(project(), schemeId).project;
+    return workshopEnsureSheet(project(), schemeId);
   }
 
   /**
@@ -73311,7 +73457,8 @@ function createWorkshop({ api, hosts }) {
    * второй способ, а не замена первому).
    */
   function placeObject(pointMm, pointsMm, rect) {
-    const ready = withSheet();
+    const sheet = withSheet();
+    const ready = sheet.project;
     const sizes = objectSizes(null);
     const fields = rect
       ? { shape: "rect", ...rect }
@@ -73331,6 +73478,9 @@ function createWorkshop({ api, hosts }) {
       // Как и проём, поставленный объект себя не выделяет: иначе выбор вещи в
       // колонке стал бы правкой только что поставленной.
       commit(added.project, strings.history.objectAdd);
+      // О самой вещи плашки нет нарочно — она видна на чертеже. А вот
+      // пересчёт меток под лист не виден ничем (дефект D67), и он говорит.
+      if (sheet.marks > 0) notify(text("workshop.sheetMarks", { count: sheet.marks }), "success");
       return added.schemeObject;
     } catch (error) {
       fail(error);
@@ -74080,6 +74230,19 @@ function createWorkshop({ api, hosts }) {
     if (panKeyDown(event.code)) {
       event.preventDefault();
       event.stopPropagation();
+      return;
+    }
+    // «+» и «−» — масштаб, как на плане (дефект D68, таск 220). До этого
+    // клавиатурного масштаба у чертежа не было вовсе: кнопки «−»/«+» в
+    // «Интерфейсе» работали, а те же клавиши не делали ничего — при том что на
+    // плане они работают и обещаны подсказкой. Набор клавиш и шаг взяты у
+    // холста (`canvasZoomKey`), своих здесь нет; приближается середина поля —
+    // та же `zoomBy`, которую зовут кнопки, и тот же потолок `WORKSHOP_ZOOM_MAX`.
+    const zoom = canvasZoomKey(event);
+    if (zoom) {
+      event.preventDefault();
+      event.stopPropagation();
+      zoomBy(zoom);
       return;
     }
     if (event.key === "Escape") {
