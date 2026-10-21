@@ -38,9 +38,33 @@ function uniqueProjectName(list) {
   return base + " " + index;
 }
 
+/**
+ * Что стоит в списке шапки — чистое правило, вынесенное ради теста (дефект
+ * D75). DOM и база сюда не ходят.
+ *
+ * `known === null` — список ещё не прочитан, `[]` — объектов правда нет.
+ * Пустота говорит о себе разными словами: непрочитанная — «читаем», ответ
+ * базы — «объектов пока нет». Открытый объект стоит в списке всегда, даже
+ * если список его ещё не знает: строка, отрицающая открытый объект, читается
+ * как «моя работа пропала».
+ */
+export function projectListItems({ known, id, name } = {}) {
+  const list = Array.isArray(known) ? known : [];
+  const empty = known === null || known === undefined ? strings.projects.reading : strings.projects.empty;
+  if (!id) return { items: list, empty };
+  if (list.some((item) => item.id === id)) return { items: list, empty };
+  return { items: [{ id, name: name || strings.project.untitled }, ...list], empty };
+}
+
 function mountProjectsPanel(host, api) {
   const { getState, setState, notify, subscribe } = api;
-  let known = [];
+  // **`null` — список ещё не прочитан, `[]` — объектов правда нет** (дефект
+  // D75). До таска 223 это было одним состоянием, и шапка на пустом `known`
+  // писала «Объектов пока нет» — то есть врала человеку, у которого объект
+  // открыт и цел. Замер: объект, пришедший **из файла**, в список не попадал
+  // вовсе — `panels/file.js` кладёт его в состояние, а перечитывать список
+  // панели не говорит, и перерисовка шла по устаревшему `known`.
+  let known = null;
   let saveTimer = null;
   let lowSpaceReported = false;
 
@@ -83,13 +107,31 @@ function mountProjectsPanel(host, api) {
     return state.project ? state.project.id : "";
   }
 
+  /**
+   * Перерисовать шапку. Два правила, оба про одно — **пустота не имеет права
+   * врать** (дефект D75):
+   *
+   * 1. Пока список не прочитан (`known === null`), на месте пустоты стоит
+   *    «читаем», а не «объектов пока нет». Прочитанная пустота — ответ базы,
+   *    непрочитанная — ещё ничей.
+   * 2. Открытый объект стоит в списке **всегда**, даже если список его ещё не
+   *    знает: он открыт, он на экране, и строка, которая его отрицает, — это
+   *    и есть «моя работа пропала». Так приходит объект из файла: `file.js`
+   *    кладёт его в состояние сам, а список о нём узнаёт только с перечитки.
+   */
   function renderList() {
     const id = currentId();
+    const state = getState();
+    const { items, empty } = projectListItems({
+      known,
+      id,
+      name: state.project ? state.project.name : "",
+    });
     select.replaceChildren();
-    if (known.length === 0) {
-      select.append(uiEl("option", { value: "", text: strings.projects.empty }));
+    if (items.length === 0) {
+      select.append(uiEl("option", { value: "", text: empty }));
     }
-    for (const item of known) {
+    for (const item of items) {
       select.append(uiEl("option", { value: item.id, text: item.name }));
     }
     select.value = id;
@@ -107,6 +149,18 @@ function mountProjectsPanel(host, api) {
   async function refreshList() {
     known = await listProjects();
     renderList();
+  }
+
+  /**
+   * Объект появился в состоянии, а список о нём не знает — значит его завёл
+   * кто-то другой (приёмка файла, папка автосохранения). Список перечитывается
+   * сам: до таска 223 он оставался устаревшим до конца сеанса, и переключиться
+   * на принесённый объект было нечем.
+   */
+  function refreshIfUnknown(project) {
+    if (!project) return;
+    if (known && known.some((item) => item.id === project.id)) return;
+    refreshList().catch(() => {});
   }
 
   async function openProjectById(id) {
@@ -143,7 +197,7 @@ function mountProjectsPanel(host, api) {
   async function createAndOpen() {
     const saved = await getSetting(TYPE_TEMPLATE_KEY);
     const template = typesTemplateFrom(saved);
-    const project = createProject({ name: uniqueProjectName(known), ...(template || {}) });
+    const project = createProject({ name: uniqueProjectName(known || []), ...(template || {}) });
     await saveProject(project);
     await refreshList();
     setState({ project, schemeId: null, selectedMarkIds: [], activeTypeId: null });
@@ -170,7 +224,7 @@ function mountProjectsPanel(host, api) {
     setState({ project: null, schemeId: null, selectedMarkIds: [], activeTypeId: null });
     notify(text("projects.removed", { name: project.name }), "success");
     await refreshList();
-    if (known.length > 0) await openProjectById(known[0].id);
+    if (known && known.length > 0) await openProjectById(known[0].id);
     else showWelcome();
   }
 
@@ -227,7 +281,7 @@ function mountProjectsPanel(host, api) {
       saveTimer = null;
       const result = await saveProject(project);
       if (result.ok) {
-        known = known.map((item) =>
+        known = (known || []).map((item) =>
           item.id === project.id
             ? { ...item, name: project.name, updatedAt: project.updatedAt, schemes: project.schemes.length, marks: project.marks.length }
             : item,
@@ -254,6 +308,7 @@ function mountProjectsPanel(host, api) {
     if ("layout" in changed) renderList();
     if (!("project" in changed)) return;
     renderList();
+    refreshIfUnknown(state.project);
     if (state.project) scheduleSave(state.project);
   });
 
@@ -261,7 +316,7 @@ function mountProjectsPanel(host, api) {
     await openStore();
     await refreshList();
     const lastId = await getSetting(LAST_PROJECT_KEY);
-    const target = known.find((item) => item.id === lastId) || known[0] || null;
+    const target = (known || []).find((item) => item.id === lastId) || (known || [])[0] || null;
     if (target) await openProjectById(target.id);
     else showWelcome();
     await checkSpace();
