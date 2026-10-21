@@ -1327,13 +1327,16 @@ export function resizeSchemePlan(project, schemeId, { width, height } = {}) {
   for (const outline of outlines) {
     next = updateOutline(next, outline.id, { points: (outline.points || []).map(keepPoint) }).project;
   }
+  // Направляющие едут через ту же дверь, что и у правки плана целиком
+  // (`setSchemeGuides`, таск 222): у списка один хозяин, и второго места, где
+  // он переписывается, быть не должно.
   const guides = schemeGuides(project, schemeId);
   if (guides.length > 0) {
-    next = withGuides(
+    next = setSchemeGuides(
       next,
       schemeId,
-      guides.map((guide) => ({ ...guide, at: clampFraction(keep(guide.at, guide.axis === "h" ? ky : kx)) })),
-    );
+      guides.map((guide) => ({ ...guide, at: keep(guide.at, guide.axis === "h" ? ky : kx) })),
+    ).project;
   }
   const scale = planScaleOf(project, schemeId);
   if (scale) {
@@ -4211,7 +4214,10 @@ export function removeOutlinePoint(project, outlineId, index) {
 //
 // Живут **у схемы**: у каждого плана свои. Координата — **доля 0…1** от размера
 // плана, как точки меток (ADR 002): при замене подложки они остаются там же,
-// где их поставили, а не разъезжаются в пикселях.
+// где их поставили, а не разъезжаются в пикселях. До таска 222 это было
+// обещанием без исполнения: правка плана целиком (`applyPlanEdit`) двигала
+// метки, контуры, калибровку и привязку, а направляющие оставляла как лежали —
+// после поворота подложки они указывали поперёк (дефект D72).
 export const GUIDE_AXES = ["h", "v"];
 
 export function schemeGuides(project, schemeId) {
@@ -4222,6 +4228,36 @@ export function schemeGuides(project, schemeId) {
 function withGuides(project, schemeId, guides) {
   const schemes = project.schemes.map((scheme) => (scheme.id === schemeId ? { ...scheme, guides } : scheme));
   return withProject(project, { schemes });
+}
+
+/**
+ * Переписать направляющие схемы целиком — дверь для правок **всего плана**:
+ * поворота с обрезкой (`panels/schemes.applyPlanEdit`) и смены размера
+ * (`resizeSchemePlan`). Поштучные правки ходят своими дверьми; здесь список
+ * едет разом, потому что преобразование плана трогает каждую.
+ *
+ * Род и доля проверяются тем же правилом, что у `addSchemeGuide`: доля
+ * зажимается в 0…1. Направляющая, вышедшая за рамку обрезки, прижимается к
+ * краю, а не пропадает: она рабочая оснастка, и прижатую видно, а пропавшую
+ * человек ищет глазами.
+ *
+ * **Ничего не изменилось — тот же объект по ссылке** (G68): у схемы, которой
+ * направляющих не ставили, не появляется ни пустого списка, ни `updatedAt`.
+ */
+export function setSchemeGuides(project, schemeId, guides) {
+  requireScheme(project, schemeId);
+  const before = schemeGuides(project, schemeId);
+  const list = (Array.isArray(guides) ? guides : []).map((guide) => {
+    if (!guide || !GUIDE_AXES.includes(guide.axis)) throw modelError("guideAxisUnknown");
+    const at = clampFraction(Number(guide.at));
+    if (!Number.isFinite(at)) throw modelError("guideAtInvalid");
+    return { id: guide.id || newId(), axis: guide.axis, at };
+  });
+  const same =
+    before.length === list.length &&
+    before.every((guide, index) => guide.id === list[index].id && guide.axis === list[index].axis && guide.at === list[index].at);
+  if (same) return { project, guides: before, changed: false };
+  return { project: withGuides(project, schemeId, list), guides: list, changed: true };
 }
 
 export function addSchemeGuide(project, schemeId, { axis, at } = {}) {

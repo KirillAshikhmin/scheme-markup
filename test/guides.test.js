@@ -22,7 +22,10 @@ import {
   moveSchemeGuide,
   replaceSchemeImage,
   schemeGuides,
+  setSchemeGuides,
 } from "../src/model.js";
+import { applyPlanEdit } from "../src/panels/schemes.js";
+import { identityTransform, rotateTransform, transformGuide } from "../src/imagePrep.js";
 import { packProject, unpackProject } from "../src/projectFile.js";
 import { canvasDraftPoint, canvasFrameGuides } from "../src/canvas.js";
 import {
@@ -97,6 +100,98 @@ test("замена подложки не двигает направляющие
       ["v", 0.3],
     ],
   );
+});
+
+// ——— правка подложки: поворот и обрезка (таск 222, дефект D72) ——————————
+//
+// Доли выбраны ради этого (ADR 002), а пересчёта направляющим не досталось:
+// `applyPlanEdit` двигал метки, контуры, калибровку и привязку, а направляющие
+// оставлял как лежали. После поворота подложки горизонтальная оставалась
+// горизонтальной — то есть указывала **поперёк** тех стен, по которым её
+// ставили, и притяжка вела точки не туда.
+
+test("поворот на четверть меняет род направляющей, а не только её долю", () => {
+  // Горизонтальная на 0,4 высоты при повороте вправо становится вертикальной
+  // на 0,6 ширины: правый поворот уносит верх плана вправо.
+  assert.deepEqual(transformGuide({ axis: "h", at: 0.4 }, { rotate: 90, crop: null }), { axis: "v", at: 0.6 });
+  // Вертикальная при том же повороте ложится горизонтальной и долю сохраняет.
+  assert.deepEqual(transformGuide({ axis: "v", at: 0.3 }, { rotate: 90, crop: null }), { axis: "h", at: 0.3 });
+  // Полуоборот рода не меняет, но зеркалит долю.
+  assert.deepEqual(transformGuide({ axis: "h", at: 0.4 }, { rotate: 180, crop: null }), { axis: "h", at: 0.6 });
+  assert.deepEqual(transformGuide({ axis: "v", at: 0.3 }, { rotate: 180, crop: null }), { axis: "v", at: 0.7 });
+  // Поворот влево — зеркало правого.
+  assert.deepEqual(transformGuide({ axis: "h", at: 0.4 }, { rotate: 270, crop: null }), { axis: "v", at: 0.4 });
+  assert.deepEqual(transformGuide({ axis: "v", at: 0.3 }, { rotate: 270, crop: null }), { axis: "h", at: 0.7 });
+  // Своих полей направляющей пересчёт не теряет: id остаётся её.
+  assert.equal(transformGuide({ id: "g1", axis: "h", at: 0.4 }, { rotate: 90, crop: null }).id, "g1");
+});
+
+test("обрезка считает направляющую по своей стороне рамки", () => {
+  const crop = { rotate: 0, crop: { x: 0.25, y: 0.5, width: 0.5, height: 0.5 } };
+  // Горизонтальная мерится высотой рамки: 0,75 от плана — середина нижней половины.
+  assert.deepEqual(transformGuide({ axis: "h", at: 0.75 }, crop), { axis: "h", at: 0.5 });
+  // Вертикальная — шириной: 0,5 от плана — середина рамки 0,25…0,75.
+  assert.deepEqual(transformGuide({ axis: "v", at: 0.5 }, crop), { axis: "v", at: 0.5 });
+  // Оставшаяся за рамкой прижимается к краю, а не теряется: оснастку видно.
+  const base = scene();
+  const pinned = setSchemeGuides(base.project, base.schemeId, [{ axis: "h", at: -0.3 }]);
+  assert.equal(pinned.guides[0].at, 0);
+});
+
+test("поворот подложки доворачивает направляющие вместе с метками", () => {
+  const base = withGuides(scene());
+  const turned = applyPlanEdit(base.project, base.schemeId, {
+    imageId: "turned",
+    width: PLAN.height,
+    height: PLAN.width,
+    transform: rotateTransform(identityTransform(), 90),
+  });
+  assert.deepEqual(
+    schemeGuides(turned.project, base.schemeId).map((guide) => [guide.axis, guide.at]),
+    [
+      ["v", 0.6],
+      ["h", 0.3],
+    ],
+  );
+  // Четыре поворота по кругу возвращают и род, и долю — как у меток.
+  let round = base.project;
+  for (let turn = 0; turn < 4; turn += 1) {
+    const scheme = round.schemes[0];
+    round = applyPlanEdit(round, base.schemeId, {
+      imageId: "round" + turn,
+      width: scheme.height,
+      height: scheme.width,
+      transform: rotateTransform(identityTransform(), 90),
+    }).project;
+  }
+  const back = schemeGuides(round, base.schemeId);
+  assert.deepEqual(back.map((guide) => guide.axis), ["h", "v"], "род направляющей не вернулся");
+  // Доли не возвращаются ровно: `1 − at` четыре раза подряд даёт 0,3 как
+  // 0,30000000000000004 — то же, что у точек метки (`planEdit.test.js`). Для
+  // линии через весь план это тысячные доли пикселя, и сверка идёт с допуском.
+  assert.ok(Math.abs(back[0].at - 0.4) < 1e-9, "горизонтальная уехала: " + back[0].at);
+  assert.ok(Math.abs(back[1].at - 0.3) < 1e-9, "вертикальная уехала: " + back[1].at);
+});
+
+test("G68: у схемы без направляющих поворот не заводит ни списка, ни ключа", () => {
+  const base = scene();
+  const turned = applyPlanEdit(base.project, base.schemeId, {
+    imageId: "turned",
+    width: PLAN.height,
+    height: PLAN.width,
+    transform: rotateTransform(identityTransform(), 90),
+  });
+  assert.ok(
+    !Object.prototype.hasOwnProperty.call(turned.project.schemes[0], "guides"),
+    "у схемы, которой направляющих не ставили, в файле появился пустой список",
+  );
+});
+
+test("G68: список тот же — тот же объект по ссылке", () => {
+  const base = withGuides(scene());
+  const same = setSchemeGuides(base.project, base.schemeId, base.guides);
+  assert.equal(same.project, base.project, "новый объект на пустом месте — лишний шаг истории и новый updatedAt");
+  assert.equal(same.changed, false);
 });
 
 // G68: у схем прежней разметки поля нет вовсе, и это не ошибка.

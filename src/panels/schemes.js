@@ -37,11 +37,13 @@ import {
   schemeAnchorCandidates,
   schemeAnchorOf,
   schemeFloorOf,
+  schemeGuides,
   schemesInOrder,
   setPlanOrigin,
   setPlanScale,
   setSchemeAnchor,
   setSchemeFloor,
+  setSchemeGuides,
   updateMark,
   updateOutline,
   updateScheme,
@@ -61,6 +63,7 @@ import {
   renderPlanImage,
   rotateTransform,
   sameAspect,
+  transformGuide,
   transformMarkPoints,
   transformOffset,
   transformPoint,
@@ -115,10 +118,16 @@ function outlinesOfScheme(project, schemeId) {
 /**
  * Правка плана одним куском: новая подложка, её размер и пересчёт всего, что
  * задано в координатах этого плана, — точки меток, смещения их подписей,
- * контуры помещений и смещения подписей комнат. Контуры двигаются вместе с
- * метками не для красоты: помещение метки подставляется по контуру на каждом
- * шаге истории, и оставь контур лежать поперёк повёрнутых стен — половина
- * меток молча уедет в чужие комнаты.
+ * контуры помещений, смещения подписей комнат и направляющие. Контуры
+ * двигаются вместе с метками не для красоты: помещение метки подставляется по
+ * контуру на каждом шаге истории, и оставь контур лежать поперёк повёрнутых
+ * стен — половина меток молча уедет в чужие комнаты.
+ *
+ * **Направляющие едут здесь с таска 222** (дефект D72). Они тоже доли — ради
+ * этого и выбраны долями, — но пересчёта им не досталось: после поворота
+ * подложки горизонтальная оставалась горизонтальной и указывала поперёк стен,
+ * по которым её ставили. Род у неё при повороте на четверть меняется, и
+ * считает это `imagePrep.transformGuide` той же `transformPoint`, что метки.
  *
  * Чистая и вынесена наружу нарочно: «до» и «после» одного и того же объекта —
  * это и есть шаг отмены, и проверяется он тестом, без DOM и без хранилища.
@@ -155,6 +164,10 @@ export function applyPlanEdit(project, schemeId, { imageId, width, height, trans
   for (const outline of outlinesOfScheme(project, schemeId)) {
     const patch = remapForTransform(outline, transform);
     next = updateOutline(next, outline.id, patch.labelOffset ? patch : { points: patch.points }).project;
+  }
+  const guides = schemeGuides(project, schemeId);
+  if (guides.length > 0) {
+    next = setSchemeGuides(next, schemeId, guides.map((guide) => transformGuide(guide, transform))).project;
   }
   if (scale && !scaleLost) {
     try {
