@@ -18381,6 +18381,23 @@ function openingFaceGrid(opening) {
 }
 
 /**
+ * **Сколько у гармошки звеньев** — одно число на план, развёртку и объём
+ * (таск 226, требование G338).
+ *
+ * Берётся из той же сетки `face`, которой нарисовано полотно: сколько секций у
+ * лица, столько и звеньев. Второго числа для гармошки в сборке нет и быть не
+ * должно — разойдись они, на плане зигзаг был бы из четырёх колен, а в объёме
+ * пакет из трёх звеньев, и правым оказался бы тот, кто смотрит.
+ *
+ * Меньше двух не бывает: полотно из одного звена не гармошка, а просто дверь.
+ * На `doorFolding` каталога это ничего не меняет (секций четыре) — порог стоит
+ * ради вида, которому однажды зададут одну секцию.
+ */
+function openingFoldLinks(opening) {
+  return Math.max(2, openingFaceGrid(opening).xs.length + 1);
+}
+
+/**
  * **Четыре состояния двери кольцом** (таск 180, G268). Слова заказчика: «при
  * установке дверей так же вращай их по Q/E причём сразу по 4 значениям —
  * сперва сторона петель, потом сторона открытия».
@@ -30730,8 +30747,9 @@ function drawDrawingDoor(ctx, bridge, wall, opening, colour) {
  *
  *   **сдвижное** — прямая полоса и стрелка;
  *   **гармошка** — та же полоса, сложенная в четыре звена: число звеньев то
- *     же, что секций у её лица (`openingFaceGrid`), и второго числа для
- *     гармошки в сборке нет;
+ *     же, что секций у её лица (`openingFoldLinks`), и второго числа для
+ *     гармошки в сборке нет: тем же числом она складывается в пакет в объёме
+ *     (таск 226);
  *   **портальное** — полоса лежит **в** стене, а за косяком пунктиром показан
  *     карман, куда полотно уезжает целиком: это и есть «слайдинг в стену».
  */
@@ -30753,7 +30771,7 @@ function drawDrawingSlider(ctx, bridge, wall, opening, leaf, colour, glazed, fra
     // Звенья гармошки: ломаная туда-обратно поперёк полосы. Амплитуда — та же
     // мера, на которую полотно отодвинуто от стены, чтобы звенья не наехали на
     // неё и не слились с её линией.
-    const parts = Math.max(2, openingFaceGrid(opening).xs.length + 1);
+    const parts = openingFoldLinks(opening);
     const amp = Math.max(2, Math.abs(away) || thick / 2);
     ctx.lineWidth = 1.5;
     ctx.beginPath();
@@ -59547,6 +59565,24 @@ const VOLUME_HANDLE_OUT_MM = 35;
 const VOLUME_HANDLE_TALL_MM = 90;
 const VOLUME_HANDLE_EDGE_MM = 70;
 
+/**
+ * **Сложенная гармошка** (таск 226, требование G338): два числа, из которых
+ * выходит толщина пакета.
+ *
+ * `VOLUME_FOLD_LEAF_MM` — толщина звена. Сорок миллиметров: межкомнатное
+ *   полотно 35–40 мм, у складных створок берут самое тонкое из этого ряда.
+ * `VOLUME_FOLD_GAP_MM` — зазор между сложенными звеньями: петля-карта с
+ *   осью снаружи полотна, десять миллиметров. Без зазора звенья легли бы
+ *   плоскость в плоскость, а коплоскостные грани в сортировке по дальности
+ *   решаются случаем (правило таска 180) — пакет мигал бы на облёте.
+ *
+ * Толщина пакета считается, а не пишется: `звеньев × 40 + промежутков × 10`.
+ * У гармошки каталога (четыре звена) это **190 мм** — ровно то, на сколько
+ * сложенное полотно вылезает из плоскости косяка в настоящей двери.
+ */
+const VOLUME_FOLD_LEAF_MM = 40;
+const VOLUME_FOLD_GAP_MM = 10;
+
 // Рама — четыре бруска по краю проёма, в середине толщины стены. Стекла нет:
 // сквозь окно видно фон, и это ровно то, чего просил заказчик.
 //
@@ -59601,6 +59637,43 @@ function volumeWindowFrame(at, from, to, bottom, top, out, grid) {
 }
 
 /**
+ * **Звенья сложенной гармошки** (таск 226, G338): где встаёт каждое полотнище,
+ * когда дверь раскрыта.
+ *
+ * Долг таска 215 звучал так: «гармошка в объёме складывается в половину своей
+ * ширины — приближение, а не пакет звеньев». Приближение врало дважды: полотно
+ * съезжало за косяк, как сдвижное (а гармошка никуда не съезжает), и оставалось
+ * одной полосой вдвое короче себя (а она собирается звеньями).
+ *
+ * Теперь честно: **звенья встают поперёк стены пакетом у того косяка, где
+ * петли**. Каждое звено — та же секция лица, которой полотно нарисовано на
+ * плане и на развёртке (`openingFoldLinks`), то есть у гармошки каталога
+ * 900 / 4 = 225 мм; в комнату пакет выступает ровно на эту ширину. Вдоль стены
+ * он занимает свою толщину (`VOLUME_FOLD_LEAF_MM`, `VOLUME_FOLD_GAP_MM`) и
+ * **из проёма не вылезает**: у двери у́же пакета (меньше 190 мм — такого не
+ * бывает, но ширину задаёт человек) шаг жмётся по месту, а не рисует звенья
+ * сквозь стену.
+ */
+function volumeFoldPack(root, into, across, width, links) {
+  const link = width / links;
+  const step = VOLUME_FOLD_LEAF_MM + VOLUME_FOLD_GAP_MM;
+  const pack = links * VOLUME_FOLD_LEAF_MM + (links - 1) * VOLUME_FOLD_GAP_MM;
+  const squeeze = pack > width ? width / pack : 1;
+  const boards = [];
+  for (let index = 0; index < links; index += 1) {
+    // Грань звена стоит в середине его толщины: пакет начинается у самого
+    // косяка и кончается ровно через свою толщину.
+    const away = (VOLUME_FOLD_LEAF_MM / 2 + step * index) * squeeze;
+    boards.push({
+      at: { x: root.x + into.x * away, y: root.y + into.y * away },
+      along: across,
+      width: link,
+    });
+  }
+  return boards;
+}
+
+/**
  * Полотно двери — одна двусторонняя грань от петли и ручка на ней.
  *
  * **Закрытое** стоит в самом проёме, в середине толщины стены: там же, где
@@ -59645,43 +59718,61 @@ function volumeDoorLeaf(wall, opening, span, out, open) {
     // Куда смотрит полотно.
     //
     //   распашное раскрытое — прочь от стены на четверть оборота;
-    //   сдвижное и гармошка раскрытые — вдоль стены **за** косяк, то есть
-    //     полотно съезжает туда, куда показывала стрелка на плане;
+    //   сдвижное раскрытое — вдоль стены **за** косяк, то есть полотно
+    //     съезжает туда, куда показывала стрелка на плане;
+    //   гармошка раскрытая — пакетом звеньев поперёк стены у косяка с петлями
+    //     (таск 226, `volumeFoldPack`): она никуда не съезжает, она
+    //     складывается;
     //   портальное раскрытое — не рисуется вовсе: оно внутри стены, и это
     //     самый честный вид «открыто», какой у него бывает;
     //   закрытое любое — вдоль стены, в самом проёме.
     if (open && motion === "pocket") continue;
-    const slid = open && (motion === "slide" || motion === "fold");
+    const packed = open && motion === "fold";
+    const slid = open && motion === "slide";
     const leaf = open && motion === "swing" ? { x: n.x * side, y: n.y * side } : { x: u.x * plan.out, y: u.y * plan.out };
-    // Сложенная гармошка короче себя: четыре звена собираются в пакет у косяка.
-    const span2 = slid && motion === "fold" ? width / 2 : width;
-    const base = slid
-      ? { x: root.x - leaf.x * span2, y: root.y - leaf.y * span2 }
-      : root;
-    const tip = { x: base.x + leaf.x * span2, y: base.y + leaf.y * span2 };
-    if (openingGlazed(opening)) {
-      volumeGlassLeaf(base, leaf, span2, span, out, doorId);
-    } else {
-      out.push(
-        volumeFace(
-          [volumeAt(base, span.bottom), volumeAt(tip, span.bottom), volumeAt(tip, span.top), volumeAt(base, span.top)],
-          VOLUME_DOOR_RGB,
-          { both: true, doorId },
-        ),
-      );
+    const boards = packed
+      ? volumeFoldPack(root, leaf, { x: n.x * side, y: n.y * side }, width, openingFoldLinks(opening))
+      : [
+          {
+            at: slid ? { x: root.x - leaf.x * width, y: root.y - leaf.y * width } : root,
+            along: leaf,
+            width,
+          },
+        ];
+    for (const board of boards) {
+      const tip = { x: board.at.x + board.along.x * board.width, y: board.at.y + board.along.y * board.width };
+      if (openingGlazed(opening)) {
+        volumeGlassLeaf(board.at, board.along, board.width, span, out, doorId);
+      } else {
+        out.push(
+          volumeFace(
+            [
+              volumeAt(board.at, span.bottom),
+              volumeAt(tip, span.bottom),
+              volumeAt(tip, span.top),
+              volumeAt(board.at, span.top),
+            ],
+            VOLUME_DOOR_RGB,
+            { both: true, doorId },
+          ),
+        );
+      }
     }
     // Ручка у свободного края полотна, на высоте, на которой её берут рукой
     // (G207: «ну и на дверях ручки нарисуй»). Выступает на обе стороны: дверь
-    // открывают с той стороны, с которой подошли.
+    // открывают с той стороны, с которой подошли. У сложенной гармошки свободный
+    // край — у **последнего** звена пакета: ручка едет вместе с ним и в воздухе
+    // не остаётся.
+    const edge = boards[boards.length - 1];
     const handleAt = {
-      x: tip.x - leaf.x * VOLUME_HANDLE_EDGE_MM,
-      y: tip.y - leaf.y * VOLUME_HANDLE_EDGE_MM,
+      x: edge.at.x + edge.along.x * (edge.width - VOLUME_HANDLE_EDGE_MM),
+      y: edge.at.y + edge.along.y * (edge.width - VOLUME_HANDLE_EDGE_MM),
     };
     const bottom = Math.max(span.bottom, VOLUME_HANDLE_MM - VOLUME_HANDLE_TALL_MM / 2);
     const top = Math.min(span.top, bottom + VOLUME_HANDLE_TALL_MM);
     if (top > bottom) {
       volumePrismFaces(
-        volumeBoxCorners(handleAt, leaf, VOLUME_HANDLE_LONG_MM, VOLUME_HANDLE_OUT_MM * 2),
+        volumeBoxCorners(handleAt, edge.along, VOLUME_HANDLE_LONG_MM, VOLUME_HANDLE_OUT_MM * 2),
         bottom,
         top,
         VOLUME_HANDLE_RGB,
@@ -64958,6 +65049,13 @@ function volumeDrawGround(ctx, box, camera, hour, land, near) {
 // лежат на земле и уходят к горизонту, дома стоят на них, машины — перед
 // ближними домами, зелень вдоль улиц. Дальний ряд домов рисуется раньше
 // ближнего — он за ним.
+//
+// **Неоновых вывесок на домах нет** — требование G337 (таск 226) сняло их:
+// заказчик завёл их в таске 206 словами «добавь туда рекламные баннеры и
+// неоновые вывески», посмотрел город в объёме и решил убрать. Снято начисто:
+// ни цвета неона в палитре, ни ветки «если вывеска», ни поля у дома. Щиты у
+// дорог остались и ночью по-прежнему не светятся — про них речи не было.
+// Светится ночью одно — окна.
 /**
  * Дом города — **коробка** (дефект D57): лицо, бок и крыша.
  *
@@ -64971,8 +65069,7 @@ function volumeDrawGround(ctx, box, camera, hour, land, near) {
  * (`VOLUME_CITY_FLOOR_MM`, `VOLUME_CITY_BAY_MM`), — у бока секций меньше, чем у
  * лица, ровно во столько раз, во сколько он у́же.
  *
- * Светящееся окно **не красится часом** (светит — значит не темнеет), и то же
- * правило у неоновой вывески (G310).
+ * Светящееся окно **не красится часом** (светит — значит не темнеет).
  */
 function volumeDrawBlock(ctx, aim, block, index, hour) {
   const palette = hour.palette;
@@ -65094,8 +65191,6 @@ function volumeDrawBlock(ctx, aim, block, index, hour) {
         ctx.fillRect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(width), Math.abs(height));
       }
     }
-    // Неоновая вывеска — только на лице и только у того, кому она задана.
-    if (wall.face && block.sign) volumeDrawSign(ctx, block.sign, wall, hour);
   }
   // Крыша: четырёхугольник по верху коробки. Видна она сверху, а снизу
   // вырождается в черту — и это та самая черта парапета, которой дом отличался
@@ -65114,47 +65209,12 @@ function volumeDrawBlock(ctx, aim, block, index, hour) {
 }
 
 /**
- * Неоновая вывеска на лице дома (G310): цветной прямоугольник в полоску.
- *
- * **Текста нет нарочно** — писать на вывеске значило бы придумывать чужую
- * рекламу; узнаётся она цветом, полосами и тем, что ночью светится.
- *
- * Светится она **тем же часом, которым загораются окна** (`hour.cityLit`,
- * G273): второго правила «ночь» в сборке нет. Днём доля ноль, и вывеска
- * красится приглушённым тоном палитры, как всякая вещь фона; ночью берётся
- * чистый неон и **час его не темнит** — светит, значит не темнеет.
- */
-function volumeDrawSign(ctx, sign, wall, hour) {
-  const { left, right, footLeft, footRight } = wall;
-  const glow = Math.max(0, Math.min(1, hour.cityLit / VOLUME_CITY_LIT_MAX));
-  const neon = VOLUME_CITY_NEON[sign.neon % VOLUME_CITY_NEON.length];
-  const half = Math.max(0.05, Math.min(0.46, sign.wide / 2));
-  const high = 1 - sign.at;
-  const tall = Math.min(0.1, 0.055 + half * 0.08);
-  const a = volumeCitySpot(left, right, footLeft, footRight, 0.5 - half, high - tall / 2);
-  const b = volumeCitySpot(left, right, footLeft, footRight, 0.5 + half, high + tall / 2);
-  const width = b.x - a.x;
-  const height = b.y - a.y;
-  if (!(Math.abs(width) > 2) || !(Math.abs(height) > 1.5)) return;
-  const x = Math.min(a.x, b.x);
-  const y = Math.min(a.y, b.y);
-  const wide = Math.abs(width);
-  const high2 = Math.abs(height);
-  ctx.fillStyle = glow > 0 ? neon.lit : volumeTintCss(volumeHexRgb(neon.day), hour.tint);
-  ctx.fillRect(x, y, wide, high2);
-  // Две тёмные полосы поперёк: по ним вывеска читается вывеской, а не окном.
-  ctx.fillStyle = glow > 0 ? neon.dark : volumeTintCss(volumeHexRgb(VOLUME_CITY_SIGN_DARK), hour.tint);
-  const bar = Math.max(1, high2 * 0.16);
-  ctx.fillRect(x + wide * 0.08, y + high2 * 0.3 - bar / 2, wide * 0.84, bar);
-  ctx.fillRect(x + wide * 0.08, y + high2 * 0.68 - bar / 2, wide * 0.52, bar);
-}
-
-/**
  * Рекламный щит у дороги (G310): полотно на двух ногах, поперёк взгляда.
  *
- * Полотно — цветные полосы, и всё: текста на нём нет по той же причине, что на
- * вывеске. Ночью щит **не светится** — подсветка билборда это уже вторая
- * история, а неон висит на домах.
+ * Полотно — цветные полосы, и всё: текста на нём нет нарочно, писать на щите
+ * значило бы придумывать чужую рекламу. Ночью щит **не светится** — подсветка
+ * билборда это отдельная история, и так было с первого дня: заказчик снял с
+ * домов неон (G337), а щиты оставил как есть.
  */
 function volumeDrawBanner(ctx, aim, banner, hour) {
   const palette = hour.palette;
@@ -66426,25 +66486,6 @@ const VOLUME_CITY_LIGHT = "#ffe6a3";
 const VOLUME_CITY_LIT_MAX = 0.55;
 
 /**
- * Неон вывесок (G310). У каждого цвета три тона: `lit` — как он светится ночью
- * (час его не темнит — светит, значит не темнеет), `day` — как та же вывеска
- * читается днём, выключенной, `dark` — полосы на ней.
- *
- * Цвета те, по которым неон и узнаётся: розовый, бирюзовый, жёлтый, зелёный.
- * Их четыре, а не десять, по той же причине, по которой у машин пять: это
- * задник, а не улица большого города.
- */
-const VOLUME_CITY_NEON = [
-  { lit: "#ff5fa2", day: "#c2748f", dark: "#7a2348" },
-  { lit: "#53e5ff", day: "#6fa8b5", dark: "#15616e" },
-  { lit: "#ffd34d", day: "#bda868", dark: "#7a5c11" },
-  { lit: "#7bff8a", day: "#7fae85", dark: "#1f6a2a" },
-];
-
-/** Полосы на вывеске днём: тёмная краска по выключенному стеклу. */
-const VOLUME_CITY_SIGN_DARK = "#4a4f57";
-
-/**
  * Рекламные щиты у дороги (G310): полотно и краска полос. Текста нет — писать
  * на щите значило бы придумывать чужую рекламу.
  */
@@ -66491,10 +66532,11 @@ const VOLUME_CITY_WINDOW_PX = 3;
  * есть глубина, и в кадр попадают две стены и крыша: какая из боковых видна,
  * решает сама камера. При облёте дом поворачивается, а не схлопывается.
  *
- * `sign` — неоновая вывеска на лице (G310): доля высоты, где она висит, доля
- * ширины и цвет. Ночью светится тем же часом, что окна.
+ * Своего на лице у дома больше ничего нет: вывеску (G310) снял G337, и поля
+ * `sign` у записи не стало вовсе — дом описывается местом, габаритом и сеткой
+ * окон.
  */
-function volumeBlock(az, away, halfM, deepM, heightM, far, sign = null) {
+function volumeBlock(az, away, halfM, deepM, heightM, far) {
   const spot = volumeAway(az, away);
   const halfMm = halfM * VOLUME_M;
   const heightMm = heightM * VOLUME_M;
@@ -66508,7 +66550,6 @@ function volumeBlock(az, away, halfM, deepM, heightM, far, sign = null) {
     floors: Math.max(2, Math.round(heightMm / VOLUME_CITY_FLOOR_MM)),
     bays: Math.max(2, Math.round((halfMm * 2) / VOLUME_CITY_BAY_MM)),
     far: Boolean(far),
-    sign,
   };
 }
 
@@ -66527,21 +66568,21 @@ const VOLUME_CITY = [
   // дальний ряд — за улицей, бледный
   volumeBlock(8, 330, 13, 11, 30, true),
   volumeBlock(24, 410, 11, 9, 26, true),
-  volumeBlock(58, 285, 15, 12, 32, true, { at: 0.72, wide: 0.5, neon: 1 }),
+  volumeBlock(58, 285, 15, 12, 32, true),
   volumeBlock(96, 370, 12, 10, 28, true),
   volumeBlock(131, 310, 14, 11, 32, true),
   volumeBlock(168, 395, 11, 9, 25, true),
-  volumeBlock(205, 265, 16, 12, 33, true, { at: 0.78, wide: 0.44, neon: 2 }),
+  volumeBlock(205, 265, 16, 12, 33, true),
   volumeBlock(241, 380, 12, 10, 27, true),
   volumeBlock(278, 320, 14, 11, 31, true),
   volumeBlock(316, 425, 11, 9, 24, true),
   volumeBlock(344, 295, 13, 11, 33, true),
   // ближний ряд — высокие, тёмнее и шире
-  volumeBlock(40, 120, 11, 14, 40, false, { at: 0.8, wide: 0.52, neon: 0 }),
-  volumeBlock(112, 98, 9, 12, 44, false, { at: 0.66, wide: 0.46, neon: 3 }),
+  volumeBlock(40, 120, 11, 14, 40, false),
+  volumeBlock(112, 98, 9, 12, 44, false),
   volumeBlock(186, 145, 15, 16, 36, false),
-  volumeBlock(258, 110, 10, 13, 46, false, { at: 0.74, wide: 0.5, neon: 1 }),
-  volumeBlock(330, 132, 12, 15, 38, false, { at: 0.58, wide: 0.42, neon: 2 }),
+  volumeBlock(258, 110, 10, 13, 46, false),
+  volumeBlock(330, 132, 12, 15, 38, false),
 ];
 
 /**
