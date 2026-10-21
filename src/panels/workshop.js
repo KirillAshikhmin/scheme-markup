@@ -93,6 +93,7 @@ import {
   GRID_STEP_DEFAULT_MM,
   OPENING_HINGES,
   OPENING_KINDS,
+  OPENING_KIND_DEFAULT,
   OPENING_SWINGS,
   PLAN_SCALE_SHORT_SHARE,
   WALL_THICKNESS_MM_MAX,
@@ -114,8 +115,13 @@ import {
   findWall,
   formatMeters,
   gridStepOf,
+  openingCanGlaze,
+  openingDoorStates,
   openingDoorStep,
+  openingGlazed,
   openingHasLeaf,
+  openingKindBase,
+  openingTitle,
   openingsInWall,
   planFractionToMm,
   planOriginOf,
@@ -226,7 +232,9 @@ import {
   objectCatalogKeyByName,
   objectCatalogName,
 } from "../objectCatalog.js";
+import { openingCatalogDefaults } from "../openingCatalog.js";
 import { objectTileIcon, openObjectPicker } from "./objectPicker.js";
+import { openOpeningPicker, openingTileIcon } from "./openingPicker.js";
 import { drawPickerHint, drawPickerName, drawPickerNote, openDrawPicker } from "./drawPicker.js";
 import { createElevationStrip, elevationPlace } from "./elevation.js";
 import { screenPlaceOf, screenPlaceSet } from "../screenPlace.js";
@@ -881,24 +889,20 @@ export function workshopMoveWall(project, wallId, deltaMm) {
 //
 // **Умолчания обязательны, а не удобны.** Человек ставит десять окон подряд, и
 // вводить по четыре числа на каждое он не станет — он поставит их «как
-// обычно» и поправит те два, которые отличаются. Числа взяты из того, что
-// ставят в квартире: окно 1500 × 1400 с подоконником на 800 (при потолке 2700
-// над ним остаётся полметра), межкомнатная дверь — проём 900 × 2100 под
-// полотно 800 × 2000, проём без полотна такой же, арка пошире — 1200.
+// обычно» и поправит те два, которые отличаются.
+//
+// С таска 215 числа живут **в каталоге видов** (`openingCatalog.js`), рядом с
+// породой, движением полотна и сеткой секций: там же, где у вещи чертежа лежат
+// её габариты. Здесь осталась одна дверь к ним — таблица по виду, которую
+// панель кладёт себе в память сеанса. Второго места с числами проёма нет:
+// разойдись они — призрак под рукой обещал бы один размер, а окно «Что
+// добавить» показывало бы другой.
 //
 // Запоминаются они **на сеанс и по виду**: поправил окно на 1300 — следующее
 // окно встанет 1300, а дверь останется дверью.
-export const WORKSHOP_OPENING_DEFAULTS = {
-  window: { widthMm: 1500, heightMm: 1400, heightAboveFloorMm: 800 },
-  door: { widthMm: 900, heightMm: 2100, heightAboveFloorMm: 0 },
-  // Стеклянная дверь (таск 180) — балконная: уже межкомнатной и выше её. 800 ×
-  // 2200 от пола — то, что стоит на французском балконе, о котором говорил
-  // заказчик; свои умолчания у неё потому, что подставить дверные значило бы
-  // заставить править оба числа на каждой.
-  glassDoor: { widthMm: 800, heightMm: 2200, heightAboveFloorMm: 0 },
-  opening: { widthMm: 900, heightMm: 2100, heightAboveFloorMm: 0 },
-  arch: { widthMm: 1200, heightMm: 2100, heightAboveFloorMm: 0 },
-};
+export const WORKSHOP_OPENING_DEFAULTS = Object.fromEntries(
+  OPENING_KINDS.map((kind) => [kind, openingCatalogDefaults(kind)]),
+);
 
 
 /** Сколько миллиметров от конца `a` до проекции точки на стену, зажато в стену. */
@@ -1818,7 +1822,7 @@ export function workshopListGroups(project, schemeId) {
       openingRows.push({
         kind: "opening",
         id: opening.id,
-        label: strings.openingKinds[opening.kind] || strings.workshop.opening,
+        label: openingTitle(opening) || strings.workshop.opening,
         note: text("workshop.listOpeningNote", {
           wall: wallName(project, wall.id),
           width: opening.widthMm,
@@ -1915,10 +1919,13 @@ export function workshopSummaryLines(project, schemeId, placement) {
 let workshopThicknessMm = WORKSHOP_THICKNESS_DEFAULT_MM;
 // Умолчания проёмов — по виду и на сеанс: поправил окно на 1300, и следующее
 // окно встанет 1300, а дверь останется дверью.
-let workshopOpeningKind = OPENING_KINDS[0];
+let workshopOpeningKind = OPENING_KIND_DEFAULT;
 let workshopOpeningSizes = JSON.parse(JSON.stringify(WORKSHOP_OPENING_DEFAULTS));
 let workshopDoorHinge = OPENING_HINGES[0];
 let workshopDoorSwing = OPENING_SWINGS[0];
+// Отметка «стеклянная» у **нового** проёма (таск 215): та же природа, что у
+// створки и размеров, — рабочее место, а не объект.
+let workshopOpeningGlazed = false;
 // Объекты: вид выбирается в колонке, размеры подставляются по виду, способ —
 // от вида же (столешницу тянут полосой, остальное ставят прямоугольником).
 // Что добавляли в прошлый раз (таск 133): вернулись в «Добавление» — вернулись
@@ -2164,13 +2171,24 @@ function createWorkshop({ api, hosts }) {
     removeButton(),
   ]);
 
-  // ——— проём: вид, размеры, место в стене, створка ———
-  const kindButtons = OPENING_KINDS.map((kind) =>
-    uiButton(strings.openingKinds[kind], {
-      class: "ui-btn ui-chip",
-      on: { click: () => setOpeningKind(kind) },
-    }),
+  // ——— проём: вид, отметка «стеклянная», размеры, место в стене, створка ———
+  //
+  // Вид выделенного проёма — **плашка с картинкой и именем**, а не ряд плиток
+  // (таск 215). Плиток в каталоге шестнадцать, и рядом чипов они не влезли бы в
+  // колонку 264 точки ни одной строкой; плашка — та же дверь в окно выбора, что
+  // у вещи чертежа (`workshop__thing`), и ведёт она в ту же сетку плиток.
+  const openingIcon = uiEl("span", { class: "workshop__thingIcon" });
+  const openingName = uiEl("span", { class: "workshop__thingName" });
+  const openingKindButton = uiEl(
+    "button",
+    { class: "workshop__thing", type: "button", on: { click: () => chooseOpeningKind() } },
+    [openingIcon, openingName, uiEl("span", { class: "workshop__thingPick", text: strings.workshop.openingPick })],
   );
+  let openingShown = null;
+  // Отметка «стеклянная» (G321): одна на все виды дверей, и видна только у них.
+  const glazeBox = uiEl("input", { type: "checkbox" });
+  glazeBox.addEventListener("change", () => applyGlazed(glazeBox.checked));
+  const glazeRow = uiCheckRow(glazeBox, strings.workshop.openingGlazed, strings.workshop.openingGlazedHint);
   const openingWidth = uiNumber(1, DRAWING_MM_MAX);
   const openingHeight = uiNumber(1, DRAWING_MM_MAX);
   const openingFloor = uiNumber(0, DRAWING_MM_MAX);
@@ -2190,7 +2208,8 @@ function createWorkshop({ api, hosts }) {
   const openingNote = uiEl("p", { class: "workshop__note" });
   const openingBad = uiBadLine();
   const openingDetail = uiEl("div", { class: "workshop__detail ui-fields" }, [
-    uiEl("div", { class: "ui-chips" }, kindButtons),
+    openingKindButton,
+    glazeRow,
     uiField(strings.workshop.openingWidth, openingWidth),
     uiField(strings.workshop.openingHeight, openingHeight),
     uiField(strings.workshop.openingFloor, openingFloor),
@@ -2729,22 +2748,85 @@ function createWorkshop({ api, hosts }) {
     const sizes = workshopOpeningSizes[kind] || WORKSHOP_OPENING_DEFAULTS[kind];
     const draftOpening = { kind, ...sizes };
     // Петли и сторона открывания — у всякого вида с полотном, не только у
-    // глухой двери (таск 180): у стеклянной они те же и те же четыре.
+    // глухой двери (таск 180): у стеклянной они те же и те же четыре. У
+    // сдвижной и гармошки (таск 215) та же пара значит другое — сторону стены и
+    // сторону отъезда, — но поля и кольцо у них те же.
     if (openingHasLeaf(kind)) {
       draftOpening.hinge = workshopDoorHinge;
       draftOpening.swing = workshopDoorSwing;
     }
+    // Отметка «стеклянная» живёт в сеансе рядом с размерами и створкой: поставил
+    // её один раз — и следующая дверь встанет стеклянной.
+    if (workshopOpeningGlazed && openingCanGlaze(kind)) draftOpening.glazed = true;
     return draftOpening;
   }
 
-  // Вид **выделенного** проёма: плитки стоят в его строке. Вид нового выбирают
-  // в окне «Что добавить» (таск 187).
+  /**
+   * Вид **выделенного** проёма: плашка в его строке открывает окно выбора — то
+   * же, в котором выбирают вещь чертежа (таск 215). Вид нового проёма выбирают
+   * шагом «Проёмы» окна «Что добавить» (таск 187).
+   */
+  async function chooseOpeningKind() {
+    const opening = selectedOpening();
+    if (!opening) return;
+    const kind = await openOpeningPicker({
+      kind: opening.kind,
+      title: strings.workshop.openingChangeTitle,
+    });
+    if (!kind) return;
+    // Проём могли удалить, пока окно было открыто.
+    if (!findOpening(project(), opening.id)) return;
+    setOpeningKind(kind);
+  }
+
   function setOpeningKind(kind) {
     const opening = selectedOpening();
     if (!opening || opening.kind === kind) return;
     try {
-      const patch = { kind, ...(openingHasLeaf(kind) ? { hinge: workshopDoorHinge, swing: workshopDoorSwing } : {}) };
+      const patch = {
+        kind,
+        ...(openingHasLeaf(kind) ? { hinge: workshopDoorHinge, swing: workshopDoorSwing } : {}),
+        // Стекло переживает смену вида: «у всех этих вариантов ещё и опция —
+        // стеклянные», и человек, сменивший распашную на сдвижную, не должен
+        // ставить отметку заново. У вида, который стеклянным не бывает, она
+        // снимается сама (модель её туда и не пустит).
+        glazed: openingCanGlaze(kind) && openingGlazed(opening),
+      };
       commit(updateOpening(project(), opening.id, patch).project, strings.history.openingKind);
+    } catch (error) {
+      fail(error);
+      sync();
+    }
+  }
+
+  /**
+   * Отметка «стеклянная» (таск 215, G321). У выделенного проёма — правкой через
+   * историю, без выделения — у того, который встанет следующим.
+   *
+   * **Снятая отметка у двери прежней разметки меняет вид**: `glassDoor` — это
+   * порода «дверь» со стеклом, и чтобы стекло ушло, проём обязан стать
+   * распашной дверью. Обратно он уже не вернётся, и это нарочно: новая разметка
+   * пишет породу плюс отметку, а два написания одного и того же разошлись бы на
+   * первой же правке (G68 — читать оба, писать одно).
+   */
+  function applyGlazed(on) {
+    const opening = selectedOpening();
+    if (!opening) {
+      workshopOpeningGlazed = Boolean(on);
+      if (ghost && openingCanGlaze(ghost.opening.kind)) {
+        ghost = { ...ghost, opening: { ...ghost.opening, glazed: Boolean(on) } };
+      }
+      sync();
+      redraw();
+      return;
+    }
+    try {
+      const kind = on ? opening.kind : openingKindBase(opening.kind) || opening.kind;
+      commit(
+        updateOpening(project(), opening.id, { kind, glazed: Boolean(on) }).project,
+        strings.history.openingGlazed,
+      );
+      workshopOpeningGlazed = Boolean(on);
     } catch (error) {
       fail(error);
       sync();
@@ -2917,6 +2999,12 @@ function createWorkshop({ api, hosts }) {
     );
   }
 
+  /** О каком виде сейчас речь: о выделенном, а без выделения — о том, что встанет. */
+  function doorKind() {
+    const opening = selectedOpening();
+    return opening && openingHasLeaf(opening.kind) ? opening.kind : workshopOpeningKind;
+  }
+
   /**
    * `Q` и `E` — четыре двери по кругу (таск 180, G268). Слова заказчика: «при
    * установке дверей так же вращай их по Q/E причём сразу по 4 значениям —
@@ -2929,7 +3017,9 @@ function createWorkshop({ api, hosts }) {
    * вещи угол, у двери четыре сочетания петель и стороны.
    */
   function stepDoor(delta) {
-    applyDoorState(openingDoorStep(doorState(selectedOpening()), delta));
+    // Кольцо — по виду (таск 215): у одностворчатой распашной оно из четырёх
+    // положений, у двустворчатой из двух. Считает его модель, здесь только шаг.
+    applyDoorState(openingDoorStep(doorState(selectedOpening()), delta, doorKind()));
   }
 
   /** Есть ли сейчас дверь, которую листать: выделенная или та, что встанет. */
@@ -3028,6 +3118,7 @@ function createWorkshop({ api, hosts }) {
         sizes: workshopOpeningSizes,
         hinge: workshopDoorHinge,
         swing: workshopDoorSwing,
+        glazed: workshopOpeningGlazed,
       },
       objects: {
         key: workshopObjectKey,
@@ -3064,6 +3155,7 @@ function createWorkshop({ api, hosts }) {
     workshopOpeningSizes = picked.openings.sizes;
     workshopDoorHinge = picked.openings.hinge;
     workshopDoorSwing = picked.openings.swing;
+    workshopOpeningGlazed = picked.openings.glazed === true;
     if (picked.objects.key) workshopObjectKey = picked.objects.key;
     // Размеры новой вещи — те, что показаны в окне: второго счёта здесь нет,
     // иначе окно обещало бы одно, а под рукой встало бы другое.
@@ -4790,13 +4882,22 @@ function createWorkshop({ api, hosts }) {
    * бы в колонке одно, а в окне другое.
    */
   function syncAddPlate() {
-    const key = tool === "objects" ? workshopObjectKey : null;
+    // Картинка на плашке — та же, что в плитке выбора: у вещи её рисует реестр
+    // изображений, у проёма — его лицо (таск 215). У стен картинки нет и быть
+    // не может: стена не вещь из каталога.
+    const key = tool === "objects" ? workshopObjectKey : tool === "openings" ? workshopOpeningKind : null;
     const note = drawPickerNote(tool, pickerSettings());
-    const mark = (key || "") + "\n" + note;
+    const mark = tool + "\n" + (key || "") + "\n" + note;
     if (addShown === mark) return;
     addShown = mark;
-    addIcon.replaceChildren(...(key ? [objectTileIcon(key, WORKSHOP_THING_ICON)] : []));
-    addIcon.hidden = !key;
+    const icon =
+      tool === "objects" && key
+        ? [objectTileIcon(key, WORKSHOP_THING_ICON)]
+        : tool === "openings" && key
+          ? [openingTileIcon(key, WORKSHOP_THING_ICON)]
+          : [];
+    addIcon.replaceChildren(...icon);
+    addIcon.hidden = icon.length === 0;
     addName.textContent = drawPickerName(tool);
     addNote.textContent = note;
   }
@@ -4957,17 +5058,32 @@ function createWorkshop({ api, hosts }) {
 
   function syncOpening(opening) {
     const kind = opening.kind;
-    kindButtons.forEach((button, index) => {
-      button.className = "ui-btn ui-chip" + (OPENING_KINDS[index] === kind ? " is-on" : "");
-    });
+    // Плашка перерисовывается только когда поменялось нарисованное: `sync`
+    // зовут на каждое движение мыши по полю, а картинка вида — холст в точках
+    // устройства. То же правило, что у плашки вещи (`syncThing`).
+    const mark = kind + "\n" + (openingGlazed(opening) ? "1" : "0");
+    if (openingShown !== mark) {
+      openingShown = mark;
+      openingIcon.replaceChildren(openingTileIcon(kind, WORKSHOP_THING_ICON));
+      openingName.textContent = openingTitle(opening);
+    }
+    openingKindButton.title = strings.workshop.openingChangeHint;
+    // Отметка «стеклянная» — только у видов, которые ею бывают: у окна и арки
+    // стеклить нечего, и пустая галочка обещала бы выбор, которого нет.
+    const canGlaze = openingCanGlaze(kind);
+    glazeRow.hidden = !canGlaze;
+    if (canGlaze) glazeBox.checked = openingGlazed(opening);
     fieldValue(openingWidth, opening.widthMm);
     fieldValue(openingHeight, opening.heightMm);
     fieldValue(openingFloor, opening.heightAboveFloorMm);
     fieldValue(openingAt, opening.atMm);
     // Поля полотна — у всякого вида с полотном (таск 180): у стеклянной двери
-    // те же петли, та же сторона и те же четыре состояния.
+    // те же петли, та же сторона и те же четыре состояния. Кнопка «Петли» уходит
+    // у видов, у которых петлям нечего переставлять (двустворчатая дверь,
+    // распашные ворота): кольцо у них из двух состояний (таск 215).
     const leaf = openingHasLeaf(kind);
     doorFields.hidden = !leaf;
+    hingeButton.hidden = !leaf || openingDoorStates(kind).length < 3;
     if (leaf) {
       hingeButton.textContent = text("workshop.doorHinge", { value: strings.openingHinges[opening.hinge] });
       swingButton.textContent = text("workshop.doorSwing", { value: strings.openingSwings[opening.swing] });

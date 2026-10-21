@@ -43,14 +43,19 @@
 // дело хозяина (`panels/workshop.js`), иначе отказ («Отмена») оставлял бы за
 // собой половину правок.
 import { strings, text } from "../strings.js";
-import { uiApply, uiButton, uiEl, uiField, uiModal, uiNumber } from "./ui.js";
+import { uiApply, uiButton, uiCheckRow, uiEl, uiField, uiModal, uiNumber } from "./ui.js";
 import {
   DRAWING_MM_MAX,
   OPENING_KINDS,
+  OPENING_KIND_DEFAULT,
   WALL_THICKNESS_MM_MAX,
+  openingCanGlaze,
+  openingDoorStates,
   openingHasLeaf,
+  openingTitle,
 } from "../model.js";
 import { createObjectTiles } from "./objectPicker.js";
+import { createOpeningTiles } from "./openingPicker.js";
 import { objectCatalogName } from "../objectCatalog.js";
 
 // Порядок шагов — порядок работы, заданный заказчиком (G176): сперва стены,
@@ -98,7 +103,9 @@ export function drawPickerNote(adding, settings = {}) {
     const sizes = (openings.sizes || {})[kind];
     if (!kind || !sizes) return strings.drawPicker.noteEmpty;
     return text("drawPicker.noteOpening", {
-      kind: strings.openingKinds[kind] || kind,
+      // Имя вида и отметка «стеклянная» — одним местом (`openingTitle`): в
+      // плашке колонки и в этой строке проём обязан называться одинаково.
+      kind: openingTitle({ kind, glazed: openings.glazed === true }),
       width: sizes.widthMm,
       height: sizes.heightMm,
     });
@@ -128,10 +135,11 @@ function drawPickerSettings(options) {
     adding: drawPickerStepOf(options.adding),
     walls: { thicknessMm: Number(walls.thicknessMm) || 100 },
     openings: {
-      kind: OPENING_KINDS.includes(openings.kind) ? openings.kind : OPENING_KINDS[0],
+      kind: OPENING_KINDS.includes(openings.kind) ? openings.kind : OPENING_KIND_DEFAULT,
       sizes,
       hinge: openings.hinge,
       swing: openings.swing,
+      glazed: openings.glazed === true,
     },
     objects: { key: objects.key || null, way: objects.way || "rect", sizes: { ...(objects.sizes || {}) } },
   };
@@ -208,22 +216,36 @@ export function openDrawPicker(options = {}) {
 
     // ——— шаг «Проёмы»: вид и размеры ———
 
-    const kindChips = OPENING_KINDS.map((kind) =>
-      uiButton(strings.openingKinds[kind], {
-        class: "ui-btn ui-chip",
-        attrs: { "data-kind": kind },
-        on: {
-          click: () => {
-            if (settings.openings.kind === kind) {
-              start();
-              return;
-            }
-            settings.openings.kind = kind;
-            sync();
-          },
-        },
-      }),
-    );
+    // Виды проёмов — **сетка плиток каталога** (таск 215, G321), той же
+    // мерки, что сетка вещей шагом ниже: заказчик так и сказал — «выбор проёмов
+    // сделай как и у объектов». Ряд чипов, стоявший здесь до таска, держал пять
+    // видов; в каталоге их шестнадцать, и рядом слов они не читались бы вовсе.
+    //
+    // Правило кликов то же, что у плиток вещей и у чипов толщины: первый клик
+    // выбирает, повторный по выбранному закрывает окно и берётся за дело.
+    const openingTiles = createOpeningTiles({
+      kind: settings.openings.kind,
+      onPick: (kind) => {
+        if (settings.openings.kind === kind) {
+          start();
+          return;
+        }
+        settings.openings.kind = kind;
+        // Размеры нового вида — его каталожные, если человек их ещё не правил:
+        // таблица умолчаний приходит доводом и правится здесь же.
+        openingTiles.setKind(kind);
+        sync();
+      },
+    });
+    // Отметка «стеклянная» (G321): одна на все виды дверей, и видна только у
+    // них. Мнение заказчика было то же — «иначе плиток вдвое больше, а разница
+    // в одном».
+    const glazeBox = uiEl("input", { type: "checkbox" });
+    glazeBox.addEventListener("change", () => {
+      settings.openings.glazed = glazeBox.checked;
+      sync();
+    });
+    const glazeRow = uiCheckRow(glazeBox, strings.workshop.openingGlazed, strings.workshop.openingGlazedHint);
     const openingWidth = uiNumber(1, DRAWING_MM_MAX);
     const openingHeight = uiNumber(1, DRAWING_MM_MAX);
     const openingFloor = uiNumber(0, DRAWING_MM_MAX);
@@ -262,7 +284,8 @@ export function openDrawPicker(options = {}) {
     });
     const doorRow = uiEl("div", { class: "ui-fields" }, [hinge, swing]);
     const openingsBody = uiEl("div", { class: "drawPicker__body" }, [
-      uiEl("div", { class: "ui-chips" }, kindChips),
+      openingTiles.node,
+      glazeRow,
       // Поля в две колонки: столбиком они растили окно так, что кнопка «Ставить
       // проём» уезжала за нижний край карточки (поймано живым прогоном).
       uiEl("div", { class: "drawPicker__grid" }, [
@@ -378,6 +401,7 @@ export function openDrawPicker(options = {}) {
               settings.adding = adding;
               sync();
               if (adding === "objects") tiles.focus();
+              if (adding === "openings") openingTiles.focus();
             },
           },
         },
@@ -418,13 +442,17 @@ export function openDrawPicker(options = {}) {
       }
       // Проёмы: вид, его размеры и створка двери.
       const sizes = openingSizes();
-      for (const chip of kindChips) chip.classList.toggle("is-on", chip.dataset.kind === settings.openings.kind);
+      glazeRow.hidden = !openingCanGlaze(settings.openings.kind);
+      glazeBox.checked = settings.openings.glazed === true && !glazeRow.hidden;
       fieldValue(openingWidth, sizes.widthMm);
       fieldValue(openingHeight, sizes.heightMm);
       fieldValue(openingFloor, sizes.heightAboveFloorMm);
       // Створка — у всякого вида с полотном (таск 180): у стеклянной двери те
       // же петли и та же сторона открывания, что у глухой.
       doorRow.hidden = !openingHasLeaf(settings.openings.kind);
+      // Петли прячутся у видов, у которых им нечего переставлять (двустворчатая
+      // дверь, распашные ворота): кольцо у них из двух положений (таск 215).
+      hinge.hidden = doorRow.hidden || openingDoorStates(settings.openings.kind).length < 3;
       hinge.textContent = text("workshop.doorHinge", {
         value: strings.openingHinges[settings.openings.hinge] || "",
       });
@@ -468,6 +496,7 @@ export function openDrawPicker(options = {}) {
     // задаёт она сама (`--picker-columns`), как в окне выбора вещи.
     if (modal.card) modal.card.classList.add("modal--wide", "modal--drawPicker");
     if (settings.adding === "objects") tiles.focus();
+    else if (settings.adding === "openings") openingTiles.focus();
     else thickness.focus();
   });
 }
