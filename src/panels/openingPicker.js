@@ -24,7 +24,7 @@
 // **выделенного** проёма — ровно как `openObjectPicker` меняет вещь у
 // выделенной вещи, и сетка у них общая на оба случая.
 import { OPENING_CATEGORIES, openingCatalogCategory, openingCatalogEntry } from "../openingCatalog.js";
-import { openingFaceGrid } from "../model.js";
+import { openingArchGeometry, openingFaceGrid } from "../model.js";
 import { drawOpeningFace } from "../render.js";
 import { strings } from "../strings.js";
 import { uiEl, uiPickCard, uiPickKeys, uiPickSearch } from "./ui.js";
@@ -78,6 +78,9 @@ export function openingTileIcon(kind, size = OPENING_TILE_ICON) {
       motion: entry.motion,
       leaves: entry.leaves,
       grid: openingFaceGrid({ kind: entry.kind, heightMm: entry.heightMm }),
+      // Дуга арки (таск 219, G329) — та же, что на листе: до неё «Проём» и
+      // «Арка» стояли в окне выбора двумя одинаковыми плитками.
+      arch: openingArchGeometry({ kind: entry.kind, widthMm: entry.widthMm, heightMm: entry.heightMm }),
       // Петли у плитки всегда у начала: плитка показывает **вид**, а не
       // состояние двери — состояние крутят `Q` и `E` уже на чертеже.
       hinge: "start",
