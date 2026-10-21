@@ -15,6 +15,7 @@ import {
   layoutAllows,
   PANEL_IDS,
   registerPanel,
+  reportAppError,
   scheduleFrame,
   SCREEN_DEFAULT,
   setScreen,
@@ -1203,7 +1204,7 @@ function canvasAlive(project, ids) {
 }
 
 function canvasFail(error) {
-  canvasApi.notify(error && error.message ? error.message : String(error), "error");
+  reportAppError(error);
 }
 
 function canvasPlacePoint(plan) {

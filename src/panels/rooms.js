@@ -9,6 +9,7 @@
 import {
   PANEL_IDS,
   registerPanel,
+  reportAppError,
   SCREEN_DEFAULT,
   SECTION_IDS,
   setScreen,
@@ -166,7 +167,7 @@ function mountRoomsPanel(host, api) {
   }
 
   function fail(error) {
-    notify(error && error.message ? error.message : String(error), "error");
+    reportAppError(error);
   }
 
   function commit(after, label, options) {

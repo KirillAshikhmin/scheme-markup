@@ -17,7 +17,7 @@
 // простыня на полтора десятка строк поверх плана; строкой панели тот же вопрос
 // ждёт, пока до него дойдут руки. Отметка «разобрано» как была в объекте
 // (`type.kindGuessed`), так и осталась: она уезжает вместе с файлом.
-import { layoutAllows, PANEL_IDS, registerPanel } from "../app.js";
+import { layoutAllows, PANEL_IDS, registerPanel, reportAppError } from "../app.js";
 import {
   acceptProblem,
   acceptedProblems,
@@ -250,7 +250,7 @@ export function warningsModel(project) {
 }
 
 function mountWarningsPanel(host, api) {
-  const { getState, setState, subscribe, notify } = api;
+  const { getState, setState, subscribe } = api;
   let model = warningsModel(null);
   let open = false;
   // Раскрытые группы помнятся по ключу: правка объекта не должна схлопывать
@@ -326,7 +326,7 @@ function mountWarningsPanel(host, api) {
     try {
       canvasCommit(project, updateType(project, typeId, { kind }).project, strings.history.typeKind);
     } catch (error) {
-      notify(error && error.message ? error.message : String(error), "error");
+      reportAppError(error);
     }
   }
 

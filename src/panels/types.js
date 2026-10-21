@@ -5,7 +5,7 @@
 // объекты. Общим остаётся только шаблон: снимок справочника в настройках
 // браузера, с которого панель объектов создаёт следующий объект; уже
 // созданные остаются как были.
-import { PANEL_IDS, registerPanel } from "../app.js";
+import { PANEL_IDS, registerPanel, reportAppError } from "../app.js";
 import { strings, text } from "../strings.js";
 import { markSizesSummary, openTypeSizesPicker } from "./markSizes.js";
 import {
@@ -737,7 +737,7 @@ export function openTypesDictionary(api) {
   }
 
   function fail(error) {
-    api.notify(error && error.message ? error.message : String(error), "error");
+    reportAppError(error);
     render();
   }
 
@@ -764,7 +764,7 @@ export function openTypesDictionary(api) {
     try {
       canvasCommit(project(), build(project()), label);
     } catch (error) {
-      api.notify(error && error.message ? error.message : String(error), "error");
+      reportAppError(error);
       const input = fields[typesAddErrorField(error && error.code)];
       if (input) {
         input.classList.add("is-wrong");

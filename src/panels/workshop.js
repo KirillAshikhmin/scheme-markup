@@ -77,6 +77,7 @@ import {
   ELEVATION_VIEWS_SETTING,
   PANEL_IDS,
   registerPanel,
+  reportAppError,
   scheduleFrame,
   SCREEN_DEFAULT,
   SECTION_IDS,
@@ -2370,7 +2371,7 @@ function createWorkshop({ api, hosts }) {
   }
 
   function fail(error) {
-    notify(error && error.message ? error.message : String(error), "error");
+    reportAppError(error);
   }
 
   function commit(after, label) {

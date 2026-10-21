@@ -4,7 +4,7 @@
 // Почему список, а не карточка метки: заказчик заполняет «Расположение» и
 // «Комментарий» не в момент постановки, а потом, разом, по списку.
 // Поэтому правка здесь на месте, а отдельного окна у метки нет вовсе.
-import { layoutAllows, PANEL_IDS, registerPanel } from "../app.js";
+import { layoutAllows, PANEL_IDS, registerPanel, reportAppError } from "../app.js";
 import { getSetting, setSetting } from "../store.js";
 import { strings, text } from "../strings.js";
 import {
@@ -715,7 +715,7 @@ function mountMarksPanel(host, api) {
   }
 
   function fail(error) {
-    notify(error && error.message ? error.message : String(error), "error");
+    reportAppError(error);
   }
 
   function selectMark(markId) {
