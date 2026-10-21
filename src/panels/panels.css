@@ -1062,6 +1062,7 @@
 .warnings__viewNone {
   color: var(--panel-muted);
   font-size: 12px;
+  white-space: nowrap;
 }
 
 /* Кнопка «Применить» в строке: держит правый край рядом с крестиком и, как он,

@@ -551,7 +551,9 @@ function mountWarningsPanel(host, api) {
         {
           class: "warnings__row warnings__row--warning warnings__row--view",
           type: "button",
-          title: strings.warnings.hint,
+          // У типа без нынешнего изображения в строке стоит короткое «нет»:
+          // длинная фраза наезжала бы на название типа. Сама фраза — здесь.
+          title: offer && !offer.now ? strings.warnings.viewNoneHint : strings.warnings.hint,
           on: { click: () => jump(item.place) },
         },
         [
