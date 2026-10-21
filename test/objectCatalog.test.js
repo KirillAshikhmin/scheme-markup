@@ -357,7 +357,7 @@ test("выход с лестницы — парный лестнице элем�
   assert.equal(stairs.heightMm, null, "лестница по-прежнему во всю высоту помещения");
   assert.equal(exit.heightMm, 200);
   assert.ok(exit.heightMm <= VOLUME_STEP_MM, "через выход обязаны переступать, иначе на него не сойти");
-  assert.equal(objectCatalogEntry("stairsExit").category, "structures");
+  assert.equal(objectCatalogEntry("stairsExit").category, "stairway", "выход ушёл из лестничного раздела");
   assert.equal(objectCatalogEntry("stairsExit").mount, "floor");
   // **Ключ свой**, а не имя вида: по нему выход будут искать (таск 205), как по
   // ключу ищут лестницу (таск 149).
@@ -389,9 +389,9 @@ test("девятнадцать вещей таска 216 на месте, и к�
   const asked = {
     railing: "structures",
     fence: "structures",
-    stairsL: "structures",
-    stairsU: "structures",
-    stairsSpiral: "structures",
+    stairsL: "stairway",
+    stairsU: "stairway",
+    stairsSpiral: "stairway",
     plant: "decor",
     treePot: "decor",
     floorLamp: "decor",
@@ -436,6 +436,41 @@ test("девятнадцать вещей таска 216 на месте, и к�
   // бы ей тело.
   assert.deepEqual(objectViewClashes(), []);
   assert.deepEqual(objectModelClashes(), []);
+});
+
+test("раскладка названа: восемь разделов, и «Лестницы» — ровно лестничная клетка (G326)", () => {
+  // Заказчик разрешил перегруппировать («можешь перегруппировать»), и
+  // раскладка после этого — решение, а не то, как сложилось. Поэтому она
+  // названа здесь числом: перестановка вещи между разделами обязана краснеть,
+  // потому что человек видит разделы в окне выбора.
+  assert.deepEqual(OBJECT_CATEGORIES, [
+    "furniture",
+    "sanitary",
+    "appliances",
+    "stairway",
+    "structures",
+    "engineering",
+    "decor",
+    "transport",
+  ]);
+  const sizes = OBJECT_CATEGORIES.map((category) => objectCatalogCategory(category).length);
+  assert.deepEqual(sizes, [14, 6, 7, 5, 5, 7, 7, 1], "вещи переехали между разделами: " + sizes.join(","));
+  assert.equal(sizes.reduce((sum, value) => sum + value, 0), objectCatalogKeys().length);
+  // **Раздел «Лестницы» и лестничная клетка — одно и то же.** Это не
+  // совпадение, а то, ради чего раздел и заведён: по этим же ключам объём
+  // переводит по этажам (T149), а привязка берёт точку (T205). Разойдись они —
+  // в разделе стояла бы лестница, которая не лестница.
+  assert.deepEqual(
+    objectCatalogCategory("stairway").map((entry) => entry.key),
+    SCHEME_ANCHOR_OBJECT_KEYS,
+    "раздел «Лестницы» разошёлся с лестничной клеткой",
+  );
+  // Переезд раздела — правка сборки, а не формата: у поставленной вещи в
+  // объекте лежит ключ, и категории там нет вовсе (G68).
+  const scene = room();
+  const put = place(scene, "stairsSpiral");
+  assert.ok(!Object.prototype.hasOwnProperty.call(put.object, "category"), "категория уехала в объект");
+  assert.ok(!JSON.stringify(put.project).includes('"category"'), "категория появилась в файле объекта");
 });
 
 test("пара лестница — выход стала точкой привязки сама, без правки привязки", () => {

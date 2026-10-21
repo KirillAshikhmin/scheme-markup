@@ -79,7 +79,7 @@ test("поиск: по имени вещи и по имени категории
   assert.deepEqual(sanitary.map((group) => group.category), ["sanitary"]);
   assert.deepEqual(keysOf(sanitary), keysOf(objectPickerGroups("")).filter((key) => objectCatalogEntry(key).category === "sanitary"));
   // Пустая категория из выдачи уходит, а не держит заголовок.
-  assert.deepEqual(objectPickerGroups("лестни").map((group) => group.category), ["structures"]);
+  assert.deepEqual(objectPickerGroups("лестни").map((group) => group.category), ["stairway"]);
   assert.deepEqual(objectPickerGroups("ничегонетщ"), []);
 });
 
