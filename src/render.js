@@ -39,6 +39,7 @@ import {
   openingArchGeometry,
   openingFaceGrid,
   openingFamilyOf,
+  openingFoldLinks,
   openingGlazed,
   openingHasLeaf,
   openingLeavesOf,
@@ -5697,8 +5698,9 @@ function drawDrawingDoor(ctx, bridge, wall, opening, colour) {
  *
  *   **сдвижное** — прямая полоса и стрелка;
  *   **гармошка** — та же полоса, сложенная в четыре звена: число звеньев то
- *     же, что секций у её лица (`openingFaceGrid`), и второго числа для
- *     гармошки в сборке нет;
+ *     же, что секций у её лица (`openingFoldLinks`), и второго числа для
+ *     гармошки в сборке нет: тем же числом она складывается в пакет в объёме
+ *     (таск 226);
  *   **портальное** — полоса лежит **в** стене, а за косяком пунктиром показан
  *     карман, куда полотно уезжает целиком: это и есть «слайдинг в стену».
  */
@@ -5720,7 +5722,7 @@ function drawDrawingSlider(ctx, bridge, wall, opening, leaf, colour, glazed, fra
     // Звенья гармошки: ломаная туда-обратно поперёк полосы. Амплитуда — та же
     // мера, на которую полотно отодвинуто от стены, чтобы звенья не наехали на
     // неё и не слились с её линией.
-    const parts = Math.max(2, openingFaceGrid(opening).xs.length + 1);
+    const parts = openingFoldLinks(opening);
     const amp = Math.max(2, Math.abs(away) || thick / 2);
     ctx.lineWidth = 1.5;
     ctx.beginPath();

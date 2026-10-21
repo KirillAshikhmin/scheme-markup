@@ -2,7 +2,7 @@
 //
 // Что здесь держится:
 //
-//   1. **Состав каталога.** Пятьдесят две вещи в семи категориях (последняя —
+//   1. **Состав каталога.** Пятьдесят девять вещей в девяти категориях (последний —
 //      «Транспорт», таск 204), у каждой имя в словаре, положительный габарит и
 //      известное место установки. Вещь, забытая в словаре, вышла бы в колонку
 //      своим ключом по-английски.
@@ -138,9 +138,9 @@ function place(scene, catalogKey, patch = {}) {
 
 // ——— состав каталога ————————————————————————————————————————————————————
 
-test("в каталоге пятьдесят две вещи, и каждая стоит ровно в одной категории", () => {
+test("в каталоге пятьдесят девять вещей, и каждая стоит ровно в одной категории", () => {
   const keys = objectCatalogKeys();
-  assert.equal(keys.length, 52, "вещей в каталоге стало другое число: " + keys.length);
+  assert.equal(keys.length, 59, "вещей в каталоге стало другое число: " + keys.length);
   assert.equal(new Set(keys).size, keys.length, "ключ занят дважды");
   // Тринадцать из брифа заказчика — поимённо: список называли словами, и
   // пропажа любой из них должна краснеть, а не теряться в числе.
@@ -397,7 +397,7 @@ test("девятнадцать вещей таска 216 на месте, и к�
     floorLamp: "decor",
   };
   const offered = {
-    rack: "engineering",
+    rack: "electrics",
     boiler: "engineering",
     waterHeater: "engineering",
     manifold: "engineering",
@@ -438,7 +438,49 @@ test("девятнадцать вещей таска 216 на месте, и к�
   assert.deepEqual(objectModelClashes(), []);
 });
 
-test("раскладка названа: восемь разделов, и «Лестницы» — ровно лестничная клетка (G326)", () => {
+test("семь вещей таска 224 на месте, и лифт — вещь лестничной клетки (G336)", () => {
+  const asked = {
+    gate: "structures",
+    evCharger: "electrics",
+    acOutdoor: "engineering",
+    generator: "electrics",
+    ups: "electrics",
+    pumpUnit: "engineering",
+    lift: "stairway",
+  };
+  for (const [key, category] of Object.entries(asked)) {
+    const entry = objectCatalogEntry(key);
+    assert.ok(entry, "вещь таска 224 пропала: " + key);
+    assert.equal(entry.category, category, key + ": вещь ушла не в свой раздел");
+    assert.equal(entry.name, strings.schemeObjectKinds[key], key + ": имя не из словаря");
+    assert.equal(objectCatalogKeyByName(entry.name), key, key + ": имя не узнаётся своим ключом");
+    assert.ok(objectViewByName(key), key + ": нет изображения");
+    assert.ok(objectModelByKey(key), key + ": нет модели");
+  }
+  // **Генератор и ИБП — две вещи, а не одна.** Заказчик назвал их через «или»,
+  // и разводит их не вкус, а габарит с местом: генератор метровый и стоит
+  // снаружи, ИБП — шкаф в техпомещении.
+  assert.notDeepEqual(objectCatalogDefaults("generator"), objectCatalogDefaults("ups"));
+  assert.equal(objectCatalogEntry("generator").mount, "floor");
+  assert.equal(objectCatalogEntry("ups").mount, "floor");
+  // Лифт — третья вещь клетки: высота во всю высоту помещения, как у марша, и
+  // ключ его стоит в том единственном списке, которым объём узнаёт переход.
+  assert.equal(objectCatalogDefaults("lift").heightMm, null, "у лифта завелась своя высота");
+  assert.deepEqual(objectCatalogDefaults("lift"), {
+    shape: "rect",
+    widthMm: 1200,
+    depthMm: 1400,
+    heightMm: null,
+    heightAboveFloorMm: 0,
+  });
+  assert.ok(SCHEME_ANCHOR_OBJECT_KEYS.includes("lift"), "лифт выпал из лестничной клетки");
+  // Ворота — одна вещь на створку с калиткой, и ростом они с забор: линия
+  // ограждения не идёт ступенькой.
+  assert.equal(objectCatalogDefaults("gate").heightMm, objectCatalogDefaults("fence").heightMm);
+  assert.equal(objectCatalogDefaults("gate").widthMm, 4500);
+});
+
+test("раскладка названа: девять разделов, и «Лестницы и лифт» — ровно лестничная клетка (G326, G336)", () => {
   // Заказчик разрешил перегруппировать («можешь перегруппировать»), и
   // раскладка после этого — решение, а не то, как сложилось. Поэтому она
   // названа здесь числом: перестановка вещи между разделами обязана краснеть,
@@ -450,11 +492,12 @@ test("раскладка названа: восемь разделов, и «Л�
     "stairway",
     "structures",
     "engineering",
+    "electrics",
     "decor",
     "transport",
   ]);
   const sizes = OBJECT_CATEGORIES.map((category) => objectCatalogCategory(category).length);
-  assert.deepEqual(sizes, [14, 6, 7, 5, 5, 7, 7, 1], "вещи переехали между разделами: " + sizes.join(","));
+  assert.deepEqual(sizes, [14, 6, 7, 6, 6, 7, 5, 7, 1], "вещи переехали между разделами: " + sizes.join(","));
   assert.equal(sizes.reduce((sum, value) => sum + value, 0), objectCatalogKeys().length);
   // **Раздел «Лестницы» и лестничная клетка — одно и то же.** Это не
   // совпадение, а то, ради чего раздел и заведён: по этим же ключам объём

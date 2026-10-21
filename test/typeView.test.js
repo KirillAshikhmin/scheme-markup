@@ -95,11 +95,11 @@ test("реестр изображений разложен по семьям, и
     }
   }
   assert.deepEqual([...all].sort(), objectViewNames(), "семьи и плоский список реестра разошлись");
-  // Восемьдесят девять изображений: 37 у меток и 52 у вещей чертежа. Число
-  // названо, чтобы следующий, кто добавит изображение, увидел, что сетка
-  // выбора подросла.
-  assert.equal(objectViewNames().length, 89);
-  assert.equal(objectViewFamily(OBJECT_VIEW_FAMILY_OBJECTS).length, 52);
+  // Девяносто шесть изображений: 37 у меток и 59 у вещей чертежа (таск 224
+  // добавил семь). Число названо, чтобы следующий, кто добавит изображение,
+  // увидел, что сетка выбора подросла.
+  assert.equal(objectViewNames().length, 96);
+  assert.equal(objectViewFamily(OBJECT_VIEW_FAMILY_OBJECTS).length, 59);
 });
 
 test("у каждого изображения метки есть человеческое имя", () => {
@@ -342,20 +342,20 @@ test("справочник показывает то же: своё имя, вы
 test("сетка изображений: разделы реестра, затем каталог вещей чертежа", () => {
   const groups = typeViewGroups("");
   const tiles = groups.flatMap((group) => group.entries);
-  // Восемьдесят восемь из восьмидесяти девяти: общий вид «Сантехника»
+  // Девяносто пять из девяноста шести: общий вид «Сантехника»
   // (`plumbing`) помечен в каталоге `legacy` и из плиток спрятан — ею больше не
   // размечают. Прячет её окно, а не каталог, и показывает обратно, пока такое
   // изображение стоит у самого типа.
-  assert.equal(tiles.length, 88, "в сетке не все изображения реестра");
+  assert.equal(tiles.length, 95, "в сетке не все изображения реестра");
   assert.equal(
     typeViewGroups("", { key: "plumbing" }).flatMap((group) => group.entries).length,
-    89,
+    96,
     "своё изображение типа пропало из сетки — человек не видит, чем он размечен",
   );
   assert.deepEqual(
     groups.map((group) => group.category),
     [...OBJECT_VIEW_FAMILIES.filter((family) => family !== OBJECT_VIEW_FAMILY_OBJECTS), "furniture", "sanitary",
-      "appliances", "stairway", "structures", "engineering", "decor", "transport"],
+      "appliances", "stairway", "structures", "engineering", "electrics", "decor", "transport"],
     "порядок разделов сетки разошёлся с порядком реестра и каталога",
   );
   // Имена — человеческие, у обеих половин.

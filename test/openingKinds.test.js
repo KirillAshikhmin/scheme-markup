@@ -34,7 +34,9 @@ import {
   createProject,
   findScheme,
   openingCanGlaze,
+  openingFaceGrid,
   openingFamilyOf,
+  openingFoldLinks,
   openingMotionOf,
   openingsInWall,
   setPlanOrigin,
@@ -47,6 +49,8 @@ import { openingCatalogDefaults } from "../src/openingCatalog.js";
 import { drawDrawingOpening, drawElevation, drawOpeningFace, drawingBridge, drawingDoorLeaves } from "../src/render.js";
 import {
   VOLUME_ARCH_SEGMENTS,
+  VOLUME_FOLD_GAP_MM,
+  VOLUME_FOLD_LEAF_MM,
   VOLUME_ROLL_MM,
   volumeDoorOpen,
   volumeInnerSide,
@@ -438,24 +442,101 @@ test("двустворчатая дверь — две створки с руч�
 
 test("сдвижное полотно съезжает за косяк, портальное прячется в стену", () => {
   const along = (faces) => faces.flatMap((face) => face.p.map((point) => point.x));
-  for (const kind of ["doorSliding", "doorFolding"]) {
-    const scene = one(kind, { hinge: "start", swing: "left" });
-    const shut = volumeScene(scene.project, scene.schemeId);
-    const open = volumeScene(scene.project, scene.schemeId, { openDoorIds: new Set(scene.ids) });
-    const closed = leafOf(shut, scene.ids[0]).filter((face) => face.both);
-    const moved = leafOf(open, scene.ids[0]).filter((face) => face.both);
-    assert.equal(closed.length, 1, kind + ": закрытое полотно — одна грань");
-    assert.ok(Math.min(...along(moved)) < Math.min(...along(closed)) - 100, kind + " не съехало");
-    // Съехало **вдоль** стены, а не поперёк: это не распашная.
-    const ys = moved.flatMap((face) => face.p.map((point) => point.y));
-    assert.ok(Math.max(...ys.map(Math.abs)) < 1, kind + " ушло от стены, а должно было съехать вдоль");
-  }
+  // Гармошки здесь нет нарочно: с таска 226 она не съезжает, а складывается
+  // пакетом звеньев — у неё свой тест ниже (G338).
+  const scene = one("doorSliding", { hinge: "start", swing: "left" });
+  const shut = volumeScene(scene.project, scene.schemeId);
+  const open = volumeScene(scene.project, scene.schemeId, { openDoorIds: new Set(scene.ids) });
+  const closed = leafOf(shut, scene.ids[0]).filter((face) => face.both);
+  const moved = leafOf(open, scene.ids[0]).filter((face) => face.both);
+  assert.equal(closed.length, 1, "закрытое полотно — одна грань");
+  assert.ok(Math.min(...along(moved)) < Math.min(...along(closed)) - 100, "сдвижное не съехало");
+  // Съехало **вдоль** стены, а не поперёк: это не распашная.
+  const ys = moved.flatMap((face) => face.p.map((point) => point.y));
+  assert.ok(Math.max(...ys.map(Math.abs)) < 1, "сдвижное ушло от стены, а должно было съехать вдоль");
   // Портальная уезжает в стену, и открытой её не видно вовсе — это самый
   // честный вид «открыто», какой у неё бывает.
   const pocket = one("doorPocket", { hinge: "start", swing: "left" });
   assert.equal(leafOf(volumeScene(pocket.project, pocket.schemeId), pocket.ids[0]).length > 0, true);
-  const open = volumeScene(pocket.project, pocket.schemeId, { openDoorIds: new Set(pocket.ids) });
-  assert.deepEqual(leafOf(open, pocket.ids[0]), [], "раскрытая портальная не рисуется");
+  const hidden = volumeScene(pocket.project, pocket.schemeId, { openDoorIds: new Set(pocket.ids) });
+  assert.deepEqual(leafOf(hidden, pocket.ids[0]), [], "раскрытая портальная не рисуется");
+});
+
+// ——— таск 226: гармошка складывается пакетом (G338) ————————————————————————
+//
+// Долг таска 215: «гармошка в объёме складывается в половину своей ширины —
+// приближение, а не пакет звеньев». Приближение врало дважды: полотно съезжало
+// за косяк, как сдвижное, и оставалось одной полосой вдвое короче себя.
+//
+// Проверяется здесь то, в чём врать некуда: число звеньев взято из той же
+// сетки, что рисунок на плане и на развёртке; звенья стоят поперёк стены; пакет
+// стоит у косяка с петлями и из проёма не вылезает; толщина его — считанная,
+// а не на глаз.
+
+test("G338: раскрытая гармошка складывается пакетом звеньев у косяка", () => {
+  const scene = one("doorFolding", { hinge: "start", swing: "left" });
+  const opening = scene.project.openings[0];
+  const links = openingFoldLinks(opening);
+  // Число звеньев — то же, которым полотно нарисовано на плане и на развёртке.
+  // Второго числа для гармошки в сборке нет, и это ровно решение таска 215.
+  assert.equal(links, openingFaceGrid(opening).xs.length + 1, "у объёма своё число звеньев");
+  assert.equal(links, 4, "у гармошки каталога звеньев не четыре");
+  const shut = leafOf(volumeScene(scene.project, scene.schemeId), scene.ids[0]).filter((face) => face.both);
+  const open = leafOf(volumeScene(scene.project, scene.schemeId, { openDoorIds: new Set(scene.ids) }), scene.ids[0]);
+  const boards = open.filter((face) => face.both);
+  assert.equal(shut.length, 1, "закрытая гармошка стоит в проёме одной гранью");
+  assert.equal(boards.length, links, "звеньев в пакете не столько, сколько секций: " + boards.length);
+  // Каждое звено — поперёк стены и шириной в свою секцию: 900 / 4 = 225 мм.
+  const link = opening.widthMm / links;
+  for (const board of boards) {
+    const xs = board.p.map((point) => point.x);
+    const ys = board.p.map((point) => point.y);
+    assert.ok(Math.max(...xs) - Math.min(...xs) < 1, "звено легло вдоль стены, а не поперёк");
+    assert.ok(Math.abs(Math.max(...ys) - Math.min(...ys) - link) < 1, "звено не в секцию шириной");
+  }
+  // Пакет стоит у того косяка, где петли (проём начинается на 1000), и толщина
+  // его считается, а не пишется: звено на звено плюс зазор. Четыре звена по 40
+  // и три зазора по 10 — 190 мм.
+  const planes = boards.map((board) => board.p[0].x).sort((one, two) => one - two);
+  const pack = links * VOLUME_FOLD_LEAF_MM + (links - 1) * VOLUME_FOLD_GAP_MM;
+  assert.equal(pack, 190);
+  assert.ok(Math.abs(planes[0] - (1000 + VOLUME_FOLD_LEAF_MM / 2)) < 1, "пакет не у косяка: " + planes[0]);
+  assert.ok(
+    Math.abs(planes[links - 1] - planes[0] - (links - 1) * (VOLUME_FOLD_LEAF_MM + VOLUME_FOLD_GAP_MM)) < 1,
+    "шаг пакета не звено с зазором",
+  );
+  assert.ok(planes[links - 1] + VOLUME_FOLD_LEAF_MM / 2 <= 1000 + opening.widthMm, "пакет вылез за проём");
+  // Ручка уехала вместе с последним звеном: в воздухе посреди проёма её нет.
+  const handles = open.filter((face) => face.rgb[0] === 186);
+  assert.ok(handles.length >= 6, "ручки у пакета нет: " + handles.length);
+  // Ручка — коробок **на** звене: вдоль стены она выступает на обе стороны
+  // полотна, поэтому сверяется середина, а не края.
+  const handleX = handles.flatMap((face) => face.p.map((point) => point.x));
+  const middle = (Math.min(...handleX) + Math.max(...handleX)) / 2;
+  assert.ok(Math.abs(middle - planes[links - 1]) < 1, "ручка стоит не на последнем звене: " + middle);
+  const handleY = handles.flatMap((face) => face.p.map((point) => Math.abs(point.y)));
+  assert.ok(Math.max(...handleY) > link / 2, "ручка не у свободного края звена: " + Math.max(...handleY));
+  // Петли у другого косяка — пакет собирается у него, а не ломится сквозь
+  // стену: на знаке здесь легко ошибиться, и видно это было бы только глазом.
+  const other = one("doorFolding", { hinge: "end", swing: "left" });
+  const far = leafOf(volumeScene(other.project, other.schemeId, { openDoorIds: new Set(other.ids) }), other.ids[0])
+    .filter((face) => face.both)
+    .map((face) => face.p[0].x)
+    .sort((one, two) => one - two);
+  assert.ok(Math.abs(far[links - 1] - (1900 - VOLUME_FOLD_LEAF_MM / 2)) < 1, "пакет не у второго косяка: " + far[links - 1]);
+  assert.ok(far[0] > 1000, "пакет от второго косяка ушёл за первый");
+});
+
+test("G338: пакет у́же проёма — а проём у́же пакета жмёт звенья, но не рисует их в стене", () => {
+  // Такой гармошки не бывает, но ширину задаёт человек: 160 мм на четыре звена
+  // по 40 — пакету негде встать во всю свою толщину. Жмётся шаг, а звенья
+  // остаются в проёме: нарисовать их сквозь косяк было бы хуже всего.
+  const scene = one("doorFolding", { widthMm: 160, hinge: "start", swing: "left" });
+  const open = leafOf(volumeScene(scene.project, scene.schemeId, { openDoorIds: new Set(scene.ids) }), scene.ids[0]);
+  const boards = open.filter((face) => face.both);
+  assert.equal(boards.length, 4, "звеньев всё те же четыре");
+  const xs = boards.flatMap((board) => board.p.map((point) => point.x));
+  assert.ok(Math.min(...xs) >= 1000 - 1 && Math.max(...xs) <= 1160 + 1, "звенья ушли в стену");
 });
 
 test("сквозь стекло в пол не ходят, а сквозь ворота ходят", () => {

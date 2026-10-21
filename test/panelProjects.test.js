@@ -20,6 +20,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { projectListItems } from "../src/panels/projects.js";
+
+const read = () =>
+  readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "src", "panels", "projects.js"), "utf8");
 import { strings } from "../src/strings.js";
 
 test("непрочитанный список и пустая база говорят разными словами", () => {
@@ -56,11 +59,43 @@ test("объект без имени не оставляет в шапке пу�
   assert.equal(shown.items[0].name, strings.project.untitled);
 });
 
+test("перечитка спрашивает смену объекта, а не факт правки", () => {
+  // Дефект D76 (таск 225): подписка на `project` срабатывает на каждый штрих —
+  // каждая метка и каждая стена идут через `setState({project})`. Пока объект
+  // не попал в список, прежнее условие звало `listProjects` на **каждую**
+  // правку, а та читает документы целиком. Замер на пяти правках: было два
+  // чтения всей базы, стало ноль.
+  const text = read();
+  const refresh = text.slice(text.indexOf("function refreshIfUnknown"), text.indexOf("async function openProjectById"));
+  assert.match(refresh, /lastProjectId/, "перечитка снова висит на факте правки, а не на смене объекта");
+  assert.match(refresh, /if \(id === lastProjectId\) return;/, "сравнение идентификатора пропало");
+  // И порядок внутри тела: сперва отсекается тот же объект, и только потом
+  // спрашивается список.
+  const body = refresh.slice(refresh.indexOf("function refreshIfUnknown"));
+  assert.ok(
+    body.indexOf("id === lastProjectId") < body.indexOf("known &&"),
+    "список спрашивается раньше, чем отсечён тот же самый объект",
+  );
+});
+
+test("шапка рисуется до того, как база ответила", () => {
+  // Иначе слова «читаем список» некому показать: первый кадр случался только
+  // после ответа базы, и в окне ожидания стоял пустой селект без строк
+  // (найдено живым прогоном таска 225).
+  const text = read();
+  const mount = text.slice(text.indexOf("  renderList();\n\n  (async () => {"));
+  assert.ok(mount.startsWith("  renderList();"), "первый кадр шапки снова ждёт ответа базы");
+  assert.ok(
+    text.indexOf("  renderList();\n\n  (async () => {") < text.indexOf("await openStore()"),
+    "кадр рисуется после открытия базы, а не до",
+  );
+});
+
 test("список перечитывается, когда объект пришёл со стороны", () => {
   // Это уже не чистое правило, а связь в панели, и держится она по исходнику:
   // подписка на объект обязана звать перечитку, иначе список останется
   // устаревшим до конца сеанса — ровно то, что и было дефектом.
-  const text = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "src", "panels", "projects.js"), "utf8");
+  const text = read();
   const subscribe = text.slice(text.lastIndexOf("subscribe((state, changed)"));
   assert.match(subscribe, /refreshIfUnknown\(state\.project\)/, "объект со стороны больше не перечитывает список");
   assert.match(text, /let known = null;/, "«не прочитан» снова стало пустым списком");

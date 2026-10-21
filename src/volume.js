@@ -57,6 +57,7 @@ import {
   openingArchDropMm,
   openingArchGeometry,
   openingFaceGrid,
+  openingFoldLinks,
   openingOpens,
   openingSlatted,
   openingFamilyOf,
@@ -74,7 +75,7 @@ import {
   projectCoords,
   projectTopAzimuth,
   SCHEME_ANCHOR_OBJECT_KEYS,
-  SCHEME_STAIR_EXIT_KEY,
+  schemeStairArrivalKeys,
   SCHEME_STAIR_OBJECT_KEYS,
   schemeAnchorOriginMm,
   schemeFloorOf,
@@ -2520,6 +2521,24 @@ const VOLUME_HANDLE_OUT_MM = 35;
 const VOLUME_HANDLE_TALL_MM = 90;
 const VOLUME_HANDLE_EDGE_MM = 70;
 
+/**
+ * **Сложенная гармошка** (таск 226, требование G338): два числа, из которых
+ * выходит толщина пакета.
+ *
+ * `VOLUME_FOLD_LEAF_MM` — толщина звена. Сорок миллиметров: межкомнатное
+ *   полотно 35–40 мм, у складных створок берут самое тонкое из этого ряда.
+ * `VOLUME_FOLD_GAP_MM` — зазор между сложенными звеньями: петля-карта с
+ *   осью снаружи полотна, десять миллиметров. Без зазора звенья легли бы
+ *   плоскость в плоскость, а коплоскостные грани в сортировке по дальности
+ *   решаются случаем (правило таска 180) — пакет мигал бы на облёте.
+ *
+ * Толщина пакета считается, а не пишется: `звеньев × 40 + промежутков × 10`.
+ * У гармошки каталога (четыре звена) это **190 мм** — ровно то, на сколько
+ * сложенное полотно вылезает из плоскости косяка в настоящей двери.
+ */
+export const VOLUME_FOLD_LEAF_MM = 40;
+export const VOLUME_FOLD_GAP_MM = 10;
+
 // Рама — четыре бруска по краю проёма, в середине толщины стены. Стекла нет:
 // сквозь окно видно фон, и это ровно то, чего просил заказчик.
 //
@@ -2574,6 +2593,43 @@ function volumeWindowFrame(at, from, to, bottom, top, out, grid) {
 }
 
 /**
+ * **Звенья сложенной гармошки** (таск 226, G338): где встаёт каждое полотнище,
+ * когда дверь раскрыта.
+ *
+ * Долг таска 215 звучал так: «гармошка в объёме складывается в половину своей
+ * ширины — приближение, а не пакет звеньев». Приближение врало дважды: полотно
+ * съезжало за косяк, как сдвижное (а гармошка никуда не съезжает), и оставалось
+ * одной полосой вдвое короче себя (а она собирается звеньями).
+ *
+ * Теперь честно: **звенья встают поперёк стены пакетом у того косяка, где
+ * петли**. Каждое звено — та же секция лица, которой полотно нарисовано на
+ * плане и на развёртке (`openingFoldLinks`), то есть у гармошки каталога
+ * 900 / 4 = 225 мм; в комнату пакет выступает ровно на эту ширину. Вдоль стены
+ * он занимает свою толщину (`VOLUME_FOLD_LEAF_MM`, `VOLUME_FOLD_GAP_MM`) и
+ * **из проёма не вылезает**: у двери у́же пакета (меньше 190 мм — такого не
+ * бывает, но ширину задаёт человек) шаг жмётся по месту, а не рисует звенья
+ * сквозь стену.
+ */
+function volumeFoldPack(root, into, across, width, links) {
+  const link = width / links;
+  const step = VOLUME_FOLD_LEAF_MM + VOLUME_FOLD_GAP_MM;
+  const pack = links * VOLUME_FOLD_LEAF_MM + (links - 1) * VOLUME_FOLD_GAP_MM;
+  const squeeze = pack > width ? width / pack : 1;
+  const boards = [];
+  for (let index = 0; index < links; index += 1) {
+    // Грань звена стоит в середине его толщины: пакет начинается у самого
+    // косяка и кончается ровно через свою толщину.
+    const away = (VOLUME_FOLD_LEAF_MM / 2 + step * index) * squeeze;
+    boards.push({
+      at: { x: root.x + into.x * away, y: root.y + into.y * away },
+      along: across,
+      width: link,
+    });
+  }
+  return boards;
+}
+
+/**
  * Полотно двери — одна двусторонняя грань от петли и ручка на ней.
  *
  * **Закрытое** стоит в самом проёме, в середине толщины стены: там же, где
@@ -2618,43 +2674,61 @@ function volumeDoorLeaf(wall, opening, span, out, open) {
     // Куда смотрит полотно.
     //
     //   распашное раскрытое — прочь от стены на четверть оборота;
-    //   сдвижное и гармошка раскрытые — вдоль стены **за** косяк, то есть
-    //     полотно съезжает туда, куда показывала стрелка на плане;
+    //   сдвижное раскрытое — вдоль стены **за** косяк, то есть полотно
+    //     съезжает туда, куда показывала стрелка на плане;
+    //   гармошка раскрытая — пакетом звеньев поперёк стены у косяка с петлями
+    //     (таск 226, `volumeFoldPack`): она никуда не съезжает, она
+    //     складывается;
     //   портальное раскрытое — не рисуется вовсе: оно внутри стены, и это
     //     самый честный вид «открыто», какой у него бывает;
     //   закрытое любое — вдоль стены, в самом проёме.
     if (open && motion === "pocket") continue;
-    const slid = open && (motion === "slide" || motion === "fold");
+    const packed = open && motion === "fold";
+    const slid = open && motion === "slide";
     const leaf = open && motion === "swing" ? { x: n.x * side, y: n.y * side } : { x: u.x * plan.out, y: u.y * plan.out };
-    // Сложенная гармошка короче себя: четыре звена собираются в пакет у косяка.
-    const span2 = slid && motion === "fold" ? width / 2 : width;
-    const base = slid
-      ? { x: root.x - leaf.x * span2, y: root.y - leaf.y * span2 }
-      : root;
-    const tip = { x: base.x + leaf.x * span2, y: base.y + leaf.y * span2 };
-    if (openingGlazed(opening)) {
-      volumeGlassLeaf(base, leaf, span2, span, out, doorId);
-    } else {
-      out.push(
-        volumeFace(
-          [volumeAt(base, span.bottom), volumeAt(tip, span.bottom), volumeAt(tip, span.top), volumeAt(base, span.top)],
-          VOLUME_DOOR_RGB,
-          { both: true, doorId },
-        ),
-      );
+    const boards = packed
+      ? volumeFoldPack(root, leaf, { x: n.x * side, y: n.y * side }, width, openingFoldLinks(opening))
+      : [
+          {
+            at: slid ? { x: root.x - leaf.x * width, y: root.y - leaf.y * width } : root,
+            along: leaf,
+            width,
+          },
+        ];
+    for (const board of boards) {
+      const tip = { x: board.at.x + board.along.x * board.width, y: board.at.y + board.along.y * board.width };
+      if (openingGlazed(opening)) {
+        volumeGlassLeaf(board.at, board.along, board.width, span, out, doorId);
+      } else {
+        out.push(
+          volumeFace(
+            [
+              volumeAt(board.at, span.bottom),
+              volumeAt(tip, span.bottom),
+              volumeAt(tip, span.top),
+              volumeAt(board.at, span.top),
+            ],
+            VOLUME_DOOR_RGB,
+            { both: true, doorId },
+          ),
+        );
+      }
     }
     // Ручка у свободного края полотна, на высоте, на которой её берут рукой
     // (G207: «ну и на дверях ручки нарисуй»). Выступает на обе стороны: дверь
-    // открывают с той стороны, с которой подошли.
+    // открывают с той стороны, с которой подошли. У сложенной гармошки свободный
+    // край — у **последнего** звена пакета: ручка едет вместе с ним и в воздухе
+    // не остаётся.
+    const edge = boards[boards.length - 1];
     const handleAt = {
-      x: tip.x - leaf.x * VOLUME_HANDLE_EDGE_MM,
-      y: tip.y - leaf.y * VOLUME_HANDLE_EDGE_MM,
+      x: edge.at.x + edge.along.x * (edge.width - VOLUME_HANDLE_EDGE_MM),
+      y: edge.at.y + edge.along.y * (edge.width - VOLUME_HANDLE_EDGE_MM),
     };
     const bottom = Math.max(span.bottom, VOLUME_HANDLE_MM - VOLUME_HANDLE_TALL_MM / 2);
     const top = Math.min(span.top, bottom + VOLUME_HANDLE_TALL_MM);
     if (top > bottom) {
       volumePrismFaces(
-        volumeBoxCorners(handleAt, leaf, VOLUME_HANDLE_LONG_MM, VOLUME_HANDLE_OUT_MM * 2),
+        volumeBoxCorners(handleAt, edge.along, VOLUME_HANDLE_LONG_MM, VOLUME_HANDLE_OUT_MM * 2),
         bottom,
         top,
         VOLUME_HANDLE_RGB,
@@ -3208,13 +3282,13 @@ export function volumeStairLanding(scene, atMm = null, headMm = VOLUME_HEAD_MM, 
   // лестничной клетки: другого места, где лестница выходит на этаж, всё равно
   // не нарисовано.
   //
-  // Маршей с таска 216 четыре вида (прямой, Г-образный, П-образный,
-  // спиральный), а выход один — поэтому пара спрашивается **стороной**, а не
-  // равенством ключей: сверь я ключ с одним словом `stairs`, и спустившийся от
-  // выхода сходил бы только у прямого марша, а у спирального оказывался бы
-  // посреди комнаты.
-  const fromExit = fromKey === SCHEME_STAIR_EXIT_KEY;
-  const paired = all.filter((place) => (place.key === SCHEME_STAIR_EXIT_KEY) !== fromExit);
+  // Кого считать парой — **одно правило на всю клетку** и лежит оно в модели
+  // (`schemeStairArrivalKeys`): маршем ушли — в выход, выходом — в марш,
+  // лифтом — в лифт (таск 224). Своей сверки ключей здесь больше нет нарочно:
+  // маршей четыре вида, лифт приходит сам в себя, и перечисляй я это на месте,
+  // третья порода клетки тихо разъехалась бы с первыми двумя.
+  const want = schemeStairArrivalKeys(fromKey);
+  const paired = all.filter((place) => want.includes(place.key));
   const places = paired.length > 0 ? paired : all;
   let best = places[0];
   if (places.length > 1 && atMm) {
@@ -3719,6 +3793,88 @@ export function volumeWallFree(lengthMm, covers) {
   return free.filter((span) => span.toMm - span.fromMm > 1);
 }
 
+// ——— потолок под дырой двусвета (таск 229, требование G343) ——————————————
+//
+// Вопрос заказчика: «можно ли поправить?» — о потолке нижней комнаты, который
+// остаётся на месте под двусветом, **если высоту комнате не задали**.
+//
+// **Откуда он там.** Двусвет собирают двумя ручками (таск 209): у помещения
+// сверху снимают пол, комнате снизу задают высоту в два этажа. Сними один
+// пол — дыра в перекрытии появится, а потолок комнаты под ней останется стоять
+// на своей высоте и затянет её снизу: сверху сквозь дыру видно серую плоскость
+// потолка, а не комнату, и двусвета не получается.
+//
+// **Что снимается.** Потолок, который стоит **в плоскости перекрытия** — тот
+// самый, что и есть низ плиты этажа выше. Это и есть случай «высоту комнате не
+// задали»: её потолок равен высоте этажа. Задали больше (двусвет как он есть,
+// 6000 мм на объекте заказчика) — потолок стоит выше дыры, и снимать нечего;
+// задали меньше (подшивной потолок) — он не низ перекрытия, а своя плоскость
+// комнаты, и дыра до неё не доходит. Поэтому мерка одна: `capMm` без
+// перекрытия против высоты комнаты, с той же точностью «одна плоскость»
+// (`VOLUME_PLANE_EPS_MM`), которой сшиваются этажи.
+//
+// **Резать потолок по контуру дыры не стали, и цена названа числами.** Случай
+// «дыра накрывает комнату целиком», на который рассчитывал тикет, на объекте
+// заказчика не встретился ни разу: накрытие там **68,8 % и 89,8 %** площади.
+// Поэтому потолок снимается целиком при любом накрытии, а ненакрытую часть
+// держит **низ плиты этажа выше** — он лежит ровно в той же плоскости и того же
+// цвета (`VOLUME_CEILING_RGB`), потому что это и есть потолок этой комнаты.
+// Замер по объекту заказчика (сетка 25 мм, с полосами под стенами верхнего
+// этажа): у комнаты 74,2 м² ненакрытое — 30,9 % низом плиты и **0,2 %** ничем,
+// у комнаты 16,8 м² — 9,3 % и **1,0 %**. Эти доли процента — полоски у стен,
+// где второй этаж не обведён; цена их закрытия — счёт вычитания многоугольников
+// (в сборке есть только отсечка выпуклым, `volumeClipPolygon`), то есть новый
+// кусок геометрии ради 0,2 % площади двух комнат. Не стали.
+
+/**
+ * Накладываются ли два плановых многоугольника. Спрашивается вершинами и
+ * серединами: вершина одного внутри другого (или середина внутри) — значит
+ * накладываются.
+ *
+ * Точного пересечения здесь не нужно, и заводить его нельзя: вопрос, на
+ * который отвечает мерка, — «стоит ли эта комната под дырой», а не «на сколько
+ * квадратных метров». Чего она не ловит: накрест положенных многоугольников,
+ * у которых ни одна вершина не внутри (крест из двух прямоугольников). Контур
+ * комнаты и контур помещения этажом выше так не лежат — они обведены по тем же
+ * стенам, — а середины добирают случай «дыра целиком внутри комнаты», где
+ * вершин внутри нет ни у той, ни у другой.
+ */
+export function volumePolysOverlap(a, b) {
+  if (!a || a.length < 3 || !b || b.length < 3) return false;
+  if (a.some((point) => volumePointInside(point, b))) return true;
+  if (b.some((point) => volumePointInside(point, a))) return true;
+  const middle = (points) => {
+    let x = 0;
+    let y = 0;
+    for (const point of points) {
+      x += point.x;
+      y += point.y;
+    }
+    return { x: x / points.length, y: y / points.length };
+  };
+  return volumePointInside(middle(a), b) || volumePointInside(middle(b), a);
+}
+
+/**
+ * Снят ли у помещения потолок дырой двусвета (таск 229, G343). Разбор —
+ * абзацем выше.
+ *
+ * `voids` — контуры помещений **без пола** с этажа выше, уже переведённые в
+ * координаты этой схемы (разницу привязок знает стопка, шов таска 205);
+ * `capMm` — потолок полосы этажа, тот же довод, которым уступают стены в
+ * двусвете (таск 214). Без стопки ни того, ни другого нет вовсе — и тогда всё
+ * как было: одна схема про соседние этажи не знает ничего (G68).
+ */
+export function volumeCeilingUnderVoid(room, voids, capMm) {
+  if (!voids || voids.length === 0) return false;
+  const slabMm = (Number(capMm) || 0) - VOLUME_SLAB_MM;
+  if (!(slabMm > 0)) return false;
+  // Потолок в плоскости перекрытия — и только он: выше дыры или ниже её стоит
+  // своя плоскость комнаты, и снимать её нечем.
+  if (Math.abs((Number(room.heightMm) || 0) - slabMm) > VOLUME_PLANE_EPS_MM) return false;
+  return voids.some((hole) => volumePolysOverlap(room.pointsMm, hole));
+}
+
 /** Снизу и сверху: насколько грани уходят по вертикали. `null` — граней нет. */
 export function volumeFacesSpan(faces) {
   let minZ = Infinity;
@@ -3838,9 +3994,16 @@ export function volumeStackScene(project, plan, optionsOf) {
       const spans = volumeWallCovers(wall, uppers);
       if (spans.length > 0) covers.set(wall.id, spans);
     }
+    // Дыры двусвета (таск 229, G343): контуры помещений **без пола** этажом
+    // выше, переведённые в координаты этого этажа. Перекрытия там нет, и
+    // комнате под дырой низ плиты потолком уже не работает — своего потолка она
+    // не рисует.
+    const voids = volumeRooms(project, above.schemeId)
+      .filter((room) => room.hasFloor === false)
+      .map((room) => volumeShiftPoints(room.pointsMm, { x: dx, y: dy }));
     // Потолок полосы этажа в его собственных миллиметрах: база соседа минус
     // своя, то есть высота этажа вместе с перекрытием.
-    return { capMm: above.baseMm - here.baseMm, covers };
+    return { capMm: above.baseMm - here.baseMm, covers, voids };
   };
   const base = volumeScene(project, mine.schemeId, {
     ...take(mine.schemeId),
@@ -5350,6 +5513,11 @@ export function volumeScene(project, schemeId, options = {}) {
       );
       volumeSlabFaces(room.pointsMm, 0, faces);
     }
+    // **Потолок под дырой двусвета не рисуется** (таск 229, G343): помещение
+    // этажом выше без пола — значит перекрытия над этой комнатой нет, и низу
+    // плиты, которым её потолок и был, стоять негде. Мерку считает одно место
+    // (`volumeCeilingUnderVoid`), доводы ей даёт стопка — как и накрытиям стен.
+    if (volumeCeilingUnderVoid(room, options.voids, options.capMm)) continue;
     // **Потолок двусторонний** (таск 211, дефект D62): снизу это потолок
     // комнаты, сверху — крыша. До таска у него была одна сторона, нормалью
     // вниз, и сверху он отбрасывался отбором — поэтому в кадре сверху потолок
@@ -5991,24 +6159,127 @@ export function volumeStanceHead(stance) {
 }
 
 /**
- * Пол держит — ниже нуля не опускается никто (G234, G292, G304).
+ * Пол держит — ниже своего пола не опускается никто (G234, G292, G304).
  *
  * Правило **одно на человека и на камеру обзора**, и названо оно здесь затем,
- * чтобы второго не завелось: под полом не нарисовано ничего — ни комнаты, ни
- * земли, одна изнанка плиты, — и провалившийся туда видел бы серое поле вместо
- * объекта. Прыжок таска 159 приземляется по нему, полёт обзора (таск 200) им же
- * останавливается у земли.
+ * чтобы второго не завелось: там, где под полом ничего не нарисовано — ни
+ * комнаты, ни земли, одна изнанка плиты, — провалившийся видел бы серое поле
+ * вместо объекта. Прыжок таска 159 приземляется по нему, полёт обзора (таск
+ * 200) им же останавливается у земли, падение в дыру двусвета (таск 229) им же
+ * кончается на полу нижнего этажа.
+ *
+ * **«Ниже нуля» стало «ниже своего пола»** ровно затем, чтобы падение не
+ * завело второго счёта: ноль — это пол того этажа, на котором человек
+ * числится, и шагнувшему в дыру полом становится этаж ниже. Разбор — у
+ * `volumeFallTo`.
  */
 export function volumeGroundMm(mm, floorMm = 0) {
-  // `floorMm` — где лежит пол **сцены**: ноль у одной схемы и низ стопки
-  // этажей (таск 202), когда человек стоит не на нижнем из них. Умолчание
+  // `floorMm` — где лежит пол **сцены**: ноль у одной схемы, низ стопки этажей
+  // (таск 202), когда камера обходит дом снаружи, и пол **нижнего этажа** у
+  // человека, который шагнул в дыру двусвета (таск 229, G342). Умолчание
   // оставляет прежнее правило до знака.
   return Math.max(Number(floorMm) || 0, Number(mm) || 0);
 }
 
-/** В воздухе ли человек: прыжок идёт, пока он не вернулся на пол. */
-export function volumeStanceAir(stance) {
-  return stance.liftMm > 0 || stance.speedMm > 0;
+// ——— падение в дыру (таск 229, требование G342) ——————————————————————————
+//
+// Слово заказчика: «Пусть падаем». До таска человек шёл над снятым полом по
+// воздуху, и об этом говорила строка.
+//
+// **Второго правила пола не завелось.** Пол по-прежнему держит на нуле
+// (`volumeGroundMm`) — меняется только то, **где для этого человека ноль**:
+// шагнул в дыру, и его полом стал пол этажа ниже, то есть `baseMm` того этажа
+// в стопке (величина отрицательная). Дальше всё делает прежняя дуга: стойка
+// видит, что человек выше своего пола, и роняет его тем же земным ускорением,
+// которым приземляется прыжок (таск 159). Прыгнуть в падении нельзя — тот же
+// счёт «в воздухе» запрещает и это.
+//
+// **Смена этажа — в миг приземления**, посреди шага. Пока человек летит, он
+// считается по миллиметрам прежнего этажа: сцена стопки рисует все этажи разом
+// (таск 202), и падающий видит нижнюю комнату до того, как в неё попадёт.
+// Коснулся её пола — этаж под ним меняется: открывается схема нижнего этажа,
+// стойка встаёт на её ноль (`volumeStanceOnFloor`), а глаза при этом не
+// дёргаются ни на миллиметр, потому что разница баз и есть та высота, которую
+// он пролетел. Столкновения всю дорогу считаются по тому этажу, на котором он
+// числится, — второго правила «где можно стоять» не заводится, а на новом
+// этаже человека выталкивает из стен то же `volumeMoveTo`, которым он выходит
+// с лестницы.
+//
+// **Падать можно только туда, что нарисовано.** Под дырой нет этажа (двусвет
+// на нижнем этаже) или этажи не показаны разом — остаётся прежнее поведение:
+// человек идёт над дырой, и окно говорит об этом словом. Довод тот же, которым
+// пол держит камеру обзора: под полом не нарисовано ничего, и провалившийся
+// туда видел бы серое поле вместо объекта.
+
+/**
+ * На какой этаж падает человек из точки `at` — или `null`, если не падает.
+ *
+ * `plan` — план стопки (`volumeFloorPlan`): в нём у каждого этажа своя база и
+ * своё смещение в общем плане дома. Ищется **ближайший этаж снизу, у которого
+ * под этой точкой есть пол**: снятый пол дырой считается и здесь, поэтому
+ * двусвет на два этажа роняет человека одной дугой, а не двумя.
+ *
+ * **Нижний этаж держит всегда**: под ним земля — плита чертежа, — и падать
+ * сквозь его дыру некуда. Это и есть разбор случая «под дырой нет этажа»:
+ * `null`, и всё остаётся как было.
+ *
+ * Точка переводится в координаты того этажа разницей смещений — тем же швом
+ * привязки схем (таск 205), которым стопка совмещает этажи; второго счёта
+ * совмещения здесь не заводится.
+ */
+export function volumeFallTo(project, plan, at) {
+  const floors = (plan && plan.floors) || [];
+  const mineAt = floors.findIndex((item) => item.current);
+  if (mineAt < 1 || !at) return null;
+  for (let below = mineAt - 1; below >= 0; below -= 1) {
+    const item = floors[below];
+    const point = { x: at.x - item.shiftMm.x, y: at.y - item.shiftMm.y };
+    const room = volumeRooms(project, item.schemeId).find((found) =>
+      volumePointInside(point, found.pointsMm),
+    );
+    // Пол под точкой есть — падаем на него. Комнаты там не обведено вовсе —
+    // летим дальше вниз: пола в сцене там нет ни одной грани.
+    if (below === 0 || (room && room.hasFloor !== false)) return item;
+  }
+  return null;
+}
+
+/**
+ * В воздухе ли человек: прыжок идёт, пока он не вернулся на пол, — а над дырой
+ * двусвета его пол лежит ниже нуля (таск 229, G342), и стоящий над ней в
+ * воздухе с первого же тика.
+ *
+ * Скорость считается **любая, а не только вверх**: падающий из дыры идёт вниз,
+ * и «скорость есть — значит в воздухе» — то же самое правило, только без
+ * знака.
+ */
+export function volumeStanceAir(stance, floorMm = 0) {
+  return stance.liftMm > (Number(floorMm) || 0) || stance.speedMm !== 0;
+}
+
+/** Падает ли человек: он уже ниже пола своего этажа (таск 229, G342). */
+export function volumeStanceFalling(stance) {
+  return stance.liftMm < 0;
+}
+
+/**
+ * Кончилось ли падение — человек встал на тот пол, который ему считали
+ * (таск 229, G342). Спрашивается у отрицательного пола: на своём этаже это
+ * «стоит на полу» и значит оно там то же самое.
+ */
+export function volumeStanceLanded(stance, floorMm) {
+  return stance.liftMm <= (Number(floorMm) || 0) && stance.speedMm === 0;
+}
+
+/**
+ * Стойка на полу нового этажа (таск 229, G342): ноль переехал вместе с
+ * человеком, и высоты у него больше нет — он стоит.
+ *
+ * Присед не трогается: приседая, падают тоже, и вставать за человека здесь
+ * никто не должен.
+ */
+export function volumeStanceOnFloor(stance) {
+  return { ...stance, liftMm: 0, speedMm: 0 };
 }
 
 /**
@@ -6020,8 +6291,10 @@ export function volumeStanceAir(stance) {
  * своих 550 мм, и ждать от него нечего — встанет он на том же тике, которым
  * выйдет из-под низкого места.
  */
-export function volumeStanceBusy(stance, crouch) {
-  if (volumeStanceAir(stance)) return true;
+export function volumeStanceBusy(stance, crouch, floorMm) {
+  // Падение — такой же повод, как прыжок: пол под человеком лежит ниже нуля,
+  // и часы обязаны идти, пока он не долетит (таск 229, G342).
+  if (volumeStanceAir(stance, floorMm)) return true;
   return stance.crouchMm !== (crouch ? VOLUME_CROUCH_MM : 0);
 }
 
@@ -6032,8 +6305,11 @@ export function volumeStanceBusy(stance, crouch) {
  * единственный способ оказаться там, где над головой низко, и прыжок оттуда
  * ударил бы макушкой в то, под что человек только что пролез.
  */
-export function volumeStanceJump(stance) {
-  if (stance.crouchMm > 0 || volumeStanceAir(stance)) return stance;
+export function volumeStanceJump(stance, floorMm) {
+  // **В падении не прыгают** — и это тот же счёт «в воздухе», а не новый
+  // запрет: над дырой двусвета пол лежит ниже нуля, и человек там в воздухе
+  // с первого тика (таск 229, G342).
+  if (stance.crouchMm > 0 || volumeStanceAir(stance, floorMm)) return stance;
   return { ...stance, speedMm: VOLUME_JUMP_MM_S };
 }
 
@@ -6047,28 +6323,34 @@ export function volumeStanceJump(stance) {
  * сквозь низ шкафа никто не проходит.
  *
  * Полёта здесь больше нет (таск 200, G304): отметку «Летать» заказчик убрал,
- * и `liftMm` снова значит одно — прыжок. Пол, который её держит, назван
- * отдельно (`volumeGroundMm`) и зовётся теперь с двух сторон: отсюда и из
- * полёта камеры обзора.
+ * и `liftMm` значит одно — **отрыв от пола**: вверх его даёт прыжок, вниз —
+ * дыра двусвета, в которую человек падает (таск 229, G342). Дуга у них одна,
+ * и число у неё одно — `VOLUME_FALL_MM_S2`. Пол, который `liftMm` держит,
+ * назван отдельно (`volumeGroundMm`) и зовётся теперь с трёх сторон: отсюда,
+ * из полёта камеры обзора и из падения.
  */
 export function volumeStanceStep(stance, seconds, options = {}) {
   const span = Math.max(0, Number(seconds) || 0);
   const crouch = Boolean(options.crouch);
   const canStand = options.canStand !== false;
+  // `floorMm` — где для этого человека пол: ноль своего этажа или пол этажа
+  // ниже, когда он шагнул в дыру двусвета (таск 229, G342). Своей дуги у
+  // падения нет — та же, которой приземляется прыжок.
+  const floorMm = Number(options.floorMm) || 0;
   const target = crouch ? VOLUME_CROUCH_MM : 0;
   let crouchMm = stance.crouchMm;
   if (target > crouchMm) crouchMm = Math.min(target, crouchMm + VOLUME_CROUCH_MM_S * span);
   else if (target < crouchMm && canStand) crouchMm = Math.max(target, crouchMm - VOLUME_CROUCH_MM_S * span);
   let liftMm = stance.liftMm;
   let speedMm = stance.speedMm;
-  if (volumeStanceAir(stance)) {
+  if (volumeStanceAir(stance, floorMm)) {
     speedMm -= VOLUME_FALL_MM_S2 * span;
     liftMm += speedMm * span;
     // Приземлились: ниже пола не бывает (`volumeGroundMm` — то же правило, по
     // которому у земли останавливается камера обзора), и скорость гасится
     // здесь же — иначе следующий тик утащил бы человека под пол.
-    const landed = liftMm <= 0;
-    liftMm = volumeGroundMm(liftMm);
+    const landed = liftMm <= floorMm;
+    liftMm = volumeGroundMm(liftMm, floorMm);
     if (landed) speedMm = 0;
   }
   return { crouchMm, liftMm, speedMm };
@@ -7940,6 +8222,13 @@ function volumeDrawGround(ctx, box, camera, hour, land, near) {
 // лежат на земле и уходят к горизонту, дома стоят на них, машины — перед
 // ближними домами, зелень вдоль улиц. Дальний ряд домов рисуется раньше
 // ближнего — он за ним.
+//
+// **Неоновых вывесок на домах нет** — требование G337 (таск 226) сняло их:
+// заказчик завёл их в таске 206 словами «добавь туда рекламные баннеры и
+// неоновые вывески», посмотрел город в объёме и решил убрать. Снято начисто:
+// ни цвета неона в палитре, ни ветки «если вывеска», ни поля у дома. Щиты у
+// дорог остались и ночью по-прежнему не светятся — про них речи не было.
+// Светится ночью одно — окна.
 /**
  * Дом города — **коробка** (дефект D57): лицо, бок и крыша.
  *
@@ -7953,8 +8242,7 @@ function volumeDrawGround(ctx, box, camera, hour, land, near) {
  * (`VOLUME_CITY_FLOOR_MM`, `VOLUME_CITY_BAY_MM`), — у бока секций меньше, чем у
  * лица, ровно во столько раз, во сколько он у́же.
  *
- * Светящееся окно **не красится часом** (светит — значит не темнеет), и то же
- * правило у неоновой вывески (G310).
+ * Светящееся окно **не красится часом** (светит — значит не темнеет).
  */
 function volumeDrawBlock(ctx, aim, block, index, hour) {
   const palette = hour.palette;
@@ -8076,8 +8364,6 @@ function volumeDrawBlock(ctx, aim, block, index, hour) {
         ctx.fillRect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(width), Math.abs(height));
       }
     }
-    // Неоновая вывеска — только на лице и только у того, кому она задана.
-    if (wall.face && block.sign) volumeDrawSign(ctx, block.sign, wall, hour);
   }
   // Крыша: четырёхугольник по верху коробки. Видна она сверху, а снизу
   // вырождается в черту — и это та самая черта парапета, которой дом отличался
@@ -8096,47 +8382,12 @@ function volumeDrawBlock(ctx, aim, block, index, hour) {
 }
 
 /**
- * Неоновая вывеска на лице дома (G310): цветной прямоугольник в полоску.
- *
- * **Текста нет нарочно** — писать на вывеске значило бы придумывать чужую
- * рекламу; узнаётся она цветом, полосами и тем, что ночью светится.
- *
- * Светится она **тем же часом, которым загораются окна** (`hour.cityLit`,
- * G273): второго правила «ночь» в сборке нет. Днём доля ноль, и вывеска
- * красится приглушённым тоном палитры, как всякая вещь фона; ночью берётся
- * чистый неон и **час его не темнит** — светит, значит не темнеет.
- */
-function volumeDrawSign(ctx, sign, wall, hour) {
-  const { left, right, footLeft, footRight } = wall;
-  const glow = Math.max(0, Math.min(1, hour.cityLit / VOLUME_CITY_LIT_MAX));
-  const neon = VOLUME_CITY_NEON[sign.neon % VOLUME_CITY_NEON.length];
-  const half = Math.max(0.05, Math.min(0.46, sign.wide / 2));
-  const high = 1 - sign.at;
-  const tall = Math.min(0.1, 0.055 + half * 0.08);
-  const a = volumeCitySpot(left, right, footLeft, footRight, 0.5 - half, high - tall / 2);
-  const b = volumeCitySpot(left, right, footLeft, footRight, 0.5 + half, high + tall / 2);
-  const width = b.x - a.x;
-  const height = b.y - a.y;
-  if (!(Math.abs(width) > 2) || !(Math.abs(height) > 1.5)) return;
-  const x = Math.min(a.x, b.x);
-  const y = Math.min(a.y, b.y);
-  const wide = Math.abs(width);
-  const high2 = Math.abs(height);
-  ctx.fillStyle = glow > 0 ? neon.lit : volumeTintCss(volumeHexRgb(neon.day), hour.tint);
-  ctx.fillRect(x, y, wide, high2);
-  // Две тёмные полосы поперёк: по ним вывеска читается вывеской, а не окном.
-  ctx.fillStyle = glow > 0 ? neon.dark : volumeTintCss(volumeHexRgb(VOLUME_CITY_SIGN_DARK), hour.tint);
-  const bar = Math.max(1, high2 * 0.16);
-  ctx.fillRect(x + wide * 0.08, y + high2 * 0.3 - bar / 2, wide * 0.84, bar);
-  ctx.fillRect(x + wide * 0.08, y + high2 * 0.68 - bar / 2, wide * 0.52, bar);
-}
-
-/**
  * Рекламный щит у дороги (G310): полотно на двух ногах, поперёк взгляда.
  *
- * Полотно — цветные полосы, и всё: текста на нём нет по той же причине, что на
- * вывеске. Ночью щит **не светится** — подсветка билборда это уже вторая
- * история, а неон висит на домах.
+ * Полотно — цветные полосы, и всё: текста на нём нет нарочно, писать на щите
+ * значило бы придумывать чужую рекламу. Ночью щит **не светится** — подсветка
+ * билборда это отдельная история, и так было с первого дня: заказчик снял с
+ * домов неон (G337), а щиты оставил как есть.
  */
 function volumeDrawBanner(ctx, aim, banner, hour) {
   const palette = hour.palette;
@@ -9412,25 +9663,6 @@ const VOLUME_CITY_LIGHT = "#ffe6a3";
 const VOLUME_CITY_LIT_MAX = 0.55;
 
 /**
- * Неон вывесок (G310). У каждого цвета три тона: `lit` — как он светится ночью
- * (час его не темнит — светит, значит не темнеет), `day` — как та же вывеска
- * читается днём, выключенной, `dark` — полосы на ней.
- *
- * Цвета те, по которым неон и узнаётся: розовый, бирюзовый, жёлтый, зелёный.
- * Их четыре, а не десять, по той же причине, по которой у машин пять: это
- * задник, а не улица большого города.
- */
-const VOLUME_CITY_NEON = [
-  { lit: "#ff5fa2", day: "#c2748f", dark: "#7a2348" },
-  { lit: "#53e5ff", day: "#6fa8b5", dark: "#15616e" },
-  { lit: "#ffd34d", day: "#bda868", dark: "#7a5c11" },
-  { lit: "#7bff8a", day: "#7fae85", dark: "#1f6a2a" },
-];
-
-/** Полосы на вывеске днём: тёмная краска по выключенному стеклу. */
-const VOLUME_CITY_SIGN_DARK = "#4a4f57";
-
-/**
  * Рекламные щиты у дороги (G310): полотно и краска полос. Текста нет — писать
  * на щите значило бы придумывать чужую рекламу.
  */
@@ -9477,10 +9709,11 @@ const VOLUME_CITY_WINDOW_PX = 3;
  * есть глубина, и в кадр попадают две стены и крыша: какая из боковых видна,
  * решает сама камера. При облёте дом поворачивается, а не схлопывается.
  *
- * `sign` — неоновая вывеска на лице (G310): доля высоты, где она висит, доля
- * ширины и цвет. Ночью светится тем же часом, что окна.
+ * Своего на лице у дома больше ничего нет: вывеску (G310) снял G337, и поля
+ * `sign` у записи не стало вовсе — дом описывается местом, габаритом и сеткой
+ * окон.
  */
-function volumeBlock(az, away, halfM, deepM, heightM, far, sign = null) {
+function volumeBlock(az, away, halfM, deepM, heightM, far) {
   const spot = volumeAway(az, away);
   const halfMm = halfM * VOLUME_M;
   const heightMm = heightM * VOLUME_M;
@@ -9494,7 +9727,6 @@ function volumeBlock(az, away, halfM, deepM, heightM, far, sign = null) {
     floors: Math.max(2, Math.round(heightMm / VOLUME_CITY_FLOOR_MM)),
     bays: Math.max(2, Math.round((halfMm * 2) / VOLUME_CITY_BAY_MM)),
     far: Boolean(far),
-    sign,
   };
 }
 
@@ -9513,21 +9745,21 @@ export const VOLUME_CITY = [
   // дальний ряд — за улицей, бледный
   volumeBlock(8, 330, 13, 11, 30, true),
   volumeBlock(24, 410, 11, 9, 26, true),
-  volumeBlock(58, 285, 15, 12, 32, true, { at: 0.72, wide: 0.5, neon: 1 }),
+  volumeBlock(58, 285, 15, 12, 32, true),
   volumeBlock(96, 370, 12, 10, 28, true),
   volumeBlock(131, 310, 14, 11, 32, true),
   volumeBlock(168, 395, 11, 9, 25, true),
-  volumeBlock(205, 265, 16, 12, 33, true, { at: 0.78, wide: 0.44, neon: 2 }),
+  volumeBlock(205, 265, 16, 12, 33, true),
   volumeBlock(241, 380, 12, 10, 27, true),
   volumeBlock(278, 320, 14, 11, 31, true),
   volumeBlock(316, 425, 11, 9, 24, true),
   volumeBlock(344, 295, 13, 11, 33, true),
   // ближний ряд — высокие, тёмнее и шире
-  volumeBlock(40, 120, 11, 14, 40, false, { at: 0.8, wide: 0.52, neon: 0 }),
-  volumeBlock(112, 98, 9, 12, 44, false, { at: 0.66, wide: 0.46, neon: 3 }),
+  volumeBlock(40, 120, 11, 14, 40, false),
+  volumeBlock(112, 98, 9, 12, 44, false),
   volumeBlock(186, 145, 15, 16, 36, false),
-  volumeBlock(258, 110, 10, 13, 46, false, { at: 0.74, wide: 0.5, neon: 1 }),
-  volumeBlock(330, 132, 12, 15, 38, false, { at: 0.58, wide: 0.42, neon: 2 }),
+  volumeBlock(258, 110, 10, 13, 46, false),
+  volumeBlock(330, 132, 12, 15, 38, false),
 ];
 
 /**
