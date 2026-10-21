@@ -32331,10 +32331,29 @@ const renderInternals = {
 // переносился ни на одном пути — ровно то, что заказчик и увидел.
 //
 // Теперь здесь лежит **одно состояние на три режима**: середина поля в
-// миллиметрах чертежа и экранных точек на миллиметр. Кто на экране — тот и
-// пишет его (на каждый кадр), а остальные читают, когда их показывают. Второго
-// счёта нет: `volumePlanCentre` и `volumePlanViewAt` объёма зовут эти же
-// функции.
+// миллиметрах чертежа, экранных точек на миллиметр и — с таска 227 — взгляд
+// камеры объёма. Кто на экране — тот и пишет его (на каждый кадр), а остальные
+// читают, когда их показывают. Второго счёта нет: `volumePlanCentre` объёма
+// зовёт эти же функции.
+//
+// ——— каждое поле пишет своё и бережёт чужое (таск 227, G339) ——————————
+//
+// Слово заказчика: «направление камеры сохраняй». Направление легло **сюда**,
+// в ту же запись, а не рядом с ней: место и взгляд — один ответ на вопрос «где
+// я и куда смотрю», и хозяин у них один (правило T210). Вторая запись рядом
+// означала бы второго хозяина и второй порядок старшинства.
+//
+// Владеют полями разные поверхности, и это не беспорядок, а то же правило:
+//
+//   `x, y`      — общие: место человека на плане, его пишут все трое;
+//   `pxPerMm`   — плана и чертежа: у камеры приближения нет вовсе, и объём,
+//                 записывая место, оставляет прежнее;
+//   `look`      — только объёма: у плоских полей взгляда нет, и они, записывая
+//                 место, оставляют прежний.
+//
+// То есть каждое поле пишет то, чем владеет, и **бережёт** то, чем не владеет.
+// Поэтому «ушёл из объёма, повозил схему, вернулся» возвращает тот же взгляд:
+// схема его не трогала.
 //
 // ——— почему это отдельный модуль, а не поле состояния ——————————————————
 //
@@ -32426,13 +32445,18 @@ function screenPlaceScreen(screen) {
  *
  * Возвращает отметку записи — её зовущий запоминает своей.
  */
-function screenPlaceSet(from, schemeId, pointMm, pxPerMm) {
+function screenPlaceSet(from, schemeId, pointMm, options = {}) {
   if (owner !== null && from !== owner) return placeStamp;
   const next = placeOf(schemeId, pointMm);
   if (!next) return placeStamp;
-  const scale = Number(pxPerMm);
-  const kept = place && place.schemeId === schemeId ? place.pxPerMm : null;
-  next.pxPerMm = Number.isFinite(scale) && scale > 0 ? scale : kept;
+  const same = place && place.schemeId === schemeId;
+  const scale = Number(options.pxPerMm);
+  next.pxPerMm = Number.isFinite(scale) && scale > 0 ? scale : same ? place.pxPerMm : null;
+  // Взгляд — поле объёма, и плоские его **берегут**: записывая место, они о нём
+  // не говорят ничего, и он остаётся прежним (таск 227). Та же бережность, с
+  // какой объём оставляет чужой `pxPerMm`.
+  const look = screenPlaceLookFrom(options.look);
+  next.look = look || (same ? place.look : null);
   // Запись, ничего не меняющая, не двигает отметку: мастерская и холст говорят
   // это на каждый кадр, и память вида иначе писалась бы в хранилище впустую.
   if (
@@ -32440,7 +32464,8 @@ function screenPlaceSet(from, schemeId, pointMm, pxPerMm) {
     place.schemeId === next.schemeId &&
     place.x === next.x &&
     place.y === next.y &&
-    place.pxPerMm === next.pxPerMm
+    place.pxPerMm === next.pxPerMm &&
+    sameLook(place.look, next.look)
   ) {
     return placeStamp;
   }
@@ -32456,10 +32481,16 @@ function screenPlaceSet(from, schemeId, pointMm, pxPerMm) {
   return placeStamp;
 }
 
-/** Общее место этой схемы: `{x, y, pxPerMm, stamp}` или `null`. */
+/** Общее место этой схемы: `{x, y, pxPerMm, look, stamp}` или `null`. */
 function screenPlaceOf(schemeId) {
   if (!place || !schemeId || place.schemeId !== schemeId) return null;
-  return { x: place.x, y: place.y, pxPerMm: place.pxPerMm, stamp: place.stamp };
+  return {
+    x: place.x,
+    y: place.y,
+    pxPerMm: place.pxPerMm,
+    look: place.look ? { ...place.look } : null,
+    stamp: place.stamp,
+  };
 }
 
 /** Забыть всё: новый объект, закрытая схема. */
@@ -32486,7 +32517,7 @@ function screenPlaceRestore(schemeId, saved) {
   // Мимо хозяина (D61): память — не поле, она поднимает то самое последнее
   // движение, которым человек закончил прошлый сеанс, и спорить ей не с кем —
   // ни одно поле ещё ничего не нарисовало.
-  return screenPlaceSet(owner, schemeId, next, next.pxPerMm);
+  return screenPlaceSet(owner, schemeId, next, { pxPerMm: next.pxPerMm, look: next.look });
 }
 
 /**
@@ -32499,7 +32530,39 @@ function screenPlaceFrom(value) {
   const y = Number(value.y);
   if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
   const scale = Number(value.pxPerMm);
-  return { x, y, pxPerMm: Number.isFinite(scale) && scale > 0 ? scale : null };
+  return {
+    x,
+    y,
+    pxPerMm: Number.isFinite(scale) && scale > 0 ? scale : null,
+    look: screenPlaceLookFrom(value.look),
+  };
+}
+
+// ——— взгляд камеры объёма (таск 227, G339) ———————————————————————————————
+//
+// `{view, yaw, pitch, reach}`: каким глазом смотрели (первым лицом или
+// обзором), рысканье и наклон в радианах, а у обзора ещё и мера — докуда он
+// достаёт до пола. Меру держим потому, что **одного направления мало**: тот же
+// угол с другой высоты показывает другую картинку, и «смотрит туда же» без неё
+// не получается. У первого лица меры нет: там высота глаза — это стойка.
+const SCREEN_LOOK_VIEWS = ["person", "around"];
+
+/** Что годится во взгляд. Мусор отбрасывается молча, как и всё в этой записи. */
+function screenPlaceLookFrom(value) {
+  if (!value || typeof value !== "object") return null;
+  if (!SCREEN_LOOK_VIEWS.includes(value.view)) return null;
+  const yaw = Number(value.yaw);
+  const pitch = Number(value.pitch);
+  if (!Number.isFinite(yaw) || !Number.isFinite(pitch)) return null;
+  const look = { view: value.view, yaw, pitch };
+  const reach = Number(value.reach);
+  if (look.view === "around" && Number.isFinite(reach) && reach > 0) look.reach = reach;
+  return look;
+}
+
+function sameLook(a, b) {
+  if (!a || !b) return a === b || (!a && !b);
+  return a.view === b.view && a.yaw === b.yaw && a.pitch === b.pitch && (a.reach || null) === (b.reach || null);
 }
 
 /** Что кладётся в настройки: только числа, и округлённые. */
@@ -32510,6 +32573,16 @@ function screenPlaceStored(value) {
   // Масштаб округляется до шестого знака: в хранилище незачем двадцать цифр
   // дробной части, а пиксель на миллиметр — это уже лупа.
   if (next.pxPerMm) stored.pxPerMm = Math.round(next.pxPerMm * 1e6) / 1e6;
+  // Углы — в радианах и до четвёртого знака: это шесть тысячных градуса, мельче
+  // которых человек не целится, а в хранилище экономит половину строки.
+  if (next.look) {
+    stored.look = {
+      view: next.look.view,
+      yaw: Math.round(next.look.yaw * 1e4) / 1e4,
+      pitch: Math.round(next.look.pitch * 1e4) / 1e4,
+    };
+    if (next.look.reach) stored.look.reach = Math.round(next.look.reach);
+  }
   return stored;
 }
 
@@ -37365,7 +37438,7 @@ function canvasPushPlace(state, project, view) {
   if (!canvasOnScreen(state) || !state.schemeId) return;
   const place = screenPlacePlanRead(project, state.schemeId, canvasBox(), view);
   if (!place) return;
-  canvasPlaceStamp = screenPlaceSet(SCREEN_DEFAULT, state.schemeId, place, place.pxPerMm);
+  canvasPlaceStamp = screenPlaceSet(SCREEN_DEFAULT, state.schemeId, place, { pxPerMm: place.pxPerMm });
 }
 
 /**
@@ -69837,15 +69910,16 @@ function createVolume({ api, hosts }) {
    * нет, и заводить его здесь было бы третьим ответом на тот же вопрос.
    */
   function placeArrive(state) {
-    if (scene.empty) return;
+    if (scene.empty) return false;
     // Место общее на три режима и лежит в одном месте (таск 193, D59): его и
     // спрашиваем, кто бы его ни поставил — план, чертёж или память вида.
     // Прежде здесь спрашивали **мастерскую**, и только когда пришли из неё, —
     // отсюда и «не всегда работает»: прямой переход «Схема → Чертёж» не
     // переносил ничего. Молчит общее место только там, где моста нет вовсе
     // (схема без калибровки): тогда считается середина плана.
-    const want = screenPlaceOf(schemeId) || volumePlanCentre(state.project, schemeId, viewport(), state.view);
-    if (!want) return;
+    const place = screenPlaceOf(schemeId);
+    const want = place || volumePlanCentre(state.project, schemeId, viewport(), state.view);
+    if (!want) return false;
     const moved = volumeMoveTo(scene, want, volumeStanceHead(stance));
     person.x = moved.x;
     person.y = moved.y;
@@ -69853,9 +69927,43 @@ function createVolume({ api, hosts }) {
     // разойдись они — человек увидел бы со стороны не ту комнату, в которой
     // только что стоял.
     aroundLookAt(moved.x, moved.y);
+    // ...а если в записи есть взгляд — встаём и смотрим туда же (таск 227).
+    const looked = lookArrive(place && place.look, moved);
     // Встал присевший под низкое или вышел из-под него — решает новое место.
     stanceRecheck();
     syncWhere();
+    return looked;
+  }
+
+  /**
+   * Поставить взгляд из общей записи. `false` — взгляда в ней нет, и кадр
+   * решает тот, кто звал (первый вход открывает объём всей схемой, таск 146).
+   *
+   * Обзор ставится **целиком**: точка пола под взглядом — там, где стоит
+   * человек, углы и мера — сохранённые. Той же дверью (`aroundFrame`), что
+   * кнопки «Обзор» и «Вся схема», — второго способа посадить камеру в сборке
+   * нет, и заводить его ради памяти нельзя.
+   */
+  function lookArrive(look, at) {
+    if (!look) return false;
+    if (look.view === "person") {
+      person.yaw = look.yaw;
+      person.pitch = volumeClampPitch(look.pitch);
+      if (view !== "person") {
+        view = "person";
+        riseStop();
+      }
+      return true;
+    }
+    const pitch = volumeClampPitch(look.pitch);
+    // Мера — докуда взгляд достаёт до пола; цель берём на полу, и тогда
+    // `volumeAroundReach` вернёт ровно её (обратный ход того же счёта).
+    aroundFrame({ x: at.x, y: at.y, z: 0 }, look.yaw, pitch, look.reach || around.distance);
+    if (view !== "around") {
+      view = "around";
+      riseStop();
+    }
+    return true;
   }
 
   /**
@@ -69875,7 +69983,27 @@ function createVolume({ api, hosts }) {
    */
   function placeHere() {
     if (scene.empty || screenMode() !== "volume") return;
-    screenPlaceSet("volume", schemeId, { x: person.x, y: person.y });
+    screenPlaceSet("volume", schemeId, { x: person.x, y: person.y }, { look: lookNow() });
+  }
+
+  /**
+   * Куда смотрит камера — **та, которой смотрят** (таск 227, G339). Слово
+   * заказчика: «направление камеры сохраняй».
+   *
+   * Углы берутся у вида, который на экране, и вид назван в самой записи: у
+   * первого лица и у обзора своя пара углов, и наклон обзора (−42° в пол) в
+   * первом лице значил бы «уткнуться под ноги». Взгляда погасшего вида в
+   * записи нет нарочно: человек его не видел и вернётся не к нему — вернётся он
+   * к тому, которым уходил. Переключит вид руками — получит умолчание этого
+   * вида, как и сегодня.
+   *
+   * У обзора записана ещё и мера (`reach`) — докуда взгляд достаёт до пола.
+   * Одного направления мало: тот же угол с другой высоты показывает другую
+   * картинку.
+   */
+  function lookNow() {
+    if (view === "person") return { view: "person", yaw: person.yaw, pitch: person.pitch };
+    return { view: "around", yaw: around.yaw, pitch: around.pitch, reach: around.distance };
   }
 
   function viewport() {
@@ -72122,8 +72250,13 @@ function createVolume({ api, hosts }) {
   // схемой** — это решение таска 146 («показать заказчику» начинается с общего
   // вида), и оно с переносом не спорит: место достаётся человеку, а не рамке
   // первого кадра. Переключил вид на первое лицо — стоит там, где показывал.
-  placeArrive(getState());
-  if (!scene.empty) fit();
+  //
+  // **Кроме случая, когда взгляд помнят** (таск 227): человек вернулся туда,
+  // откуда ушёл, и показывать ему вместо этого общий вид — значит забыть то,
+  // что он просил запомнить. Кнопки «Обзор» и «Вся схема» при этом как были:
+  // они возвращают взгляд к умолчанию по нажатию, и память им не перечит.
+  const looked = placeArrive(getState());
+  if (!scene.empty && !looked) fit();
   if (typeof stage.focus === "function") stage.focus({ preventScroll: true });
   return { destroy };
 }
@@ -76343,7 +76476,7 @@ function createWorkshop({ api, hosts }) {
     const box = viewport();
     const zoom = place.pxPerMm > 0 ? workshopClampZoom(place.pxPerMm, zoomCeiling()) : view.zoom;
     view = { zoom, offsetX: box.width / 2 - place.x * zoom, offsetY: box.height / 2 - place.y * zoom };
-    placeStamp = screenPlaceSet("drawing", schemeId, { x: place.x, y: place.y }, zoom);
+    placeStamp = screenPlaceSet("drawing", schemeId, { x: place.x, y: place.y }, { pxPerMm: zoom });
     return true;
   }
 
@@ -76364,7 +76497,7 @@ function createWorkshop({ api, hosts }) {
         "drawing",
         schemeId,
         screenToPlan({ x: box.width / 2, y: box.height / 2 }, WORKSHOP_UNIT, view),
-        view.zoom,
+        { pxPerMm: view.zoom },
       );
     }
     // Бумага заливается по настоящим точкам холста, а не по его размеру в

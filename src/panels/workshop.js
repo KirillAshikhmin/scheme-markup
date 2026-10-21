@@ -4293,7 +4293,7 @@ function createWorkshop({ api, hosts }) {
     const box = viewport();
     const zoom = place.pxPerMm > 0 ? workshopClampZoom(place.pxPerMm, zoomCeiling()) : view.zoom;
     view = { zoom, offsetX: box.width / 2 - place.x * zoom, offsetY: box.height / 2 - place.y * zoom };
-    placeStamp = screenPlaceSet("drawing", schemeId, { x: place.x, y: place.y }, zoom);
+    placeStamp = screenPlaceSet("drawing", schemeId, { x: place.x, y: place.y }, { pxPerMm: zoom });
     return true;
   }
 
@@ -4314,7 +4314,7 @@ function createWorkshop({ api, hosts }) {
         "drawing",
         schemeId,
         screenToPlan({ x: box.width / 2, y: box.height / 2 }, WORKSHOP_UNIT, view),
-        view.zoom,
+        { pxPerMm: view.zoom },
       );
     }
     // Бумага заливается по настоящим точкам холста, а не по его размеру в

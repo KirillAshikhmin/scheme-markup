@@ -913,7 +913,7 @@ function canvasPushPlace(state, project, view) {
   if (!canvasOnScreen(state) || !state.schemeId) return;
   const place = screenPlacePlanRead(project, state.schemeId, canvasBox(), view);
   if (!place) return;
-  canvasPlaceStamp = screenPlaceSet(SCREEN_DEFAULT, state.schemeId, place, place.pxPerMm);
+  canvasPlaceStamp = screenPlaceSet(SCREEN_DEFAULT, state.schemeId, place, { pxPerMm: place.pxPerMm });
 }
 
 /**

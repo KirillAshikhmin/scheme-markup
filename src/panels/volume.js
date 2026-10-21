@@ -1519,15 +1519,16 @@ function createVolume({ api, hosts }) {
    * нет, и заводить его здесь было бы третьим ответом на тот же вопрос.
    */
   function placeArrive(state) {
-    if (scene.empty) return;
+    if (scene.empty) return false;
     // Место общее на три режима и лежит в одном месте (таск 193, D59): его и
     // спрашиваем, кто бы его ни поставил — план, чертёж или память вида.
     // Прежде здесь спрашивали **мастерскую**, и только когда пришли из неё, —
     // отсюда и «не всегда работает»: прямой переход «Схема → Чертёж» не
     // переносил ничего. Молчит общее место только там, где моста нет вовсе
     // (схема без калибровки): тогда считается середина плана.
-    const want = screenPlaceOf(schemeId) || volumePlanCentre(state.project, schemeId, viewport(), state.view);
-    if (!want) return;
+    const place = screenPlaceOf(schemeId);
+    const want = place || volumePlanCentre(state.project, schemeId, viewport(), state.view);
+    if (!want) return false;
     const moved = volumeMoveTo(scene, want, volumeStanceHead(stance));
     person.x = moved.x;
     person.y = moved.y;
@@ -1535,9 +1536,43 @@ function createVolume({ api, hosts }) {
     // разойдись они — человек увидел бы со стороны не ту комнату, в которой
     // только что стоял.
     aroundLookAt(moved.x, moved.y);
+    // ...а если в записи есть взгляд — встаём и смотрим туда же (таск 227).
+    const looked = lookArrive(place && place.look, moved);
     // Встал присевший под низкое или вышел из-под него — решает новое место.
     stanceRecheck();
     syncWhere();
+    return looked;
+  }
+
+  /**
+   * Поставить взгляд из общей записи. `false` — взгляда в ней нет, и кадр
+   * решает тот, кто звал (первый вход открывает объём всей схемой, таск 146).
+   *
+   * Обзор ставится **целиком**: точка пола под взглядом — там, где стоит
+   * человек, углы и мера — сохранённые. Той же дверью (`aroundFrame`), что
+   * кнопки «Обзор» и «Вся схема», — второго способа посадить камеру в сборке
+   * нет, и заводить его ради памяти нельзя.
+   */
+  function lookArrive(look, at) {
+    if (!look) return false;
+    if (look.view === "person") {
+      person.yaw = look.yaw;
+      person.pitch = volumeClampPitch(look.pitch);
+      if (view !== "person") {
+        view = "person";
+        riseStop();
+      }
+      return true;
+    }
+    const pitch = volumeClampPitch(look.pitch);
+    // Мера — докуда взгляд достаёт до пола; цель берём на полу, и тогда
+    // `volumeAroundReach` вернёт ровно её (обратный ход того же счёта).
+    aroundFrame({ x: at.x, y: at.y, z: 0 }, look.yaw, pitch, look.reach || around.distance);
+    if (view !== "around") {
+      view = "around";
+      riseStop();
+    }
+    return true;
   }
 
   /**
@@ -1557,7 +1592,27 @@ function createVolume({ api, hosts }) {
    */
   function placeHere() {
     if (scene.empty || screenMode() !== "volume") return;
-    screenPlaceSet("volume", schemeId, { x: person.x, y: person.y });
+    screenPlaceSet("volume", schemeId, { x: person.x, y: person.y }, { look: lookNow() });
+  }
+
+  /**
+   * Куда смотрит камера — **та, которой смотрят** (таск 227, G339). Слово
+   * заказчика: «направление камеры сохраняй».
+   *
+   * Углы берутся у вида, который на экране, и вид назван в самой записи: у
+   * первого лица и у обзора своя пара углов, и наклон обзора (−42° в пол) в
+   * первом лице значил бы «уткнуться под ноги». Взгляда погасшего вида в
+   * записи нет нарочно: человек его не видел и вернётся не к нему — вернётся он
+   * к тому, которым уходил. Переключит вид руками — получит умолчание этого
+   * вида, как и сегодня.
+   *
+   * У обзора записана ещё и мера (`reach`) — докуда взгляд достаёт до пола.
+   * Одного направления мало: тот же угол с другой высоты показывает другую
+   * картинку.
+   */
+  function lookNow() {
+    if (view === "person") return { view: "person", yaw: person.yaw, pitch: person.pitch };
+    return { view: "around", yaw: around.yaw, pitch: around.pitch, reach: around.distance };
   }
 
   function viewport() {
@@ -3804,8 +3859,13 @@ function createVolume({ api, hosts }) {
   // схемой** — это решение таска 146 («показать заказчику» начинается с общего
   // вида), и оно с переносом не спорит: место достаётся человеку, а не рамке
   // первого кадра. Переключил вид на первое лицо — стоит там, где показывал.
-  placeArrive(getState());
-  if (!scene.empty) fit();
+  //
+  // **Кроме случая, когда взгляд помнят** (таск 227): человек вернулся туда,
+  // откуда ушёл, и показывать ему вместо этого общий вид — значит забыть то,
+  // что он просил запомнить. Кнопки «Обзор» и «Вся схема» при этом как были:
+  // они возвращают взгляд к умолчанию по нажатию, и память им не перечит.
+  const looked = placeArrive(getState());
+  if (!scene.empty && !looked) fit();
   if (typeof stage.focus === "function") stage.focus({ preventScroll: true });
   return { destroy };
 }
