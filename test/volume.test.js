@@ -35,10 +35,12 @@ import {
   projectTopAzimuth,
   setProjectSite,
   SCHEME_ANCHOR_OBJECT_KEYS,
+  SCHEME_LIFT_KEY,
   SCHEME_FLOOR_MAX,
   SCHEME_FLOOR_MIN,
   SCHEME_STAIR_EXIT_KEY,
   SCHEME_STAIR_OBJECT_KEYS,
+  schemeStairArrivalKeys,
   schemeAnchorCandidates,
   ensureSchemeObjectKinds,
   findMark,
@@ -253,6 +255,9 @@ import {
   volumeFloorTopMm,
   volumeWallsTopMm,
   volumeFacesSpan,
+  volumeFallTo,
+  volumeCeilingUnderVoid,
+  volumePolysOverlap,
   volumeSchemeOriginMm,
   volumeStackScene,
   volumeOrderStack,
@@ -294,6 +299,7 @@ import {
   volumePadVector,
   volumeFloorAction,
   volumeFloorName,
+  volumeFloorWord,
   volumeTitle,
   volumeTypingTarget,
   volumeViewSwitch,
@@ -5988,12 +5994,22 @@ test("у лестницы окно предлагает этаж, а без не
   // видит нарисованную лестницу.
   const dead = volumeFloorAction(stair, [], null);
   assert.equal(dead.kind, "none");
-  assert.equal(dead.hint, strings.volume.stairNoFloors);
+  assert.equal(dead.hint, text("volume.stairNoFloors", { what: strings.volume.stairWord }));
   // Лестница и этажи — обычный переход таска 149.
   const up = volumeFloorAction(stair, floors, null);
   assert.equal(up.kind, "stair");
   assert.equal(up.label, strings.volume.stairButton);
-  assert.equal(up.hint, strings.volume.stairNear);
+  assert.equal(up.hint, text("volume.stairNear", { what: strings.volume.stairWord }));
+  // **Лифт — тот же переход и то же окно** (таск 224, G316): правило не
+  // ветвится, меняется только слово, которым названо то, у чего стоят.
+  const lift = volumeFloorAction({ objectId: "l", key: SCHEME_LIFT_KEY }, floors, null);
+  assert.equal(lift.kind, up.kind, "у лифта завёлся свой вид действия");
+  assert.equal(lift.label, up.label, "у лифта своя кнопка");
+  assert.equal(lift.hint, text("volume.stairNear", { what: strings.volume.liftWord }));
+  assert.equal(volumeFloorWord(SCHEME_LIFT_KEY), strings.volume.liftWord);
+  assert.equal(volumeFloorWord(SCHEME_LIFT_KEY, true), strings.volume.liftWordAt);
+  assert.equal(volumeFloorWord("stairsSpiral"), strings.volume.stairWord, "спиральный марш — тоже лестница");
+  assert.equal(volumeFloorWord(SCHEME_STAIR_EXIT_KEY, true), strings.volume.stairWordAt);
   // Лестницы нет, а пришли мы сюда переходом — возврат (G216).
   const back = volumeFloorAction(null, [], { schemeId: "s1", name: "1 этаж", floor: 1 });
   assert.equal(back.kind, "back");
@@ -6108,7 +6124,7 @@ test("текст подсказки говорит про тот вид и то 
   assert.ok(!touch.includes(strings.volume.hintGrab) && !touch.includes(strings.volume.hintLocked), touch);
   // Двери и лестница дописываются теми же строками, что и прежде.
   const full = volumeHintText({ ...base, doors: ["d1"], stair: { objectId: "s" }, floors: [{ floor: 2 }] });
-  assert.ok(full.includes(strings.volume.stairNear), full);
+  assert.ok(full.includes(text("volume.stairNear", { what: strings.volume.stairWord })), full);
   // Возврат с этажа без лестницы (G216) говорится в той же строке.
   const back = volumeHintText({ ...base, back: { schemeId: "s", name: "1 этаж", floor: 1 } });
   assert.ok(back.includes(strings.volume.backLine), back);
@@ -6208,7 +6224,17 @@ function houseScene() {
   let project = setSchemeFloor(first.project, first.schemeId, 1).project;
   const second = addFloor(project, { name: "2 этаж", imageId: "plan-2", floor: 2, heightMm: 3000 });
   const third = addFloor(second.project, { name: "3 этаж", imageId: "plan-3", floor: 3, heightMm: 2800 });
-  return { project: third.project, first: first.schemeId, second: second.schemeId, third: third.schemeId };
+  return {
+    project: third.project,
+    first: first.schemeId,
+    second: second.schemeId,
+    third: third.schemeId,
+    // Комнаты второго и третьего этажей стоят в плане на одном месте — ими
+    // проверяются дыра двусвета и падение (таск 229).
+    firstRoomId: first.roomId,
+    secondRoomId: second.roomId,
+    thirdRoomId: third.roomId,
+  };
 }
 
 const houseStack = (project, schemeId, options = {}) =>
@@ -6647,6 +6673,64 @@ test("четыре вида марша — одна лестничная кле�
   );
 });
 
+test("лифт — та же клетка и то же окно, но приезжают им в лифт (таск 224)", () => {
+  // Решение таска: лифт переводит по этажам, как лестница, — значит он вещь
+  // лестничной клетки, а не картинка. Пары у него нет: шахта на каждом этаже
+  // одна и та же, поэтому ключ один, и уехавший лифтом приезжает в лифт.
+  assert.deepEqual(schemeStairArrivalKeys(SCHEME_LIFT_KEY), [SCHEME_LIFT_KEY]);
+  assert.deepEqual(schemeStairArrivalKeys(SCHEME_STAIR_EXIT_KEY), SCHEME_STAIR_OBJECT_KEYS);
+  assert.deepEqual(schemeStairArrivalKeys("stairsSpiral"), [SCHEME_STAIR_EXIT_KEY]);
+
+  const base = stairScene();
+  let project = base.project;
+  const lift = addSchemeObject(project, {
+    schemeId: base.schemeId,
+    catalogKey: SCHEME_LIFT_KEY,
+    shape: "rect",
+    atMm: { x: 1200, y: -1200 },
+    widthMm: 1200,
+    depthMm: 1400,
+    turnDeg: 0,
+    heightAboveFloorMm: 0,
+  });
+  project = lift.project;
+  const exit = addSchemeObject(project, {
+    schemeId: base.schemeId,
+    catalogKey: SCHEME_STAIR_EXIT_KEY,
+    shape: "rect",
+    atMm: { x: 1200, y: 1200 },
+    widthMm: 1100,
+    depthMm: 2700,
+    turnDeg: 0,
+    heightAboveFloorMm: 0,
+  });
+  project = exit.project;
+  const scene = volumeScene(project, base.schemeId);
+  // Объём узнаёт лифт сам — по тому же списку ключей, что лестницу.
+  assert.ok(
+    scene.stairs.some((place) => place.key === SCHEME_LIFT_KEY),
+    "лифт не стал вещью лестничной клетки",
+  );
+  // **Приехали лифтом — вышли у лифта**, хотя на этаже есть и выход с лестницы,
+  // и он к месту ухода не дальше. Сверяйся пара «марш ↔ выход», человек вышел
+  // бы из шахты посреди лестничного проёма.
+  const byLift = volumeStairLanding(scene, { x: 1200, y: -1200 }, VOLUME_HEAD_MM, SCHEME_LIFT_KEY);
+  assert.equal(byLift.objectId, lift.schemeObject.id);
+  assert.equal(byLift.key, SCHEME_LIFT_KEY);
+  assert.equal(byLift.paired, true);
+  // А лестница своё прибытие не потеряла: маршем ушли — в выход пришли.
+  const byStairs = volumeStairLanding(scene, { x: -1200, y: 0 }, VOLUME_HEAD_MM, "stairs");
+  assert.equal(byStairs.objectId, exit.schemeObject.id);
+  // Подошли к лифту — тот же вопрос, что у лестницы: окно одно (G316).
+  const near = volumeStairNear(scene.stairs, { x: 1200, y: -1200 });
+  assert.equal(near.stair.key, SCHEME_LIFT_KEY);
+  // И точкой привязки лифт предлагается наравне с маршами.
+  assert.ok(
+    schemeAnchorCandidates(project, base.schemeId).some((item) => item.key === SCHEME_LIFT_KEY),
+    "лифт не предлагается точкой привязки",
+  );
+});
+
 test("привязка схем доезжает до стопки: этажи совмещаются по точке, а не по нулю", () => {
   const house = houseScene();
   // Без привязки — как было: нулевые сдвиги (G68).
@@ -6731,7 +6815,10 @@ test("снятый пол — дыра в перекрытии, и край её
   assert.ok(Number.isFinite(start.x) && Number.isFinite(start.y));
 });
 
-test("над дырой окно говорит словом: падения в сборке нет", () => {
+test("над дырой окно говорит словом — там, где падать некуда (таск 209, таск 229)", () => {
+  // С таска 229 из дыры падают (G342). Слово осталось для тех мест, откуда
+  // падать некуда: одна схема без стопки, двусвет на нижнем этаже. Молчать о
+  // них нельзя — иначе это читается хождением по воздуху, а не снятым полом.
   const scene = roomScene();
   const off = setRoomFloor(scene.project, scene.roomId, false).project;
   const holed = volumeScene(off, scene.schemeId);
@@ -6739,6 +6826,149 @@ test("над дырой окно говорит словом: падения в 
   assert.ok(where.includes(strings.volume.noFloor), "сказано вслух: " + where);
   const solid = volumeWhere(scene.project, volumeScene(scene.project, scene.schemeId), { x: 0, y: 0 });
   assert.ok(!solid.includes(strings.volume.noFloor), "с полом про дыру не говорится: " + solid);
+  // И причину окно называет вслух: обе строки есть в словаре, и обе про то,
+  // что человек может исправить.
+  assert.ok(strings.volume.fallOneFloor.length > 0 && strings.volume.fallNoBelow.length > 0);
+});
+
+// ——— потолок под дырой двусвета (таск 229, требование G343) ——————————————
+
+test("помещение без пола снимает потолок у комнаты под ним (G343)", () => {
+  const house = houseScene();
+  // Пол снят у комнаты третьего этажа — значит у комнаты второго этажа над
+  // головой дыра, а не низ плиты. Высоты ей никто не задавал: её потолок и
+  // есть низ перекрытия, и стоять ему негде.
+  const off = setRoomFloor(house.project, house.thirdRoomId, false).project;
+  // Двусторонний потолок — это потолок помещения (таск 211); низ плиты крашен
+  // тем же цветом, но односторонний всегда.
+  const ceilingAt = (stack, zMm) =>
+    stack.faces.filter(
+      (face) => face.rgb === VOLUME_CEILING_RGB && face.both === true && Math.abs(face.p[0].z - zMm) < 1,
+    );
+  const whole = houseStack(house.project, house.second);
+  const holed = houseStack(off, house.second);
+  assert.equal(ceilingAt(whole, 3000).length, 1, "с полом наверху потолок у комнаты второго этажа есть");
+  assert.equal(ceilingAt(holed, 3000).length, 0, "под дырой его нет");
+  // Соседи не тронуты: потолок третьего этажа (своя высота 2800 над базой
+  // 3200) и потолок первого (2700 под базой −2900) на месте.
+  assert.equal(ceilingAt(holed, 3200 + 2800).length, 1, "потолок самого помещения без пола остался");
+  assert.equal(ceilingAt(holed, -2900 + 2700).length, 1, "первого этажа дыра третьего не касается");
+  // Пятна солнца от этого не меняются (прямое требование тикета).
+  assert.equal(holed.sunSpots.length, whole.sunSpots.length);
+  // Своя высота комнаты потолка не отдаёт: задали двусвет 5800 — потолок стоит
+  // выше дыры, и снимать нечего. Задали меньше этажа (подшивной, 2400) — это
+  // своя плоскость комнаты, и дыра до неё не доходит.
+  const tall = setRoomWallHeight(off, house.secondRoomId, 5800).project;
+  assert.equal(ceilingAt(houseStack(tall, house.second), 5800).length, 1, "двусвет свой потолок держит");
+  const low = setRoomWallHeight(off, house.secondRoomId, 2400).project;
+  assert.equal(ceilingAt(houseStack(low, house.second), 2400).length, 1, "подшивной потолок остаётся");
+});
+
+test("сверху сквозь дыру видно пол нижней комнаты, а не её потолок (G343)", () => {
+  const house = houseScene();
+  const off = setRoomFloor(house.project, house.thirdRoomId, false).project;
+  // Крыша снята (таск 212) — иначе сверху виден потолок верхнего помещения, и
+  // проверять нечего.
+  const stack = houseStack(off, house.second, { roofOff: true });
+  // Грани подписаны ролью: кадр переносит в многоугольник `markId`, и спор
+  // читается по имени, а не по цвету.
+  const named = {
+    ...stack,
+    order: undefined,
+    faces: stack.faces.map((face) => {
+      const top = Math.max(...face.p.map((point) => point.z));
+      if (face.rgb === VOLUME_FLOOR_RGB && face.n.z > 0 && Math.abs(top) < 1) return { ...face, markId: "пол 2" };
+      if (face.rgb === VOLUME_CEILING_RGB && face.n.z < 0) return { ...face, markId: "потолок" };
+      return face;
+    }),
+  };
+  const box = { width: 240, height: 180 };
+  const camera = {
+    at: { x: 0, y: 0, z: stack.stackMm.topMm + 4000 },
+    yaw: 0,
+    pitch: -Math.PI / 2 + 0.001,
+  };
+  const seen = paintedAt(named, camera, box, box.width / 2, box.height / 2);
+  const last = seen[seen.length - 1];
+  assert.ok(last, "кадр пуст — стенд ничего не проверяет");
+  assert.equal(last.pick, "пол 2", "сверху сквозь дыру видно не пол нижней комнаты, а " + last.pick);
+  // И ни одного потолка в этой точке: сняли его целиком, а не повернули.
+  assert.equal(seen.filter((polygon) => polygon.pick === "потолок").length, 0);
+});
+
+test("мерка «стоит под дырой» считает плоскостью перекрытия и накладкой контуров (G343)", () => {
+  const square = (half) => [
+    { x: -half, y: -half },
+    { x: half, y: -half },
+    { x: half, y: half },
+    { x: -half, y: half },
+  ];
+  const room = { heightMm: 3000, pointsMm: square(2000) };
+  const capMm = 3000 + VOLUME_SLAB_MM;
+  // Потолок в плоскости перекрытия и под дырой — снимается.
+  assert.equal(volumeCeilingUnderVoid(room, [square(2000)], capMm), true, "дыра ровно по комнате");
+  assert.equal(volumeCeilingUnderVoid(room, [square(800)], capMm), true, "дыра целиком внутри комнаты");
+  assert.equal(volumeCeilingUnderVoid(room, [square(9000)], capMm), true, "комната целиком под дырой");
+  // Частичное накрытие — тоже снимается: ненакрытую часть держит низ плиты
+  // этажа выше, он в той же плоскости и того же цвета. Резать не стали, цена
+  // названа в разборе.
+  const aside = square(2000).map((point) => ({ x: point.x + 3000, y: point.y }));
+  assert.equal(volumeCeilingUnderVoid(room, [aside], capMm), true, "дыра краем — потолка нет");
+  const far = square(2000).map((point) => ({ x: point.x + 9000, y: point.y }));
+  assert.equal(volumeCeilingUnderVoid(room, [far], capMm), false, "чужая дыра потолка не трогает");
+  // Не в плоскости перекрытия — не снимается ни выше, ни ниже.
+  assert.equal(volumeCeilingUnderVoid({ ...room, heightMm: 5800 }, [square(2000)], capMm), false);
+  assert.equal(volumeCeilingUnderVoid({ ...room, heightMm: 2400 }, [square(2000)], capMm), false);
+  // Без стопки доводов нет вовсе — и тогда всё как было (G68).
+  assert.equal(volumeCeilingUnderVoid(room, [], capMm), false);
+  assert.equal(volumeCeilingUnderVoid(room, null, 0), false);
+  assert.equal(volumeCeilingUnderVoid(room, [square(2000)], 0), false);
+  // Накладка контуров: вершинами и серединами, в обе стороны.
+  assert.equal(volumePolysOverlap(square(1000), square(1000)), true, "одинаковые контуры");
+  assert.equal(volumePolysOverlap(square(1000), square(300)), true, "вложенный контур");
+  assert.equal(volumePolysOverlap(square(300), square(1000)), true, "и наоборот");
+  assert.equal(volumePolysOverlap(square(1000), far), false, "далёкие не накладываются");
+  // Касание краем накладкой считается — и это честно: контуры обводят рукой по
+  // одним и тем же стенам, и выгадывать миллиметры там нечего.
+  assert.equal(volumePolysOverlap(square(1000), aside), true, "край в край — уже под дырой");
+  assert.equal(volumePolysOverlap(square(1000), [{ x: 0, y: 0 }]), false, "не многоугольник — не накладка");
+});
+
+// ——— куда падать из дыры (таск 229, требование G342) ————————————————————
+
+test("падают на ближайший этаж снизу, у которого под этой точкой есть пол (G342)", () => {
+  const house = houseScene();
+  // Середина комнат второго и третьего этажей: в плане они стоят на одном
+  // месте, и стенд этим и годится.
+  const at = { x: 0, y: 0 };
+  const fromThird = volumeFallTo(house.project, volumeFloorPlan(house.project, house.third), at);
+  assert.equal(fromThird.schemeId, house.second, "с третьего падают на второй");
+  assert.equal(fromThird.baseMm, -3200, "его пол на 3200 ниже — высота этажа с перекрытием");
+  // Пол второго этажа снят — летим дальше **одной дугой**, до первого: дыра
+  // на два этажа не роняет человека дважды.
+  const off = setRoomFloor(house.project, house.secondRoomId, false).project;
+  const deep = volumeFallTo(off, volumeFloorPlan(off, house.third), at);
+  assert.equal(deep.schemeId, house.first, "сквозь две дыры — на первый этаж");
+  assert.equal(deep.baseMm, -6100);
+  // **Нижний этаж держит всегда**: под ним земля, и падать с него некуда даже
+  // сквозь снятый пол. Это и есть разбор «под дырой нет этажа».
+  const bottom = setRoomFloor(house.project, house.firstRoomId, false).project;
+  assert.equal(volumeFallTo(bottom, volumeFloorPlan(bottom, house.first), at), null);
+  // Нет стопки — нет и падения; нет точки — тоже.
+  assert.equal(volumeFallTo(house.project, { floors: [] }, at), null);
+  assert.equal(volumeFallTo(house.project, null, at), null);
+  assert.equal(volumeFallTo(house.project, volumeFloorPlan(house.project, house.third), null), null);
+  // Комнаты под точкой не обведено вовсе — пола там нет ни одной грани, и
+  // человек летит мимо: за габаритом комнаты второго этажа его держит только
+  // первый.
+  const outside = { x: 0, y: 2900 };
+  const past = volumeFallTo(house.project, volumeFloorPlan(house.project, house.third), outside);
+  assert.equal(past.schemeId, house.first, "над необведённым местом второй этаж не держит");
+  // Привязка схем доезжает и сюда (шов таска 205): сдвинули второй этаж на
+  // три метра — и точка, которая была над его комнатой, оказалась мимо неё.
+  const tied = setSchemeAnchor(house.project, house.second, { x: -3000, y: 0 }).project;
+  const shifted = volumeFallTo(tied, volumeFloorPlan(tied, house.third), at);
+  assert.equal(shifted.schemeId, house.first, "сдвинутый этаж под точкой уже не стоит");
 });
 
 test("в помещение без пола солнце пятна не кладёт: ложиться не на что", () => {
