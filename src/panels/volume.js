@@ -667,6 +667,30 @@ function volumeNamedList(list, name, moreKey) {
  * собранную в обработчике кадра, не проверяет ничто. Дверей в схеме нет вовсе —
  * и строки нет: клавиша, которой нечего открывать, в подсказке лишняя.
  */
+/**
+ * Строка про шторы (G332) — рядом с дверной и по её образцу.
+ *
+ * **Шторы нет в `R`, и это решение.** `R` названа требованием G210 словами «все
+ * двери», у неё свой счётчик в плашке и своя кнопка «Все двери»; сложи в неё
+ * шторы — и число в плашке начнёт говорить о двух разных вещах. Штора при этом
+ * не проём чертежа, а **метка** с тюлевым телом, и открывается она там же, где
+ * выделяется: клик или `E` по тому, на что смотришь (G214). Захочет заказчик
+ * один взмах на всё — это вторая кнопка и второй счётчик, а не смешение этих.
+ *
+ * Пустой список — строки нет вовсе: на схеме без штор обещать нечего, и
+ * картинка у того, у кого их нет, не меняется ни словом.
+ */
+export function volumeSheerLine(sheers, open, aimed, touching) {
+  const list = sheers || [];
+  if (list.length === 0) return "";
+  const count = list.filter((id) => open.has(id)).length;
+  const state = text("volume.sheers", { open: count, count: list.length });
+  // Пальцем клавиши E нет вовсе (таск 149): штора открывается касанием по ней,
+  // ровно как дверь.
+  if (touching) return state + " " + strings.volume.sheerTouch;
+  return aimed ? state + " " + strings.volume.sheerAimed : state + " " + strings.volume.sheerKeys;
+}
+
 export function volumeDoorLine(doors, open, aimed, touching) {
   const list = doors || [];
   if (list.length === 0) return "";
@@ -715,6 +739,7 @@ export function volumeHintText(state) {
   // Про прицел — там же, где он показан: пальцем его нет, в обзоре нет.
   if (state.aim) parts.push(strings.volume.aimHint);
   parts.push(volumeDoorLine(state.doors, state.open, state.aimedDoor, state.touching));
+  parts.push(volumeSheerLine(state.sheers, state.openSheers || new Set(), state.aimedSheer, state.touching));
   // Про этажи — последней: лестница под рукой есть далеко не всегда, а когда
   // есть, это самое новое в строке. Там же и возврат (G216).
   parts.push(volumeFloorAction(state.stair, state.floors, state.back).hint);
@@ -875,6 +900,10 @@ function createVolume({ api, hosts }) {
   // файл не попадает ничего (G68), и объект после прогулки байт в байт тот же.
   // Поэтому это и не поле проёма, а аргумент сборки сцены.
   const openDoors = new Set();
+  // Раскрытые шторы (G332) — то же множество и то же место, что у дверей: сеанс
+  // окна, а не поле метки. Открыл штору в объёме — в файл не попало ничего
+  // (G68), и объект после прогулки байт в байт тот же.
+  const openCurtains = new Set();
   // «Скрыть все объекты» — та же отметка, только разом: сцена собирается без
   // единой вещи чертежа. Отдельного выключателя у сцены нет нарочно — иначе
   // ответов на «что показано» стало бы два.
@@ -886,6 +915,7 @@ function createVolume({ api, hosts }) {
   const sceneOptions = (state, id) => ({
     marks: sceneMarks(state, id),
     openDoorIds: openDoors,
+    openCurtainIds: openCurtains,
     // «Снять крышу» (таск 212, G319): отметка окна параметров. Доезжает до
     // **каждого** этажа стопки — крыша снимается у всех, а не только у
     // верхнего; разбор у самой грани в `volumeScene`.
@@ -952,6 +982,10 @@ function createVolume({ api, hosts }) {
   // «по клику на них или когда наведён курсор».
   let aimedDoor = null;
   let heldDoor = null;
+  // Метка под прицелом — только ради строки про штору (G332), и считается она
+  // лишь на схемах со шторами.
+  let aimedMark = null;
+  const aimedSheer = () => Boolean(aimedMark && (scene.sheers || []).includes(aimedMark));
   // Alt отпустил мышь, и по отпусканию Alt её надо забрать обратно (G211).
   let altFree = false;
   // Зашли пальцем (таск 149). Догадка по виду указателя — сразу, точный ответ —
@@ -1987,8 +2021,14 @@ function createVolume({ api, hosts }) {
     syncAimNode();
     const at = aimPoint();
     const found = at && !scene.empty ? volumeDoorAt(shown, at.x, at.y) : null;
-    if (found === aimedDoor) return;
+    // Штора под прицелом (G332) спрашивается **только там, где шторы есть**: на
+    // схеме без них это был бы лишний проход по кадру на каждое движение
+    // взгляда, а сказать о ней всё равно нечего.
+    const sheer =
+      at && !scene.empty && (scene.sheers || []).length > 0 ? volumeSightAt(shown, at.x, at.y) : null;
+    if (found === aimedDoor && sheer === aimedMark) return;
     aimedDoor = found;
+    aimedMark = sheer;
     syncHint();
   }
 
@@ -2036,6 +2076,11 @@ function createVolume({ api, hosts }) {
   function actOnChoice(choice, at) {
     if (choice.kind === "mark") {
       select(choice.id);
+      // **Штора открывается там же, где выделяется** (G332): у метки с тюлевым
+      // телом есть своё дело, и `E` делает его — тем же правилом, которым
+      // щелчок по клавише выключателя выбирает канал. Выделение при этом
+      // остаётся: по шторе смотрят её размеры и привязку, как по любой вещи.
+      if (toggleCurtain(choice.id)) return true;
       // Щелчок по клавише многоклавишного выключателя выбирает **её канал**
       // (таск 177, G274), мимо клавиши — снимает выбор и возвращает все связи
       // метки. Выделение при этом одно и то же: канал не выделяет вместо вещи,
@@ -2056,6 +2101,16 @@ function createVolume({ api, hosts }) {
     const at = aimPoint();
     const choice = aimChoiceAt(at, aimedDoor || heldDoor);
     if (!actOnChoice(choice, at)) notify(strings.volume.aimless, "info");
+  }
+
+  /** Открыть или задвинуть штору. `false` — эта метка не штора. */
+  function toggleCurtain(markId) {
+    if (!markId || !(scene.sheers || []).includes(markId)) return false;
+    if (openCurtains.has(markId)) openCurtains.delete(markId);
+    else openCurtains.add(markId);
+    rebuildScene();
+    notify(openCurtains.has(markId) ? strings.volume.sheerOpened : strings.volume.sheerClosed, "info");
+    return true;
   }
 
   function toggleDoor(doorId) {
@@ -3350,6 +3405,9 @@ function createVolume({ api, hosts }) {
       doors: scene.doors,
       open: openDoors,
       aimedDoor: aimedDoor || heldDoor,
+      sheers: scene.sheers,
+      openSheers: openCurtains,
+      aimedSheer: aimedSheer(),
       stair: stairHere(),
       floors: floorOptions(),
       back: backFloor(),

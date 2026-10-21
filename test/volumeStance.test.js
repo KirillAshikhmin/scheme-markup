@@ -334,6 +334,46 @@ test("низкий проём держит стоя и пропускает пр
   assert.deepEqual(volumeWallLintels([{ kind: "window", atMm: 0, widthMm: 1400, heightMm: 1400, heightAboveFloorMm: 800 }], 2700), []);
 });
 
+test("у арки просвет считается по дуге, и голова задевает пяту (дефект D71)", () => {
+  // Арка 1200 × 2100 — умолчание каталога. Прямоугольником её просвет был
+  // 2100 на всю ширину, то есть препятствия не заводилось вовсе; дуга
+  // полуциркульная, пята на 1500 — ниже порога 1700, и под косяком стоя не
+  // пройти. Числа дуги — те же, что у развёртки (`openingArchDropMm`).
+  const arch = { kind: "arch", atMm: 1000, widthMm: 1200, heightMm: 2100, heightAboveFloorMm: 0 };
+  const spans = volumeWallLintels([arch], 2700);
+  assert.equal(spans.length, 2, "у арки 1200 × 2100 низки только пяты: " + JSON.stringify(spans));
+  assert.deepEqual(
+    spans.map((span) => [Math.round(span.fromMm), Math.round(span.toMm), Math.round(span.bottomMm)]),
+    [
+      [1000, 1100, 1500],
+      [2100, 2200, 1500],
+    ],
+    "просвет у косяка — пята полуциркульной дуги",
+  );
+  assert.ok(spans.every((span) => span.topMm === 2700), "препятствие идёт до верха стены");
+  assert.equal(volumeSolidBlocks(spans[0], VOLUME_HEAD_MM), true, "у пяты стоя не пройти");
+  assert.equal(volumeSolidBlocks(spans[0], 1350), false, "присев — пройти");
+  // Прямой проём той же высоты препятствия по-прежнему не получает: правило
+  // тронуто только у арки.
+  assert.deepEqual(
+    volumeWallLintels([{ kind: "opening", atMm: 1000, widthMm: 1200, heightMm: 2100, heightAboveFloorMm: 0 }], 2700),
+    [],
+  );
+  // Низкая арка: дуга сегментная, и под ней низко везде — препятствие идёт
+  // всей дугой, по куску на отрезок.
+  const low = volumeWallLintels([{ kind: "arch", atMm: 0, widthMm: 1200, heightMm: 1000, heightAboveFloorMm: 0 }], 2700);
+  assert.equal(low.length, 12, "сегментная дуга режется на отрезки свода");
+  assert.deepEqual(
+    low.map((span) => Math.round(span.bottomMm)),
+    [500, 739, 851, 921, 966, 992, 992, 966, 921, 851, 739, 500],
+    "у каждого куска берётся низшая из его высот",
+  );
+  assert.ok(
+    low.every((span) => span.bottomMm < 1700),
+    "под низкой аркой стоя не пройти нигде",
+  );
+});
+
 test("лаз в стене коридора пускает присевшего и не пускает стоящего", () => {
   const base = corridor();
   // Лаз в дальней стене коридора: 1500 мм высотой, от пола.
