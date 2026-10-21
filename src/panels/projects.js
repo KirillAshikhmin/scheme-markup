@@ -156,10 +156,22 @@ function mountProjectsPanel(host, api) {
    * кто-то другой (приёмка файла, папка автосохранения). Список перечитывается
    * сам: до таска 223 он оставался устаревшим до конца сеанса, и переключиться
    * на принесённый объект было нечем.
+   *
+   * **Спрашивается смена объекта, а не факт правки** (дефект D76, таск 225).
+   * Подписка на `project` срабатывает на каждый штрих: каждая метка, каждая
+   * стена идут через `setState({project})`. Пока объект не попал в список,
+   * прежнее условие звало `listProjects` на **каждую** правку, а та читает
+   * документы целиком (`getAll`), а не сводки. Поэтому сравнивается
+   * идентификатор: сменился объект — спросили список один раз, двигают метку
+   * в том же объекте — не спросили ни разу.
    */
+  let lastProjectId = null;
   function refreshIfUnknown(project) {
-    if (!project) return;
-    if (known && known.some((item) => item.id === project.id)) return;
+    const id = project ? project.id : null;
+    if (id === lastProjectId) return;
+    lastProjectId = id;
+    if (!id) return;
+    if (known && known.some((item) => item.id === id)) return;
     refreshList().catch(() => {});
   }
 
@@ -311,6 +323,12 @@ function mountProjectsPanel(host, api) {
     refreshIfUnknown(state.project);
     if (state.project) scheduleSave(state.project);
   });
+
+  // Первый кадр шапки — **до** того, как база ответила (таск 225): иначе
+  // слова «читаем список» некому показать, и в окне ожидания стоит пустой
+  // селект без единой строки. Рисуется он тем же `renderList`, просто с
+  // непрочитанным списком.
+  renderList();
 
   (async () => {
     await openStore();
