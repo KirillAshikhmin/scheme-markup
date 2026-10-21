@@ -6173,6 +6173,85 @@ export function wallHeightOf(project, { schemeId, roomId } = {}) {
  */
 export const WALL_HEIGHT_FALLBACK_MM = 2800;
 
+// Воздух над самым высоким, что стоит на этаже без заданной высоты. Триста
+// миллиметров — ровно про то, чтобы верхний косяк не упёрся в потолок: лист
+// развёртки с ними читается, а объёмная комната не срезает дверь.
+export const WALL_HEIGHT_AIR_MM = 300;
+
+// Счёт самого высокого на схеме по объекту, который не трогали, выходит один и
+// тот же, а стоит он полмиллисекунды на шести сотнях меток — и спрашивают его
+// и развёртка каждой стены, и каждая комната объёма. Объект после любой правки
+// **новый** (модель не меняет данные на месте), поэтому `WeakMap` по объекту
+// сам забывает устаревшее — тот же приём, которым `render.js` помнит стопки
+// меток и раскладку подписей.
+const SCHEME_TOP_CACHE = new WeakMap();
+
+/**
+ * Самое высокое, что стоит на схеме: верх проёма, верх вещи, посадка метки.
+ *
+ * Мерки те же, какими их кладёт на лист развёртка (`wallElevation`), и те же
+ * хозяева: у проёма верх считается от высоты над полом, у вещи его отдаёт
+ * `schemeObjectTopMm`, у метки — `markSizes` вместе с умолчаниями типа (G192).
+ * Мусор (нечисло, пустая строка) в счёт не идёт: он сделал бы высоту `NaN`, а
+ * с ней пропала бы вся картинка.
+ */
+function schemeTopMm(project, schemeId) {
+  if (!project || !schemeId) return 0;
+  let perScheme = SCHEME_TOP_CACHE.get(project);
+  if (!perScheme) {
+    perScheme = new Map();
+    SCHEME_TOP_CACHE.set(project, perScheme);
+  }
+  if (perScheme.has(schemeId)) return perScheme.get(schemeId);
+  let top = 0;
+  const raise = (value) => {
+    const mm = Number(value);
+    if (Number.isFinite(mm) && mm > top) top = mm;
+  };
+  for (const wall of wallsOnScheme(project, schemeId)) {
+    for (const opening of openingsInWall(project, wall.id)) {
+      raise(Number(opening.heightAboveFloorMm) + Number(opening.heightMm));
+    }
+  }
+  for (const object of schemeObjectsOnScheme(project, schemeId)) raise(schemeObjectTopMm(object));
+  for (const mark of project.marks || []) {
+    if (mark.schemeId !== schemeId) continue;
+    raise(markSizes(project, mark).heightAboveFloor);
+  }
+  perScheme.set(schemeId, top);
+  return top;
+}
+
+/**
+ * **Показанная высота стены — одна на объём и развёртку** (таск 228, G340).
+ *
+ * `{mm, known}`: `mm` — то, во что рисовать, `known` — своё это число человека
+ * или наше. Заданная высота берётся как есть (переопределение комнаты старше
+ * высоты схемы — `wallHeightOf`), незаданная **выводится**: умолчание
+ * `WALL_HEIGHT_FALLBACK_MM`, поднятое над самым высоким на схеме, если то выше.
+ *
+ * **Почему вывод по схеме, а не по стене.** До этого таска вывод жил только на
+ * развёртке и считался по тому, что стоит на **этой** стене, а объём рисовал
+ * комнату плоским умолчанием. Выходило два числа про одну стену: полоса
+ * развёртки писала «показано 3100 мм», окно объёма — «комната показана высотой
+ * 2800», и объёмная комната срезала дверь, которую лист рисовал целиком
+ * (`volumeWallTiles` прижимает верх проёма к потолку). Высоту задают **схеме**
+ * — это этаж, и потолок у этажа один; выводить её по отдельной стене значило бы
+ * показать в одной комнате два потолка: голой стене 2800, стене со шкафом 3100.
+ *
+ * Выведенное число **только растёт**: самое высокое на схеме не ниже самого
+ * высокого на любой её стене, поэтому лист развёртки после этого таска нигде не
+ * стал короче, чем был, и срезать то, что рисовалось, ему нечем.
+ *
+ * **Данных это не касается** (G68): в `project.json` выведенное не пишется
+ * никогда, и у кого высота задана — у того ничего не изменилось.
+ */
+export function wallHeightShownMm(project, { schemeId, roomId } = {}) {
+  const known = wallHeightOf(project, { schemeId, roomId });
+  if (known > 0) return { mm: known, known: true };
+  return { mm: Math.max(WALL_HEIGHT_FALLBACK_MM, schemeTopMm(project, schemeId) + WALL_HEIGHT_AIR_MM), known: false };
+}
+
 // Снижать высоту под уже стоящим проёмом модель не даёт: промолчать значило бы
 // оставить окно выше потолка, а прижать его — угадать за человека.
 function checkHeightOverOpenings(project, schemeId, height) {
@@ -7211,10 +7290,11 @@ function wallCornerMoveSide(project, { wallId, roomId, middleMm, ahead, edge }) 
  * Отступы здесь уже **зеркальные по стороне**: рисующему остаётся отложить их
  * слева направо и ничего не знать ни про стороны, ни про направление стены.
  * `heightMm` — высота этой стороны (`null`, если её не задавали);
- * `heightShownMm` — то, во что рисовать: заданная высота, умолчание
- * `WALL_HEIGHT_FALLBACK_MM` или — если на стене стоит что-то выше его —
- * выведенная из этого высота. Без числа развёртка была бы картинкой, а с
- * выдуманным молча — враньём, поэтому признак `heightKnown` идёт рядом.
+ * `heightShownMm` — то, во что рисовать, и это **то же число, которым объём
+ * рисует комнату** (`wallHeightShownMm`, таск 228): заданная высота или
+ * умолчание, поднятое над самым высоким на схеме. Без числа развёртка была бы
+ * картинкой, а с выдуманным молча — враньём, поэтому признак `heightKnown`
+ * идёт рядом.
  */
 export function wallElevation(project, wallId, side = "left", cut = null) {
   const wall = findWall(project, wallId);
@@ -7334,12 +7414,13 @@ export function wallElevation(project, wallId, side = "left", cut = null) {
   // стены это по-прежнему её середина.
   const middleAlongMm = sideAlong(length, (span.fromMm + span.toMm) / 2, view);
   const known = wallHeightOnSide(project, wallId, view, middleAlongMm);
-  const tops = [
-    ...shownOpenings.map((opening) => opening.topMm),
-    ...objects.map((object) => (object.topMm === null ? 0 : object.topMm)),
-    ...shownMarks.map((mark) => mark.heightMm || 0),
-  ];
   const roomId = wallRoomId(project, wallId, view, middleAlongMm);
+  // Показанная высота — у модели, одна на лист и на объёмную комнату (таск
+  // 228). Своего счёта у развёртки больше нет: прежде она выводила его по
+  // тому, что стоит на **этой** стене, и расходилась с объёмом на той же
+  // стене. Комната та же, по которой взята заданная высота, — иначе лист
+  // спрашивал бы об одной стороне у двух разных хозяев.
+  const shown = wallHeightShownMm(project, { schemeId: wall.schemeId, roomId });
   const room = roomId ? findRoom(project, roomId) : null;
   const named = wallNaming(project, wall.schemeId).walls.get(wallId) || { name: "", aLetter: "", bLetter: "" };
   return {
@@ -7360,17 +7441,12 @@ export function wallElevation(project, wallId, side = "left", cut = null) {
     lengthMm: span.lengthMm,
     thicknessMm: Number(wall.thicknessMm),
     heightMm: known,
-    heightKnown: known !== null,
-    // Незаданная высота — умолчание `WALL_HEIGHT_FALLBACK_MM`, то же, которым
-    // рисует комнату объём. Вывод «по тому, что на стене стоит» при этом
-    // остался, но стал **запасным путём**: он поднимает лист выше умолчания,
-    // когда на стене что-то стоит выше него, и не опускает его никогда.
-    //
-    // Убрать вывод совсем было нельзя: на объекте заказчика шесть сторон из
-    // пятидесяти несут вещь или метку ростом в самый потолок, и по плоскому
-    // умолчанию у них срезало бы верх — верхний косяк упёрся бы в потолок
-    // листа. Триста миллиметров воздуха над самым высоким — ровно про это.
-    heightShownMm: known !== null ? known : Math.max(WALL_HEIGHT_FALLBACK_MM, Math.max(0, ...tops) + 300),
+    heightKnown: shown.known,
+    // Незаданная высота — выведенная (`wallHeightShownMm`): умолчание,
+    // поднятое над самым высоким на схеме. Убрать вывод совсем было нельзя —
+    // на объекте заказчика шесть сторон из пятидесяти несут вещь или метку
+    // ростом в самый потолок, и по плоскому умолчанию у них срезало бы верх.
+    heightShownMm: shown.mm,
     roomId,
     roomName: room ? room.name : "",
     openings: shownOpenings,

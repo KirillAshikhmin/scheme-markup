@@ -856,7 +856,13 @@ export function volumeNotes(scene) {
   for (const note of scene.notes || []) {
     if (note === "noRooms") lines.push(strings.volume.noRooms);
     if (note === "noBridge") lines.push(strings.volume.noBridge);
-    if (note === "noHeight") lines.push(text("volume.noHeight", { height: WALL_HEIGHT_FALLBACK_MM }));
+    // Число берётся у сцены, а не у константы (таск 228): высота, которую не
+    // задали, выводится из того, что стоит на схеме, и бывает выше умолчания.
+    // Константа в строке соврала бы ровно там, где объём и так рисует выше, —
+    // и снова разошлась бы с полосой развёртки, которая выводит то же число.
+    if (note === "noHeight") {
+      lines.push(text("volume.noHeight", { height: scene.heightMm || WALL_HEIGHT_FALLBACK_MM }));
+    }
   }
   return lines;
 }

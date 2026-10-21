@@ -86,8 +86,8 @@ import {
   typeChannels,
   typeObjectView,
   WALL_HEIGHT_FALLBACK_MM,
-  wallHeightOf,
   wallHeightOnSide,
+  wallHeightShownMm,
   wallVectors,
   wallsOnScheme,
 } from "./model.js";
@@ -2729,17 +2729,20 @@ function volumeGlassLeaf(hinge, leaf, width, span, out, doorId) {
 
 /**
  * Высота помещения: переопределение комнаты, высота схемы, а если ни того ни
- * другого — `WALL_HEIGHT_FALLBACK_MM` и честный `known: false`.
+ * другого — выведенная высота и честный `known: false`.
  *
- * Умолчание живёт в модели (таск 173) и **одно** на объём и развёртку: своей
- * константы здесь больше нет. Окно говорит о нём строкой `volume.noHeight`, и
- * в строке стоит то же число, что на полосе развёртки, — прежде окно обещало
- * это согласие комментарием, а числа были разные (2700 против «не ниже 2000»).
+ * **Своего счёта здесь нет ни одной строки** (таск 228): и умолчание, и вывод
+ * живут в модели (`wallHeightShownMm`), и ровно то же читает развёртка.
+ * Умолчание стало общим ещё в таске 173, а вывод — нет: лист поднимался над
+ * самым высоким, что стоит на стене, а комната оставалась плоской. Выходило два
+ * числа про одну стену, и дверь выше умолчания объём срезал потолком
+ * (`volumeWallTiles`), пока лист рисовал её целиком.
+ *
+ * Окно говорит о выведенном строкой `volume.noHeight`, и число в ней — это
+ * `scene.heightMm`, а не константа: иначе строка снова разошлась бы с полосой.
  */
 export function volumeHeightMm(project, schemeId, roomId) {
-  const given = wallHeightOf(project, { schemeId, roomId });
-  if (given > 0) return { mm: given, known: true };
-  return { mm: WALL_HEIGHT_FALLBACK_MM, known: false };
+  return wallHeightShownMm(project, { schemeId, roomId });
 }
 
 /** Внутри ли точка в плановом многоугольнике. Тот же счёт, что `pointInOutline`. */
