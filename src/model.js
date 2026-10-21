@@ -6,6 +6,7 @@ import { strings, text } from "./strings.js";
 // установки. Данные сборки, а не справочник объекта, — поэтому модель их
 // читает, но никогда не правит.
 import { objectCatalogEntry, objectCatalogKeyByName, objectCatalogRetired } from "./objectCatalog.js";
+import { openingCatalogEntry, openingCatalogKinds } from "./openingCatalog.js";
 
 // Версия формата объекта. Поднимается, когда в project.json появляются поля,
 // без которых работа теряется. История:
@@ -4915,30 +4916,162 @@ export function scaleDrawing(project, schemeId, factor) {
 // внутри, а что снаружи, модель не знает — помещения выводятся из контуров, а
 // не из стен (таск 122, развилка 2), и «внутрь» пришлось бы угадывать.
 
-// Виды проёма. **Стеклянная дверь стоит рядом с обычной** (таск 180, G269):
-// слова заказчика — «как на французский балкон — с рамой, но не глухая, а по
-// центру стекло, ну и тоже ручки». Для модели это дверь со всеми её полями:
-// петли, сторона открывания, полотно, ручка — и отличается она только тем, из
-// чего полотно сделано. Новый ключ приписан в середину списка, а не в начало:
-// `OPENING_KINDS[0]` — вид нового проёма по умолчанию (окно), и менять его
-// значило бы менять поведение кнопки, которой человек пользуется каждый день.
-export const OPENING_KINDS = ["window", "door", "glassDoor", "opening", "arch"];
+// Виды проёма живут **встроенным каталогом** (таск 215, `openingCatalog.js`) —
+// там же их разделы, породы, умолчания и описание того, чем вид отличается на
+// рисунке. Здесь остаются вопросы о виде: что у него есть полотно, можно ли его
+// остеклить, ходят ли сквозь него. Порядок списка — порядок каталога (сперва
+// двери, как в разговоре заказчика), а **вид нового проёма по умолчанию назван
+// прямо** — `OPENING_KIND_DEFAULT`: до таска 215 им был первый в списке, и
+// пополнение каталога молча переставило бы кнопку, которой человек пользуется
+// каждый день.
+//
+// **Стеклянная дверь стоит рядом с обычной** (таск 180, G269), но с таска 215
+// стекло — **отметка** `glazed` у любой двери, а не порода: слова заказчика —
+// «у всех этих вариантов ещё и опция — стеклянные». Вид `glassDoor` остался в
+// каталоге отметкой `legacy`: по нему открываются уже размеченные чертежи, а
+// новая разметка пишет породу плюс отметку (G68).
+export const OPENING_KINDS = openingCatalogKinds();
 export const OPENING_KIND_DOOR = "door";
 export const OPENING_KIND_GLASS_DOOR = "glassDoor";
+/** Вид нового проёма, пока человек не выбрал другой: окно, как было всегда. */
+export const OPENING_KIND_DEFAULT = "window";
 /** Виды с полотном: петли, сторона открывания, ручка, открывание в объёме. */
-export const OPENING_DOOR_KINDS = [OPENING_KIND_DOOR, OPENING_KIND_GLASS_DOOR];
+export const OPENING_DOOR_KINDS = OPENING_KINDS.filter((kind) => openingHasLeaf(kind));
 export const OPENING_HINGES = ["start", "end"];
 export const OPENING_SWINGS = ["left", "right"];
 
+/** Порода вида: `door`, `window`, `plain`, `gate`. Чужой вид — пусто. */
+export function openingFamilyOf(kind) {
+  const entry = openingCatalogEntry(kind);
+  return entry ? entry.family : "";
+}
+
+/** Как ходит полотно: `swing`, `slide`, `fold`, `pocket`, `lift` или `null`. */
+export function openingMotionOf(kind) {
+  const entry = openingCatalogEntry(kind);
+  return entry && entry.motion ? entry.motion : null;
+}
+
+/** Сколько створок у вида: 0, 1 или 2. */
+export function openingLeavesOf(kind) {
+  const entry = openingCatalogEntry(kind);
+  return entry ? Number(entry.leaves) || 0 : 0;
+}
+
 /**
- * **Есть ли у этого вида полотно.** Один вопрос — один хозяин: до таска 180 его
- * задавали восемь раз сравнением `kind === OPENING_KIND_DOOR`, и стеклянной
- * двери пришлось бы завести девятое. Спрашивать вид напрямую больше нельзя:
- * разойдись эти сравнения — у двери в колонке появились бы петли, а в объёме
- * нет, или наоборот.
+ * **Есть ли у этого вида полотно со стороной.** Один вопрос — один хозяин: до
+ * таска 180 его задавали восемь раз сравнением `kind === OPENING_KIND_DOOR`, и
+ * стеклянной двери пришлось бы завести девятое. Спрашивать вид напрямую больше
+ * нельзя: разойдись эти сравнения — у двери в колонке появились бы петли, а в
+ * объёме нет, или наоборот.
+ *
+ * С таска 215 отвечает «да» не только распашным: у сдвижной, гармошки и
+ * портальной та же пара признаков — по какой стороне стены идёт полотно
+ * (`swing`) и в какую сторону оно уходит (`hinge`), — и кольцо `Q`/`E` ведёт их
+ * по тем же четырём положениям. Роллетные и секционные ворота отвечают «нет»:
+ * их полотно уходит **вверх**, и ни петель, ни стороны стены у него нет.
  */
 export function openingHasLeaf(kind) {
-  return OPENING_DOOR_KINDS.includes(kind);
+  return openingLeavesOf(kind) > 0 && openingMotionOf(kind) !== "lift";
+}
+
+/**
+ * **Какая плитка каталога горит у этого вида.** У всех — своя, у стеклянной
+ * двери прежней разметки — распашная: стекло у неё отметка, а не порода, и
+ * второй плитки «Распашная стеклянная» в выборе быть не должно (мнение
+ * заказчика: «иначе плиток вдвое больше, а разница в одном»).
+ */
+export function openingKindBase(kind) {
+  const entry = openingCatalogEntry(kind);
+  return entry && entry.base ? entry.base : entry ? entry.kind : "";
+}
+
+/** Бывает ли такой вид стеклянным. Стекло — отметка у дверей, и только у них. */
+export function openingCanGlaze(kind) {
+  return openingFamilyOf(kind) === "door";
+}
+
+/**
+ * **Стеклянная ли это дверь** — один вопрос на три поверхности.
+ *
+ * Отвечает «да» двумя путями, и это G68 буквально: новая разметка ставит
+ * отметку `glazed` у породы (`door` + `glazed`), а прежняя писала отдельный вид
+ * `glassDoor`. Читается то и другое, а пишется только первое — «переименованное
+ * читается по обоим именам».
+ */
+export function openingGlazed(opening) {
+  if (!opening) return false;
+  if (opening.glazed === true) return true;
+  const entry = openingCatalogEntry(opening.kind);
+  return Boolean(entry && entry.glazed);
+}
+
+/**
+ * **Как проём называется в строке** — имя вида и отметка «стеклянная».
+ *
+ * Одно место на всех: список чертежа, подсказка метки, попавшей в проём, строка
+ * «что поставит следующий клик» и плашка выделенного. Разойдись они — человек
+ * читал бы в списке «Сдвижная дверь», а в плашке «Сдвижная дверь, стеклянная»
+ * про один и тот же проём.
+ */
+export function openingTitle(opening) {
+  const kind = opening && opening.kind;
+  const entry = openingCatalogEntry(kind);
+  const name = entry ? entry.name : strings.openingKinds[kind] || kind || "";
+  if (!openingGlazed(opening)) return name;
+  // У вида, остеклённого самой породой, приписка не нужна: «Стеклянная дверь,
+  // стеклянная» — это не подпись, а описка.
+  if (entry && entry.glazed) return name;
+  return text("openingLabel.glazed", { name });
+}
+
+/**
+ * Ходят ли сквозь такой проём. Сквозь окно — нет, сквозь дверь, проём, арку и
+ * ворота — да.
+ *
+ * Вид, которого в каталоге нет, отвечает «да»: так отвечал и прежний счёт
+ * (единственным исключением было окно), и проём из чужого файла не должен
+ * внезапно стать стеной.
+ */
+export function openingWalkThrough(kind) {
+  return openingFamilyOf(kind) !== "window";
+}
+
+/**
+ * **Чем делится просвет проёма в лицевой проекции** — один ответ на развёртку,
+ * объём и плитку выбора.
+ *
+ * Отдаёт доли, а не миллиметры: доля ложится и на лист развёртки, и на грань в
+ * объёме, и в клетку плитки сорока точек — а миллиметры пришлось бы делить на
+ * три разные мерки и разойтись в одной из них.
+ *
+ *   `xs` — где стоят вертикальные импосты, долями ширины просвета;
+ *   `ys` — где горизонтальные, долями высоты **от низа** просвета.
+ *
+ * Равные секции делятся ровно; у балконного окна полосы **не равны**: нижняя —
+ * пояс (`OPENING_BELT_MM`), верхняя — всё остальное, и это ровно то, о чём
+ * просил заказчик. Роллетные ворота задают не число полос, а шаг ламели:
+ * полос у них столько, сколько ламелей влезло в высоту.
+ */
+export function openingFaceGrid(opening) {
+  const entry = openingCatalogEntry(opening && opening.kind);
+  const face = entry && entry.face ? entry.face : {};
+  const height = Number(opening && opening.heightMm) || 0;
+  const cols = Math.max(1, Math.round(Number(face.cols) || 1));
+  const xs = [];
+  for (let index = 1; index < cols; index += 1) xs.push(index / cols);
+  const ys = [];
+  if (face.slatMm > 0 && height > 0) {
+    const slats = Math.max(1, Math.round(height / face.slatMm));
+    for (let index = 1; index < slats; index += 1) ys.push(index / slats);
+  } else if (face.beltMm > 0 && height > face.beltMm) {
+    // Пояс и всё, что выше: полос ровно две, и равными они не бывают.
+    ys.push(face.beltMm / height);
+  } else {
+    const rows = Math.max(1, Math.round(Number(face.rows) || 1));
+    for (let index = 1; index < rows; index += 1) ys.push(index / rows);
+  }
+  return { xs, ys };
 }
 
 /**
@@ -4966,23 +5099,47 @@ export const OPENING_DOOR_STATES = [
   { hinge: OPENING_HINGES[0], swing: OPENING_SWINGS[1] },
 ];
 
-/** Какое это из четырёх состояний. Чужое или пустое — первое, а не `-1`. */
-export function openingDoorStateIndex(state) {
+/**
+ * **Кольцо этого вида** (таск 215). У одностворчатой двери оно то самое, из
+ * четырёх; у двустворчатой и у распашных ворот — из **двух**, и это не
+ * урезание, а правда о них: петли у двупольной двери стоят у обоих косяков
+ * сразу, выбирать между «у начала» и «у конца» нечего, и `Q`/`E` обязаны
+ * показывать две разные двери, а не щёлкать дважды впустую.
+ *
+ * Петли в объекте у такой двери всё равно лежат (их пишет `openingDoorFields`):
+ * пара `hinge`/`swing` — одно состояние, и разбирать её по видам значило бы
+ * заводить второй вид записи. Кнопка «Петли» у двустворчатой спрятана, и
+ * рисунок её не спрашивает — врать ей негде.
+ */
+export function openingDoorStates(kind) {
+  if (openingLeavesOf(kind) > 1) return OPENING_SWINGS.map((swing) => ({ hinge: OPENING_HINGES[0], swing }));
+  return OPENING_DOOR_STATES;
+}
+
+/** Какое это из состояний кольца. Чужое или пустое — первое, а не `-1`. */
+export function openingDoorStateIndex(state, kind) {
+  const ring = openingDoorStates(kind);
   const hinge = state && state.hinge != null ? state.hinge : OPENING_HINGES[0];
   const swing = state && state.swing != null ? state.swing : OPENING_SWINGS[0];
-  const found = OPENING_DOOR_STATES.findIndex((item) => item.hinge === hinge && item.swing === swing);
-  return found < 0 ? 0 : found;
+  const found = ring.findIndex((item) => item.hinge === hinge && item.swing === swing);
+  if (found >= 0) return found;
+  // Кольцо из двух петель не различает: дверь с петлями у конца стоит на том
+  // же месте кольца, что с петлями у начала, — иначе `Q` у двустворчатой
+  // прыгал бы на первое состояние вместо соседнего.
+  const bySwing = ring.findIndex((item) => item.swing === swing);
+  return bySwing < 0 ? 0 : bySwing;
 }
 
 /**
  * Следующее состояние двери: `+1` — по кольцу вперёд (`E`), `−1` — назад (`Q`).
  * Отдаёт **новый** объект `{hinge, swing}`, как и всё в модели.
  */
-export function openingDoorStep(state, delta = 1) {
-  const count = OPENING_DOOR_STATES.length;
+export function openingDoorStep(state, delta = 1, kind) {
+  const ring = openingDoorStates(kind);
+  const count = ring.length;
   const step = Number(delta) || 0;
-  const index = (((openingDoorStateIndex(state) + step) % count) + count) % count;
-  return { ...OPENING_DOOR_STATES[index] };
+  const index = (((openingDoorStateIndex(state, kind) + step) % count) + count) % count;
+  return { ...ring[index] };
 }
 
 /**
@@ -5049,6 +5206,32 @@ function checkOpeningHeight(project, wall, opening) {
   if (top > height) throw modelError("openingAboveHeight", { top, height });
 }
 
+/**
+ * **Отметка «стеклянная»** (таск 215, G321). Слова заказчика: «у всех этих
+ * вариантов ещё и опция — стеклянные, по сути как добавили со стеклом по
+ * центру».
+ *
+ * Поле появляется в объекте **только когда оно `true`**: снятая отметка
+ * удаляет ключ, как пустое поле удаляет `floor` у схемы и `site` у объекта
+ * (G68, образец таска 188). У вида, который стеклянным не бывает, отметку не
+ * принимают молча — отказывают: пустить её значило бы записать в чертёж то,
+ * чего рисунок не покажет.
+ *
+ * Вид прежней разметки `glassDoor` остеклён сам, и ключа у него нет вовсе:
+ * читает оба пути `openingGlazed`, пишется всегда новый.
+ */
+function openingGlazeField(kind, patch, current) {
+  const has = patch && Object.prototype.hasOwnProperty.call(patch, "glazed");
+  const asked = has ? patch.glazed === true : Boolean(current && current.glazed === true);
+  if (!asked) return {};
+  if (!openingCanGlaze(kind)) throw modelError("openingGlazedOnlyDoor");
+  // У вида, остеклённого самой породой, отметке взяться негде: она ничего не
+  // добавляет и только развела бы два написания одного и того же.
+  const entry = openingCatalogEntry(kind);
+  if (entry && entry.glazed) return {};
+  return { glazed: true };
+}
+
 function openingDoorFields(kind, patch, current) {
   const has = (key) => patch && Object.prototype.hasOwnProperty.call(patch, key);
   const value = (key) => (has(key) ? patch[key] : current ? current[key] : undefined);
@@ -5066,7 +5249,10 @@ function openingDoorFields(kind, patch, current) {
   return { hinge, swing };
 }
 
-export function addOpening(project, { wallId, kind, atMm, widthMm, heightMm, heightAboveFloorMm = 0, hinge, swing } = {}) {
+export function addOpening(
+  project,
+  { wallId, kind, atMm, widthMm, heightMm, heightAboveFloorMm = 0, hinge, swing, glazed } = {},
+) {
   const wall = requireWall(project, wallId);
   if (!OPENING_KINDS.includes(kind)) throw modelError("openingKindUnknown");
   const height = drawingHeightMm(heightMm);
@@ -5080,6 +5266,7 @@ export function addOpening(project, { wallId, kind, atMm, widthMm, heightMm, hei
     heightMm: height,
     heightAboveFloorMm: drawingOffsetMm(heightAboveFloorMm),
     ...openingDoorFields(kind, { hinge, swing }, null),
+    ...openingGlazeField(kind, { glazed }, null),
   };
   checkOpeningFits(opening, wallLengthMm(wall));
   checkOpeningFree(project, opening);
@@ -5107,10 +5294,13 @@ export function updateOpening(project, openingId, patch = {}) {
     next.heightAboveFloorMm = drawingOffsetMm(patch.heightAboveFloorMm);
   }
   // Стала дверью — у неё появилась сторона открывания; перестала — поля
-  // убираются, а не остаются лежать соврать в развёртке.
+  // убираются, а не остаются лежать соврать в развёртке. То же и с отметкой
+  // «стеклянная»: окно со снятой отметкой не носит её ключ.
   delete next.hinge;
   delete next.swing;
+  delete next.glazed;
   Object.assign(next, openingDoorFields(next.kind, patch, current));
+  Object.assign(next, openingGlazeField(next.kind, patch, current));
   checkOpeningFits(next, wallLengthMm(wall));
   checkOpeningFree(project, next);
   checkOpeningHeight(project, wall, next);
@@ -6568,6 +6758,14 @@ export function wallElevation(project, wallId, side = "left", cut = null) {
       toMm: Math.round(span.toMm),
       floorMm: Number(opening.heightAboveFloorMm) || 0,
       topMm: Number(opening.heightAboveFloorMm) + Number(opening.heightMm),
+      // Вид проёма на листе — это его лицо: сколько секций, стеклянный ли он и
+      // как ходит полотно. Считается **здесь**, а не на листе: развёртку рисуют
+      // и холст, и лист ГОСТ, и архив всех схем, и спрашивать каталог трижды
+      // значило бы развести их в первой же правке.
+      glazed: openingGlazed(opening),
+      motion: openingMotionOf(opening.kind),
+      leaves: openingLeavesOf(opening.kind),
+      grid: openingFaceGrid(opening),
       // Петли и сторона открывания названы **от направления стены**, и при
       // взгляде с зеркальной стороны обе переворачиваются: дверь,
       // открывающаяся налево, с обратной стороны открывается направо.
@@ -8206,7 +8404,7 @@ export function validate(project) {
     problems.push(
       problem(
         "markInOpening",
-        { label: markLabel(project, mark), kind: strings.openingKinds[opening.kind] || opening.kind },
+        { label: markLabel(project, mark), kind: openingTitle(opening) },
         mark.id,
         "warning",
       ),
