@@ -18,10 +18,29 @@
 // переносился ни на одном пути — ровно то, что заказчик и увидел.
 //
 // Теперь здесь лежит **одно состояние на три режима**: середина поля в
-// миллиметрах чертежа и экранных точек на миллиметр. Кто на экране — тот и
-// пишет его (на каждый кадр), а остальные читают, когда их показывают. Второго
-// счёта нет: `volumePlanCentre` и `volumePlanViewAt` объёма зовут эти же
-// функции.
+// миллиметрах чертежа, экранных точек на миллиметр и — с таска 227 — взгляд
+// камеры объёма. Кто на экране — тот и пишет его (на каждый кадр), а остальные
+// читают, когда их показывают. Второго счёта нет: `volumePlanCentre` объёма
+// зовёт эти же функции.
+//
+// ——— каждое поле пишет своё и бережёт чужое (таск 227, G339) ——————————
+//
+// Слово заказчика: «направление камеры сохраняй». Направление легло **сюда**,
+// в ту же запись, а не рядом с ней: место и взгляд — один ответ на вопрос «где
+// я и куда смотрю», и хозяин у них один (правило T210). Вторая запись рядом
+// означала бы второго хозяина и второй порядок старшинства.
+//
+// Владеют полями разные поверхности, и это не беспорядок, а то же правило:
+//
+//   `x, y`      — общие: место человека на плане, его пишут все трое;
+//   `pxPerMm`   — плана и чертежа: у камеры приближения нет вовсе, и объём,
+//                 записывая место, оставляет прежнее;
+//   `look`      — только объёма: у плоских полей взгляда нет, и они, записывая
+//                 место, оставляют прежний.
+//
+// То есть каждое поле пишет то, чем владеет, и **бережёт** то, чем не владеет.
+// Поэтому «ушёл из объёма, повозил схему, вернулся» возвращает тот же взгляд:
+// схема его не трогала.
 //
 // ——— почему это отдельный модуль, а не поле состояния ——————————————————
 //
@@ -114,13 +133,18 @@ export function screenPlaceScreen(screen) {
  *
  * Возвращает отметку записи — её зовущий запоминает своей.
  */
-export function screenPlaceSet(from, schemeId, pointMm, pxPerMm) {
+export function screenPlaceSet(from, schemeId, pointMm, options = {}) {
   if (owner !== null && from !== owner) return placeStamp;
   const next = placeOf(schemeId, pointMm);
   if (!next) return placeStamp;
-  const scale = Number(pxPerMm);
-  const kept = place && place.schemeId === schemeId ? place.pxPerMm : null;
-  next.pxPerMm = Number.isFinite(scale) && scale > 0 ? scale : kept;
+  const same = place && place.schemeId === schemeId;
+  const scale = Number(options.pxPerMm);
+  next.pxPerMm = Number.isFinite(scale) && scale > 0 ? scale : same ? place.pxPerMm : null;
+  // Взгляд — поле объёма, и плоские его **берегут**: записывая место, они о нём
+  // не говорят ничего, и он остаётся прежним (таск 227). Та же бережность, с
+  // какой объём оставляет чужой `pxPerMm`.
+  const look = screenPlaceLookFrom(options.look);
+  next.look = look || (same ? place.look : null);
   // Запись, ничего не меняющая, не двигает отметку: мастерская и холст говорят
   // это на каждый кадр, и память вида иначе писалась бы в хранилище впустую.
   if (
@@ -128,7 +152,8 @@ export function screenPlaceSet(from, schemeId, pointMm, pxPerMm) {
     place.schemeId === next.schemeId &&
     place.x === next.x &&
     place.y === next.y &&
-    place.pxPerMm === next.pxPerMm
+    place.pxPerMm === next.pxPerMm &&
+    sameLook(place.look, next.look)
   ) {
     return placeStamp;
   }
@@ -144,10 +169,16 @@ export function screenPlaceSet(from, schemeId, pointMm, pxPerMm) {
   return placeStamp;
 }
 
-/** Общее место этой схемы: `{x, y, pxPerMm, stamp}` или `null`. */
+/** Общее место этой схемы: `{x, y, pxPerMm, look, stamp}` или `null`. */
 export function screenPlaceOf(schemeId) {
   if (!place || !schemeId || place.schemeId !== schemeId) return null;
-  return { x: place.x, y: place.y, pxPerMm: place.pxPerMm, stamp: place.stamp };
+  return {
+    x: place.x,
+    y: place.y,
+    pxPerMm: place.pxPerMm,
+    look: place.look ? { ...place.look } : null,
+    stamp: place.stamp,
+  };
 }
 
 /** Забыть всё: новый объект, закрытая схема. */
@@ -174,7 +205,7 @@ export function screenPlaceRestore(schemeId, saved) {
   // Мимо хозяина (D61): память — не поле, она поднимает то самое последнее
   // движение, которым человек закончил прошлый сеанс, и спорить ей не с кем —
   // ни одно поле ещё ничего не нарисовало.
-  return screenPlaceSet(owner, schemeId, next, next.pxPerMm);
+  return screenPlaceSet(owner, schemeId, next, { pxPerMm: next.pxPerMm, look: next.look });
 }
 
 /**
@@ -187,7 +218,59 @@ export function screenPlaceFrom(value) {
   const y = Number(value.y);
   if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
   const scale = Number(value.pxPerMm);
-  return { x, y, pxPerMm: Number.isFinite(scale) && scale > 0 ? scale : null };
+  return {
+    x,
+    y,
+    pxPerMm: Number.isFinite(scale) && scale > 0 ? scale : null,
+    look: screenPlaceLookFrom(value.look),
+  };
+}
+
+// ——— взгляд камеры объёма (таск 227, G339) ———————————————————————————————
+//
+// `{view, yaw, pitch, eye}`: каким глазом смотрели (первым лицом или обзором),
+// рысканье и наклон в радианах, а у обзора ещё и где стоит сам глаз.
+//
+// **Почему у обзора мало одних углов.** Обзор вертится и летает на месте: его
+// камера живёт отдельно от тела, и человек, повернувшись и отойдя, смотрит на
+// дом со стороны, а не на себя. В записи же `x, y` — место **человека** (это
+// G276: центр плана и есть место камеры-тела). Поэтому глаз хранится
+// **смещением от человека** и своей высотой: вернувшись, камера встаёт туда
+// же относительно тела, где и стояла. Смещением, а не точкой на плане, потому
+// что тело к этому мигу могло переехать — его двигают и схема, и чертёж, и
+// выталкивание из стены на входе (D39); камера обязана ехать за телом, а не
+// оставаться висеть над чужой комнатой.
+//
+// У первого лица глаза в записи нет вовсе: там камера и есть тело, а высота
+// глаза — стойка (G234), которая в память не ходит.
+export const SCREEN_LOOK_VIEWS = ["person", "around"];
+
+/** Что годится во взгляд. Мусор отбрасывается молча, как и всё в этой записи. */
+export function screenPlaceLookFrom(value) {
+  if (!value || typeof value !== "object") return null;
+  if (!SCREEN_LOOK_VIEWS.includes(value.view)) return null;
+  const yaw = Number(value.yaw);
+  const pitch = Number(value.pitch);
+  if (!Number.isFinite(yaw) || !Number.isFinite(pitch)) return null;
+  const look = { view: value.view, yaw, pitch };
+  const eye = value.eye;
+  if (look.view === "around" && eye && typeof eye === "object") {
+    const dx = Number(eye.dx);
+    const dy = Number(eye.dy);
+    const z = Number(eye.z);
+    if (Number.isFinite(dx) && Number.isFinite(dy) && Number.isFinite(z)) look.eye = { dx, dy, z };
+  }
+  return look;
+}
+
+function sameEye(a, b) {
+  if (!a || !b) return !a && !b;
+  return a.dx === b.dx && a.dy === b.dy && a.z === b.z;
+}
+
+function sameLook(a, b) {
+  if (!a || !b) return !a && !b;
+  return a.view === b.view && a.yaw === b.yaw && a.pitch === b.pitch && sameEye(a.eye, b.eye);
 }
 
 /** Что кладётся в настройки: только числа, и округлённые. */
@@ -198,6 +281,23 @@ export function screenPlaceStored(value) {
   // Масштаб округляется до шестого знака: в хранилище незачем двадцать цифр
   // дробной части, а пиксель на миллиметр — это уже лупа.
   if (next.pxPerMm) stored.pxPerMm = Math.round(next.pxPerMm * 1e6) / 1e6;
+  // Углы — в радианах и до четвёртого знака: это шесть тысячных градуса, мельче
+  // которых человек не целится, а в хранилище экономит половину строки.
+  if (next.look) {
+    stored.look = {
+      view: next.look.view,
+      yaw: Math.round(next.look.yaw * 1e4) / 1e4,
+      pitch: Math.round(next.look.pitch * 1e4) / 1e4,
+    };
+    // Глаз — в целых миллиметрах: доля миллиметра на экране не видна.
+    if (next.look.eye) {
+      stored.look.eye = {
+        dx: Math.round(next.look.eye.dx),
+        dy: Math.round(next.look.eye.dy),
+        z: Math.round(next.look.eye.z),
+      };
+    }
+  }
   return stored;
 }
 

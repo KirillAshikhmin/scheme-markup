@@ -40,8 +40,10 @@ import {
 } from "../src/model.js";
 import { drawDrawingGrid, drawRuler, drawScheme, drawingBridge, drawingUnitBridge, planToScreen, rulerTicks } from "../src/render.js";
 import {
+  SCREEN_LOOK_VIEWS,
   screenPlaceForget,
   screenPlaceFrom,
+  screenPlaceLookFrom,
   screenPlaceScreen,
   screenPlaceOf,
   screenPlacePlanRead,
@@ -200,8 +202,8 @@ test("память вида: что ложится в настройки и чт
     assert.equal(screenPlaceFrom(bad), null);
   }
   // Негодный масштаб не роняет место: оно читается, а приближение остаётся
-  // тем, которое выбрал человек.
-  assert.deepEqual(screenPlaceFrom({ x: 5, y: 6, pxPerMm: -1 }), { x: 5, y: 6, pxPerMm: null });
+  // тем, которое выбрал человек. Взгляда в такой записи нет — его пишет объём.
+  assert.deepEqual(screenPlaceFrom({ x: 5, y: 6, pxPerMm: -1 }), { x: 5, y: 6, pxPerMm: null, look: null });
 });
 
 test("память вида поднимается в общее место и становится чужой записью", () => {
@@ -223,16 +225,16 @@ test("о смене места сообщают — на это и пишетс�
   const stop = screenPlaceWatch(() => {
     heard += 1;
   });
-  screenPlaceSet("scheme", "схема-1", { x: 10, y: 20 }, 0.5);
+  screenPlaceSet("scheme", "схема-1", { x: 10, y: 20 }, { pxPerMm: 0.5 });
   assert.equal(heard, 1);
   // Поле говорит о месте на каждый кадр: запись, ничего не меняющая, память не
   // будит — иначе в хранилище летело бы по шестьдесят записей в секунду.
-  screenPlaceSet("scheme", "схема-1", { x: 10, y: 20 }, 0.5);
+  screenPlaceSet("scheme", "схема-1", { x: 10, y: 20 }, { pxPerMm: 0.5 });
   assert.equal(heard, 1);
-  screenPlaceSet("scheme", "схема-1", { x: 11, y: 20 }, 0.5);
+  screenPlaceSet("scheme", "схема-1", { x: 11, y: 20 }, { pxPerMm: 0.5 });
   assert.equal(heard, 2);
   stop();
-  screenPlaceSet("scheme", "схема-1", { x: 12, y: 20 }, 0.5);
+  screenPlaceSet("scheme", "схема-1", { x: 12, y: 20 }, { pxPerMm: 0.5 });
   assert.equal(heard, 2, "отписка не сработала");
   screenPlaceForget();
 });
@@ -423,7 +425,7 @@ test("D61: пишет только то поле, которое на экран
   screenPlaceForget();
   screenPlaceScreen("scheme");
   // Человек двигает схему.
-  const moved = screenPlaceSet("scheme", "с-1", { x: 1000, y: 500 }, 0.2);
+  const moved = screenPlaceSet("scheme", "с-1", { x: 1000, y: 500 }, { pxPerMm: 0.2 });
   // Объём жив за кадром и говорит, где камера, — его не слушают.
   const ignored = screenPlaceSet("volume", "с-1", { x: -9000, y: -9000 });
   assert.equal(ignored, moved, "запись из погасшего поля сдвинула отметку");
@@ -433,7 +435,7 @@ test("D61: пишет только то поле, которое на экран
     "место схемы перебито камерой",
   );
   // И мастерская, пока она не на экране, тоже молчит.
-  screenPlaceSet("drawing", "с-1", { x: 3, y: 4 }, 1);
+  screenPlaceSet("drawing", "с-1", { x: 3, y: 4 }, { pxPerMm: 1 });
   assert.equal(screenPlaceOf("с-1").x, 1000);
   assert.equal(screenPlaceOf("с-1").pxPerMm, 0.2, "и масштаб её не достался");
   screenPlaceForget();
@@ -450,12 +452,12 @@ test("D61: четыре порядка — последнее движение �
 
   // 1. Сдвинул схему → ушёл в чертёж: чертёж встаёт по схеме.
   screenPlaceScreen("scheme");
-  screenPlaceSet("scheme", scheme, { x: 1200, y: -300 }, 0.2);
+  screenPlaceSet("scheme", scheme, { x: 1200, y: -300 }, { pxPerMm: 0.2 });
   screenPlaceScreen("drawing");
   assert.deepEqual(read(), { x: 1200, y: -300, pxPerMm: 0.2 }, "чертёж встал не по схеме");
 
   // 2. Сдвинул чертёж → вернулся на схему: схема встаёт по чертежу.
-  screenPlaceSet("drawing", scheme, { x: -800, y: 900 }, 0.35);
+  screenPlaceSet("drawing", scheme, { x: -800, y: 900 }, { pxPerMm: 0.35 });
   screenPlaceScreen("scheme");
   assert.deepEqual(read(), { x: -800, y: 900, pxPerMm: 0.35 }, "схема встала не по чертежу");
 
@@ -474,7 +476,7 @@ test("D61: четыре порядка — последнее движение �
   assert.deepEqual(read(), { x: 2500, y: 2500, pxPerMm: 0.35 }, "схема не пошла за камерой");
 
   // И снова сдвиг схемы старше камеры: объём за кадром больше не спорит.
-  screenPlaceSet("scheme", scheme, { x: 10, y: 20 }, 0.35);
+  screenPlaceSet("scheme", scheme, { x: 10, y: 20 }, { pxPerMm: 0.35 });
   screenPlaceSet("volume", scheme, { x: 2500, y: 2500 });
   screenPlaceScreen("drawing");
   assert.deepEqual(read(), { x: 10, y: 20, pxPerMm: 0.35 }, "камера снова оказалась старше руки");
@@ -493,6 +495,113 @@ test("D61: память вида поднимается мимо хозяина 
     { x: screenPlaceOf("с-1").x, y: screenPlaceOf("с-1").y, pxPerMm: screenPlaceOf("с-1").pxPerMm },
     { x: 4000, y: -2000, pxPerMm: 0.5 },
   );
+  screenPlaceForget();
+  screenPlaceScreen(null);
+});
+
+// ——— G339: взгляд камеры живёт в той же записи, что и место ————————————
+//
+// Слово заказчика: «направление камеры сохраняй». Разбор, почему взгляд лёг
+// сюда, а не во вторую запись рядом, — в голове `screenPlace.js`: место и
+// взгляд отвечают на один вопрос «где я и куда смотрю», и хозяин у них один
+// (правило T210).
+
+test("G339: что годится во взгляд, а что отбрасывается молча", () => {
+  assert.deepEqual(SCREEN_LOOK_VIEWS, ["person", "around"]);
+  assert.deepEqual(screenPlaceLookFrom({ view: "person", yaw: 1.5, pitch: -0.2 }), {
+    view: "person",
+    yaw: 1.5,
+    pitch: -0.2,
+  });
+  // Глаз — только у обзора: у первого лица камера и есть тело.
+  assert.deepEqual(screenPlaceLookFrom({ view: "person", yaw: 0, pitch: 0, eye: { dx: 1, dy: 2, z: 3 } }), {
+    view: "person",
+    yaw: 0,
+    pitch: 0,
+  });
+  assert.deepEqual(screenPlaceLookFrom({ view: "around", yaw: 0.5, pitch: -0.7, eye: { dx: -4000, dy: 1500, z: 9000 } }), {
+    view: "around",
+    yaw: 0.5,
+    pitch: -0.7,
+    eye: { dx: -4000, dy: 1500, z: 9000 },
+  });
+  for (const bad of [null, {}, "строка", { view: "сбоку", yaw: 0, pitch: 0 }, { view: "person", yaw: "абв", pitch: 0 }]) {
+    assert.equal(screenPlaceLookFrom(bad), null, "принято негодное: " + JSON.stringify(bad));
+  }
+  // Негодный глаз не роняет взгляд: направление читается, а камера остаётся
+  // там, где её поставил кадр.
+  assert.deepEqual(screenPlaceLookFrom({ view: "around", yaw: 0, pitch: -0.5, eye: { dx: "абв", dy: 0, z: 0 } }), {
+    view: "around",
+    yaw: 0,
+    pitch: -0.5,
+  });
+});
+
+test("G339: взгляд ложится в настройки округлённым и поднимается обратно", () => {
+  const stored = screenPlaceStored({
+    x: 10.4,
+    y: -20.6,
+    pxPerMm: 0.1,
+    look: { view: "around", yaw: 1.23456789, pitch: -0.73299999, eye: { dx: -4000.4, dy: 1500.6, z: 9123.7 } },
+  });
+  assert.deepEqual(stored, {
+    x: 10,
+    y: -21,
+    pxPerMm: 0.1,
+    look: { view: "around", yaw: 1.2346, pitch: -0.733, eye: { dx: -4000, dy: 1501, z: 9124 } },
+  });
+  // Поднимается то же самое: круг «записали — прочитали» ничего не теряет.
+  assert.deepEqual(screenPlaceFrom(stored).look, stored.look);
+  // Места без взгляда в настройках не бывает лишнего ключа.
+  assert.equal("look" in screenPlaceStored({ x: 1, y: 2 }), false);
+});
+
+test("G339: плоские поля взгляд берегут, объём бережёт масштаб", () => {
+  screenPlaceForget();
+  screenPlaceScreen("volume");
+  // Объём записал место и взгляд — масштаба у него нет вовсе.
+  screenPlaceSet("volume", "с-1", { x: 100, y: 200 }, { look: { view: "person", yaw: 1, pitch: -0.1 } });
+  assert.deepEqual(screenPlaceOf("с-1").look, { view: "person", yaw: 1, pitch: -0.1 });
+  assert.equal(screenPlaceOf("с-1").pxPerMm, null);
+  // Ушли на схему: она пишет место и масштаб — и **не трогает** взгляд.
+  screenPlaceScreen("scheme");
+  screenPlaceSet("scheme", "с-1", { x: 300, y: 400 }, { pxPerMm: 0.25 });
+  assert.deepEqual(screenPlaceOf("с-1").look, { view: "person", yaw: 1, pitch: -0.1 }, "схема стёрла взгляд");
+  assert.equal(screenPlaceOf("с-1").pxPerMm, 0.25);
+  // Чертёж — то же самое.
+  screenPlaceScreen("drawing");
+  screenPlaceSet("drawing", "с-1", { x: 500, y: 600 }, { pxPerMm: 0.4 });
+  assert.deepEqual(screenPlaceOf("с-1").look, { view: "person", yaw: 1, pitch: -0.1 });
+  // Вернулись в объём: он пишет новый взгляд, а масштаб плоских бережёт.
+  screenPlaceScreen("volume");
+  screenPlaceSet("volume", "с-1", { x: 500, y: 600 }, { look: { view: "around", yaw: 2, pitch: -0.7, eye: { dx: -3000, dy: 0, z: 7000 } } });
+  assert.deepEqual(screenPlaceOf("с-1").look, { view: "around", yaw: 2, pitch: -0.7, eye: { dx: -3000, dy: 0, z: 7000 } });
+  assert.equal(screenPlaceOf("с-1").pxPerMm, 0.4, "объём отнял у плоских масштаб");
+  // Правило T210 цело: запись из погасшего объёма не проходит вовсе — ни
+  // местом, ни взглядом.
+  screenPlaceScreen("scheme");
+  screenPlaceSet("volume", "с-1", { x: -9, y: -9 }, { look: { view: "person", yaw: 9, pitch: 0 } });
+  assert.deepEqual(screenPlaceOf("с-1").look, { view: "around", yaw: 2, pitch: -0.7, eye: { dx: -3000, dy: 0, z: 7000 } });
+  assert.equal(screenPlaceOf("с-1").x, 500);
+  // Другая схема — другая камера: чужой взгляд на этаж не переезжает.
+  screenPlaceSet("scheme", "с-2", { x: 0, y: 0 }, { pxPerMm: 0.4 });
+  assert.equal(screenPlaceOf("с-2").look, null);
+  screenPlaceForget();
+  screenPlaceScreen(null);
+});
+
+test("G339: взгляд поднимается из памяти вместе с местом — одной записью", () => {
+  screenPlaceForget();
+  screenPlaceScreen("scheme");
+  const saved = { x: 4000, y: -2000, pxPerMm: 0.5, look: { view: "around", yaw: 1.5708, pitch: -0.733, eye: { dx: -5000, dy: 2000, z: 9000 } } };
+  assert.ok(screenPlaceRestore("с-1", saved) > 0);
+  const place = screenPlaceOf("с-1");
+  assert.deepEqual({ x: place.x, y: place.y, pxPerMm: place.pxPerMm }, { x: 4000, y: -2000, pxPerMm: 0.5 });
+  assert.deepEqual(place.look, saved.look, "взгляд не доехал из памяти");
+  // Запись в памяти одна: `viewMemoryEntry` кладёт место целиком, со взглядом.
+  const entry = viewMemoryEntry({ screen: "volume", schemeId: "с-1" }, place);
+  assert.deepEqual(entry.place.look, saved.look);
+  assert.equal("look" in entry, false, "взгляд завёл вторую запись рядом с местом");
   screenPlaceForget();
   screenPlaceScreen(null);
 });

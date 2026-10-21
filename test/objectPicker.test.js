@@ -83,6 +83,36 @@ test("поиск: по имени вещи и по имени категории
   assert.deepEqual(objectPickerGroups("ничегонетщ"), []);
 });
 
+// ——— таск 230: поиск не подменяет вещь разделом (D77) ————————————————————
+//
+// Нашёл исполнитель таска 224: запрос «лифт» поднимал весь раздел «Лестницы и
+// лифт», первой стояла «Лестница прямая» — и Enter, который берёт первую
+// плитку, ставил лестницу вместо лифта.
+
+test("D77: нашлись вещи — показываем вещи, и первой стоит та, которую искали", () => {
+  const first = (query) => {
+    const groups = objectPickerGroups(query);
+    return groups.length > 0 ? groups[0].entries[0].name : null;
+  };
+  assert.deepEqual(keysOf(objectPickerGroups("лифт")), ["lift"], "раздел снова подменил вещь");
+  assert.equal(first("лифт"), "Лифт", "Enter возьмёт не ту плитку");
+  // Раздел отвечает, только когда по именам вещей не нашлось ничего, — и это
+  // по-прежнему работает: «сантех» показывает весь раздел.
+  assert.ok(keysOf(objectPickerGroups("сантех")).length > 1, "раздел перестал отвечать вовсе");
+  // Половинчатый запрос чинится тем же правилом, а не точным совпадением.
+  assert.deepEqual(keysOf(objectPickerGroups("лиф")), ["lift"]);
+});
+
+test("D77: у сетки плиток то же правило совпадения, что у всей сборки", () => {
+  // `queryHit`: с начала слова, а не серединой. До таска 230 у сеток было своё
+  // сравнение, и «техник» поднимал «Сантехнику» серединой слова.
+  const categories = (query) => objectPickerGroups(query).map((group) => group.category);
+  assert.deepEqual(categories("техник"), ["appliances"], "«техник» снова ловит «Сантехнику» серединой слова");
+  assert.deepEqual(categories("сантех"), ["sanitary"]);
+  // Слово с начала — по-прежнему ответ, в том числе вторым словом имени.
+  assert.ok(keysOf(objectPickerGroups("дорожка")).length > 0, "«дорожка» не нашла беговую дорожку");
+});
+
 test("высота категории — заголовок плюс ряды плиток", () => {
   assert.equal(OBJECT_PICKER_TILES_PER_ROW, 3);
   assert.equal(objectPickerWeight({ entries: [] }), 1, "пустая категория — один заголовок");

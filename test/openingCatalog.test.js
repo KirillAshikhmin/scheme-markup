@@ -183,11 +183,17 @@ test("стеклянная дверь прежней разметки в пли�
   assert.ok(kinds("", OPENING_KIND_GLASS_DOOR).includes(OPENING_KIND_GLASS_DOOR), "а у выделенной — есть");
   // Остальные виды в плитках все до одного: спрятан ровно один.
   assert.equal(kinds("", null).length, OPENING_KINDS.length - 1);
-  // Поиск ищет по имени вида и по имени раздела.
+  // Поиск ищет по имени вида, а имя раздела отвечает, только когда по видам
+  // не нашлось ничего (таск 230, D77 — общий `objectTilesForQuery`).
   assert.deepEqual(kinds("ролл", null), ["gateRoller"]);
   assert.deepEqual(kinds("ворота", null), ASKED.gates);
   assert.deepEqual(kinds("витраж", null), ["windowGlazing"]);
   assert.deepEqual(kinds("нет такого", null), []);
+  // «Проём» — вид и раздел сразу; раньше он поднимал раздел целиком, и рядом с
+  // искомым проёмом вставала арка.
+  assert.deepEqual(kinds("проём", null), ["opening"]);
+  // А «двер» видов не называет — отвечает раздел, как и прежде.
+  assert.deepEqual(kinds("двер", null), ASKED.doors.filter((kind) => kind !== OPENING_KIND_GLASS_DOOR));
   // У записи плитки есть `key` — по нему ходят общие стрелки сетки.
   for (const group of openingPickerGroups("", {})) {
     for (const entry of group.entries) assert.equal(entry.key, entry.kind);
@@ -196,9 +202,18 @@ test("стеклянная дверь прежней разметки в пли�
 
 // ——— отметка «стеклянная» ————————————————————————————————————————————————
 
-test("стеклянной бывает любая дверь, и это отметка, а не вид каталога", () => {
+test("стеклянной бывает цельная дверь, и это отметка, а не вид каталога", () => {
+  // С таска 230 (G347) из дверей выпала гармошка: её полотно делится на
+  // звенья, звено у́же трёх рам, и стекла в нём не остаётся. Спрашивается это у
+  // движения полотна, а не по списку ключей, — поэтому и здесь проверяется
+  // правило, а не перечень.
   for (const kind of OPENING_KINDS) {
-    assert.equal(openingCanGlaze(kind), openingFamilyOf(kind) === "door", kind);
+    const whole = openingFamilyOf(kind) === "door" && openingMotionOf(kind) !== "fold";
+    assert.equal(openingCanGlaze(kind), whole, kind);
+  }
+  assert.equal(openingCanGlaze("doorFolding"), false, "гармошке стекло больше не предлагают");
+  for (const kind of ["door", "doorDouble", "doorSliding", "doorPocket"]) {
+    assert.equal(openingCanGlaze(kind), true, kind + ": у цельного полотна стекло осталось");
   }
   // Ни одного парного вида «такая же, но стеклянная» в каталоге нет: мнение
   // заказчика было то же — «иначе плиток вдвое больше, а разница в одном».
@@ -246,6 +261,44 @@ test("отметка пишется ключом, читается двумя п
   const again = updateOpening(legacy.project, legacy.opening.id, { kind: "door", glazed: true });
   assert.equal(again.opening.glazed, true);
   assert.equal(again.opening.kind, "door", "новая разметка пишет породу плюс отметку");
+});
+
+// ——— таск 230: гармошке стекло не предлагают (G347) ——————————————————————
+//
+// Слова заказчика: «как будто гармошка стеклянной и не может быть». Причина
+// названа рисунком: звено 225 мм у́же трёх рам, и стекла в нём не остаётся.
+//
+// Проверяется здесь обе стороны решения: новой стеклянной гармошки не
+// появляется **и** уже размеченная не теряет стекло молча (G68).
+
+test("G347: новую стеклянную гармошку не принимают, размеченную прежде — не трогают", () => {
+  const box = wall();
+  const fold = { wallId: box.wallId, kind: "doorFolding", atMm: 0, widthMm: 900, heightMm: 2100 };
+  assert.equal(errorCode(() => addOpening(box.project, { ...fold, glazed: true })), "openingGlazedOnlyDoor");
+  // Поставленная прежней сборкой отметка **читается** — рисунок чужого чертежа
+  // от нашего решения не меняется.
+  const plain = addOpening(box.project, fold);
+  const marked = {
+    ...plain.project,
+    openings: plain.project.openings.map((item) => (item.id === plain.opening.id ? { ...item, glazed: true } : item)),
+  };
+  const was = marked.openings.find((item) => item.id === plain.opening.id);
+  assert.equal(openingGlazed(was), true, "стекло у размеченной гармошки пропало");
+  // Правка, которая вида не меняет, в неё не упирается: проём остаётся правимым.
+  const wider = updateOpening(marked, plain.opening.id, { widthMm: 1000 });
+  assert.equal(wider.opening.glazed, true, "правка ширины сняла стекло");
+  assert.equal(wider.opening.widthMm, 1000);
+  // Снять человек может — и обратно она уже не встанет.
+  const bare = updateOpening(marked, plain.opening.id, { glazed: false });
+  assert.equal(Object.prototype.hasOwnProperty.call(bare.opening, "glazed"), false);
+  assert.equal(errorCode(() => updateOpening(bare.project, plain.opening.id, { glazed: true })), "openingGlazedOnlyDoor");
+  // И сменой вида стекло на гармошку не пронести: у распашной отметка есть, у
+  // гармошки её не будет.
+  const glassy = addOpening(box.project, { wallId: box.wallId, kind: "door", atMm: 2000, widthMm: 900, heightMm: 2100, glazed: true });
+  assert.equal(
+    errorCode(() => updateOpening(glassy.project, glassy.opening.id, { kind: "doorFolding", glazed: true })),
+    "openingGlazedOnlyDoor",
+  );
 });
 
 test("у окна и арки стеклить нечего — отметку не принимают вслух", () => {

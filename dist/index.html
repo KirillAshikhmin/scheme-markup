@@ -7600,7 +7600,7 @@ const strings = {
     openingHingeUnknown: "Петли двери — у начала проёма или у его конца",
     openingSwingUnknown: "Дверь открывается на одну сторону стены или на другую",
     openingSwingOnlyDoor: "Сторона открывания бывает только у двери: у окна и арки полотна нет",
-    openingGlazedOnlyDoor: "Стеклянной бывает дверь: у окна и арки стеклить нечего",
+    openingGlazedOnlyDoor: "Стеклянной бывает дверь с цельным полотном: у окна и арки стеклить нечего, а звено гармошки у́же рамы",
     schemeObjectNotFound: "Объект схемы не найден",
     schemeObjectKindNotFound: "Вид объекта схемы не найден",
     schemeObjectKindInUse: "Вид «{name}» стоит у объектов схемы ({count}) — сперва смените им вид",
@@ -18584,9 +18584,26 @@ function openingKindBase(kind) {
   return entry && entry.base ? entry.base : entry ? entry.kind : "";
 }
 
-/** Бывает ли такой вид стеклянным. Стекло — отметка у дверей, и только у них. */
+/**
+ * **Предлагается ли у этого вида отметка «стеклянная»** (таск 230, G347).
+ *
+ * Стекло — отметка у дверей, и только у них: у окна и арки стеклить нечего. С
+ * таска 230 из дверей выпала **гармошка**, и причина названа рисунком, а не
+ * вкусом: её полотно делится на звенья (`openingFoldLinks`), звено у двери
+ * каталога — 900 / 4 = 225 мм, у́же трёх рам `OPENING_GLASS_FRAME_MM`, и стекла
+ * в нём не остаётся. Сложенный пакет рисовался бы глухим, а врать про стекло
+ * там, где его негде нарисовать, нельзя (правило таска 180). Слова заказчика:
+ * «как будто гармошка стеклянной и не может быть».
+ *
+ * Спрашивается у записи каталога — у движения полотна, — а не по списку
+ * ключей: заведётся второй складной вид, и отметки у него не будет само собой.
+ *
+ * Это вопрос **«можно ли поставить»**, а не «стоит ли она». У проёма, которому
+ * отметку поставили прежней сборкой, стекло остаётся: за это отвечает
+ * `openingGlazed`, и молча оно не снимается (G68).
+ */
 function openingCanGlaze(kind) {
-  return openingFamilyOf(kind) === "door";
+  return openingFamilyOf(kind) === "door" && openingMotionOf(kind) !== "fold";
 }
 
 /**
@@ -18596,17 +18613,23 @@ function openingCanGlaze(kind) {
  * отметку `glazed` у породы (`door` + `glazed`), а прежняя писала отдельный вид
  * `glassDoor`. Читается то и другое, а пишется только первое — «переименованное
  * читается по обоим именам».
+ *
+ * **Спрашивается здесь порода, а не `openingCanGlaze`** (таск 230): отметку
+ * перестали предлагать у гармошки, но у той, что уже размечена стеклянной в
+ * чужом объекте, стекло обязано остаться — рисунок чужого чертежа от нашего
+ * решения не меняется (G68). Снять отметку человек может сам, и тогда она уже
+ * не вернётся — та же односторонняя дорога, что у `glassDoor`.
  */
 function openingGlazed(opening) {
   if (!opening) return false;
   const entry = openingCatalogEntry(opening.kind);
   if (entry && entry.glazed) return true;
-  // Отметка у вида, который стеклянным не бывает, не значит ничего. В объект
-  // такая не попадает (модель её не пустит), а вот в настройках окна «Что
-  // добавить» она переживает смену вида — и без этой строки строка «что
+  // Отметка у **породы**, которая стеклянной не бывает, не значит ничего. В
+  // объект такая не попадает (модель её не пустит), а вот в настройках окна
+  // «Что добавить» она переживает смену вида — и без этой строки строка «что
   // поставит следующий клик» обещала бы «Балконное окно, стеклянная» (поймано
   // живым прогоном таска 215).
-  return opening.glazed === true && openingCanGlaze(opening.kind);
+  return opening.glazed === true && openingFamilyOf(opening.kind) === "door";
 }
 
 /**
@@ -18928,12 +18951,22 @@ function checkOpeningHeight(project, wall, opening) {
  *
  * Вид прежней разметки `glassDoor` остеклён сам, и ключа у него нет вовсе:
  * читает оба пути `openingGlazed`, пишется всегда новый.
+ *
+ * **Уже стоящая отметка переживает правку** (таск 230, G347). Отметку перестали
+ * предлагать у гармошки, но в чужом объекте стеклянная гармошка может лежать, и
+ * G68 говорит: чужой чертёж от нашего решения не меняется. Поэтому отказ —
+ * только на **просьбу поставить** её там, где её не предлагают; та, что уже
+ * записана, остаётся, пока вид не меняют: иначе правка ширины упиралась бы в
+ * стекло, которого мы сами не ставили, и проём стал бы неправимым. Снять
+ * отметку человек может, вернуть — нет; смена вида на гармошку её тоже не
+ * пронесёт (`current.kind === kind`).
  */
 function openingGlazeField(kind, patch, current) {
   const has = patch && Object.prototype.hasOwnProperty.call(patch, "glazed");
   const asked = has ? patch.glazed === true : Boolean(current && current.glazed === true);
   if (!asked) return {};
-  if (!openingCanGlaze(kind)) throw modelError("openingGlazedOnlyDoor");
+  const kept = Boolean(current && current.glazed === true && current.kind === kind);
+  if (!openingCanGlaze(kind) && !kept) throw modelError("openingGlazedOnlyDoor");
   // У вида, остеклённого самой породой, отметке взяться негде: она ничего не
   // добавляет и только развела бы два написания одного и того же.
   const entry = openingCatalogEntry(kind);
@@ -32398,10 +32431,29 @@ const renderInternals = {
 // переносился ни на одном пути — ровно то, что заказчик и увидел.
 //
 // Теперь здесь лежит **одно состояние на три режима**: середина поля в
-// миллиметрах чертежа и экранных точек на миллиметр. Кто на экране — тот и
-// пишет его (на каждый кадр), а остальные читают, когда их показывают. Второго
-// счёта нет: `volumePlanCentre` и `volumePlanViewAt` объёма зовут эти же
-// функции.
+// миллиметрах чертежа, экранных точек на миллиметр и — с таска 227 — взгляд
+// камеры объёма. Кто на экране — тот и пишет его (на каждый кадр), а остальные
+// читают, когда их показывают. Второго счёта нет: `volumePlanCentre` объёма
+// зовёт эти же функции.
+//
+// ——— каждое поле пишет своё и бережёт чужое (таск 227, G339) ——————————
+//
+// Слово заказчика: «направление камеры сохраняй». Направление легло **сюда**,
+// в ту же запись, а не рядом с ней: место и взгляд — один ответ на вопрос «где
+// я и куда смотрю», и хозяин у них один (правило T210). Вторая запись рядом
+// означала бы второго хозяина и второй порядок старшинства.
+//
+// Владеют полями разные поверхности, и это не беспорядок, а то же правило:
+//
+//   `x, y`      — общие: место человека на плане, его пишут все трое;
+//   `pxPerMm`   — плана и чертежа: у камеры приближения нет вовсе, и объём,
+//                 записывая место, оставляет прежнее;
+//   `look`      — только объёма: у плоских полей взгляда нет, и они, записывая
+//                 место, оставляют прежний.
+//
+// То есть каждое поле пишет то, чем владеет, и **бережёт** то, чем не владеет.
+// Поэтому «ушёл из объёма, повозил схему, вернулся» возвращает тот же взгляд:
+// схема его не трогала.
 //
 // ——— почему это отдельный модуль, а не поле состояния ——————————————————
 //
@@ -32493,13 +32545,18 @@ function screenPlaceScreen(screen) {
  *
  * Возвращает отметку записи — её зовущий запоминает своей.
  */
-function screenPlaceSet(from, schemeId, pointMm, pxPerMm) {
+function screenPlaceSet(from, schemeId, pointMm, options = {}) {
   if (owner !== null && from !== owner) return placeStamp;
   const next = placeOf(schemeId, pointMm);
   if (!next) return placeStamp;
-  const scale = Number(pxPerMm);
-  const kept = place && place.schemeId === schemeId ? place.pxPerMm : null;
-  next.pxPerMm = Number.isFinite(scale) && scale > 0 ? scale : kept;
+  const same = place && place.schemeId === schemeId;
+  const scale = Number(options.pxPerMm);
+  next.pxPerMm = Number.isFinite(scale) && scale > 0 ? scale : same ? place.pxPerMm : null;
+  // Взгляд — поле объёма, и плоские его **берегут**: записывая место, они о нём
+  // не говорят ничего, и он остаётся прежним (таск 227). Та же бережность, с
+  // какой объём оставляет чужой `pxPerMm`.
+  const look = screenPlaceLookFrom(options.look);
+  next.look = look || (same ? place.look : null);
   // Запись, ничего не меняющая, не двигает отметку: мастерская и холст говорят
   // это на каждый кадр, и память вида иначе писалась бы в хранилище впустую.
   if (
@@ -32507,7 +32564,8 @@ function screenPlaceSet(from, schemeId, pointMm, pxPerMm) {
     place.schemeId === next.schemeId &&
     place.x === next.x &&
     place.y === next.y &&
-    place.pxPerMm === next.pxPerMm
+    place.pxPerMm === next.pxPerMm &&
+    sameLook(place.look, next.look)
   ) {
     return placeStamp;
   }
@@ -32523,10 +32581,16 @@ function screenPlaceSet(from, schemeId, pointMm, pxPerMm) {
   return placeStamp;
 }
 
-/** Общее место этой схемы: `{x, y, pxPerMm, stamp}` или `null`. */
+/** Общее место этой схемы: `{x, y, pxPerMm, look, stamp}` или `null`. */
 function screenPlaceOf(schemeId) {
   if (!place || !schemeId || place.schemeId !== schemeId) return null;
-  return { x: place.x, y: place.y, pxPerMm: place.pxPerMm, stamp: place.stamp };
+  return {
+    x: place.x,
+    y: place.y,
+    pxPerMm: place.pxPerMm,
+    look: place.look ? { ...place.look } : null,
+    stamp: place.stamp,
+  };
 }
 
 /** Забыть всё: новый объект, закрытая схема. */
@@ -32553,7 +32617,7 @@ function screenPlaceRestore(schemeId, saved) {
   // Мимо хозяина (D61): память — не поле, она поднимает то самое последнее
   // движение, которым человек закончил прошлый сеанс, и спорить ей не с кем —
   // ни одно поле ещё ничего не нарисовало.
-  return screenPlaceSet(owner, schemeId, next, next.pxPerMm);
+  return screenPlaceSet(owner, schemeId, next, { pxPerMm: next.pxPerMm, look: next.look });
 }
 
 /**
@@ -32566,7 +32630,59 @@ function screenPlaceFrom(value) {
   const y = Number(value.y);
   if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
   const scale = Number(value.pxPerMm);
-  return { x, y, pxPerMm: Number.isFinite(scale) && scale > 0 ? scale : null };
+  return {
+    x,
+    y,
+    pxPerMm: Number.isFinite(scale) && scale > 0 ? scale : null,
+    look: screenPlaceLookFrom(value.look),
+  };
+}
+
+// ——— взгляд камеры объёма (таск 227, G339) ———————————————————————————————
+//
+// `{view, yaw, pitch, eye}`: каким глазом смотрели (первым лицом или обзором),
+// рысканье и наклон в радианах, а у обзора ещё и где стоит сам глаз.
+//
+// **Почему у обзора мало одних углов.** Обзор вертится и летает на месте: его
+// камера живёт отдельно от тела, и человек, повернувшись и отойдя, смотрит на
+// дом со стороны, а не на себя. В записи же `x, y` — место **человека** (это
+// G276: центр плана и есть место камеры-тела). Поэтому глаз хранится
+// **смещением от человека** и своей высотой: вернувшись, камера встаёт туда
+// же относительно тела, где и стояла. Смещением, а не точкой на плане, потому
+// что тело к этому мигу могло переехать — его двигают и схема, и чертёж, и
+// выталкивание из стены на входе (D39); камера обязана ехать за телом, а не
+// оставаться висеть над чужой комнатой.
+//
+// У первого лица глаза в записи нет вовсе: там камера и есть тело, а высота
+// глаза — стойка (G234), которая в память не ходит.
+const SCREEN_LOOK_VIEWS = ["person", "around"];
+
+/** Что годится во взгляд. Мусор отбрасывается молча, как и всё в этой записи. */
+function screenPlaceLookFrom(value) {
+  if (!value || typeof value !== "object") return null;
+  if (!SCREEN_LOOK_VIEWS.includes(value.view)) return null;
+  const yaw = Number(value.yaw);
+  const pitch = Number(value.pitch);
+  if (!Number.isFinite(yaw) || !Number.isFinite(pitch)) return null;
+  const look = { view: value.view, yaw, pitch };
+  const eye = value.eye;
+  if (look.view === "around" && eye && typeof eye === "object") {
+    const dx = Number(eye.dx);
+    const dy = Number(eye.dy);
+    const z = Number(eye.z);
+    if (Number.isFinite(dx) && Number.isFinite(dy) && Number.isFinite(z)) look.eye = { dx, dy, z };
+  }
+  return look;
+}
+
+function sameEye(a, b) {
+  if (!a || !b) return !a && !b;
+  return a.dx === b.dx && a.dy === b.dy && a.z === b.z;
+}
+
+function sameLook(a, b) {
+  if (!a || !b) return !a && !b;
+  return a.view === b.view && a.yaw === b.yaw && a.pitch === b.pitch && sameEye(a.eye, b.eye);
 }
 
 /** Что кладётся в настройки: только числа, и округлённые. */
@@ -32577,6 +32693,23 @@ function screenPlaceStored(value) {
   // Масштаб округляется до шестого знака: в хранилище незачем двадцать цифр
   // дробной части, а пиксель на миллиметр — это уже лупа.
   if (next.pxPerMm) stored.pxPerMm = Math.round(next.pxPerMm * 1e6) / 1e6;
+  // Углы — в радианах и до четвёртого знака: это шесть тысячных градуса, мельче
+  // которых человек не целится, а в хранилище экономит половину строки.
+  if (next.look) {
+    stored.look = {
+      view: next.look.view,
+      yaw: Math.round(next.look.yaw * 1e4) / 1e4,
+      pitch: Math.round(next.look.pitch * 1e4) / 1e4,
+    };
+    // Глаз — в целых миллиметрах: доля миллиметра на экране не видна.
+    if (next.look.eye) {
+      stored.look.eye = {
+        dx: Math.round(next.look.eye.dx),
+        dy: Math.round(next.look.eye.dy),
+        z: Math.round(next.look.eye.z),
+      };
+    }
+  }
   return stored;
 }
 
@@ -37432,7 +37565,7 @@ function canvasPushPlace(state, project, view) {
   if (!canvasOnScreen(state) || !state.schemeId) return;
   const place = screenPlacePlanRead(project, state.schemeId, canvasBox(), view);
   if (!place) return;
-  canvasPlaceStamp = screenPlaceSet(SCREEN_DEFAULT, state.schemeId, place, place.pxPerMm);
+  canvasPlaceStamp = screenPlaceSet(SCREEN_DEFAULT, state.schemeId, place, { pxPerMm: place.pxPerMm });
 }
 
 /**
@@ -48393,6 +48526,7 @@ function openTypePicker(project, options = {}) {
 
 
 
+
 // Клетка картинки на плитке. Сорок точек — столько же, сколько у крупного
 // знака типа метки в разделе «Метки»: мельче у кровати не разобрать подушек.
 const OBJECT_TILE_ICON = 40;
@@ -48452,8 +48586,7 @@ function objectPickerWeight(group) {
 }
 
 // Терпимое сравнение, как у каталога: регистр, «ё» и пробелы по краям не
-// считаются. Поиск идёт по имени вещи и по имени её категории — «сантех»
-// показывает весь раздел, «хол» одну плитку.
+// считаются.
 function plain(value) {
   return String(value == null ? "" : value)
     .trim()
@@ -48462,16 +48595,46 @@ function plain(value) {
 }
 
 /**
- * Подходит ли плитка под запрос: по имени вещи или по имени её раздела.
+ * Подходит ли строка под запрос — **правилом сборки** (`queryHit`, находка 7
+ * разбора механик): с начала слова, а не серединой.
  *
- * **Одно правило на всю сетку плиток** (таск 218): сетку изображений в
- * справочнике типов собирают из тех же кирпичей, и её разделы — свои. Разойдись
- * правила — в одном окне половина плиток искалась бы иначе, чем другая.
+ * До таска 230 у сеток плиток было своё сравнение (`includes`), и это был
+ * седьмой угол, в котором поиск работал иначе, чем в остальных пяти окнах:
+ * запрос «техник» поднимал «Сантехнику» серединой слова. Правило совпадения на
+ * сборку одно; ранги у окон остаются свои.
  */
-function objectTileMatches(query, name, groupName) {
+function objectTileMatches(query, name) {
   const needle = plain(query);
   if (needle === "") return true;
-  return plain(name).includes(needle) || plain(groupName).includes(needle);
+  return queryHit(plain(name), needle);
+}
+
+/**
+ * **Что остаётся в сетке от запроса** — один ответ на все сетки плиток: вещи
+ * чертежа, виды проёмов и изображения типа.
+ *
+ * Имя раздела — тоже ответ: «сантех» показывает весь раздел, и это заведено
+ * нарочно (таск 154). Но **раздел отвечает только тогда, когда по именам вещей
+ * не нашлось ничего** (дефект D77, таск 230): до правки запрос «лифт» поднимал
+ * весь раздел «Лестницы и лифт», первой в выдаче стояла «Лестница прямая», и
+ * Enter ставил лестницу вместо лифта — поиск подменял вещь разделом.
+ *
+ * Почему так, а не «точное совпадение вперёд»: порядок плиток в разделе человек
+ * уже выучил, и переставлять их под запрос — значит каждый раз показывать новый
+ * каталог. А «нашлись вещи — показываем вещи» объясняется одной строкой и
+ * чинит не только точный запрос, но и «лиф».
+ */
+function objectTilesForQuery(query, groups) {
+  const list = (Array.isArray(groups) ? groups : []).filter(
+    (group) => group && Array.isArray(group.entries) && group.entries.length > 0,
+  );
+  const needle = plain(query);
+  if (needle === "") return list;
+  const named = list
+    .map((group) => ({ ...group, entries: group.entries.filter((entry) => queryHit(plain(entry.name), needle)) }))
+    .filter((group) => group.entries.length > 0);
+  if (named.length > 0) return named;
+  return list.filter((group) => queryHit(plain(group.name), needle));
 }
 
 /**
@@ -48483,15 +48646,22 @@ function objectTileMatches(query, name, groupName) {
  * заголовок держал бы колонку зря.
  */
 function objectPickerGroups(query, { key } = {}) {
+  return objectTilesForQuery(query, objectPickerAllGroups({ key }));
+}
+
+/**
+ * Разделы каталога со всеми их вещами — **до** запроса. Сужает их общий
+ * `objectTilesForQuery`: сетке изображений (таск 218) нужны те же разделы
+ * рядом со своими семьями, и решать «вещи или раздел» надо один раз на всё
+ * окно, а не дважды по половинам.
+ */
+function objectPickerAllGroups({ key } = {}) {
   const chosen = key || null;
-  return OBJECT_CATEGORIES.map((category) => {
-    const name = strings.schemeObjectCategories[category] || category;
-    const entries = objectCatalogCategory(category).filter((entry) => {
-      if (entry.legacy && entry.key !== chosen) return false;
-      return objectTileMatches(query, entry.name, name);
-    });
-    return { category, name, entries };
-  }).filter((group) => group.entries.length > 0);
+  return OBJECT_CATEGORIES.map((category) => ({
+    category,
+    name: strings.schemeObjectCategories[category] || category,
+    entries: objectCatalogCategory(category).filter((entry) => !entry.legacy || entry.key === chosen),
+  })).filter((group) => group.entries.length > 0);
 }
 
 /**
@@ -48705,6 +48875,7 @@ function openObjectPicker(options = {}) {
 
 
 
+
 // Клетка картинки на плитке — та же сорокаточечная, что у вещи чертежа: две
 // сетки плиток стоят рядом в одном окне «Что добавить», и разного размера
 // клетки читались бы как разная важность.
@@ -48761,13 +48932,6 @@ function openingTileIcon(kind, size = OPENING_TILE_ICON) {
 
 // Терпимое сравнение, как у каталога вещей: регистр, «ё» и пробелы по краям не
 // считаются.
-function openingPlain(value) {
-  return String(value == null ? "" : value)
-    .trim()
-    .toLowerCase()
-    .replace(/ё/g, "е");
-}
-
 /**
  * Что показать в окне: разделы по порядку каталога, в каждом — его виды.
  *
@@ -48777,26 +48941,24 @@ function openingPlain(value) {
  * видеть, чем стоит проём на его чертеже, а подсветить вместо него похожий
  * значило бы соврать.
  *
- * Поиск идёт по имени вида и по имени раздела: «двер» показывает весь раздел,
- * «ролл» одну плитку.
+ * **Сужает выдачу общий `objectTilesForQuery`** — тот же, что у сетки вещей
+ * (таск 230): своего сравнения здесь было третье на сборку, и раздел отвечал
+ * наравне с видом. Теперь имя раздела отвечает только тогда, когда по именам
+ * видов не нашлось ничего: «двер» по-прежнему показывает весь раздел, а
+ * «проём» — одну плитку, а не раздел, в котором она вторая.
  */
 function openingPickerGroups(query, { kind } = {}) {
-  const needle = openingPlain(query);
   const chosen = kind || null;
-  return OPENING_CATEGORIES.map((category) => {
-    const name = strings.openingCategories[category] || category;
-    const hay = openingPlain(name);
-    const entries = openingCatalogCategory(category)
-      .filter((entry) => {
-        if (entry.legacy && entry.kind !== chosen) return false;
-        if (needle === "") return true;
-        return openingPlain(entry.name).includes(needle) || hay.includes(needle);
-      })
+  const groups = OPENING_CATEGORIES.map((category) => ({
+    category,
+    name: strings.openingCategories[category] || category,
+    entries: openingCatalogCategory(category)
+      .filter((entry) => !entry.legacy || entry.kind === chosen)
       // Шаг стрелки и разметка плитки общие с вещами и ходят по `key`: у проёма
       // ключ — это его вид.
-      .map((entry) => ({ ...entry, key: entry.kind }));
-    return { category, name, entries };
-  }).filter((group) => group.entries.length > 0);
+      .map((entry) => ({ ...entry, key: entry.kind })),
+  }));
+  return objectTilesForQuery(query, groups);
 }
 
 /**
@@ -49022,7 +49184,13 @@ function drawPickerNote(adding, settings = {}) {
     return text("drawPicker.noteOpening", {
       // Имя вида и отметка «стеклянная» — одним местом (`openingTitle`): в
       // плашке колонки и в этой строке проём обязан называться одинаково.
-      kind: openingTitle({ kind, glazed: openings.glazed === true }),
+      //
+      // Отметка спрашивается через `openingCanGlaze` — тем же вопросом, каким
+      // ставит её себе будущий проём: строка обещает **то, что встанет по
+      // клику**, а у гармошки отметки не будет (G347). Без этого она обещала бы
+      // «Дверь-гармошка, стеклянная» — ровно тот промах, который поймал живой
+      // прогон таска 215 на балконном окне.
+      kind: openingTitle({ kind, glazed: openings.glazed === true && openingCanGlaze(kind) }),
       width: sizes.widthMm,
       height: sizes.heightMm,
     });
@@ -54518,8 +54686,8 @@ function typesLineButton({ lineStyle, color, allowInherit, inheritLineStyle, onP
 // Шесть семей реестра — изображения меток (37 штук): им нужны человеческие
 // имена, и они дописаны в словарь (`strings.markViews`). Восемь разделов
 // каталога — вещи чертежа (52 штуки): имена и порядок у них уже есть, и берутся
-// они **тем же** `objectPickerGroups`, которым стоит шаг «Объекты» окна «Что
-// добавить». Выглядит эта половина в точности как там, и это нарочно: человек
+// они **тем же** каталогом (`objectPickerAllGroups`), которым стоит шаг
+// «Объекты» окна «Что добавить»; сужает выдачу общий `objectTilesForQuery`. Выглядит эта половина в точности как там, и это нарочно: человек
 // уже знает, где у него лежит кровать.
 //
 // Почему вещи чертежа не спрятаны от метки: реестр один, и ключ изображения —
@@ -54574,18 +54742,21 @@ function typeViewGroups(query, { key, offer, used } = {}) {
   for (const family of OBJECT_VIEW_FAMILIES) {
     if (family === OBJECT_VIEW_FAMILY_OBJECTS) continue;
     const name = strings.dictionary.viewFamilies[family] || family;
-    const entries = objectViewFamily(family)
-      .map((item) => typesViewEntry(item, strings.markViews[item] || item, { offer, used }))
-      .filter((entry) => objectTileMatches(query, entry.name, name));
+    const entries = objectViewFamily(family).map((item) =>
+      typesViewEntry(item, strings.markViews[item] || item, { offer, used }),
+    );
     if (entries.length > 0) groups.push({ category: family, name, entries });
   }
-  for (const group of objectPickerGroups(query, { key })) {
+  for (const group of objectPickerAllGroups({ key })) {
     groups.push({
       ...group,
       entries: group.entries.map((entry) => typesViewEntry(entry.key, entry.name, { offer, used })),
     });
   }
-  return groups;
+  // Запрос сужает **всё окно разом** (таск 230): семьи реестра и разделы
+  // каталога стоят в одной сетке, и решать «нашлись имена или отвечает
+  // раздел» по половинам нельзя — вышло бы два разных ответа в одном окне.
+  return objectTilesForQuery(query, groups);
 }
 
 /**
@@ -60183,6 +60354,25 @@ const VOLUME_HANDLE_EDGE_MM = 70;
 const VOLUME_FOLD_LEAF_MM = 40;
 const VOLUME_FOLD_GAP_MM = 10;
 
+/**
+ * **Зазор между уехавшим сдвижным полотном и стеной** (дефект D78).
+ *
+ * До правки открытое сдвижное полотно оставалось в средней плоскости стены —
+ * то есть **внутри** неё, — и в объёме его не было видно вовсе: стена рисуется
+ * поверх. На плане оно всё это время лежало накладным, по стороне стены
+ * (`drawDrawingSlider`), и расходились эти два рисунка молча.
+ *
+ * Теперь полотно уезжает по той же стороне, и от оси стены его отделяет
+ * полтолщины плюс эти двадцать миллиметров — кронштейн ролика, на котором
+ * накладная дверь и висит. Меньше нельзя: полотно слилось бы со стеной в одну
+ * плоскость, а коплоскостные грани сортировка по дальности разводит случаем
+ * (правило таска 180).
+ *
+ * Портальной это не касается: у неё полотно **внутри** стены по замыслу, и
+ * открытой она не рисуется вовсе (решение таска 215).
+ */
+const VOLUME_SLIDE_GAP_MM = 20;
+
 // Рама — четыре бруска по краю проёма, в середине толщины стены. Стекла нет:
 // сквозь окно видно фон, и это ровно то, чего просил заказчик.
 //
@@ -60318,8 +60508,8 @@ function volumeDoorLeaf(wall, opening, span, out, open) {
     // Куда смотрит полотно.
     //
     //   распашное раскрытое — прочь от стены на четверть оборота;
-    //   сдвижное раскрытое — вдоль стены **за** косяк, то есть полотно
-    //     съезжает туда, куда показывала стрелка на плане;
+    //   сдвижное раскрытое — вдоль стены **за** косяк и **по её стороне**, той
+    //     самой, по которой оно нарисовано накладным на плане (дефект D78);
     //   гармошка раскрытая — пакетом звеньев поперёк стены у косяка с петлями
     //     (таск 226, `volumeFoldPack`): она никуда не съезжает, она
     //     складывается;
@@ -60330,11 +60520,15 @@ function volumeDoorLeaf(wall, opening, span, out, open) {
     const packed = open && motion === "fold";
     const slid = open && motion === "slide";
     const leaf = open && motion === "swing" ? { x: n.x * side, y: n.y * side } : { x: u.x * plan.out, y: u.y * plan.out };
+    // Сколько полотно отстоит от оси стены, когда уехало: полстены плюс зазор.
+    const away = slid ? Math.abs(Number(wall.thicknessMm) || 0) / 2 + VOLUME_SLIDE_GAP_MM : 0;
     const boards = packed
       ? volumeFoldPack(root, leaf, { x: n.x * side, y: n.y * side }, width, openingFoldLinks(opening))
       : [
           {
-            at: slid ? { x: root.x - leaf.x * width, y: root.y - leaf.y * width } : root,
+            at: slid
+              ? { x: root.x - leaf.x * width + n.x * side * away, y: root.y - leaf.y * width + n.y * side * away }
+              : root,
             along: leaf,
             width,
           },
@@ -70102,15 +70296,16 @@ function createVolume({ api, hosts }) {
    * нет, и заводить его здесь было бы третьим ответом на тот же вопрос.
    */
   function placeArrive(state) {
-    if (scene.empty) return;
+    if (scene.empty) return false;
     // Место общее на три режима и лежит в одном месте (таск 193, D59): его и
     // спрашиваем, кто бы его ни поставил — план, чертёж или память вида.
     // Прежде здесь спрашивали **мастерскую**, и только когда пришли из неё, —
     // отсюда и «не всегда работает»: прямой переход «Схема → Чертёж» не
     // переносил ничего. Молчит общее место только там, где моста нет вовсе
     // (схема без калибровки): тогда считается середина плана.
-    const want = screenPlaceOf(schemeId) || volumePlanCentre(state.project, schemeId, viewport(), state.view);
-    if (!want) return;
+    const place = screenPlaceOf(schemeId);
+    const want = place || volumePlanCentre(state.project, schemeId, viewport(), state.view);
+    if (!want) return false;
     const moved = volumeMoveTo(scene, want, volumeStanceHead(stance));
     person.x = moved.x;
     person.y = moved.y;
@@ -70118,9 +70313,43 @@ function createVolume({ api, hosts }) {
     // разойдись они — человек увидел бы со стороны не ту комнату, в которой
     // только что стоял.
     aroundLookAt(moved.x, moved.y);
+    // ...а если в записи есть взгляд — встаём и смотрим туда же (таск 227).
+    const looked = lookArrive(place && place.look, moved);
     // Встал присевший под низкое или вышел из-под него — решает новое место.
     stanceRecheck();
     syncWhere();
+    return looked;
+  }
+
+  /**
+   * Поставить взгляд из общей записи. `false` — взгляда в ней нет, и кадр
+   * решает тот, кто звал (первый вход открывает объём всей схемой, таск 146).
+   *
+   * Обзор ставится **целиком**: глаз — туда же относительно человека, где он
+   * и стоял, углы — сохранённые. Той же дверью (`aroundSet`), которой живёт
+   * весь обзор, — второго способа посадить камеру в сборке нет, и заводить его
+   * ради памяти нельзя. Глаза в записи нет (запись старая или от первого лица)
+   * — берутся одни углы, камера остаётся там, где её поставил кадр.
+   */
+  function lookArrive(look, at) {
+    if (!look) return false;
+    const pitch = volumeClampPitch(look.pitch);
+    if (look.view === "person") {
+      person.yaw = look.yaw;
+      person.pitch = pitch;
+      if (view !== "person") {
+        view = "person";
+        riseStop();
+      }
+      return true;
+    }
+    if (look.eye) aroundSet({ x: at.x + look.eye.dx, y: at.y + look.eye.dy, z: look.eye.z }, look.yaw, pitch);
+    else aroundTurn(look.yaw, pitch);
+    if (view !== "around") {
+      view = "around";
+      riseStop();
+    }
+    return true;
   }
 
   /**
@@ -70140,7 +70369,33 @@ function createVolume({ api, hosts }) {
    */
   function placeHere() {
     if (scene.empty || screenMode() !== "volume") return;
-    screenPlaceSet("volume", schemeId, { x: person.x, y: person.y });
+    screenPlaceSet("volume", schemeId, { x: person.x, y: person.y }, { look: lookNow() });
+  }
+
+  /**
+   * Куда смотрит камера — **та, которой смотрят** (таск 227, G339). Слово
+   * заказчика: «направление камеры сохраняй».
+   *
+   * Углы берутся у вида, который на экране, и вид назван в самой записи: у
+   * первого лица и у обзора своя пара углов, и наклон обзора (−42° в пол) в
+   * первом лице значил бы «уткнуться под ноги». Взгляда погасшего вида в
+   * записи нет нарочно: человек его не видел и вернётся не к нему — вернётся он
+   * к тому, которым уходил. Переключит вид руками — получит умолчание этого
+   * вида, как и сегодня.
+   *
+   * У обзора записан ещё и сам глаз — **смещением от человека** и своей
+   * высотой. Одних углов там мало: обзор вертится и летает на месте, его
+   * камера живёт отдельно от тела, и повернувшийся да отошедший смотрит на дом
+   * со стороны, а не на себя. Разбор, почему смещением, — в `screenPlace.js`.
+   */
+  function lookNow() {
+    if (view === "person") return { view: "person", yaw: person.yaw, pitch: person.pitch };
+    return {
+      view: "around",
+      yaw: around.yaw,
+      pitch: around.pitch,
+      eye: { dx: around.eye.x - person.x, dy: around.eye.y - person.y, z: around.eye.z },
+    };
   }
 
   function viewport() {
@@ -72407,19 +72662,30 @@ function createVolume({ api, hosts }) {
   document.addEventListener("pointerlockchange", onLockChange);
   for (const name of FULLSCREEN_EVENTS) document.addEventListener(name, onFullscreenChange);
 
+  // Первый вход в режим: человек встаёт туда, где была середина поля, с
+  // которого пришли (G276). Обзор при этом по-прежнему открывается **всей
+  // схемой** — это решение таска 146 («показать заказчику» начинается с общего
+  // вида), и оно с переносом не спорит: место достаётся человеку, а не рамке
+  // первого кадра. Переключил вид на первое лицо — стоит там, где показывал.
+  //
+  // **Кроме случая, когда взгляд помнят** (таск 227): человек вернулся туда,
+  // откуда ушёл, и показывать ему вместо этого общий вид — значит забыть то,
+  // что он просил запомнить. Кнопки «Обзор» и «Вся схема» при этом как были:
+  // они возвращают взгляд к умолчанию по нажатию, и память им не перечит.
+  //
+  // **Встать надо до первого кадра.** Кадр говорит общей записи, где камера
+  // (`placeHere`), и, нарисованный раньше, он успевал перебить поднятый из
+  // памяти взгляд своим — тем, с которого поверхность начинается. Живой прогон
+  // таска 227 поймал это на первом лице: вид возвращался обзором, потому что
+  // читалась уже затёртая запись.
+  const looked = placeArrive(getState());
   volumeParamsArrive(Date.now());
   refreshHour();
   syncClock();
   syncStanceWords();
   sync();
   resize();
-  // Первый вход в режим: человек встаёт туда, где была середина поля, с
-  // которого пришли (G276). Обзор при этом по-прежнему открывается **всей
-  // схемой** — это решение таска 146 («показать заказчику» начинается с общего
-  // вида), и оно с переносом не спорит: место достаётся человеку, а не рамке
-  // первого кадра. Переключил вид на первое лицо — стоит там, где показывал.
-  placeArrive(getState());
-  if (!scene.empty) fit();
+  if (!scene.empty && !looked) fit();
   if (typeof stage.focus === "function") stage.focus({ preventScroll: true });
   return { destroy };
 }
@@ -76639,7 +76905,7 @@ function createWorkshop({ api, hosts }) {
     const box = viewport();
     const zoom = place.pxPerMm > 0 ? workshopClampZoom(place.pxPerMm, zoomCeiling()) : view.zoom;
     view = { zoom, offsetX: box.width / 2 - place.x * zoom, offsetY: box.height / 2 - place.y * zoom };
-    placeStamp = screenPlaceSet("drawing", schemeId, { x: place.x, y: place.y }, zoom);
+    placeStamp = screenPlaceSet("drawing", schemeId, { x: place.x, y: place.y }, { pxPerMm: zoom });
     return true;
   }
 
@@ -76660,7 +76926,7 @@ function createWorkshop({ api, hosts }) {
         "drawing",
         schemeId,
         screenToPlan({ x: box.width / 2, y: box.height / 2 }, WORKSHOP_UNIT, view),
-        view.zoom,
+        { pxPerMm: view.zoom },
       );
     }
     // Бумага заливается по настоящим точкам холста, а не по его размеру в
@@ -77499,9 +77765,16 @@ function createWorkshop({ api, hosts }) {
     openingKindButton.title = strings.workshop.openingChangeHint;
     // Отметка «стеклянная» — только у видов, которые ею бывают: у окна и арки
     // стеклить нечего, и пустая галочка обещала бы выбор, которого нет.
-    const canGlaze = openingCanGlaze(kind);
-    glazeRow.hidden = !canGlaze;
-    if (canGlaze) glazeBox.checked = openingGlazed(opening);
+    //
+    // **Поставленная отметка показывается и там, где её больше не предлагают**
+    // (таск 230, G347): у гармошки, размеченной стеклянной прежней сборкой,
+    // галочка стоит и её видно — иначе стекло осталось бы в чертеже молча, без
+    // способа его снять. Снять человек может, вернуть — нет: та же
+    // односторонняя дорога, что у стеклянной двери прежней разметки.
+    const glazed = openingGlazed(opening);
+    const showGlaze = openingCanGlaze(kind) || glazed;
+    glazeRow.hidden = !showGlaze;
+    if (showGlaze) glazeBox.checked = glazed;
     fieldValue(openingWidth, opening.widthMm);
     fieldValue(openingHeight, opening.heightMm);
     fieldValue(openingFloor, opening.heightAboveFloorMm);

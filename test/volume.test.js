@@ -4192,7 +4192,7 @@ test("место и масштаб — одна запись на три реж�
   screenPlaceForget();
   screenPlaceScreen(null);
   assert.equal(screenPlaceOf("схема-1"), null, "на пустом месте никто не отвечает");
-  const first = screenPlaceSet("scheme", "схема-1", { x: 1500, y: -800 }, 0.25);
+  const first = screenPlaceSet("scheme", "схема-1", { x: 1500, y: -800 }, { pxPerMm: 0.25 });
   const place = screenPlaceOf("схема-1");
   assert.deepEqual({ x: place.x, y: place.y, pxPerMm: place.pxPerMm }, { x: 1500, y: -800, pxPerMm: 0.25 });
   assert.equal(place.stamp, first, "отметка записи — ответ той же записи");
@@ -4206,10 +4206,10 @@ test("место и масштаб — одна запись на три реж�
   // Запись, ничего не меняющая, не двигает отметку: поле говорит это на каждый
   // кадр, и память вида иначе писалась бы в хранилище впустую.
   const stamp = screenPlaceOf("схема-1").stamp;
-  screenPlaceSet("scheme", "схема-1", { x: -200, y: 400 }, 0.25);
+  screenPlaceSet("scheme", "схема-1", { x: -200, y: 400 }, { pxPerMm: 0.25 });
   assert.equal(screenPlaceOf("схема-1").stamp, stamp, "отметка выросла на пустой записи");
   // Мусор не ломает место: негодное число отбрасывается молча.
-  screenPlaceSet("scheme", "схема-1", { x: Number.NaN, y: 0 }, 1);
+  screenPlaceSet("scheme", "схема-1", { x: Number.NaN, y: 0 }, { pxPerMm: 1 });
   assert.equal(screenPlaceOf("схема-1").x, -200);
   screenPlaceForget();
   assert.equal(screenPlaceOf("схема-1"), null);
