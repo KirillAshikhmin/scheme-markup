@@ -161,6 +161,7 @@ import {
   canvasDragSlop,
   canvasPanSpeed,
   canvasPanVector,
+  canvasZoomKey,
   canvasRedoStep,
   canvasStartScale,
   canvasUndoStep,
@@ -1742,8 +1743,19 @@ export function workshopFitView(extent, viewport, max = WORKSHOP_ZOOM_MAX) {
  * минуты, как занятий стало три: про «вершину цепочки» читал человек, который
  * в это время ставил окно в стену. Чистая и вынесена наружу ради теста:
  * пропущенное занятие молча показало бы чужие слова.
+ *
+ * **Про стрелки и «+»/«−» дописано одной строкой на все занятия** (дефект D68,
+ * таск 220, правило таска 213 «горячий ключ, о котором негде прочитать, всё
+ * равно что его нет»). Клавиши эти от занятия не зависят вовсе — они про вид
+ * поля, — и шесть копий в шести подсказках разошлись бы на первой же правке.
+ * Привычные слова занятий при этом не переписаны ни в одном: про колесо и
+ * Shift там сказано своим языком с самого начала (правило таска 182).
  */
 export function workshopHint(tool, way) {
+  return workshopHintSubject(tool, way) + " " + strings.workshop.hintView;
+}
+
+function workshopHintSubject(tool, way) {
   if (tool === "openings") return strings.workshop.hintOpenings;
   if (tool === "objects") {
     // Способов поставить объект три, и жесты у них разные (таск 137): про
@@ -3999,6 +4011,19 @@ function createWorkshop({ api, hosts }) {
     if (panKeyDown(event.code)) {
       event.preventDefault();
       event.stopPropagation();
+      return;
+    }
+    // «+» и «−» — масштаб, как на плане (дефект D68, таск 220). До этого
+    // клавиатурного масштаба у чертежа не было вовсе: кнопки «−»/«+» в
+    // «Интерфейсе» работали, а те же клавиши не делали ничего — при том что на
+    // плане они работают и обещаны подсказкой. Набор клавиш и шаг взяты у
+    // холста (`canvasZoomKey`), своих здесь нет; приближается середина поля —
+    // та же `zoomBy`, которую зовут кнопки, и тот же потолок `WORKSHOP_ZOOM_MAX`.
+    const zoom = canvasZoomKey(event);
+    if (zoom) {
+      event.preventDefault();
+      event.stopPropagation();
+      zoomBy(zoom);
       return;
     }
     if (event.key === "Escape") {
