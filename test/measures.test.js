@@ -26,6 +26,7 @@ const CANVAS_SRC = readFileSync(new URL("../src/canvas.js", import.meta.url), "u
 const SRC_FILES = ["canvas.js", "app.js", "panels/workshop.js", "panels/volume.js"].map((name) =>
   readFileSync(new URL("../src/" + name, import.meta.url), "utf8"),
 );
+const VOLUME_SRC = readFileSync(new URL("../src/panels/volume.js", import.meta.url), "utf8");
 
 test("чертёж берёт мерки у холста и отрисовки, а не повторяет их числами", () => {
   // Ручка поворота вещи и магнит углов стены — один шаг: человек, повернувший
@@ -88,4 +89,24 @@ test("кадр без requestAnimationFrame заказывается одной 
   for (const code of SRC_FILES) {
     assert.ok(!/setTimeout\([^,)]+, 16\)/.test(code), "свой кадр в 16 мс мимо scheduleFrame");
   }
+});
+
+test("объём рисует поле один раз на событие: из события — заказ, в кадре — рисование (D80)", () => {
+  // Смена этажа трогала поверхность трижды — мерила поле, ставила подписи и
+  // сбрасывала выделение, — и каждая рука рисовала поле сама: три кадра на одно
+  // событие, 43–52 мс против 4,5 мс сборки сцены. Сливать их «по месту» нельзя:
+  // рук больше, чем событий, и завтра появится четвёртая. Поэтому правило одно
+  // и проверяется по исходнику: `paint()` зовут ровно двое.
+  const lines = VOLUME_SRC.split("\n")
+    .map((line, at) => ({ at: at + 1, text: line.trim() }))
+    .filter((line) => line.text === "paint();");
+  assert.equal(lines.length, 2, "прямых вызовов `paint()` стало " + lines.length + ": " + lines.map((l) => l.at).join(", "));
+  // Первый — внутри самого заказа (`redraw`), второй — в шаге хода: он сам уже
+  // кадр, и заказ из него уехал бы на кадр позже.
+  const owners = lines.map((line) => {
+    const head = VOLUME_SRC.slice(0, VOLUME_SRC.split("\n").slice(0, line.at).join("\n").length);
+    const names = [...head.matchAll(/\n  function (\w+)\(/g)];
+    return names.length ? names[names.length - 1][1] : "?";
+  });
+  assert.deepEqual(owners, ["redraw", "walkTick"], "рисуют не те: " + owners.join(", "));
 });

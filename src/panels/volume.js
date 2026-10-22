@@ -1472,7 +1472,7 @@ function createVolume({ api, hosts }) {
       sync();
       return;
     }
-    paint();
+    redraw();
   }
 
   /**
@@ -1699,7 +1699,7 @@ function createVolume({ api, hosts }) {
     node.width = Math.round(box.width * ratio);
     node.height = Math.round(box.height * ratio);
     placeStance();
-    paint();
+    redraw();
   }
 
   /**
@@ -1823,7 +1823,7 @@ function createVolume({ api, hosts }) {
     hourTick = setInterval(() => {
       if (closed) return;
       refreshHour();
-      paint();
+      redraw();
     }, every);
   }
 
@@ -1860,7 +1860,7 @@ function createVolume({ api, hosts }) {
     syncHint();
     stanceRecheck();
     walkSchedule();
-    paint();
+    redraw();
   }
 
   /**
@@ -2130,7 +2130,7 @@ function createVolume({ api, hosts }) {
     rebuildOverlay();
     syncCard();
     syncHint();
-    paint();
+    redraw();
   }
 
   // Во что ткнули. Под захватом мыши курсора нет вовсе, и целятся серединой
@@ -2212,7 +2212,7 @@ function createVolume({ api, hosts }) {
     // Низкое место могли убрать с чертежа, пока человек сидел под ним (G234).
     stanceRecheck();
     syncHint();
-    paint();
+    redraw();
   }
 
   /**
@@ -2306,6 +2306,20 @@ function createVolume({ api, hosts }) {
     notify(next.length > 0 ? strings.volume.doorsOpened : strings.volume.doorsClosed, "info");
   }
 
+  /**
+   * **Кадр по событию заказывается, а не рисуется** (дефект D80, таск 233).
+   *
+   * Правило одно на всю поверхность: внутри кадра — `paint()`, из события —
+   * `redraw()`. Событие трогает поверхность не один раз (смена этажа мерит
+   * поле, ставит подписи и сбрасывает выделение — и каждая рука рисовала поле
+   * сама), а кадр у него должен быть один: лишние перерисовки человек не
+   * видит, а время у них настоящее. Заказ сливается сам — пока кадр заказан,
+   * второй заказ ничего не делает.
+   *
+   * Проверять «а не тот же ли это кадр» нигде больше не нужно: заказ **и есть**
+   * проверка, и другого места для неё нет. Единственный, кто рисует напрямую, —
+   * `walkTick`: он сам уже кадр, и заказ из него уехал бы на кадр позже.
+   */
   function redraw() {
     if (frame || closed) return;
     frame = scheduleFrame(() => {
@@ -2792,7 +2806,7 @@ function createVolume({ api, hosts }) {
     } else {
       aroundTurn(yaw, pitch);
     }
-    paint();
+    redraw();
   }
 
   function onPointerDown(event) {
@@ -2852,7 +2866,7 @@ function createVolume({ api, hosts }) {
           aroundZoom(step.factor);
           const moved = volumeAroundPan(around, viewport(), step.panX, step.panY);
           aroundSlide(moved.dx, moved.dy);
-          paint();
+          redraw();
         }
         return;
       }
@@ -2932,7 +2946,7 @@ function createVolume({ api, hosts }) {
           stanceRecheck();
           syncWhere();
           stairCheck();
-          paint();
+          redraw();
           return;
         }
       }
@@ -2965,7 +2979,7 @@ function createVolume({ api, hosts }) {
           // новое место (G234).
           stanceRecheck();
           syncWhere();
-          paint();
+          redraw();
         }
         return;
       }
@@ -3037,7 +3051,7 @@ function createVolume({ api, hosts }) {
     } else {
       aroundZoom(step.factor);
     }
-    paint();
+    redraw();
   }
 
   // ——— палец: площадка ходьбы, щипок, кнопки на поле (таск 149) ———
