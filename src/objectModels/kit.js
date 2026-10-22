@@ -69,6 +69,8 @@
 // негде, а мёртвый ключ в словаре красит прогон (`test/strings.test.js`): день,
 // когда имя части понадобится на экране, добавит строку рядом с остальными.
 
+import { VIEW_KEYS_FRAME, viewKeyRects } from "../objectViews/kit.js";
+
 /** Материалы тела. Все до единого считаются от цвета вещи — см. выше. */
 export const MODEL_MATERIALS = ["body", "dark", "light", "metal", "glass"];
 
@@ -207,7 +209,13 @@ export function modelFront(name, depth, material) {
 /**
  * Клавиши выключателя: столько, сколько каналов. Разница между «В», «ВВ» и
  * «ВВВ» на стене — это они, и на плоском изображении она ровно такая же
- * (`viewKeys`), поэтому и доли здесь те же.
+ * (`viewKeys`), поэтому и раскладка у них одна — `viewKeyRects`.
+ *
+ * **Рамка вокруг клавиш — пара миллиметров** (таск 14 сценариев, G14). Слова
+ * заказчика: «сделав рамку сильно меньше, буквально пару миллиметров, что бы
+ * кнопки были больше». Отступ клавиш от края — `VIEW_KEYS_FRAME`: у модели лицо
+ * и есть рамка во весь габарит, а плоское изображение отступает тем же числом
+ * от края своей плашки.
  *
  * **У каждой клавиши стоит номер её канала** (таск 177, G274). Слова заказчика:
  * «обрабатывай клик на каждый канал отдельно рисуя стрелки только на
@@ -219,23 +227,19 @@ export function modelFront(name, depth, material) {
  * значит «канал выделен», решает окно, а в объект не пишется ничего (G68).
  */
 export function modelKeys(count, y, depth) {
-  const parts = [];
-  const width = 0.62 / count;
-  for (let index = 0; index < count; index += 1) {
-    parts.push({
-      ...modelBox("key" + (index + 1), {
-        x: -0.31 + index * width + width * 0.08,
-        width: width * 0.84,
-        y,
-        depth,
-        z: 0.14,
-        height: 0.72,
-        material: "light",
-      }),
-      channel: index + 1,
-    });
-  }
-  return parts;
+  return viewKeyRects(count, VIEW_KEYS_FRAME).map((rect, index) => ({
+    ...modelBox("key" + (index + 1), {
+      x: rect.x,
+      width: rect.width,
+      y,
+      depth,
+      // У модели `z` растёт вверх от низа, у изображения `y` — вниз от верха.
+      z: 0.5 - (rect.y + rect.height),
+      height: rect.height,
+      material: "light",
+    }),
+    channel: index + 1,
+  }));
 }
 
 /** Собрать описание: кирпичи возвращают кто тело, кто список. */

@@ -983,6 +983,9 @@ function createVolume({ api, hosts }) {
     // Спрятанные вещи чертежа (таск 154, G223): «Скрытое не видно на чертеже
     // и в объёме». Отметка приходит из сеанса, в объект не пишется.
     hiddenObjectIds: state.objectsShown === false ? sceneObjectIds(state, id) : state.hiddenObjectIds,
+    // «Подсвечивать метки» (таск 14 сценариев, G15): контур изображения поверх
+    // модели метки. Отметка раздела «Интерфейс», умолчание — снята.
+    markImages: state.marksHighlight === true,
   });
   /**
    * Какие этажи показывает окно (таск 202): стопка или одна открытая схема.
@@ -4018,7 +4021,10 @@ function createVolume({ api, hosts }) {
         // Вещи погасили или вернули (таск 154, G223) — сцену надо собрать
         // заново: спрятанной вещи в ней нет ни гранью, ни препятствием.
         const objectsChanged = "objectsShown" in changed || "hiddenObjectIds" in changed;
-        if (!("project" in changed) && !("filter" in changed) && !objectsChanged) return;
+        // «Подсвечивать метки» переключили (G15) — контур изображения живёт в
+        // гранях сцены, и без пересборки он остался бы как был.
+        const imagesChanged = "marksHighlight" in changed;
+        if (!("project" in changed) && !("filter" in changed) && !objectsChanged && !imagesChanged) return;
         setScene(state);
         // Координаты объекта и направление верха чертежа — свойства объекта
         // (таск 188), и правят их, не выходя из режима. Час пересчитывается

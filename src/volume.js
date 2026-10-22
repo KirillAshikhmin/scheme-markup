@@ -4044,6 +4044,10 @@ export function volumeFloorKey(project, schemeId, options, cover, upper, known) 
     schemeId,
     marks: options.marks || null,
     roofOff: options.roofOff === true,
+    // Контур изображения поверх модели (G15): умолчание — рисуется, как в
+    // `volumeScene`. Переключили — этаж собирается заново, иначе готовый этаж
+    // стопки остался бы с картинкой, которую убрали.
+    markImages: options.markImages !== false,
     upper: upper === true,
     capMm: cover && cover.capMm !== undefined ? cover.capMm : null,
     coverX: (cover && cover.dx) || 0,
@@ -4061,6 +4065,7 @@ export function volumeFloorKeySame(was, now) {
     was.project !== now.project ||
     was.schemeId !== now.schemeId ||
     was.roofOff !== now.roofOff ||
+    was.markImages !== now.markImages ||
     was.upper !== now.upper ||
     was.capMm !== now.capMm ||
     was.coverX !== now.coverX ||
@@ -5379,6 +5384,10 @@ export function volumeFacePoint(face, fx, fy) {
  * нет и контура: вещь остаётся своей плашкой цвета категории. Условный знак
  * плана сюда не переносится нарочно: знак читают как обозначение рядом с
  * подписью, а в объёме подписи нет, и знак стал бы украшением.
+ *
+ * Это и есть салатовая картинка поверх выключателя со скриншота заказчика
+ * (таск 14 сценариев, G15): с тех пор поверх **модели** она рисуется только по
+ * опции «Подсвечивать метки» — решает `volumeScene` доводом `markImages`.
  */
 export function volumeMarkViewLines(place, out = []) {
   if (!place || !place.face || !place.view) return out;
@@ -5665,6 +5674,19 @@ export function volumeLinkLines(links, anchorOf, out = []) {
  * препятствия, ни лестницы: сквозь невидимый шкаф человек идёт, не понимая,
  * обо что споткнулся, а лестница, которой не видно, не должна спрашивать про
  * этаж.
+ *
+ * `options.markImages` — рисовать ли **поверх модели метки её изображение**
+ * контуром цвета категории (таск 14 сценариев, G15). Это та салатовая картинка
+ * со скриншота заказчика, а рисует её `volumeMarkViewLines`. Слова заказчика:
+ * «сделай опцию вида, отключённую по умолчанию — Подсвечивать метки, которая
+ * убирает изображение метки поверх её модели». Опция живёт в сеансе и в
+ * настройках браузера (`marksHighlight`), и окно отдаёт её сюда доводом.
+ *
+ * Без довода контур рисуется, как рисовался до опции: сборка без неё обязана
+ * давать прежнюю сцену грань в грань, и выключает его только явное `false`.
+ * Метка **без модели** (изображение есть, а тела нет) контур сохраняет и тогда:
+ * поверх плашки он — единственное, что говорит, какая это вещь, а убрать
+ * заказчик просил картинку поверх модели.
  */
 export function volumeScene(project, schemeId, options = {}) {
   const scheme = findScheme(project, schemeId);
@@ -6033,9 +6055,10 @@ export function volumeScene(project, schemeId, options = {}) {
   // стоит перед стеной — это и значит «перед»; препятствием она при этом не
   // становится (сквозь розетку ходят).
   const marks = volumeMarks(project, schemeId, { marks: options.marks, rooms });
+  const markImages = options.markImages !== false;
   for (const place of marks.placed) {
     volumeMarkFaces(place, faces);
-    volumeMarkViewLines(place, faces);
+    if (markImages || !place.model) volumeMarkViewLines(place, faces);
   }
   // `wallCount` — настоящее число стен чертежа, а не длина `solids`: препятствий
   // больше, потому что проём режет стену на куски, а вещи на полу тоже держат.

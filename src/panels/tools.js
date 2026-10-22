@@ -12,6 +12,7 @@ import {
   GRID_SETTING,
   GRID_SNAP_SETTING,
   GUIDES_SETTING,
+  MARKS_HIGHLIGHT_SETTING,
   OBJECTS_SETTING,
   PLAN_SETTING,
   SCHEME_FONT_SETTING,
@@ -222,7 +223,7 @@ function toolsGuidesCheck(state, setState) {
  * они читались бы свойством схемы — то есть объекта, — а объект тут ни при чём:
  * на одном компьютере размечают по фотографии, на другом по своему чертежу.
  */
-function toolsLayerCheck(state, setState, key, setting) {
+function toolsLayerCheck(state, setState, key, setting, shownByDefault = true) {
   const box = uiEl("input", {
     class: "tools__check",
     type: "checkbox",
@@ -233,7 +234,9 @@ function toolsLayerCheck(state, setState, key, setting) {
       },
     },
   });
-  box.checked = state[key] !== false;
+  // Умолчание у отметки своё: слои стартуют показанными, а «Подсвечивать
+  // метки» (G15) — снятой, и взведена она только явным «да».
+  box.checked = shownByDefault ? state[key] !== false : state[key] === true;
   return box;
 }
 
@@ -673,7 +676,7 @@ export function createSizesFields(api) {
    */
   function layerRow(state, key, setting, label, title, options = {}) {
     const row = uiEl("label", { class: "tools__field tools__field--check", title: options.reason || title }, [
-      toolsLayerCheck(state, setState, key, setting),
+      toolsLayerCheck(state, setState, key, setting, options.shownByDefault !== false),
       uiEl("span", { text: label }),
     ]);
     if (options.off) {
@@ -799,6 +802,18 @@ export function createSizesFields(api) {
       // Вещи чертежа (таск 154, G223) — работают во всех трёх режимах: гасят
       // их и на плане, и в чертеже, и в объёме.
       layerRow(state, "objectsShown", OBJECTS_SETTING, strings.tools.objectsLayer, strings.tools.objectsLayerHint),
+      // «Подсвечивать метки» (таск 14 сценариев, G15): контур изображения
+      // поверх модели метки в объёме. Пункт стоит во всех режимах, как и
+      // остальные (таск 193), а что он меняет только объём — сказано в
+      // подсказке. Умолчание — снята.
+      layerRow(
+        state,
+        "marksHighlight",
+        MARKS_HIGHLIGHT_SETTING,
+        strings.tools.marksHighlight,
+        strings.tools.marksHighlightHint,
+        { shownByDefault: false },
+      ),
       // Полоса развёртки выделенной стены — над планом и над чертежом (G185,
       // G227). В объёме стену не выделяют, и полосы там нет — об этом говорит
       // подсказка, а не отсутствие пункта.
@@ -829,6 +844,7 @@ export function createSizesFields(api) {
       "gridShown" in changed ||
       "gridSnap" in changed ||
       "objectsShown" in changed ||
+      "marksHighlight" in changed ||
       "elevationShown" in changed ||
       // Калька выбрана или снята (таск 208): ряд обязан показать выбранное.
       "overlaySchemeId" in changed ||
