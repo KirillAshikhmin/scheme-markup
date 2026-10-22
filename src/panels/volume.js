@@ -332,6 +332,33 @@ export function volumeDoorsAfterAll(doors, open) {
   return closed.length > 0 ? list : [];
 }
 
+/**
+ * Живые ключи из памяти показа (таск 234, G352): что из раскрытого ещё
+ * существует в этой сцене.
+ *
+ * Проём могли стереть между сеансами, и ключ остался бы висеть в настройке. Сам
+ * по себе он безвреден — сцена спрашивает «открыта ли **эта** дверь», а не
+ * «какие ключи записаны», — но копиться ему незачем: просеянное первый же кадр
+ * пишет обратно, и мёртвый ключ не доживает до второго возвращения.
+ *
+ * Смотрим и на этажи стопки: в ней человек видит соседние этажи, и дверь,
+ * открытую там, тоже надо узнать своей. Чистая и вынесена наружу ради теста —
+ * ошибиться здесь значит молча закрыть дверь, которую человек оставил открытой.
+ */
+export function volumeOpenAlive(scene, saved) {
+  const open = saved || {};
+  const doors = new Set();
+  const sheers = new Set();
+  const add = (sub) => {
+    for (const id of (sub && sub.doors) || []) doors.add(id);
+    for (const id of (sub && sub.sheers) || []) sheers.add(id);
+  };
+  add(scene);
+  for (const part of (scene && scene.stackParts) || []) add(part && part.sub);
+  const kept = (list, alive) => (Array.isArray(list) ? list.filter((id) => alive.has(id)) : []);
+  return { doors: kept(open.doors, doors), sheers: kept(open.sheers, sheers) };
+}
+
 /** Наклон взгляда не заводится за отвес: вверх ногами смотреть незачем. */
 export function volumeClampPitch(radians) {
   const limit = (VOLUME_PITCH_MAX_DEG * Math.PI) / 180;
@@ -935,6 +962,12 @@ function createVolume({ api, hosts }) {
   // окна, а не поле метки. Открыл штору в объёме — в файл не попало ничего
   // (G68), и объект после прогулки байт в байт тот же.
   const openCurtains = new Set();
+  // Сколько раз трогали открытое и когда об этом сказали общей записи: кадру
+  // незачем перебирать множества, пока в них ничего не менялось. Начальные
+  // значения разные нарочно — первый кадр обязан сказать, что поднялось из
+  // памяти (просеянное) или что открытого нет вовсе.
+  let openRev = 1;
+  let openSaid = 0;
   // «Скрыть все объекты» — та же отметка, только разом: сцена собирается без
   // единой вещи чертежа. Отдельного выключателя у сцены нет нарочно — иначе
   // ответов на «что показано» стало бы два.
@@ -980,7 +1013,31 @@ function createVolume({ api, hosts }) {
     return volumeScene(state.project, schemeId, sceneOptions(state, schemeId));
   };
 
+  // ——— что было открыто (таск 234, G352) ————————————————————————————————
+  //
+  // Двери и шторы поднимаются из памяти показа **до** первой сборки сцены: она
+  // спрашивает оба множества доводом, и подними их позже — дом собрался бы
+  // закрытым, а потом пересобрался открытым, то есть вдвое (кэш этажей таска
+  // 232 ровно на такие пересборки и заведён).
+  //
+  // Мёртвые ключи при этом не страшны: сцена спрашивает «открыта ли **эта**
+  // дверь», а не «какие ключи записаны». Просеиваются они сразу после сборки —
+  // по живой сцене, — и первый же кадр записывает просеянное обратно.
+  const savedOpen = screenPlaceOf(schemeId);
+  if (savedOpen && savedOpen.open) {
+    for (const id of savedOpen.open.doors) openDoors.add(id);
+    for (const id of savedOpen.open.sheers) openCurtains.add(id);
+  }
+
   scene = sceneOf(getState());
+
+  if (savedOpen && savedOpen.open) {
+    const alive = volumeOpenAlive(scene, { doors: [...openDoors], sheers: [...openCurtains] });
+    openDoors.clear();
+    for (const id of alive.doors) openDoors.add(id);
+    openCurtains.clear();
+    for (const id of alive.sheers) openCurtains.add(id);
+  }
   // ——— час суток (таск 181, G282) ———
   //
   // Снимок часа (`volumeMood`) держится здесь и пересчитывается **не чаще раза
@@ -1655,7 +1712,21 @@ function createVolume({ api, hosts }) {
    */
   function placeHere() {
     if (scene.empty || screenMode() !== "volume") return;
-    screenPlaceSet("volume", schemeId, { x: person.x, y: person.y }, { look: lookNow() });
+    screenPlaceSet("volume", schemeId, { x: person.x, y: person.y }, { look: lookNow(), open: openNow() });
+  }
+
+  /**
+   * Что в доме открыто — в общую запись (таск 234, G352): двери и шторы.
+   *
+   * Списки собираются **только когда их меняли**: кадров в секунде шестьдесят,
+   * а дверь открывают раз в минуту, и перебирать два множества на каждый кадр
+   * незачем. В остальные кадры поле молчит, а запись бережёт прежнее — то же
+   * правило, по которому объём бережёт чужой масштаб (T227).
+   */
+  function openNow() {
+    if (openRev === openSaid) return undefined;
+    openSaid = openRev;
+    return { doors: [...openDoors], sheers: [...openCurtains] };
   }
 
   /**
@@ -2279,6 +2350,7 @@ function createVolume({ api, hosts }) {
     if (!markId || !(scene.sheers || []).includes(markId)) return false;
     if (openCurtains.has(markId)) openCurtains.delete(markId);
     else openCurtains.add(markId);
+    openRev += 1;
     rebuildScene();
     notify(openCurtains.has(markId) ? strings.volume.sheerOpened : strings.volume.sheerClosed, "info");
     return true;
@@ -2288,6 +2360,7 @@ function createVolume({ api, hosts }) {
     if (!doorId) return false;
     if (openDoors.has(doorId)) openDoors.delete(doorId);
     else openDoors.add(doorId);
+    openRev += 1;
     heldDoor = doorId;
     rebuildScene();
     return true;
@@ -2302,6 +2375,7 @@ function createVolume({ api, hosts }) {
     const next = volumeDoorsAfterAll(doors, openDoors);
     openDoors.clear();
     for (const id of next) openDoors.add(id);
+    openRev += 1;
     rebuildScene();
     notify(next.length > 0 ? strings.volume.doorsOpened : strings.volume.doorsClosed, "info");
   }
