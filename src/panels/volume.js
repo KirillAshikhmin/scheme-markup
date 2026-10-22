@@ -2681,9 +2681,29 @@ function createVolume({ api, hosts }) {
     walkSchedule();
   }
 
+  /**
+   * Пустить ход. Часы ставятся **здесь**, на пуске: отсюда ход начинают
+   * события — нажатая клавиша, палец на площадке, пропавший пол под ногами.
+   */
   function walkSchedule() {
     if (walking || !moving() || closed) return;
     clock = now();
+    walking = scheduleFrame(walkTick);
+  }
+
+  /**
+   * Заказать следующий тик **изнутри кадра** — и часов не трогать (дефект
+   * D81, таск 233).
+   *
+   * Прежде продолжение шло той же `walkSchedule`, и она переставляла `clock`
+   * на «сейчас» — то есть **после** шага и кадра. Время, ушедшее на сам кадр,
+   * из счёта выпадало, и чем дороже кадр, тем медленнее шли ходьба и падение:
+   * на объекте заказчика полёт с трёх метров вместо 0,81 с (√(2h/g), таск 229)
+   * занимал секунды, и всё это время поле перерисовывалось. Правило простое:
+   * часы ставит пуск, а продолжение их только читает.
+   */
+  function walkAgain() {
+    if (walking || !moving() || closed) return;
     walking = scheduleFrame(walkTick);
   }
 
@@ -2762,7 +2782,7 @@ function createVolume({ api, hosts }) {
       aroundFly(forward, side, scale, basis, speed);
     }
     paint();
-    walkSchedule();
+    walkAgain();
   }
 
   function keyStop(code) {
