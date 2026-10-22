@@ -799,6 +799,9 @@ export function hubContext(chain, nameOf) {
           return "TIMER[" + hubFrameName(cause.what || "") + "]_" + hubSeconds(cause.at);
         case "scenario":
           return "SCENARIO[" + hubFrameName(name(cause)) + "]";
+        // Команда «Выполнить команду» (G16): звено между сценарием и щелчком.
+        case "command":
+          return "COMMAND[" + hubFrameName(cause.text || "") + "]";
         default:
           return String(cause.k || "").toUpperCase() + "[]";
       }

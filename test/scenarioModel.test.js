@@ -184,12 +184,12 @@ test("сценарий со ссылкой на удалённое устрой�
   assert.equal(problems.length, 1, "одна строка на сценарий");
   assert.equal(problems[0].kind, "warning");
   assert.equal(problems[0].ref, block.scenario.id);
-  assert.equal(problems[0].message, "Сценарий «Свет по движению» ссылается на удалённое устройство");
+  assert.equal(problems[0].message, "Сценарий «Свет по движению» ссылается на удалённый аксессуар");
 
   const model = warningsModel(project);
   const group = model.groups.find((item) => item.code === "scenarioDeviceMissing");
   assert.ok(group, "в панели нет строки");
-  assert.equal(group.title, "Сценариев со ссылкой на удалённое устройство: 1");
+  assert.equal(group.title, "Сценариев со ссылкой на удалённый аксессуар: 1");
   assert.equal(WARNING_TARGETS.scenarioDeviceMissing, "scenario");
   assert.deepEqual(warningPlace(project, problems[0]), {
     markId: null,

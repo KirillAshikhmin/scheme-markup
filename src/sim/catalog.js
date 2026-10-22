@@ -285,11 +285,18 @@ export const DEVICE_KINDS = Object.freeze([
   simKind("lightOnOff", [["Lightbulb", ["On"]]]),
   simKind("lightCct", [["Lightbulb", ["On", "Brightness", "ColorTemperature"]]]),
   simKind("lightRgb", [["Lightbulb", ["On", "Brightness", "ColorTemperature", "Hue", "Saturation", "C_ColorMode"]]]),
-  simKind("switch", [["StatelessProgrammableSwitch", KEY_CHARS, true]]),
+  // Выключатель (G11): на каждый канал сервис «Выключатель» — реле клавиши,
+  // за которым следуют нагрузки канала, — затем кнопка на каждый канал (она
+  // шлёт нажатия, только когда клавиша отвязана). Ключ вида остался прежним,
+  // `switchRelay`: так он и лежит в объектах, где его выбрали руками.
   simKind("switchRelay", [
     ["Switch", ["On"], true],
     ["StatelessProgrammableSwitch", KEY_CHARS, true],
   ]),
+  // Выключатель без реле — одни кнопки. Так стартовые выключатели выглядели
+  // до G11, и профиль, сохранённый тогда (`kind: "switch"`), обязан читаться
+  // и работать как прежде (G68): щелчок переключает нагрузки и шлёт нажатие.
+  simKind("switch", [["StatelessProgrammableSwitch", KEY_CHARS, true]]),
   simKind("button", [
     ["StatelessProgrammableSwitch", KEY_CHARS, true],
     ["BatteryService", BATTERY_CHARS],
@@ -376,7 +383,10 @@ export function deviceKind(key) {
 // пара, канализация…); кода, которого здесь нет, таблица не знает вовсе.
 const DEVICE_KIND_BY_CODE_SOURCE = [
   ["light", ["Т", "С", "ПК", "ТР", "ПС", "Л", "ПШ", "ППл", "ПКШ", "ЛЮ", "Н", "Бр", "ЛВ", "ПЛ", "ПЗ"]],
-  ["switch", ["В", "П", "МВ", "ВВ", "ПП", "ВВВ"]],
+  // Выключатели — с реле на каждый канал (G11). До G11 здесь стоял `switch`
+  // (одни кнопки); выведенный профиль в объект не пишется, так что старый
+  // объект без своих профилей просто видит новый.
+  ["switchRelay", ["В", "П", "МВ", "ВВ", "ПП", "ВВВ"]],
   ["outlet", ["Р", "РC"]],
   ["conditioner", ["К"]],
   ["fan", ["Б", "ВЫТ", "ВЕНТ"]],

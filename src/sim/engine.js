@@ -25,7 +25,19 @@
 // странице), `walk` (ходьба в «Объёме»), `door` (дверь в «Объёме»), `char`
 // (изменение характеристики: `markId, aid, service, sid, serviceType, char,
 // cid, address, value`), `timer` (`at, what`), `hub` (`what: "start" | "load"
-// | "reset"` — `HUB[OnStart]`), `scenario` и `logic` — звенья хозяев.
+// | "reset"` — `HUB[OnStart]`), `command` (`at, text` — команда «Ёлочка гори»,
+// G16), `scenario` и `logic` — звенья хозяев.
+//
+// **Клавиша выключателя** (G11) — кнопка канала (`StatelessProgrammableSwitch`)
+// и «Выключатель» того же канала (`Switch`, `On` — реле клавиши). Нагрузки из
+// связи «чем управляет» следуют за «Выключателем»: включился — включить все,
+// выключился — выключить все; кто бы его ни поставил — щелчок, сценарий или
+// логика. Привязанная клавиша щелчком переключает свой «Выключатель», а её
+// кнопка событий не шлёт; у отвязанной щелчок, двойное и долгое — события
+// кнопки, «Выключатель» остаётся сценариям. Клавиша без своего
+// «Выключателя» (профиль, сохранённый до G11, — одни кнопки) работает как
+// прежде: одиночное нажатие привязанной клавиши переключает нагрузки канала
+// («что-то включено — выключить всё, иначе включить всё») и уходит событием.
 import { simClamp } from "./catalog.js";
 import { simValueKey } from "./live.js";
 import { pressEventValue } from "./presses.js";
@@ -47,7 +59,7 @@ export const SIM_CURTAIN_STEP = 10;
 /** Уровень CO2, с которого датчик говорит «превышение», ppm. */
 export const SIM_CO2_ABNORMAL = 1000;
 /** Действия человека (`act`). */
-export const SIM_ACTIONS = Object.freeze(["set", "toggle", "press", "sensor", "presence", "door"]);
+export const SIM_ACTIONS = Object.freeze(["set", "toggle", "press", "sensor", "presence", "door", "command"]);
 
 // Откуда действие пришло, если `cause` не сказан.
 const SIM_ENGINE_ACTION_CAUSE = Object.freeze({
@@ -57,6 +69,7 @@ const SIM_ENGINE_ACTION_CAUSE = Object.freeze({
   sensor: "web",
   presence: "walk",
   door: "door",
+  command: "web",
 });
 const SIM_ENGINE_CAUSES = new Set(["web", "walk", "door"]);
 // Нагрузки: что включает клавиша и щелчок по устройству.
@@ -119,13 +132,19 @@ function simEngineList(value) {
  *
  * `act(action)`: `{kind: "set", markId, service, char, value}` ·
  * `{kind: "toggle", markId, service?}` (щелчок: свет/реле/розетка/ТВ/
- * вентилятор/кран/кондиционер — вкл↔выкл, штора — открыть/закрыть, замок,
- * термостат, колонка, клавиша — одиночное нажатие, датчик — как `sensor`) ·
- * `{kind: "press", markId, service?, press: "single"|"double"|"long"}` ·
+ * вентилятор/кран/кондиционер/«Выключатель» — вкл↔выкл, штора —
+ * открыть/закрыть, замок, термостат, колонка, клавиша — как `press single`,
+ * датчик — как `sensor`; без `service` — первая кнопка, иначе главный сервис) ·
+ * `{kind: "press", markId, service?, press: "single"|"double"|"long"}` (по
+ * кнопке клавиши: привязанная с «Выключателем» — одиночное переключает его,
+ * двойное и долгое ничего не делают; отвязанная и кнопка без «Выключателя» —
+ * событие нажатия) ·
  * `{kind: "sensor", markId, service?, value?}` (`value` нет — движение
  * «сработал», остальные переключаются; `true/false` — сработал/тихо) ·
  * `{kind: "presence", roomIds}` (где человек сейчас — весь список) ·
- * `{kind: "door", openingId, open}`; у каждого необязательный `cause`
+ * `{kind: "door", openingId, open}` · `{kind: "command", text}` (команда
+ * «Ёлочка гори», G16: журнал `command {text}`, хозяева получают хук
+ * `command`; не понял никто — `commandUnknown {text}`); у каждого необязательный `cause`
  * (`web | walk | door`). Возвращает `true`, если что-то изменилось. Пока дом
  * не запущен, действия не исполняются.
  *
@@ -163,6 +182,9 @@ function simEngineList(value) {
  *   `runCode(request, host) -> {ok: true, value} | {ok: false, error, line}` —
  *     исполнитель кода для других хозяев (условие-код и блок-код);
  *   `clock({from, to}, host)` — часы перевели (перечитать расписания);
+ *   `command({text, chain}, host) -> число` — команда (G16): сколько
+ *     сценариев хозяина её поняли (`chain` — `[{k:"command", at, text},
+ *     {k:"web", at}]`); ни один хозяин не понял — запись `commandUnknown`;
  *   `scenarios() -> [{id, active, running, fault}]`.
  *
  * `host` (своя у каждого хозяина): `name`; `now() -> simMs`; `running()`;
@@ -364,6 +386,7 @@ export function createSimEngine({ emit, owners = [] } = {}) {
       keys: services.filter((service) => service.type === "StatelessProgrammableSwitch").length,
       values: {},
     };
+    pairKeys(services);
     for (const service of services) {
       const before = old ? old.services[service.index] : null;
       const same = before && before.type === service.type;
@@ -376,6 +399,27 @@ export function createSimEngine({ emit, owners = [] } = {}) {
       }
     }
     return device;
+  }
+
+  // Клавиша и её «Выключатель» (G11): кнопка и реле одного канала. Канал без
+  // номера — первый, как у связи «чем управляет». У кнопки без своего
+  // «Выключателя» (профиль до G11) пары нет — она работает как прежде.
+  function pairKeys(services) {
+    const relays = new Map();
+    for (const service of services) {
+      service.relay = null;
+      service.key = null;
+      if (service.type === "Switch" && service.chars.has("On") && !relays.has(channelOf(service))) {
+        relays.set(channelOf(service), service);
+      }
+    }
+    for (const service of services) {
+      if (service.type !== "StatelessProgrammableSwitch") continue;
+      const relay = relays.get(channelOf(service));
+      if (!relay || relay.key) continue;
+      service.relay = relay;
+      relay.key = service;
+    }
   }
 
   function indexHome() {
@@ -661,9 +705,15 @@ export function createSimEngine({ emit, owners = [] } = {}) {
     if (!service || service.type !== event.serviceType) return;
     switch (service.type) {
       case "StatelessProgrammableSwitch":
-        if (event.char === "ProgrammableSwitchEvent" && event.value === "SINGLE_PRESS" && !service.decoupled) {
+        // Кнопка без своего «Выключателя» (профиль до G11): одиночное нажатие
+        // привязанной клавиши переключает нагрузки канала.
+        if (event.char === "ProgrammableSwitchEvent" && event.value === "SINGLE_PRESS" && !service.decoupled && !service.relay) {
           keyLoads(device, service, event.chain);
         }
+        break;
+      case "Switch":
+        // «Выключатель» клавиши ведёт нагрузки канала — кто бы его ни поставил.
+        if (event.char === "On" && service.key) followLoads(device, service, event.value === true, event.chain);
         break;
       case "MotionSensor":
         if (event.char !== "MotionDetected") break;
@@ -887,15 +937,13 @@ export function createSimEngine({ emit, owners = [] } = {}) {
     return changed;
   }
 
-  function keyLoads(device, key, chain) {
-    const channel = key.channel === null ? 1 : key.channel;
+  function channelOf(service) {
+    return service.channel === null ? 1 : service.channel;
+  }
+
+  // Нагрузки канала клавиши из связи «чем управляет» — по сервису на нагрузку.
+  function channelLoads(device, channel) {
     const loads = [];
-    // Своё реле того же канала (выключатель с реле) — первая нагрузка клавиши.
-    for (const service of device.services) {
-      if (service.type === "Switch" && (service.channel === null ? 1 : service.channel) === channel && loadRole(service)) {
-        loads.push({ device, service });
-      }
-    }
     const links = keyLinks.get(device.markId);
     const targets = links ? [...(links.get(channel) || [])] : [];
     // Связь без номера канала — только у единственной клавиши (таск 177, D50).
@@ -908,7 +956,22 @@ export function createSimEngine({ emit, owners = [] } = {}) {
       if (!target) continue;
       for (const service of target.services) if (loadRole(service)) loads.push({ device: target, service });
     }
-    toggleGroup(loads, chain);
+    return loads;
+  }
+
+  // Клавиша без своего «Выключателя» (профиль до G11): группа нагрузок канала
+  // переключается целиком.
+  function keyLoads(device, key, chain) {
+    toggleGroup(channelLoads(device, channelOf(key)), chain);
+  }
+
+  // Нагрузки следуют за «Выключателем» клавиши: вкл — все вкл, выкл — все выкл.
+  function followLoads(device, relay, on, chain) {
+    let changed = false;
+    for (const { device: target, service } of channelLoads(device, channelOf(relay))) {
+      changed = loadSet(target, service, on, chain) || changed;
+    }
+    return changed;
   }
 
   function primaryService(device) {
@@ -927,6 +990,12 @@ export function createSimEngine({ emit, owners = [] } = {}) {
     if (!service || !SIM_ENGINE_KEYS.has(service.type)) return false;
     const value = pressEventValue(press);
     if (!value) return false;
+    // Привязанная клавиша с «Выключателем» (G11): щелчок переключает его, а
+    // кнопка событий не шлёт — двойного и долгого у неё нет.
+    if (service.relay && !service.decoupled) {
+      if (value !== "SINGLE_PRESS") return false;
+      return apply(device.markId, service.relay.index, "On", read(device, service.relay, "On") !== true, chain);
+    }
     return apply(device.markId, service.index, "ProgrammableSwitchEvent", value, chain);
   }
 
@@ -1020,6 +1089,28 @@ export function createSimEngine({ emit, owners = [] } = {}) {
     return changed;
   }
 
+  // Команда (G16): запись журнала, затем хозяева сценариев — каждый говорит,
+  // сколько его сценариев её поняли.
+  function commandAct(given, origin) {
+    const said = typeof given === "string" ? given.trim() : "";
+    if (!said) return false;
+    const vars = { text: said };
+    outLog.push({ at: now, kind: "system", chain: [...origin], code: "command", vars, text: text("sim.journal.command", vars) });
+    const chain = [{ k: "command", at: now, text: said }, ...origin];
+    let heard = 0;
+    for (const entry of entries) {
+      const got = Number(call(entry, "command", { text: said, chain }));
+      drain();
+      if (Number.isFinite(got) && got > 0) heard += got;
+    }
+    if (heard > 0) {
+      outScenarios = true;
+      return true;
+    }
+    outLog.push({ at: now, kind: "system", chain: [...origin], code: "commandUnknown", vars: { text: said }, text: text("sim.journal.commandUnknown", vars) });
+    return false;
+  }
+
   function originOf(action) {
     const k = SIM_ENGINE_CAUSES.has(action.cause) ? action.cause : SIM_ENGINE_ACTION_CAUSE[action.kind];
     if (k === "door") return { k, at: now, openingId: action.openingId, open: action.open === true };
@@ -1028,6 +1119,7 @@ export function createSimEngine({ emit, owners = [] } = {}) {
 
   function actNow(action) {
     const chain = [originOf(action)];
+    if (action.kind === "command") return commandAct(action.text, chain);
     if (action.kind === "presence") return presenceAct(action.roomIds, chain);
     if (action.kind === "door") return doorAct(action.openingId, action.open === true, chain);
     const device = devices.get(action.markId);

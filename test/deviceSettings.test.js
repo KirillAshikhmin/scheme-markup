@@ -1,5 +1,7 @@
-// Окно «Устройство» (таск 03 сценариев, истории 1.1, 1.8–1.13): сводка профиля,
-// состав окна, правки черновика и перевод черновика в записи модели.
+// Окно «Аксессуар» (таск 03 сценариев, истории 1.1, 1.8–1.13; таск 13 — G11–G13:
+// «Аксессуар» вместо «Устройство», идентификаторы aid и sid, кнопка клавиши
+// рядом с её «Выключателем»): сводка профиля, состав окна, правки черновика и
+// перевод черновика в записи модели.
 //
 // Ожидаемые подписи и значения здесь записаны руками по спецификации и словарю
 // заказчика, а не прочитаны из кода под тестом. Сам диалог проверяется живой
@@ -21,7 +23,8 @@ import {
   typeDeviceOf,
 } from "../src/model.js";
 import { LAYOUT_ABILITIES } from "../src/app.js";
-import { strings } from "../src/strings.js";
+import { strings, text } from "../src/strings.js";
+import { deviceAids, markAccessory } from "../src/sim/home.js";
 import {
   deviceDraftAddService,
   deviceDraftChar,
@@ -30,12 +33,14 @@ import {
   deviceDraftOf,
   deviceDraftParam,
   deviceDraftRemoveService,
+  deviceMarkAid,
   deviceMarkField,
   deviceMarkPatch,
   deviceSummary,
   deviceTypeField,
   deviceTypeRecord,
   deviceWindowModel,
+  deviceWindowTitle,
 } from "../src/panels/deviceSettings.js";
 import { filtersMarkRows } from "../src/panels/filters.js";
 import { marksRowModel } from "../src/panels/marks.js";
@@ -64,14 +69,17 @@ function home() {
   return { project, schemeId: scheme.scheme.id, marks };
 }
 
-test("сводка: свет — вид и характеристики, выключатель — число клавиш, щит — без устройства", () => {
+test("сводка: свет — вид и характеристики, выключатель — число клавиш, щит — без аксессуара", () => {
   const { project } = home();
   const sum = (code) => deviceTypeField(project, typeOf(project, code).id);
   assert.equal(sum("Т"), "Светильник: включено, яркость");
   assert.equal(sum("В"), "1 клавиша");
   assert.equal(sum("ВВ"), "2 клавиши");
   assert.equal(sum("ВВВ"), "3 клавиши");
-  assert.equal(sum("Щ"), "без устройства");
+  assert.equal(sum("Щ"), "без аксессуара");
+  // Выключатель с профилем до G11 (одни кнопки) — тоже числом клавиш.
+  const legacy = setTypeDevice(project, typeOf(project, "ВВ").id, { kind: "switch" }).project;
+  assert.equal(deviceTypeField(legacy, typeOf(legacy, "ВВ").id), "2 клавиши");
   // Датчик с добавленной освещённостью: главный сервис назван, остальное числом.
   const motion = typeOf(project, "ДД");
   const draft = deviceDraftAddService(deviceDraftOf(typeDeviceOf(project, motion.id)), "LightSensor");
@@ -88,7 +96,7 @@ test("сводка: склонение числа клавиш — 1, 2–4, 5 �
   assert.equal(deviceSummary(key, 5), "5 клавиш");
   assert.equal(deviceSummary(key, 11), "11 клавиш");
   assert.equal(deviceSummary(key, 21), "21 клавиша");
-  assert.equal(deviceSummary(null), "без устройства");
+  assert.equal(deviceSummary(null), "без аксессуара");
 });
 
 test("необязательная характеристика включается галкой и выключается ею же; обязательная не гаснет", () => {
@@ -137,7 +145,7 @@ test("клавиши: по числу каналов типа, отметка «
   const draft = deviceDraftOf(typeDeviceOf(project, type.id));
   const model = deviceWindowModel(draft, 3);
   assert.deepEqual(model.keys.map((key) => [key.channel, key.decoupled]), [[1, false], [2, false], [3, false]]);
-  assert.equal(model.services[0].label, "Кнопка × 3");
+  assert.deepEqual(model.services.map((service) => service.label), ["Выключатель × 3", "Кнопка × 3"]);
 
   const decoupled = deviceDraftDecoupled(deviceDraftDecoupled(draft, 3, true), 2, true);
   assert.deepEqual(decoupled.decoupled, [2, 3]);
@@ -152,8 +160,15 @@ test("клавиши: по числу каналов типа, отметка «
     points: [{ x: 0.5, y: 0.5 }],
   });
   assert.deepEqual(
-    markDeviceOf(markId.project, markId.mark.id).services.map((service) => service.decoupled),
-    [false, true, true],
+    markDeviceOf(markId.project, markId.mark.id).services.map((service) => [service.type, service.decoupled]),
+    [
+      ["Switch", false],
+      ["Switch", false],
+      ["Switch", false],
+      ["StatelessProgrammableSwitch", false],
+      ["StatelessProgrammableSwitch", true],
+      ["StatelessProgrammableSwitch", true],
+    ],
   );
   // Светильнику клавиш нет.
   assert.deepEqual(deviceWindowModel(deviceDraftOf(typeDeviceOf(project, typeOf(project, "Т").id)), 1).keys, []);
@@ -198,7 +213,7 @@ test("тип: черновик без правок пишется минимал
   // «Без устройства» у типа и обратно выбором вида.
   const none = setTypeDevice(project, lamp.id, deviceTypeRecord(deviceDraftKind(base, "none"))).project;
   assert.equal(typeDeviceOf(none, lamp.id), null);
-  assert.equal(deviceTypeField(none, lamp.id), "без устройства");
+  assert.equal(deviceTypeField(none, lamp.id), "без аксессуара");
   const relay = deviceDraftKind(deviceDraftOf(null), "relay");
   assert.equal(
     typeDeviceOf(setTypeDevice(none, lamp.id, deviceTypeRecord(relay)).project, lamp.id).kind,
@@ -237,7 +252,7 @@ test("метка: своя настройка — снимок; правка т�
   assert.deepEqual(deviceMarkField(reset, lamp), { summary: "Светильник: включено, яркость", own: false });
 });
 
-test("метка: черновик, совпавший с типом, ничего не задаёт; «без устройства» у метки — своя настройка", () => {
+test("метка: черновик, совпавший с типом, ничего не задаёт; «без аксессуара» у метки — своя настройка", () => {
   const { project, marks } = home();
   const lamp = marks["Т"];
   const typeId = findMark(project, lamp).typeId;
@@ -251,7 +266,7 @@ test("метка: черновик, совпавший с типом, ничег
     deviceMarkPatch(typeDeviceOf(project, typeId), deviceDraftOf(null)),
   ).project;
   assert.equal(markDeviceProfile(none, lamp), null);
-  assert.deepEqual(deviceMarkField(none, lamp), { summary: "без устройства", own: true });
+  assert.deepEqual(deviceMarkField(none, lamp), { summary: "без аксессуара", own: true });
   // У не-устройства профиль задаётся руками: щиту — датчик.
   const board = marks["Щ"];
   const boardType = findMark(project, board).typeId;
@@ -295,4 +310,85 @@ test("строка метки несёт поле device и не хранит е
 test("телефон: правка меток недоступна — окно откроется только на просмотр", () => {
   assert.deepEqual(LAYOUT_ABILITIES.editMarks, ["desktop"]);
   assert.ok(strings.deviceWindow.viewOnly.length > 0);
+});
+
+// ——— таск 13: идентификаторы, кнопка клавиши, слово «Аксессуар» ————————————
+
+test("окно метки пишет aid аксессуара и sid каждого сервиса — те же, что у дома (G12)", () => {
+  const { project, marks } = home();
+  const markId = marks["ВВ"];
+  const typeId = findMark(project, markId).typeId;
+  const aid = deviceMarkAid(project, markId);
+  assert.equal(aid, deviceAids(project).get(markId));
+  assert.equal(aid, markAccessory(project, markId).aid, "aid окна и дома разошлись");
+  const model = deviceWindowModel(deviceDraftOf(markDeviceProfile(project, markId)), 2, { aid });
+  assert.equal(model.aid, aid);
+  // ВВ: «Выключатель» × 2 — sid 13 и 15 (у каждого одна характеристика), кнопка × 2 — 17 и 20.
+  assert.deepEqual(model.services.map((service) => [service.type, service.sids]), [
+    ["Switch", [13, 15]],
+    ["StatelessProgrammableSwitch", [17, 20]],
+  ]);
+  assert.deepEqual(
+    markAccessory(project, markId).services.map((service) => service.sid),
+    [13, 15, 17, 20],
+    "sid окна и дома разошлись",
+  );
+  assert.equal(text("deviceWindow.aid", { aid }), "Идентификатор аксессуара (aid): " + aid);
+  assert.equal(text("deviceWindow.sid", { sids: "13, 15" }), "sid 13, 15");
+  // Светильник с добавленной батареей: sid идут дальше по характеристикам.
+  const lamp = deviceDraftAddService(deviceDraftOf(markDeviceProfile(project, marks["Т"])), "BatteryService");
+  assert.deepEqual(deviceWindowModel(lamp, 1, { aid: 1 }).services.map((service) => service.sids), [[13], [16]]);
+  // Окно типа: aid нет — у каждой метки свой, окно так и говорит.
+  const typeModel = deviceWindowModel(deviceDraftOf(typeDeviceOf(project, typeId)), 2);
+  assert.equal(typeModel.aid, null);
+  assert.deepEqual(typeModel.services.map((service) => service.sids), [[13, 15], [17, 20]]);
+  assert.match(strings.deviceWindow.aidPerMark, /у каждой метки свой идентификатор аксессуара/i);
+  // «Без аксессуара» — ни aid, ни сервисов.
+  assert.equal(deviceWindowModel(deviceDraftOf(null), 1, { aid }).aid, null);
+  assert.equal(deviceMarkAid(project, "нет-метки"), null);
+});
+
+test("кнопка клавиши рядом с «Выключателем» помечена «работает, когда клавиша отвязана»; без «Выключателя» — нет (G11)", () => {
+  const { project } = home();
+  const relayed = deviceWindowModel(deviceDraftOf(typeDeviceOf(project, typeOf(project, "В").id)), 1);
+  assert.deepEqual(relayed.services.map((service) => [service.type, service.keyNote]), [
+    ["Switch", false],
+    ["StatelessProgrammableSwitch", true],
+  ]);
+  assert.equal(strings.deviceWindow.keyNote, "работает, когда клавиша отвязана");
+  // Профиль до G11 (одни кнопки): кнопка работает всегда — пометки нет.
+  const legacy = deviceWindowModel(deviceDraftKind(deviceDraftOf(null), "switch"), 1);
+  assert.deepEqual(legacy.services.map((service) => [service.type, service.keyNote]), [["StatelessProgrammableSwitch", false]]);
+});
+
+test("в интерфейсе — «Аксессуар», не «Устройство» (G13): словарь строк окна, справочника, строки метки и предупреждения", () => {
+  const keys = {
+    ...Object.fromEntries(Object.entries(strings.deviceWindow).map(([key, value]) => ["deviceWindow." + key, value])),
+    "sim.kinds.none": strings.sim.kinds.none,
+    "history.typeDevice": strings.history.typeDevice,
+    "history.markDevice": strings.history.markDevice,
+    "history.markDeviceReset": strings.history.markDeviceReset,
+    "errors.commentNoDevice": strings.errors.commentNoDevice,
+    "errors.deviceKindUnknown": strings.errors.deviceKindUnknown,
+    "errors.deviceServiceUnknown": strings.errors.deviceServiceUnknown,
+    "errors.deviceParamInvalid": strings.errors.deviceParamInvalid,
+    "errors.logicBindingNotLogic": strings.errors.logicBindingNotLogic,
+    "errors.logicBindingService": strings.errors.logicBindingService,
+    "problems.scenarioDeviceMissing": strings.problems.scenarioDeviceMissing,
+    "warnings.groups.scenarioDeviceMissing": strings.warnings.groups.scenarioDeviceMissing,
+  };
+  for (const [key, value] of Object.entries(keys)) {
+    assert.equal(typeof value, "string", key + " нет в словаре");
+    assert.doesNotMatch(value, /устройств/i, key + ": «" + value + "»");
+  }
+  // Кнопка справочника и строки метки, заголовок окна, «без аксессуара».
+  assert.equal(strings.deviceWindow.open, "Аксессуар");
+  assert.equal(strings.deviceWindow.none, "без аксессуара");
+  assert.equal(strings.deviceWindow.kindNone, "Без аксессуара");
+  const { project, marks } = home();
+  assert.equal(deviceWindowTitle(project, { markId: marks["ВВ"] }), "Аксессуар метки ВВ1");
+  assert.equal(deviceWindowTitle(project, { typeId: typeOf(project, "ВВ").id }), "Аксессуар типа ВВ — " + typeOf(project, "ВВ").name);
+  assert.match(strings.deviceWindow.ownTitle, /своя настройка аксессуара/);
+  assert.match(text("problems.scenarioDeviceMissing", { name: "Свет" }), /аксессуар/);
+  assert.match(text("warnings.groups.scenarioDeviceMissing", { count: 2 }), /аксессуар/);
 });

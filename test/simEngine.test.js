@@ -8,8 +8,8 @@ import assert from "node:assert/strict";
 
 import { SIM_CHAIN_MAX, createSimEngine } from "../src/sim/engine.js";
 import { buildHomeSpec } from "../src/sim/home.js";
-import { addScenario, createProject, setMarkDevice } from "../src/model.js";
-import { simBigHouse, simHouse, simHouseSpec, simLink, simPut, simRecorder } from "./fixtures/simHome.js";
+import { addScenario, createProject, setMarkDevice, setTypeDevice } from "../src/model.js";
+import { simBigHouse, simHouse, simHouseSpec, simLegacySwitchProject, simLink, simPut, simRecorder } from "./fixtures/simHome.js";
 
 // Полдень 23 октября 2026 года в местных миллисекундах часов имитации.
 const T0 = Date.UTC(2026, 9, 23, 12, 0, 0);
@@ -39,6 +39,25 @@ function setup({ owners = [], box = simHouse(), start = true } = {}) {
 
 function kinds(chain) {
   return chain.map((cause) => cause.k);
+}
+
+// Выключатели с профилем G11: сначала «Выключатель» на каждый канал, затем
+// кнопки. В1: 0 — «Выключатель», 1 — кнопка; ВВ1: 0, 1 — «Выключатели»,
+// 2, 3 — кнопки клавиш 1 и 2.
+const B1_RELAY = 0;
+const B1_KEY = 1;
+const DUO_KEY1 = 2;
+const DUO_KEY2 = 3;
+
+// Дом, где типы В и ВВ хранят профиль, сохранённый до G11: вид `switch`, одни
+// кнопки — сервис 0 у В1, 0 и 1 у ВВ1.
+function legacyHouse() {
+  const box = simHouse();
+  for (const code of ["В", "ВВ"]) {
+    const type = box.project.markTypes.find((item) => item.code === code);
+    box.project = setTypeDevice(box.project, type.id, { kind: "switch" }).project;
+  }
+  return box;
 }
 
 // ——— состояние и значения ——————————————————————————————————————————————
@@ -90,8 +109,25 @@ test("изменения уходят наружу сообщением changes,
 
 // ——— привязанная и отвязанная клавиша —————————————————————————————————————
 
-test("привязанная клавиша: щелчок включает нагрузки канала, следующий выключает; нажатие — в события", () => {
+test("привязанная клавиша (G11): щелчок переключает «Выключатель» канала, свет следует за ним; кнопка событий не шлёт", () => {
   const home = setup();
+  assert.equal(home.press("В1", "single", B1_KEY), true);
+  assert.equal(home.value("В1", "On", B1_RELAY), true, "«Выключатель» клавиши не включился");
+  assert.equal(home.value("С1", "On"), true, "свет не включился");
+  home.press("В1", "single", B1_KEY);
+  assert.equal(home.value("В1", "On", B1_RELAY), false);
+  assert.equal(home.value("С1", "On"), false, "свет не выключился");
+  // Щелчок по выключателю без выбора клавиши — первая клавиша.
+  home.engine.act({ kind: "toggle", markId: home.id("В1") });
+  assert.equal(home.value("С1", "On"), true);
+  home.engine.act({ kind: "toggle", markId: home.id("В1"), service: B1_KEY });
+  assert.equal(home.value("С1", "On"), false);
+  assert.deepEqual(home.entries("В1", null, "press"), [], "кнопка привязанной клавиши прислала нажатие");
+  assert.equal(home.entries("В1", "On").length, 4, "«Выключатель» переключился не по щелчку");
+});
+
+test("профиль до G11 (одни кнопки): щелчок включает нагрузки канала, следующий выключает; нажатие — в события", () => {
+  const home = setup({ box: legacyHouse() });
   assert.equal(home.press("В1"), true);
   assert.equal(home.value("С1", "On"), true, "свет не включился");
   const [press] = home.entries("В1", null, "press");
@@ -105,8 +141,24 @@ test("привязанная клавиша: щелчок включает на�
   assert.equal(home.entries("В1", null, "press").length, 3);
 });
 
-test("в канале что-то включено — щелчок выключает все нагрузки, иначе включает все", () => {
+test("нагрузки следуют за «Выключателем» (G11): включился — все вкл, выключился — все выкл; штора — открыть и закрыть", () => {
   const home = setup();
+  home.set("Т1", "On", true);
+  home.press("ВВ1", "single", DUO_KEY1);
+  assert.deepEqual([home.value("С2", "On"), home.value("Т1", "On")], [true, true], "включённый «Выключатель» не включил всё");
+  home.press("ВВ1", "single", DUO_KEY1);
+  assert.deepEqual([home.value("С2", "On"), home.value("Т1", "On")], [false, false], "выключенный «Выключатель» не выключил всё");
+  // Вторая клавиша — свой канал: штора открывается и закрывается.
+  home.press("ВВ1", "single", DUO_KEY2);
+  assert.equal(home.value("ВВ1", "On", 1), true);
+  assert.equal(home.value("КШ1", "TargetPosition"), 100);
+  assert.deepEqual([home.value("С2", "On"), home.value("Т1", "On")], [false, false], "вторая клавиша тронула первый канал");
+  home.press("ВВ1", "single", DUO_KEY2);
+  assert.equal(home.value("КШ1", "TargetPosition"), 0);
+});
+
+test("профиль до G11: в канале что-то включено — щелчок выключает все нагрузки, иначе включает все", () => {
+  const home = setup({ box: legacyHouse() });
   home.set("С2", "On", true);
   home.press("ВВ1", "single", 0);
   assert.deepEqual([home.value("С2", "On"), home.value("Т1", "On")], [false, false], "включённое в канале не погасило всё");
@@ -129,21 +181,83 @@ test("нагрузки клавиши: свет, реле, розетка, ве�
     ["Б1", 1],
   ]);
   const home = setup({ box });
-  home.press("В1");
+  home.press("В1", "single", B1_KEY);
   assert.deepEqual(
     [home.value("С1", "On"), home.value("ТВ1", "Active"), home.value("Р1", "On"), home.value("Б1", "Active")],
     [true, "ACTIVE", true, "ACTIVE"],
   );
   home.set("ТВ1", "Active", "INACTIVE");
-  home.press("В1");
+  home.press("В1", "single", B1_KEY);
   assert.deepEqual(
     [home.value("С1", "On"), home.value("ТВ1", "Active"), home.value("Р1", "On"), home.value("Б1", "Active")],
     [false, "INACTIVE", false, "INACTIVE"],
   );
 });
 
-test("двойное и долгое на привязанной клавише — только события; отвязанная — только события", () => {
+test("«Выключатель», поставленный сценарием или логикой, ведёт нагрузки так же — и у отвязанной клавиши", () => {
+  // Хозяин-зонд пишет «Выключатель» так, как пишут блочные и логические
+  // сценарии: `host.write` со своим звеном в цепочке.
+  const probeHome = (box) => {
+    let host = null;
+    const home = setup({ owners: [{ name: "probe", load: (spec, own) => (host = own) }], box });
+    home.write = (label, service, value) => {
+      const done = host.write({ markId: home.id(label), service, char: "On", value, chain: [{ k: "scenario", scenarioId: "s1" }] });
+      home.engine.advanceTo(home.engine.now());
+      return done;
+    };
+    return home;
+  };
+  const home = probeHome(simHouse());
+  assert.equal(home.write("В1", B1_RELAY, true), true);
+  assert.equal(home.value("С1", "On"), true, "запись сценария в «Выключатель» не включила свет");
+  const [lit] = home.entries("С1", "On");
+  assert.deepEqual(kinds(lit.chain), ["char", "scenario"], "свет без причины «Выключатель ← сценарий»");
+  home.write("ВВ1", 1, true);
+  assert.equal(home.value("КШ1", "TargetPosition"), 100, "штора не поехала за «Выключателем»");
+  home.write("ВВ1", 1, false);
+  assert.equal(home.value("КШ1", "TargetPosition"), 0);
+  // Карточка аксессуара: «Выключатель» напрямую — как у реле.
+  home.engine.act({ kind: "toggle", markId: home.id("В1"), service: B1_RELAY });
+  assert.equal(home.value("С1", "On"), false);
+  // Отвязанная клавиша: «Выключатель» остаётся сценариям и ведёт нагрузки.
+  const box = simHouse();
+  box.project = setMarkDevice(box.project, box.marks["В1"], { decoupled: [1] }).project;
+  const loose = probeHome(box);
+  loose.write("В1", B1_RELAY, true);
+  assert.equal(loose.value("С1", "On"), true, "у отвязанной клавиши «Выключатель» не ведёт нагрузки");
+  assert.deepEqual(loose.entries("В1", null, "press"), [], "запись «Выключателя» прислала нажатие");
+});
+
+test("двойное и долгое на привязанной клавише — ничего; отвязанная (G11) — события кнопки, «Выключатель» не меняется", () => {
   const home = setup();
+  assert.equal(home.press("В1", "double", B1_KEY), false);
+  assert.equal(home.press("В1", "long", B1_KEY), false);
+  assert.equal(home.value("В1", "On", B1_RELAY), false, "двойное или долгое переключило «Выключатель»");
+  assert.equal(home.value("С1", "On"), false, "двойное или долгое переключило нагрузку");
+  assert.deepEqual(home.entries("В1", null, "press"), [], "привязанная клавиша прислала нажатие");
+
+  const box = simHouse();
+  box.project = setMarkDevice(box.project, box.marks["В1"], { decoupled: [1] }).project;
+  const loose = setup({ box });
+  assert.equal(loose.press("В1", "single", B1_KEY), true);
+  loose.press("В1", "double", B1_KEY);
+  loose.press("В1", "long", B1_KEY);
+  loose.engine.act({ kind: "toggle", markId: loose.id("В1") });
+  assert.deepEqual(
+    loose.entries("В1", null, "press").map((entry) => [entry.service, entry.to]),
+    [
+      [B1_KEY, "SINGLE_PRESS"],
+      [B1_KEY, "DOUBLE_PRESS"],
+      [B1_KEY, "LONG_PRESS"],
+      [B1_KEY, "SINGLE_PRESS"],
+    ],
+  );
+  assert.equal(loose.value("В1", "On", B1_RELAY), false, "щелчок по отвязанной клавише переключил «Выключатель»");
+  assert.equal(loose.value("С1", "On"), false, "отвязанная клавиша переключила нагрузку");
+});
+
+test("профиль до G11: двойное и долгое на привязанной клавише — только события; отвязанная — только события", () => {
+  const home = setup({ box: legacyHouse() });
   home.press("В1", "double");
   home.press("В1", "long");
   assert.equal(home.value("С1", "On"), false, "двойное или долгое переключило нагрузку");
@@ -157,15 +271,41 @@ test("двойное и долгое на привязанной клавише 
   assert.deepEqual(home.entries("В2", null, "press").map((entry) => entry.to), ["SINGLE_PRESS"]);
 });
 
+test("G68: объект с профилем до G11 работает как прежде — щелчок переключает нагрузки и шлёт одиночное нажатие", () => {
+  const legacy = simLegacySwitchProject();
+  const recorder = simRecorder();
+  const engine = createSimEngine({ emit: recorder.emit });
+  engine.load(buildHomeSpec(legacy.project));
+  engine.setClock({ simMs: T0 });
+  engine.start();
+  const at = (label) => legacy.marks[label];
+  const presses = (label) =>
+    recorder.log().filter((entry) => entry.kind === "press" && entry.markId === at(label)).map((entry) => [entry.service, entry.to]);
+  engine.act({ kind: "press", markId: at("В1"), service: 0, press: "single" });
+  assert.equal(engine.value(at("Т1"), 0, "On"), true, "щелчок по клавише до G11 не включил свет");
+  assert.deepEqual(presses("В1"), [[0, "SINGLE_PRESS"]], "щелчок по клавише до G11 не прислал нажатие");
+  engine.act({ kind: "toggle", markId: at("В1") });
+  assert.equal(engine.value(at("Т1"), 0, "On"), false);
+  engine.act({ kind: "press", markId: at("ВВ1"), service: 0, press: "single" });
+  assert.equal(engine.value(at("Р1"), 0, "On"), true);
+  // Клавиша 2 ВВ1 отвязана у типа, клавиша В2 — своей настройкой: только нажатия.
+  engine.act({ kind: "press", markId: at("ВВ1"), service: 1, press: "double" });
+  engine.act({ kind: "press", markId: at("В2"), service: 0, press: "single" });
+  assert.equal(engine.value(at("Л1"), 0, "On"), false, "отвязанная клавиша переключила ленту");
+  assert.equal(engine.value(at("Т1"), 0, "On"), false, "отвязанная В2 переключила свет");
+  assert.deepEqual(presses("ВВ1"), [[0, "SINGLE_PRESS"], [1, "DOUBLE_PRESS"]]);
+  assert.deepEqual(presses("В2"), [[0, "SINGLE_PRESS"]]);
+});
+
 test("связь без номера канала: у одной клавиши — её, у нескольких — ничья", () => {
   const box = simHouse();
   simLink(box, "В1", [["С1", null]]);
   simLink(box, "ВВ1", [["С2", null]]);
   const home = setup({ box });
-  home.press("В1");
+  home.press("В1", "single", B1_KEY);
   assert.equal(home.value("С1", "On"), true, "единственная клавиша не взяла связь без номера");
-  home.press("ВВ1", "single", 0);
-  home.press("ВВ1", "single", 1);
+  home.press("ВВ1", "single", DUO_KEY1);
+  home.press("ВВ1", "single", DUO_KEY2);
   assert.equal(home.value("С2", "On"), false, "связь без номера досталась клавише многоклавишного");
 });
 
@@ -332,7 +472,7 @@ test("замок — текущее за целевым; термостат гр
 test("до запуска дом не слушается; запуск — «Дом запущен», остановка снимает таймеры, состояния остаются", () => {
   const home = setup({ start: false });
   assert.equal(home.engine.running(), false);
-  assert.equal(home.press("В1"), false, "незапущенный дом переключил свет");
+  assert.equal(home.press("В1", "single", B1_KEY), false, "незапущенный дом переключил свет");
   assert.equal(home.value("С1", "On"), false);
   home.engine.start();
   assert.equal(home.engine.running(), true);
@@ -360,7 +500,7 @@ test("до запуска дом не слушается; запуск — «Д�
 
 test("«Сбросить дом» — умолчания: выключено, закрыто, не обнаружено, 22 °C, 45 %, позиции 0", () => {
   const home = setup();
-  home.press("В1");
+  home.press("В1", "single", B1_KEY);
   home.set("КШ1", "TargetPosition", 100);
   home.engine.advanceTo(T0 + 30 * SEC);
   home.engine.act({ kind: "door", openingId: home.box.doors.front, open: true });
@@ -372,6 +512,7 @@ test("«Сбросить дом» — умолчания: выключено, з
   assert.deepEqual(
     [
       home.value("С1", "On"),
+      home.value("В1", "On", B1_RELAY),
       home.value("КШ1", "CurrentPosition"),
       home.value("КШ1", "TargetPosition"),
       home.value("ДО1", "ContactSensorState"),
@@ -379,7 +520,7 @@ test("«Сбросить дом» — умолчания: выключено, з
       home.value("ДТВ1", "CurrentTemperature", 0),
       home.value("ДТВ1", "CurrentRelativeHumidity", 1),
     ],
-    [false, 0, 0, "CONTACT_DETECTED", false, 22, 45],
+    [false, false, 0, 0, "CONTACT_DETECTED", false, 22, 45],
   );
   assert.deepEqual(home.recorder.log().map((entry) => entry.code), ["reset"], "сброс не записан или записан по строке на значение");
   const changed = home.recorder.changes().map((item) => item.markId + "." + item.char);
@@ -400,14 +541,19 @@ test("пустой дом: запуск доступен, журнал гово�
 
 test("состояние дома снимается values() и поднимается start(values) без журнала изменений", () => {
   const first = setup();
-  first.press("В1");
+  first.press("В1", "single", B1_KEY);
   first.engine.act({ kind: "sensor", markId: first.id("ДД1") });
   first.set("КШ1", "TargetPosition", 100);
   first.engine.advanceTo(T0 + 30 * SEC);
   const values = first.engine.values();
   assert.deepEqual(structuredClone(values), values);
   assert.equal(values[first.id("С1")]["0.On"], true);
-  assert.equal(Object.prototype.hasOwnProperty.call(values[first.id("В1")], "0.ProgrammableSwitchEvent"), false, "событие кнопки попало в состояние");
+  assert.equal(values[first.id("В1")][B1_RELAY + ".On"], true, "«Выключатель» клавиши не в состоянии");
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(values[first.id("В1")], B1_KEY + ".ProgrammableSwitchEvent"),
+    false,
+    "событие кнопки попало в состояние",
+  );
 
   const second = setup({ box: first.box, start: false });
   second.recorder.clear();
@@ -428,16 +574,17 @@ test("цепочка причин: щелчок, связь клавиши, хо
   home.set("С2", "On", true);
   assert.deepEqual(home.entries("С2", "On")[0].chain, [{ k: "web", at: T0 }]);
 
-  home.press("В1");
+  home.press("В1", "single", B1_KEY);
   const [lit] = home.entries("С1", "On");
   assert.deepEqual(kinds(lit.chain), ["char", "web"], "свет от клавиши без причины");
   const key = simHouseSpec(home.box).accessories.find((item) => item.markId === home.id("В1"));
   const cause = lit.chain[0];
   assert.equal(cause.markId, home.id("В1"));
-  assert.equal(cause.service, 0);
-  assert.equal(cause.char, "ProgrammableSwitchEvent");
-  assert.equal(cause.value, "SINGLE_PRESS");
-  assert.equal(cause.address, key.services[0].chars[0].address, "адрес характеристики не aid.sid.cid");
+  assert.equal(cause.service, B1_RELAY);
+  assert.equal(cause.serviceType, "Switch");
+  assert.equal(cause.char, "On");
+  assert.equal(cause.value, true);
+  assert.equal(cause.address, key.services[B1_RELAY].chars[0].address, "адрес характеристики не aid.sid.cid");
 
   home.engine.act({ kind: "sensor", markId: home.id("ДД1") });
   home.engine.advanceTo(T0 + MIN);
@@ -686,7 +833,7 @@ test("дверь: ошибка хозяина не роняет дом и пиш
 test("дверь: перестройка дома на ходу сохраняет состояния и заново заводит хозяев", () => {
   const log = [];
   const home = setup({ owners: [lightOwner(log)] });
-  home.press("В1");
+  home.press("В1", "single", B1_KEY);
   const added = simPut(home.box, "С", { x: 0.9, y: 0.9 }, "bedroom");
   home.recorder.clear();
   home.engine.load(simHouseSpec(home.box));
@@ -737,10 +884,10 @@ test("большой дом: 500 устройств запускаются бы�
   const switches = box.groups.map((group) => group.switch);
   const t = performance.now();
   for (let index = 0; index < 1000; index += 1) {
-    engine.act({ kind: "press", markId: switches[index % switches.length], service: 0, press: "single" });
+    engine.act({ kind: "press", markId: switches[index % switches.length], service: B1_KEY, press: "single" });
   }
   const eventsMs = performance.now() - t;
-  // Каждое нажатие — событие клавиши и переключение света.
+  // Каждое нажатие — событие «Выключателя» клавиши и переключение света.
   assert.equal(delivered, 2000);
   assert.ok(eventsMs < 100, "1000 нажатий заняли " + eventsMs.toFixed(1) + " мс");
 });

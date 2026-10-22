@@ -13,7 +13,7 @@ import { Worker } from "node:worker_threads";
 
 import { workerBundle } from "../build.js";
 import { clockMsStamp, clockSimMs, volumeClockFixed } from "../src/clockMath.js";
-import { addLogicBinding, addScenario, deleteMark } from "../src/model.js";
+import { addLogicBinding, addScenario, createProject, deleteMark } from "../src/model.js";
 import { createSimBridge } from "../src/sim/bridge.js";
 import { markAccessory } from "../src/sim/home.js";
 import { simWorkerMain } from "../src/sim/worker.js";
@@ -24,6 +24,8 @@ import {
   SIM_STATE_SETTING,
   createSimulation,
   simAct,
+  simCommand,
+  simCommands,
   simDoor,
   simJournal,
   simJournalClear,
@@ -820,4 +822,58 @@ test("двери sim* — одна имитация на сеанс", async () =
   assert.equal(simRunning(), false);
   assert.equal(simJournal().length, 0);
   assert.equal(typeof simStep, "function");
+});
+
+// ——— «Выполнить команду» (G17) ————————————————————————————————————————————
+
+function commandHouse() {
+  const box = simHouse();
+  const id = (label) => box.marks[label];
+  const said = (text) => ({ type: "command", id: nid("k"), text });
+  const add = (scenario) => {
+    const added = addScenario(box.project, { kind: "block", ...scenario });
+    box.project = added.project;
+    return added.scenario.id;
+  };
+  box.tree = add({ name: "Гирлянда", targets: [{ ...when([said("Ёлочка гори")], [put(ref(id("Р1"), "On"), true)]) }] });
+  box.again = add({ name: "Гирлянда ещё", targets: [when([said("  ёлочка  ГОРИ! ")], [put(ref(id("С2"), "On"), true)])] });
+  box.night = add({ name: "Ночь", active: false, targets: [when([said("Спокойной ночи")], [put(ref(id("С1"), "On"), false)])] });
+  add({ name: "Пустая", targets: [when([said("   ")], [])] });
+  addScript(box, "logic", "Логика", logicSource("Логика", "  return;"));
+  return box;
+}
+
+test("simCommands: все команды сценариев без повторов, по алфавиту; неактивный помечен; без команд — пусто", () => {
+  const box = commandHouse();
+  assert.deepEqual(simCommands(box.project), [
+    { text: "Ёлочка гори", scenarioIds: [box.tree, box.again], active: true },
+    { text: "Спокойной ночи", scenarioIds: [box.night], active: false },
+  ]);
+  assert.deepEqual(simCommands(createProject()), []);
+  assert.deepEqual(simCommands(simHouse().project), []);
+});
+
+test("«Выполнить команду»: «Ëлочка гори» уходит в имитацию — гирлянда включена, журнал говорит о команде", async () => {
+  const box = commandHouse();
+  const { sim } = session();
+  sim.sync(box.project);
+  sim.start();
+  await settle();
+  assert.equal(sim.command("Ëлочка гори"), true);
+  await settle();
+  assert.equal(sim.value(box.marks["Р1"], 0, "On"), true, "команда не включила гирлянду");
+  assert.equal(sim.value(box.marks["С2"], 0, "On"), true, "второй сценарий с той же командой не запустился");
+  const journal = sim.journal();
+  const said = journal.find((entry) => entry.code === "command");
+  assert.deepEqual(said && said.vars, { text: "Ëлочка гори" });
+  assert.deepEqual(
+    journal.filter((entry) => entry.code === "blockRun").map((entry) => entry.scenarioId),
+    [box.tree, box.again],
+  );
+  sim.command("Ёлочка погасни");
+  await settle();
+  assert.deepEqual(journal.length < sim.journal().length, true);
+  assert.deepEqual(sim.journal().find((entry) => entry.code === "commandUnknown").vars, { text: "Ёлочка погасни" });
+  assert.equal(typeof simCommand, "function");
+  sim.stop();
 });

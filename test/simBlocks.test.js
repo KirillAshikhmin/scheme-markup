@@ -13,8 +13,8 @@ import assert from "node:assert/strict";
 import { createSimEngine } from "../src/sim/engine.js";
 import { buildHomeSpec } from "../src/sim/home.js";
 import { simCharMeta } from "../src/sim/catalog.js";
-import { blocksOwner, blocksPrepare, blocksRepeatAllowed } from "../src/sim/blocks.js";
-import { addScenario, addType, deleteMark, moveScenario } from "../src/model.js";
+import { blocksCommandTexts, blocksOwner, blocksPrepare, blocksRepeatAllowed, commandKey } from "../src/sim/blocks.js";
+import { addScenario, addType, deleteMark, moveScenario, setMarkDevice } from "../src/model.js";
 import { simBigHouse, simHouse, simPut, simRecorder } from "./fixtures/simHome.js";
 
 // Полдень пятницы 23 октября 2026 года в местных миллисекундах часов имитации.
@@ -40,6 +40,7 @@ const when = (conditions, then, other = null, { id = nid("if"), mode = "OR", eve
 const act = (at, items, id = nid("a")) => ({ type: "device", id, ref: { markId: at.markId, service: at.service }, items });
 const put = (at, value, id) => act(at, [{ char: at.char, verb: "set", value }], id);
 const note = (text, id = nid("n")) => ({ type: "notify", id, text });
+const command = (text, id = nid("k")) => ({ type: "command", id, text });
 const other = (verb, scenarioId, id = nid("s")) => ({ type: "scenario", id, verb, scenarioId });
 
 // ——— дом с хозяином блоков ———————————————————————————————————————————————————
@@ -65,6 +66,7 @@ function house({ scenarios = () => [], owners = [], box = simHouse(), start = tr
     value: (label, char, service = 0) => engine.value(id(label), service, char),
     set: (label, char, value, service = 0) => engine.act({ kind: "set", markId: id(label), service, char, value }),
     press: (label, press = "single", service = 0) => engine.act({ kind: "press", markId: id(label), service, press }),
+    say: (text) => engine.act({ kind: "command", text, cause: "web" }),
     sensor: (label, value) => engine.act({ kind: "sensor", markId: id(label), value }),
     notes: () => recorder.log().filter((entry) => entry.kind === "notify").map((entry) => entry.vars.text),
     entries: (code) => recorder.log().filter((entry) => entry.code === code),
@@ -73,6 +75,13 @@ function house({ scenarios = () => [], owners = [], box = simHouse(), start = tr
 
 function kinds(chain) {
   return chain.map((cause) => cause.k);
+}
+
+// Нажатия шлёт только отвязанная клавиша (G11): у ВВ1 отвязывается клавиша 2 —
+// её кнопка стоит после двух «Выключателей», сервис 3.
+const DUO_KEY2 = 3;
+function decoupleDuoKey2(box, id) {
+  box.project = setMarkDevice(box.project, id("ВВ1"), { decoupled: [2] }).project;
 }
 
 // Дом с датчиком освещённости в спальне (свой тип человека): дерево §2.5 вики.
@@ -230,6 +239,7 @@ test("«Одно из / Все сразу» и вложенная группа (
 
 test("условие-нажатие истинно только в момент своего события; «Изменено» — любое изменение", () => {
   const home = house({
+    prepare: decoupleDuoKey2,
     scenarios: (id) => [
       {
         id: "press",
@@ -250,7 +260,7 @@ test("условие-нажатие истинно только в момент 
           when(
             [
               trig(ref(id("В2"), "ProgrammableSwitchEvent"), "eq", "SINGLE_PRESS"),
-              trig(ref(id("ВВ1"), "ProgrammableSwitchEvent", 1), "eq", "SINGLE_PRESS"),
+              trig(ref(id("ВВ1"), "ProgrammableSwitchEvent", DUO_KEY2), "eq", "SINGLE_PRESS"),
             ],
             [note("оба")],
             null,
@@ -279,7 +289,7 @@ test("условие-нажатие истинно только в момент 
   home.press("В2");
   assert.deepEqual(home.notes(), ["кнопки нет", "свет"]);
   home.press("В2", "double");
-  home.press("ВВ1", "single", 1);
+  home.press("ВВ1", "single", DUO_KEY2);
   assert.deepEqual(home.notes(), ["кнопки нет", "свет"], "«Все сразу» с двумя кнопками сработало от одной");
   home.sensor("ДД2", false);
   assert.deepEqual(home.notes(), ["кнопки нет", "свет", "кнопки нет"], "«Изменено» — и на сброс движения");
@@ -427,6 +437,7 @@ test("действия: «Установить», «Инвертировать»
 test("другие сценарии: «Запустить», «Активировать», «Активировать и запустить», «Деактивировать»; неактивный не запускается", () => {
   const key = (id, press, service = 0) => trig(ref(id("В2"), "ProgrammableSwitchEvent", service), "eq", press);
   const home = house({
+    prepare: decoupleDuoKey2,
     scenarios: (id) => [
       { id: "target", name: "Цель", targets: [note("цель")] },
       {
@@ -436,8 +447,8 @@ test("другие сценарии: «Запустить», «Активиро�
           when([key(id, "SINGLE_PRESS")], [other("run", "target")]),
           when([key(id, "DOUBLE_PRESS")], [other("deactivate", "target")]),
           when([key(id, "LONG_PRESS")], [other("activateRun", "target")]),
-          when([trig(ref(id("ВВ1"), "ProgrammableSwitchEvent", 1), "eq", "SINGLE_PRESS")], [other("activate", "target")]),
-          when([trig(ref(id("ВВ1"), "ProgrammableSwitchEvent", 1), "eq", "DOUBLE_PRESS")], [other("run", "gone", "s-gone")]),
+          when([trig(ref(id("ВВ1"), "ProgrammableSwitchEvent", DUO_KEY2), "eq", "SINGLE_PRESS")], [other("activate", "target")]),
+          when([trig(ref(id("ВВ1"), "ProgrammableSwitchEvent", DUO_KEY2), "eq", "DOUBLE_PRESS")], [other("run", "gone", "s-gone")]),
         ],
       },
       {
@@ -456,7 +467,7 @@ test("другие сценарии: «Запустить», «Активиро�
   home.press("В2");
   assert.deepEqual(home.notes(), ["цель"], "неактивный сценарий запустился");
   assert.equal(home.entries("blockNotActive").length, 1, "отказ неактивному не записан в журнал");
-  home.press("ВВ1", "single", 1);
+  home.press("ВВ1", "single", DUO_KEY2);
   assert.equal(active("target"), true, "«Активировать» не включил сценарий");
   home.press("В2");
   assert.deepEqual(home.notes(), ["цель", "цель"]);
@@ -465,7 +476,7 @@ test("другие сценарии: «Запустить», «Активиро�
   assert.equal(active("target"), true);
   assert.deepEqual(home.notes(), ["цель", "цель", "цель"], "«Активировать и запустить» не запустил");
 
-  home.press("ВВ1", "double", 1);
+  home.press("ВВ1", "double", DUO_KEY2);
   const [missing] = home.entries("blockScenarioMissing");
   assert.equal(missing.blockId, "s-gone", "ссылка на удалённый сценарий не записана");
 
@@ -785,4 +796,146 @@ test("большой дом: 500 устройств и 50 сценариев з�
   }
   assert.ok(worst < 100, "событие со сценарием заняло " + worst.toFixed(1) + " мс");
   assert.equal(engine.value(box.groups[0].light, 0, "On"), true, "сценарии большого дома не сработали");
+});
+
+// ——— условие «Команда» (G16) ——————————————————————————————————————————————
+
+test("commandKey: регистр, «ё»/«е» и латинская «Ë», лишние пробелы и знаки по краям не важны", () => {
+  for (const said of ["Ёлочка гори", "Ëлочка гори", "ёлочка ГОРИ", "  Елочка   гори! ", "«Ёлочка гори»", "ёлочка гори...", "е\u0308лочка гори"]) {
+    assert.equal(commandKey(said), "елочка гори", JSON.stringify(said));
+  }
+  assert.notEqual(commandKey("Ёлочка, гори"), commandKey("Ёлочка гори"), "знак внутри — часть команды");
+  assert.notEqual(commandKey("Ёлочка погасни"), commandKey("Ёлочка гори"));
+  for (const empty of ["", "   ", "?!", null, undefined]) assert.equal(commandKey(empty), "");
+});
+
+test("команда (G16): «Ëлочка гори» включает розетку гирлянды по сценарию с командой «Ёлочка гори»", () => {
+  const home = house({
+    scenarios: (id) => [
+      { id: "tree", name: "Ёлочка", targets: [when([command("Ёлочка гори", "k-tree")], [put(ref(id("Р1"), "On"), true, "a-tree")])] },
+      { id: "off", name: "Ёлочка спать", targets: [when([command("Ёлочка, спать")], [put(ref(id("Р1"), "On"), false)])] },
+    ],
+  });
+  assert.equal(home.say("Ëлочка гори"), true);
+  assert.equal(home.value("Р1", "On"), true, "команда не включила розетку гирлянды");
+  const [said] = home.entries("command");
+  assert.equal(said.kind, "system");
+  assert.deepEqual(said.vars, { text: "Ëлочка гори" });
+  assert.deepEqual(kinds(said.chain), ["web"]);
+  const [run] = home.entries("blockRun");
+  assert.equal(run.scenarioId, "tree");
+  assert.deepEqual(run.chain[0], { k: "command", at: T0, text: "Ëлочка гори" }, "запуск без причины «команда»");
+  assert.deepEqual(kinds(run.chain), ["command", "web"]);
+  const cond = home.entries("blockCond").find((entry) => entry.blockId === "k-tree");
+  assert.equal(cond.result, true);
+  const lit = home.recorder.log().find((entry) => entry.kind === "change" && entry.markId === home.id("Р1"));
+  assert.deepEqual(kinds(lit.chain), ["scenario", "command", "web"], "розетка без причины «сценарий ← команда ← щелчок»");
+  // Знаки, пробелы и регистр не важны; другая команда — другой сценарий.
+  home.say(" ЁЛОЧКА, спать! ");
+  assert.equal(home.value("Р1", "On"), false);
+  assert.deepEqual(home.entries("commandUnknown"), [], "понятую команду записали непонятой");
+});
+
+test("команду не понял ни один сценарий — запись commandUnknown; пустая — ничего; неактивный — отказ", () => {
+  const home = house({
+    scenarios: (id) => [
+      { id: "tree", name: "Ёлочка", targets: [when([command("Ёлочка гори")], [put(ref(id("Р1"), "On"), true)])] },
+      { id: "sleep", name: "Спит", active: false, targets: [when([command("Спокойной ночи")], [note("ночь")])] },
+      { id: "blank", name: "Пустая", targets: [when([command("  ")], [note("пусто")])] },
+    ],
+  });
+  assert.equal(home.say("Ёлочка погасни"), false);
+  const [unknown] = home.entries("commandUnknown");
+  assert.equal(unknown.kind, "system");
+  assert.deepEqual(unknown.vars, { text: "Ёлочка погасни" });
+  assert.deepEqual(home.entries("blockRun"), []);
+  assert.equal(home.value("Р1", "On"), false);
+  // Неактивный сценарий команду услышал, но не запустился — это не «не понял».
+  home.say("спокойной ночи");
+  assert.deepEqual(home.notes(), []);
+  assert.equal(home.entries("blockNotActive").length, 1);
+  assert.equal(home.entries("commandUnknown").length, 1);
+  // Пустая команда — ни журнала, ни запуска; пустой текст условия — неполный блок.
+  home.recorder.clear();
+  assert.equal(home.say("   "), false);
+  assert.deepEqual(home.recorder.log(), []);
+  const blank = blocksPrepare(home.box.project.scenarios.find((item) => item.id === "blank"), buildHomeSpec(home.box.project));
+  assert.deepEqual(blank.issues.map((issue) => issue.code), ["incomplete"]);
+  // Остановленный дом команд не слушает.
+  home.engine.stop();
+  home.recorder.clear();
+  assert.equal(home.say("Ёлочка гори"), false);
+  assert.deepEqual(home.recorder.log(), []);
+});
+
+test("команда — всегда триггер и истинна только в миг команды; в «Все сразу» остальное — по текущему состоянию", () => {
+  const home = house({
+    scenarios: (id) => [
+      {
+        id: "night",
+        name: "Свет при движении",
+        targets: [
+          when([command("Свет"), cond(ref(id("ДД2"), "MotionDetected"), "eq", true)], [note("да")], [note("нет")], { mode: "AND" }),
+        ],
+      },
+    ],
+  });
+  home.say("свет");
+  assert.deepEqual(home.notes(), ["нет"], "без движения «Все сразу» не дало «Иначе»");
+  home.sensor("ДД2");
+  assert.deepEqual(home.notes(), ["нет"], "движение без галки запустило сценарий");
+  home.say("Свет!");
+  assert.deepEqual(home.notes(), ["нет", "да"]);
+  // Ручной запуск: команды не было — условие ложно.
+  home.engine.runScenario("night");
+  assert.deepEqual(home.notes(), ["нет", "да", "нет"]);
+});
+
+test("blocksCommandTexts: тексты команд из «Если», групп, вложенных «Если» и задержек — без пустых", () => {
+  const scenario = {
+    targets: [
+      when([command("Ёлочка гори"), group("AND", [command("Свет")])], [
+        { type: "delay", id: nid("d"), no: 1, sec: 5, timer: "one", blocks: [when([command("Позже")], [])] },
+      ], [when([command("  ")], [])]),
+    ],
+  };
+  assert.deepEqual(blocksCommandTexts(scenario), ["Ёлочка гори", "Свет", "Позже"]);
+  assert.deepEqual(blocksCommandTexts({}), []);
+});
+
+// ——— выключатель G11 в блочных сценариях ——————————————————————————————————
+
+test("блочный сценарий ставит «Выключатель» клавиши — нагрузки канала следуют за ним (G11)", () => {
+  // В1: сервис 0 — «Выключатель», 1 — кнопка; ВВ1: 0, 1 — «Выключатели».
+  const home = house({
+    scenarios: (id) => [
+      { id: "on", name: "Движение — свет", targets: [when([trig(ref(id("ДД2"), "MotionDetected"), "eq", true)], [put(ref(id("В1"), "On", 0), true)], [put(ref(id("В1"), "On", 0), false)])] },
+      { id: "curtain", name: "Протечка — штора", targets: [when([trig(ref(id("ДПр1"), "LeakDetected"), "eq", "LEAK_DETECTED")], [put(ref(id("ВВ1"), "On", 1), true)])] },
+    ],
+  });
+  home.sensor("ДД2");
+  assert.equal(home.value("В1", "On", 0), true);
+  assert.equal(home.value("С1", "On"), true, "свет не пошёл за «Выключателем» из сценария");
+  home.sensor("ДД2", false);
+  assert.equal(home.value("С1", "On"), false);
+  home.sensor("ДПр1", true);
+  assert.equal(home.value("КШ1", "TargetPosition"), 100);
+  // Кнопка привязанной клавиши событий не шлёт: сценарий на её нажатие молчит.
+  const quiet = house({
+    scenarios: (id) => [{ id: "press", name: "Нажатие", targets: [when([trig(ref(id("В1"), "ProgrammableSwitchEvent", 1), "eq", "SINGLE_PRESS")], [note("нажата")])] }],
+  });
+  quiet.press("В1", "single", 1);
+  assert.equal(quiet.value("С1", "On"), true, "щелчок по привязанной клавише не включил свет");
+  assert.deepEqual(quiet.notes(), [], "кнопка привязанной клавиши прислала нажатие в сценарий");
+  // Отвязали — щелчок уходит нажатием в сценарий, свет не трогается.
+  const loose = house({
+    prepare: (box, id) => {
+      box.project = setMarkDevice(box.project, id("В1"), { decoupled: [1] }).project;
+    },
+    scenarios: (id) => [{ id: "press", name: "Нажатие", targets: [when([trig(ref(id("В1"), "ProgrammableSwitchEvent", 1), "eq", "DOUBLE_PRESS")], [note("двойное")])] }],
+  });
+  loose.press("В1", "single", 1);
+  loose.press("В1", "double", 1);
+  assert.deepEqual(loose.notes(), ["двойное"]);
+  assert.equal(loose.value("С1", "On"), false, "отвязанная клавиша включила свет");
 });

@@ -41,6 +41,7 @@ import {
 import { PROJECT_ENTRY, packProject, readZip, unpackProject } from "../src/projectFile.js";
 import { projectsMigrateStored } from "../src/panels/projects.js";
 import { typesSnapshot, typesTemplateFrom } from "../src/panels/types.js";
+import { simLegacySwitchProject } from "./fixtures/simHome.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const read = (name) => readFileSync(join(here, name), "utf8");
@@ -49,7 +50,8 @@ const read = (name) => readFileSync(join(here, name), "utf8");
 
 const KEY = ["StatelessProgrammableSwitch", ["ProgrammableSwitchEvent", "ServiceLabelIndex"]];
 const LIGHT = { kind: "light", services: [["Lightbulb", ["On", "Brightness"]]] };
-const SWITCH = { kind: "switch", services: [KEY], perChannel: true };
+// Выключатель (G11): «Выключатель» на каждый канал, затем кнопка на каждый.
+const SWITCH = { kind: "switchRelay", services: [["Switch", ["On"]], KEY], perChannel: true };
 const OUTLET = { kind: "outlet", services: [["Outlet", ["On"]]] };
 const FAN = { kind: "fan", services: [["Fan", ["Active", "RotationSpeed"]]] };
 const RELAY = { kind: "relay", services: [["Switch", ["On"]]] };
@@ -146,7 +148,8 @@ test("каждый из 51 типа стартового справочника 
     next = placed.project;
     marks.set(type.code, placed.markId);
   }
-  // У меток — по сервису, у выключателей — по клавише на канал с номером.
+  // У меток — по сервису, у выключателей — N «Выключателей», затем N кнопок
+  // с номерами 1…N.
   for (const [code, markId] of marks) {
     const expected = PROFILE_BY_CODE[code];
     const profile = markDeviceOf(next, markId);
@@ -154,12 +157,19 @@ test("каждый из 51 типа стартового справочника 
       assert.equal(profile, null, code);
       continue;
     }
-    const count = expected.keys || expected.services.length;
+    const count = expected.keys ? expected.keys * 2 : expected.services.length;
     assert.equal(profile.services.length, count, "сервисов у метки " + code);
     if (expected.keys) {
-      assert.deepEqual(profile.services.map((service) => service.channel), [1, 2, 3].slice(0, expected.keys));
-      for (const service of profile.services) {
-        assert.equal(service.type, "StatelessProgrammableSwitch");
+      const channels = [1, 2, 3].slice(0, expected.keys);
+      assert.deepEqual(profile.services.map((service) => service.channel), [...channels, ...channels], code + ": каналы");
+      const relays = profile.services.slice(0, expected.keys);
+      const keys = profile.services.slice(expected.keys);
+      for (const service of relays) {
+        assert.deepEqual([service.type, service.chars], ["Switch", ["On"]], code + ": сначала «Выключатели»");
+        assert.equal(service.decoupled, false);
+      }
+      for (const service of keys) {
+        assert.equal(service.type, "StatelessProgrammableSwitch", code + ": затем кнопки");
         assert.ok(service.chars.includes("ServiceLabelIndex"), code + ": клавиша без номера");
         assert.equal(service.decoupled, false, code + ": клавиша по умолчанию привязана");
       }
@@ -447,3 +457,35 @@ for (const [name, print] of LEGACY) {
     assert.ok(text.length > 0);
   });
 }
+
+// ——— G68 (G11): профиль выключателя, сохранённый до G11 ————————————————————
+
+test("G68: объект с профилем выключателя до G11 (одни кнопки) открывается байт в байт и читает те же кнопки", async () => {
+  const legacy = simLegacySwitchProject();
+  const blob = await packProject(legacy.project, new Map(), { date: new Date("2026-10-22T10:00:00Z") });
+  const packed = new TextDecoder().decode((await readZip(blob)).get(PROJECT_ENTRY));
+  assert.equal(packed, legacy.text, "project.json объекта до G11 стал другим текстом");
+  const restored = (await unpackProject(blob)).project;
+  for (const key of ["marks", "markTypes", "counters"]) {
+    assert.equal(JSON.stringify(restored[key]), JSON.stringify(legacy.project[key]), key + " после файла");
+  }
+  const stored = projectsMigrateStored(legacy.project);
+  assert.equal(stored, legacy.project, "открытие из базы переписало объект");
+  const KEY_ONLY = ["StatelessProgrammableSwitch", ["ProgrammableSwitchEvent", "ServiceLabelIndex"]];
+  for (const project of [restored, stored]) {
+    for (const code of ["В", "ВВ"]) {
+      const profile = typeDeviceOf(project, legacy.types[code]);
+      assert.equal(profile.kind, "switch", code + ": вид профиля до G11");
+      assert.equal(profile.derived, false);
+      assert.deepEqual(profile.services.map((service) => [service.type, service.chars]), [KEY_ONLY], code + ": к кнопкам добавился сервис");
+    }
+    const shape = (label) =>
+      markDeviceOf(project, legacy.marks[label]).services.map((service) => [service.type, service.channel, service.decoupled]);
+    assert.deepEqual(shape("В1"), [["StatelessProgrammableSwitch", 1, false]]);
+    assert.deepEqual(shape("ВВ1"), [
+      ["StatelessProgrammableSwitch", 1, false],
+      ["StatelessProgrammableSwitch", 2, true],
+    ]);
+    assert.deepEqual(shape("В2"), [["StatelessProgrammableSwitch", 1, true]]);
+  }
+});

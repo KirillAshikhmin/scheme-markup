@@ -37,10 +37,11 @@
 // `pageReloaded`, `editReset`, `noWorker`, `reset` (сброс остановленного дома),
 // `scenarioHung` (`{name, label, where}`), `hungUnknown` (`{count}`).
 import { appClockJump, appClockNow, appClockSimMs, appClockStep, appClockWatch } from "./appClock.js";
-import { roomsInOrder } from "./model.js";
+import { roomsInOrder, scenariosInOrder } from "./model.js";
 import { getSetting, setSetting } from "./store.js";
 import { text } from "./strings.js";
 import { SIM_BRIDGE_REPLAY, createSimBridge } from "./sim/bridge.js";
+import { blocksCommandTexts, commandKey } from "./sim/blocks.js";
 import { simClamp } from "./sim/catalog.js";
 import { buildHomeSpec, homeAccessories } from "./sim/home.js";
 import { simLiveOf, simValueKey } from "./sim/live.js";
@@ -110,6 +111,28 @@ export function simMirrorFit(values, accessory, before = null) {
     }
   }
   return out;
+}
+
+/**
+ * Список кнопки «Выполнить команду» (G17): все тексты условий «Команда»
+ * блочных сценариев объекта — без повторов (одна команда — один ключ
+ * `commandKey`, текст — как набран первым по порядку сценариев), по алфавиту.
+ * `scenarioIds` — какие сценарии её слушают, `active: false` — все они
+ * неактивны (пометка в списке). Объект без команд — пустой список.
+ */
+export function simCommands(project) {
+  const byKey = new Map();
+  for (const scenario of scenariosInOrder(project)) {
+    if (!scenario || scenario.kind !== "block") continue;
+    for (const raw of blocksCommandTexts(scenario)) {
+      const key = commandKey(raw);
+      if (!byKey.has(key)) byKey.set(key, { text: raw.trim().replace(/\s+/g, " "), scenarioIds: [], active: false });
+      const item = byKey.get(key);
+      if (!item.scenarioIds.includes(scenario.id)) item.scenarioIds.push(scenario.id);
+      if (scenario.active !== false) item.active = true;
+    }
+  }
+  return [...byKey.values()].sort((a, b) => a.text.localeCompare(b.text, "ru", { sensitivity: "base" }) || (a.text < b.text ? -1 : a.text > b.text ? 1 : 0));
 }
 
 /** Карта памяти с записью объекта `key`: не больше `SIM_STATE_MAX`, давние уходят. */
@@ -728,6 +751,7 @@ export function createSimulation(options = {}) {
     running: () => running,
     act,
     press: (markId, service, press) => act({ kind: "press", markId, service, press }),
+    command: (said) => act({ kind: "command", text: typeof said === "string" ? said : String(said ?? ""), cause: "web" }),
     presence: (roomIds) => act({ kind: "presence", roomIds: simList(roomIds) }),
     door: (openingId, open) => act({ kind: "door", openingId, open: open === true }),
     value,
@@ -796,6 +820,16 @@ export function simAct(action) {
 /** Нажатие клавиши: `"single" | "double" | "long"`. */
 export function simPress(markId, service, press) {
   return simSessionOf().press(markId, service, press);
+}
+
+/**
+ * «Выполнить команду» (G17): текст уходит в имитацию событием команды —
+ * сценарии с условием «Команда» на тот же текст запускаются; журнал
+ * `command {text}`, не понял никто — `commandUnknown {text}`. `true` — дом
+ * запущен и исполнит её.
+ */
+export function simCommand(text) {
+  return simSessionOf().command(text);
 }
 
 /** Значение характеристики из зеркала (нет в зеркале — начальное). */

@@ -97,6 +97,35 @@ test("SwitchCallbackControl: fire по UUID включает и выключае
   noErrors(home);
 });
 
+test("SwitchCallbackControl на настенных выключателях (G11): fire ставит «Выключатель» клавиши, свет канала следует за ним", () => {
+  // Выключатели фикстуры с профилем G11: сервис 0 у В1 и 0, 1 у ВВ1 —
+  // «Выключатели» (`Switch.On`), к ним логика и привязывается.
+  const global = sprut("SwitchCallbackControl.Global.json");
+  const logic = sprut("SwitchCallbackControl.Logic.js");
+  const home = hubHome({
+    scripts: [
+      { key: "g", kind: "global", name: global.template.name, source: global.source },
+      { key: "l", kind: "logic", source: logic.source },
+    ],
+    bindings: [
+      { key: "hall", script: "l", mark: "В1", service: 0 },
+      { key: "duo", script: "l", mark: "ВВ1", service: 1 },
+    ],
+  });
+  const fire = (mark, service, action) =>
+    home.code("return global.switchCallbackControlFire(" + JSON.stringify(home.address(mark, service)) + ", " + JSON.stringify(action) + ", {})").value;
+  assert.equal(home.accessory("В1").services[0].type, "Switch");
+  assert.equal(fire("В1", 0, "on"), true);
+  assert.equal(home.value("В1", "On", 0), true);
+  assert.equal(home.value("С1", "On"), true, "свет не пошёл за «Выключателем», включённым логикой");
+  assert.equal(fire("ВВ1", 1, "toggle"), true);
+  assert.equal(home.value("КШ1", "TargetPosition"), 100, "штора второй клавиши не поехала");
+  assert.equal(home.value("С2", "On"), false, "вторая клавиша тронула первый канал");
+  assert.equal(fire("В1", 0, "off"), true);
+  assert.equal(home.value("С1", "On"), false);
+  noErrors(home);
+});
+
 test("SwitchCallbackControl: мёртвый ключ «aid.sid» вычищается; ошибка handler — в журнал, fire — false", () => {
   const home = callbackHome();
   assert.equal(

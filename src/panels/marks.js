@@ -66,6 +66,7 @@ import { openMarkControlsPicker } from "./markControls.js";
 import { openEquipmentWindow } from "./equipment.js";
 import { markSizesSummary, openMarkSizesPicker } from "./markSizes.js";
 import {
+  deviceMarkAid,
   deviceMarkField,
   deviceMarkPatch,
   deviceWindowTitle,
@@ -548,7 +549,7 @@ export function marksRowModel(project, row, options = {}) {
     // Посадка решает, какое из двух полей зовётся высотой (таск 161): у
     // потолочной люстры «В» стоит у того числа, которое свисает вниз.
     sizes: markSizesSummary(mark, markAxisSeat(project, mark)),
-    // Устройство метки (таск 03 сценариев): сводка и пометка «своя настройка».
+    // Аксессуар метки (таск 03 сценариев): сводка и пометка «своя настройка».
     // Считается из модели на каждый спрос — второй правды о метке здесь нет.
     device: deviceMarkField(project, mark.id),
     // Длина линейной метки по плану — в метрах, и только когда у схемы есть
@@ -945,8 +946,8 @@ function mountMarksPanel(host, api) {
     }
   }
 
-  // Устройство метки: окно доступно и на телефоне, но там оно только
-  // показывает. Правка ложится на свежий снимок, как у размеров; ничего не
+  // Аксессуар метки (G13 — «Аксессуар», не «Устройство»): окно доступно и на
+  // телефоне, но там оно только показывает; сразу пишет `aid` метки (G12). Правка ложится на свежий снимок, как у размеров; ничего не
   // изменили — шага истории нет.
   async function editDevice(markId) {
     const state = getState();
@@ -958,6 +959,7 @@ function mountMarksPanel(host, api) {
       hint: strings.deviceWindow.markHint,
       profile: markDeviceProfile(state.project, markId),
       channels: typeChannels(state.project, mark.typeId),
+      aid: deviceMarkAid(state.project, markId),
       readOnly: !editable,
       own: markDeviceOwn(state.project, markId),
       resetable: true,
@@ -1178,7 +1180,7 @@ function mountMarksPanel(host, api) {
           on: { click: () => editSizes(mark.id) },
         })
       : null;
-    // Устройство метки: четвёртая кнопка ряда. Говорит сводкой профиля; у метки
+    // Аксессуар метки: четвёртая кнопка ряда. Говорит сводкой профиля; у метки
     // со своей настройкой рядом пометка и кнопка «Вернуть как у типа».
     const deviceButton = view.fields
       ? uiEl("div", { class: "mark-row__deviceRow" }, [

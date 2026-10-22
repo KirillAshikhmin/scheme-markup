@@ -657,6 +657,18 @@ test("hubContext — звенья хаба через « <- »", () => {
   );
 });
 
+test("hubContext: звено команды (G16) — COMMAND[текст]", () => {
+  assert.equal(
+    hubContext([
+      { k: "char", address: "123.13.14", serviceType: "Outlet", char: "On" },
+      { k: "scenario", scenarioId: "s", name: "Гирлянда" },
+      { k: "command", at: 61000, text: "Ëлочка гори" },
+      { k: "web", at: 61000 },
+    ]),
+    "C[123.13.14 Outlet.On] <- SCENARIO[Гирлянда] <- COMMAND[Ëлочка_гори] <- WEB[Имитация]_61",
+  );
+});
+
 test("блочный хозяин через дверь движка: условие-код и блок-код исполняет хозяин скриптов", () => {
   const box = simHouse();
   const added = addScenario(box.project, {

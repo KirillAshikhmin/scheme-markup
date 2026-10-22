@@ -315,7 +315,8 @@ test("коды стартового справочника узнаются бе
   assert.equal(deviceKindForTemplateCode("ДПр"), "leak");
   // «РC» — кириллическая Р и **латинская** C (так в справочнике заказчика).
   assert.equal(deviceKindForTemplateCode("РC"), "outlet");
-  assert.equal(deviceKindForTemplateCode("ВВВ"), "switch");
+  // Выключатели — с «Выключателем» на каждый канал (G11).
+  for (const code of ["В", "П", "МВ", "ВВ", "ПП", "ВВВ", " ввв "]) assert.equal(deviceKindForTemplateCode(code), "switchRelay", code);
   // Не-устройство названо прямо, а свой код не узнан вовсе.
   assert.equal(deviceKindForTemplateCode("Щ"), "none");
   assert.equal(deviceKindForTemplateCode("ЖЖ"), null);

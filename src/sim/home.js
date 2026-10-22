@@ -77,17 +77,34 @@ export function deviceAids(project) {
   return aids;
 }
 
+/**
+ * Номера сервисов и характеристик аксессуара по его развёрнутым сервисам
+ * (`markDeviceOf(...).services` или любой список `{chars}` в том же порядке):
+ * `[{sid, cids}]` — подряд с `DEVICE_ID_START`, сервис, следом его
+ * характеристики. Одно правило для дома и для окна «Аксессуар» (G12).
+ */
+export function deviceIdsOf(services) {
+  let next = DEVICE_ID_START;
+  return (Array.isArray(services) ? services : []).map((service) => {
+    const sid = next;
+    next += 1;
+    const cids = (Array.isArray(service.chars) ? service.chars : []).map(() => {
+      next += 1;
+      return next - 1;
+    });
+    return { sid, cids };
+  });
+}
+
 function deviceAccessory(project, mark, aid) {
   const profile = markDeviceOf(project, mark.id);
   if (!profile) return null;
-  let next = DEVICE_ID_START;
+  const ids = deviceIdsOf(profile.services);
   const services = profile.services.map((service, index) => {
-    const sid = next;
-    next += 1;
+    const sid = ids[index].sid;
     const meta = simServiceMeta(service.type);
-    const chars = service.chars.map((type) => {
-      const cid = next;
-      next += 1;
+    const chars = service.chars.map((type, at) => {
+      const cid = ids[index].cids[at];
       const charMeta = simServiceCharMeta(service.type, type);
       // Номер клавиши — константа сервиса: канал, а у одиночной кнопки — 1.
       const value = type === "ServiceLabelIndex" ? service.channel || 1 : charMeta ? charMeta.initial : null;
@@ -130,6 +147,22 @@ export function markAccessory(project, markId) {
   const mark = project ? findMark(project, markId) : null;
   if (!mark || markIsComment(mark)) return null;
   return deviceAccessory(project, mark, deviceAids(project).get(mark.id) || deviceAid(mark.id));
+}
+
+/**
+ * Куда слать щелчок по клавише канала `channel` (G11): индекс кнопки
+ * (`StatelessProgrammableSwitch`) этого канала у аксессуара — `act {kind:
+ * "toggle" | "press", service}` по нему. Привязанная клавиша с «Выключателем»
+ * переключит его, отвязанная пришлёт нажатие. Канала без кнопки — `null`;
+ * канал без номера — первый.
+ */
+export function deviceKeyIndex(accessory, channel = 1) {
+  const wanted = Number.isInteger(channel) && channel >= 1 ? channel : 1;
+  const services = accessory && Array.isArray(accessory.services) ? accessory.services : [];
+  const key = services.find(
+    (service) => service.type === "StatelessProgrammableSwitch" && (Number.isInteger(service.channel) ? service.channel : 1) === wanted,
+  );
+  return key ? key.index : null;
 }
 
 /** Аксессуары всех меток-устройств объекта, в порядке объекта. */

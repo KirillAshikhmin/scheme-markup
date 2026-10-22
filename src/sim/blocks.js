@@ -26,8 +26,13 @@
 //   «Каждые N» отсчитывается от запуска дома или ручного запуска сценария.
 //   Период с галкой запускает сценарий на своих краях: в начале он истинен
 //   («Тогда»), в конце ложен («Иначе»); без галки — «сейчас внутри».
+// - Команда (G16, `{type: "command", id, text}`) — всегда триггер и истинна
+//   только в миг своей команды (`act {kind: "command", text}`); тексты
+//   сравниваются ключом `commandKey` — без регистра, «ё» = «е» (и латинская
+//   «Ë»), лишние пробелы и знаки по краям не важны. В «Все сразу» остальные
+//   условия проверяются по текущему состоянию. Пустой текст — неполный блок.
 // - Ручной запуск, «Выполнить на старте» и запуск из другого сценария
-//   проверяют условия по состоянию; планировщик в них ложен.
+//   проверяют условия по состоянию; планировщик и команда в них ложны.
 // - Неактивный сценарий не запускается ничем; «Активировать» и
 //   «Деактивировать» меняют только живое состояние имитации, не объект.
 //
@@ -79,6 +84,52 @@ function blocksList(value) {
 
 function blocksObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
+
+/**
+ * Ключ сравнения текста команды (G16): регистр не важен, «ё» и латинская «ë»
+ * — это «е», пробелы внутри сводятся к одному, пробелы и знаки препинания по
+ * краям отбрасываются. «Ëлочка гори!» и « ёлочка  ГОРИ » — одна команда
+ * «елочка гори». Пусто — команды нет.
+ */
+export function commandKey(text) {
+  if (text === null || text === undefined) return "";
+  return String(text)
+    .normalize("NFC")
+    .toLowerCase()
+    .replace(/[\u0451\u00eb]/g, "\u0435")
+    .replace(/\s+/g, " ")
+    .replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
+}
+
+// Тексты условий «Команда» в дереве блоков — по порядку дерева.
+function blocksCommandWalk(block, out) {
+  if (!blocksObject(block)) return;
+  if (block.type === "command") {
+    if (typeof block.text === "string") out.push(block.text);
+    return;
+  }
+  if (block.type === "group") {
+    for (const item of blocksList(block.conditions)) blocksCommandWalk(item, out);
+    return;
+  }
+  if (block.type === "if") {
+    blocksCommandWalk(block.if, out);
+    for (const item of blocksList(block.then)) blocksCommandWalk(item, out);
+    for (const item of blocksList(block.else)) blocksCommandWalk(item, out);
+    return;
+  }
+  if (block.type === "delay") for (const item of blocksList(block.blocks)) blocksCommandWalk(item, out);
+}
+
+/**
+ * Тексты условий «Команда» блочного сценария (как набраны, без пустых) — для
+ * списка кнопки «Выполнить команду» (G17, `simCommands`).
+ */
+export function blocksCommandTexts(scenario) {
+  const out = [];
+  for (const block of blocksList(scenario && scenario.targets)) blocksCommandWalk(block, out);
+  return out.filter((item) => commandKey(item) !== "");
 }
 
 // Характеристика без состояния: нажатие и команда «только запись».
@@ -254,6 +305,12 @@ function blocksWalkCondition(compiled, devices, block) {
     case "code":
       blocksNote(compiled, block, { kind: "code", block, key, status: typeof block.code === "string" && block.code.trim() ? "ok" : "incomplete" });
       return;
+    case "command": {
+      const said = commandKey(block.text);
+      const info = blocksNote(compiled, block, { kind: "command", block, key, status: said ? "ok" : "incomplete", command: said });
+      if (info.status === "ok") compiled.commands.push(info);
+      return;
+    }
     default:
       blocksNote(compiled, block, { kind: "unknown", block, key, status: "incomplete" });
   }
@@ -355,7 +412,8 @@ function blocksWalkActions(compiled, devices, blocks) {
  * Сценарий, собранный к исполнению на доме `home` (`buildHomeSpec` или
  * `spec` движка): `{id, name, order, active, onStart, sequential, targets,
  * info: Map<блок, сведения>, keys: Map<"markId|service|char", {markId,
- * service, char, conditions}>, schedules, periods, delays, issues}`.
+ * service, char, conditions}>, schedules, periods, delays, commands, issues}`;
+ * `commands` — условия «Команда» с ключом `command` (`commandKey`).
  * `issues` — `[{blockId, code: "incomplete" | "deviceMissing"}]` в порядке
  * дерева: что при исполнении будет пропущено.
  */
@@ -374,6 +432,7 @@ export function blocksPrepare(scenario, home) {
     schedules: [],
     periods: [],
     delays: [],
+    commands: [],
     issues: [],
     counter: 0,
   };
@@ -669,6 +728,9 @@ export function blocksOwner() {
       case "schedule":
         result = run.source.schedule === info;
         break;
+      case "command":
+        result = run.source.command === info.command;
+        break;
       case "period":
         result = periodContains(block, host.now());
         break;
@@ -883,6 +945,25 @@ export function blocksOwner() {
     },
     clock(info, host) {
       for (const sc of compiled) armTime(host, sc, false);
+    },
+    // Команда (G16): запускает каждый сценарий, где есть условие с той же
+    // командой; неактивный — отказом `blockNotActive`. Ответ — сколько
+    // сценариев её поняли (ноль — движок запишет `commandUnknown`).
+    command({ text, chain }, host) {
+      const said = commandKey(text);
+      if (!said) return 0;
+      const given = Array.isArray(chain) ? chain : [];
+      let heard = 0;
+      for (const sc of compiled) {
+        if (!sc.commands.some((info) => info.command === said)) continue;
+        heard += 1;
+        if (!isActive(sc)) {
+          log(host, sc, { kind: "system", code: "blockNotActive", chain: given });
+          continue;
+        }
+        launch(host, sc, { command: said }, given);
+      }
+      return heard;
     },
     scenarios() {
       return compiled.map((sc) => ({ id: sc.id, active: isActive(sc), running: running(sc.id), fault: null }));

@@ -23,6 +23,7 @@ import {
   buildHomeSpec,
   deviceAid,
   deviceAids,
+  deviceKeyIndex,
   homeAccessories,
   markAccessory,
   markDoorOf,
@@ -104,27 +105,65 @@ test("адреса различны у меток объекта и не мен�
 
 // ——— аксессуар метки ————————————————————————————————————————————————————
 
-test("аксессуар выключателя: клавиша на канал, sid и cid подряд с 13, номер клавиши — константа", () => {
+test("аксессуар выключателя (G11): «Выключатель» на канал, затем кнопки; sid и cid подряд с 13, номер клавиши — константа", () => {
   const box = put(house(), "switch", "ВВ", { x: 0.5, y: 0.5 });
   const accessory = markAccessory(box.project, box.marks.switch);
   assert.equal(accessory.aid, deviceAid(box.marks.switch));
-  assert.equal(accessory.kind, "switch");
+  assert.equal(accessory.kind, "switchRelay");
   assert.equal(accessory.label, "ВВ1");
   assert.deepEqual(
     accessory.services.map((service) => [service.sid, service.type, service.channel, service.chars.map((char) => [char.cid, char.type])]),
     [
-      [13, "StatelessProgrammableSwitch", 1, [[14, "ProgrammableSwitchEvent"], [15, "ServiceLabelIndex"]]],
-      [16, "StatelessProgrammableSwitch", 2, [[17, "ProgrammableSwitchEvent"], [18, "ServiceLabelIndex"]]],
+      [13, "Switch", 1, [[14, "On"]]],
+      [15, "Switch", 2, [[16, "On"]]],
+      [17, "StatelessProgrammableSwitch", 1, [[18, "ProgrammableSwitchEvent"], [19, "ServiceLabelIndex"]]],
+      [20, "StatelessProgrammableSwitch", 2, [[21, "ProgrammableSwitchEvent"], [22, "ServiceLabelIndex"]]],
     ],
   );
-  assert.deepEqual(accessory.services.map((service) => service.chars[1].value), [1, 2], "номер клавиши не по каналу");
-  assert.equal(accessory.services[1].address, accessory.aid + ".16");
-  assert.equal(accessory.services[1].chars[0].address, accessory.aid + ".16.17");
+  assert.deepEqual(accessory.services.slice(2).map((service) => service.chars[1].value), [1, 2], "номер клавиши не по каналу");
+  assert.equal(accessory.services[3].address, accessory.aid + ".20");
+  assert.equal(accessory.services[3].chars[0].address, accessory.aid + ".20.21");
   // Метаданные характеристики — из словаря: событие с тремя нажатиями.
-  const press = accessory.services[0].chars[0].meta;
+  const press = accessory.services[2].chars[0].meta;
   assert.equal(press.format, "event");
   assert.deepEqual(press.values.map((value) => value.key), ["SINGLE_PRESS", "DOUBLE_PRESS", "LONG_PRESS"]);
-  assert.equal(accessory.services[0].decoupled, false);
+  assert.equal(accessory.services[2].decoupled, false);
+  assert.equal(accessory.services[0].chars[0].value, false, "«Выключатель» стартует выключенным");
+});
+
+test("выключатели шаблона В, П, МВ, ВВ, ПП, ВВВ: N × «Выключатель» (On), затем N × кнопка с номерами 1…N", () => {
+  const channels = { В: 1, П: 1, МВ: 1, ВВ: 2, ПП: 2, ВВВ: 3 };
+  let box = house();
+  for (const code of Object.keys(channels)) box = put(box, code, code, { x: 0.1 + Object.keys(box.marks).length / 20, y: 0.5 });
+  for (const [code, count] of Object.entries(channels)) {
+    const accessory = markAccessory(box.project, box.marks[code]);
+    const numbers = Array.from({ length: count }, (unused, at) => at + 1);
+    assert.deepEqual(
+      accessory.services.map((service) => [service.type, service.channel]),
+      [...numbers.map((n) => ["Switch", n]), ...numbers.map((n) => ["StatelessProgrammableSwitch", n])],
+      code,
+    );
+    for (const service of accessory.services.slice(0, count)) {
+      assert.deepEqual(service.chars.map((char) => char.type), ["On"], code + ": у «Выключателя» только On");
+    }
+    assert.deepEqual(
+      accessory.services.slice(count).map((service) => service.chars.find((char) => char.type === "ServiceLabelIndex").value),
+      numbers,
+      code + ": ServiceLabelIndex не 1…N",
+    );
+  }
+});
+
+test("deviceKeyIndex: щелчок по клавише канала — в её кнопку, а не в «Выключатель»; у профиля до G11 — та же кнопка", () => {
+  let box = put(house(), "duo", "ВВ", { x: 0.5, y: 0.5 });
+  box = put(box, "lamp", "Т", { x: 0.2, y: 0.2 });
+  const duo = markAccessory(box.project, box.marks.duo);
+  assert.deepEqual([deviceKeyIndex(duo, 1), deviceKeyIndex(duo, 2), deviceKeyIndex(duo, 3), deviceKeyIndex(duo)], [2, 3, null, 2]);
+  assert.equal(deviceKeyIndex(markAccessory(box.project, box.marks.lamp), 1), null);
+  assert.equal(deviceKeyIndex(null, 1), null);
+  const legacy = setMarkDevice(box.project, box.marks.duo, { kind: "switch" }).project;
+  const old = markAccessory(legacy, box.marks.duo);
+  assert.deepEqual([deviceKeyIndex(old, 1), deviceKeyIndex(old, 2)], [0, 1]);
 });
 
 test("аксессуар светильника — один сервис с метаданными; не-устройство и комментарий — без аксессуара", () => {

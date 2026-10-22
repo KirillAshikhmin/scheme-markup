@@ -12,6 +12,12 @@
 //              К1 (кондиционер);
 //   Спальня  — С3 (свет), В2 (клавиша → С3, **отвязана**), ТС1 (термостат),
 //              ДТВ1 (температура, влажность, батарея);
+// Выключатели В1 и ВВ1 — с выведенным профилем G11: сначала «Выключатель» на
+// каждый канал (`Switch`, сервисы 0…N−1), затем кнопки (N…2N−1). В1: 0 —
+// «Выключатель», 1 — кнопка; ВВ1: 0, 1 — «Выключатели», 2, 3 — кнопки.
+// В2 — своя настройка, сохранённая **до G11** (вид `switch`, одни кнопки,
+// клавиша 1 отвязана): сервис 0 — кнопка. Так дом держит и прежний профиль,
+// который обязан работать как раньше.
 //   без помещения — ДД2 (движение), ДПр1 (протечка), КВ1 (кран), ЗМ1 (замок).
 // ТС, ДТВ, ЗМ — свои типы человека с заданным профилем (их в стартовом
 // справочнике нет).
@@ -32,6 +38,7 @@ import {
   updateMark,
 } from "../../src/model.js";
 import { buildHomeSpec } from "../../src/sim/home.js";
+import { readFileSync } from "node:fs";
 
 function simFixtureScheme() {
   const added = addScheme(createProject(), { name: "1 этаж", imageId: "plan", width: 1200, height: 800 });
@@ -152,7 +159,7 @@ export function simHouse() {
     ["КШ1", 2],
   ]);
   simLink(box, "В2", [["С3", 1]]);
-  box.project = setMarkDevice(box.project, box.marks["В2"], { decoupled: [1] }).project;
+  box.project = setMarkDevice(box.project, box.marks["В2"], { kind: "switch", decoupled: [1] }).project;
   return box;
 }
 
@@ -205,5 +212,53 @@ export function simRecorder() {
     clear: () => {
       messages.length = 0;
     },
+  };
+}
+
+// ——— объект, сохранённый до G11 ————————————————————————————————————————————
+
+// Что сборка до G11 (окно «Устройство» на проде) дописала к объекту
+// `g68-legacy-project.packed.json`: два типа выключателей с профилем «одни
+// кнопки» (вид `switch`; у ВВ отвязана клавиша 2) и три метки — В1 → Т1, ВВ1
+// (клавиша 1 → Р1, клавиша 2 → Л1), В2 → Т1 со своей настройкой окна (полный
+// снимок, клавиша 1 отвязана). Снято той сборкой с её `packProject` — не
+// командами модели этой: так тест сверяет текст, который она записала.
+const SIM_LEGACY_SWITCH_TYPES = [
+  {"id":"199c3b5d-b0f6-4d18-954d-89e6f8c3ca2b","categoryId":"c-power","code":"В","name":"Выключатель","kind":"point","shape":null,"lineStyle":null,"blockMode":"each","channels":1,"order":3,"device":{"kind":"switch"},"sizes":{"length":80,"width":80,"depth":10,"heightAboveFloor":900}},
+  {"id":"92adcf10-6c64-4b77-9674-2f5e9d2e0276","categoryId":"c-power","code":"ВВ","name":"Выключатель двойной","kind":"point","shape":null,"lineStyle":null,"blockMode":"each","channels":2,"order":4,"device":{"kind":"switch","decoupled":[2]},"sizes":{"length":80,"width":80,"depth":10,"heightAboveFloor":900}},
+];
+const SIM_LEGACY_SWITCH_MARKS = [
+  {"id":"4dc2fa27-9c5f-4cf9-8753-1f497db4883e","schemeId":"1578fd44-4527-4628-915f-7365fc9beb04","typeId":"199c3b5d-b0f6-4d18-954d-89e6f8c3ca2b","number":1,"kind":"point","points":[{"x":0.3,"y":0.3}],"closed":false,"groupId":null,"labelOffset":null,"roomId":null,"roomManual":false,"location":"","original":"","length":null,"width":null,"heightAboveFloor":null,"controls":[{"id":"e90fbf81-7d0f-4cae-a07b-c32036187f6e","channel":1}]},
+  {"id":"f4b6fe64-7723-4f9f-bb49-be842915f831","schemeId":"1578fd44-4527-4628-915f-7365fc9beb04","typeId":"92adcf10-6c64-4b77-9674-2f5e9d2e0276","number":1,"kind":"point","points":[{"x":0.4,"y":0.3}],"closed":false,"groupId":null,"labelOffset":null,"roomId":null,"roomManual":false,"location":"","original":"","length":null,"width":null,"heightAboveFloor":null,"controls":[{"id":"e8b6facf-dd4c-499d-bd7e-3f20087798af","channel":1},{"id":"02876802-6bd8-4b41-9fe0-41eb091396fc","channel":2}]},
+  {"id":"7b7ae1a5-4130-4b34-9499-499199be5d49","schemeId":"1578fd44-4527-4628-915f-7365fc9beb04","typeId":"199c3b5d-b0f6-4d18-954d-89e6f8c3ca2b","number":2,"kind":"point","points":[{"x":0.5,"y":0.3}],"closed":false,"groupId":null,"labelOffset":null,"roomId":null,"roomManual":false,"location":"","original":"","length":null,"width":null,"heightAboveFloor":null,"controls":[{"id":"e90fbf81-7d0f-4cae-a07b-c32036187f6e","channel":1}],"device":{"kind":"switch","services":[{"type":"StatelessProgrammableSwitch","chars":["ProgrammableSwitchEvent","ServiceLabelIndex"],"perChannel":true}],"decoupled":[1]}},
+];
+
+/**
+ * Объект с профилями выключателей, сохранёнными до G11 (одни кнопки):
+ * `{project, text, marks: {В1, ВВ1, В2, Т1, Р1, Л1}, types: {В, ВВ}}`, где
+ * `text` — `project.json`, который записала та сборка (байт в байт).
+ */
+export function simLegacySwitchProject() {
+  const base = JSON.parse(readFileSync(new URL("./g68-legacy-project.packed.json", import.meta.url), "utf8"));
+  const project = {
+    ...base,
+    updatedAt: "2026-10-22T23:25:34.152Z",
+    markTypes: [...base.markTypes, ...structuredClone(SIM_LEGACY_SWITCH_TYPES)],
+    marks: [...base.marks, ...structuredClone(SIM_LEGACY_SWITCH_MARKS)],
+    counters: { ...base.counters, В: 2, ВВ: 1 },
+  };
+  const markOf = (typeId) => base.marks.find((mark) => mark.typeId === typeId).id;
+  return {
+    project,
+    text: JSON.stringify(project, null, 2),
+    marks: {
+      В1: SIM_LEGACY_SWITCH_MARKS[0].id,
+      ВВ1: SIM_LEGACY_SWITCH_MARKS[1].id,
+      В2: SIM_LEGACY_SWITCH_MARKS[2].id,
+      Т1: markOf("t-lamp"),
+      Р1: markOf("t-socket"),
+      Л1: markOf("t-tape"),
+    },
+    types: { В: SIM_LEGACY_SWITCH_TYPES[0].id, ВВ: SIM_LEGACY_SWITCH_TYPES[1].id },
   };
 }

@@ -1,5 +1,7 @@
-// Окно «Устройство»: профиль устройства у типа и своя настройка у метки
-// (таск 03 сценариев, истории 1.1, 1.8–1.13).
+// Окно «Аксессуар»: профиль аксессуара у типа и своя настройка у метки
+// (таск 03 сценариев, истории 1.1, 1.8–1.13; слово «аксессуар» вместо
+// «устройство», идентификаторы `aid`/`sid` в окне и кнопка клавиши рядом с её
+// «Выключателем» — таск 13, G11–G13). Имена в коде (`device*`) прежние.
 //
 // Устройство метки в имитации — аксессуар: упорядоченный список сервисов с
 // характеристиками. Описание живёт у типа (профиль) и может быть поправлено у
@@ -33,18 +35,23 @@ import {
 } from "../sim/catalog.js";
 import {
   DEVICE_KIND_NONE,
+  deviceExpand,
   findMark,
   findType,
   labelOf,
   markDeviceOwn,
   markDeviceProfile,
+  markIsComment,
   typeChannels,
   typeDeviceOf,
 } from "../model.js";
+import { deviceAids, deviceIdsOf } from "../sim/home.js";
 import { uiBadLine, uiButton, uiCheckRow, uiEl, uiMarkBad, uiModal } from "./ui.js";
 
 // Тип сервиса-клавиши: отметка «отвязана» есть только у него.
 const DEVICE_KEY_TYPE = "StatelessProgrammableSwitch";
+// «Выключатель» клавиши (G11): реле канала, за которым следуют нагрузки.
+const DEVICE_RELAY_TYPE = "Switch";
 // Характеристики, которые человеку не показываются галкой: номер клавиши
 // проставляет сборка дома.
 const DEVICE_HIDDEN_CHARS = ["ServiceLabelIndex"];
@@ -221,8 +228,13 @@ export function deviceSummary(profile, channels = 1) {
     return strings.deviceWindow.none;
   }
   const main = profile.services.filter((service) => !deviceIsAux(service.type));
-  if (main.length > 0 && main.every((service) => service.type === DEVICE_KEY_TYPE) && profile.kind !== "button") {
-    const keys = main.reduce((sum, service) => sum + (service.perChannel ? channels : 1), 0);
+  // Выключатель — числом клавиш: одни кнопки (профиль до G11) или кнопки со
+  // своими «Выключателями» (G11).
+  const keyed = main.some((service) => service.type === DEVICE_KEY_TYPE);
+  if (keyed && main.every((service) => service.type === DEVICE_KEY_TYPE || service.type === DEVICE_RELAY_TYPE) && profile.kind !== "button") {
+    const keys = main
+      .filter((service) => service.type === DEVICE_KEY_TYPE)
+      .reduce((sum, service) => sum + (service.perChannel ? channels : 1), 0);
     return deviceKeysText(keys);
   }
   const first = main[0] || profile.services[0];
@@ -253,6 +265,30 @@ export function deviceTypeField(project, typeId) {
   return deviceSummary(typeDeviceOf(project, typeId), typeChannels(project, typeId));
 }
 
+/**
+ * Идентификатор аксессуара метки (`aid`, G12) — тот же, что у дома
+ * (`deviceAids`: совпадения разведены по всему объекту); `null` — нет метки.
+ */
+export function deviceMarkAid(project, markId) {
+  const mark = findMark(project, markId);
+  if (!mark || markIsComment(mark)) return null;
+  return deviceAids(project).get(markId) ?? null;
+}
+
+// Идентификаторы сервисов черновика (G12): по строке окна — список `sid`
+// (у сервиса на каждый канал — по номеру на канал), счёт — правилом дома.
+function deviceDraftSids(draft, channels) {
+  const expanded = deviceExpand({ ...draft, decoupled: [] }, channels);
+  const ids = deviceIdsOf(expanded ? expanded.services : []);
+  let at = 0;
+  return draft.services.map((service) => {
+    const copies = deviceExpand({ services: [service], decoupled: [] }, channels).services.length;
+    const sids = ids.slice(at, at + copies).map((item) => item.sid);
+    at += copies;
+    return sids;
+  });
+}
+
 // Сервисы черновика, которых вид сам не даёт, — «добавленные»: их можно
 // убрать. Сопоставление по типу и числу: вид с двумя сервисами одного типа
 // теряет «свои» по очереди.
@@ -269,14 +305,20 @@ function deviceAddedFlags(draft) {
 
 /**
  * Состав окна по черновику: что показать и что можно. Чистая функция —
- * по ней окно строится и по ней же тест проверяет состав.
+ * по ней окно строится и по ней же тест проверяет состав. `aid` — у окна
+ * метки её идентификатор аксессуара, у окна типа `null` (у каждой метки свой).
+ * У сервиса `sids` — его идентификаторы (по одному на канал), `keyNote` —
+ * кнопка стоит рядом со своим «Выключателем» и работает, только когда клавиша
+ * отвязана (G11).
  */
-export function deviceWindowModel(draft, channels = 1) {
+export function deviceWindowModel(draft, channels = 1, { aid = null } = {}) {
   const kinds = [
     { key: DEVICE_KIND_NONE, label: strings.deviceWindow.kindNone },
     ...DEVICE_KINDS.map((kind) => ({ key: kind.key, label: strings.sim.kinds[kind.key] || kind.key })),
   ];
   const added = deviceAddedFlags(draft);
+  const sids = deviceDraftSids(draft, channels);
+  const relayed = draft.services.some((service) => service.type === DEVICE_RELAY_TYPE);
   const services = draft.services.map((service, index) => {
     const meta = simServiceMeta(service.type);
     const name = strings.sim.services[service.type] || service.type;
@@ -284,6 +326,8 @@ export function deviceWindowModel(draft, channels = 1) {
       index,
       type: service.type,
       label: service.perChannel ? text("deviceWindow.perChannel", { name, count: channels }) : name,
+      sids: sids[index],
+      keyNote: service.type === DEVICE_KEY_TYPE && relayed,
       aux: Boolean(meta && meta.aux),
       removable: added[index],
       optional: (meta ? meta.optional : [])
@@ -322,20 +366,29 @@ export function deviceWindowModel(draft, channels = 1) {
       min: DEVICE_PARAMS[name].min,
       max: DEVICE_PARAMS[name].max,
     }));
-  return { kind: draft.kind, kinds, services, addable, keys, params };
+  return {
+    kind: draft.kind,
+    aid: draft.kind === DEVICE_KIND_NONE || !Number.isInteger(aid) ? null : aid,
+    kinds,
+    services,
+    addable,
+    keys,
+    params,
+  };
 }
 
 // ——— окно ————————————————————————————————————————————————————————————————
 
 /**
- * Окно «Устройство». Параметры: `title`, `hint`, `profile` (профиль модели
- * или `null`), `channels`, `readOnly` (телефон), `own` и `resetable` (у
- * метки со своей настройкой — кнопка «Вернуть как у типа»).
+ * Окно «Аксессуар». Параметры: `title`, `hint`, `profile` (профиль модели
+ * или `null`), `channels`, `aid` (у окна метки — её идентификатор
+ * аксессуара, `deviceMarkAid`; у окна типа — нет), `readOnly` (телефон),
+ * `own` и `resetable` (у метки со своей настройкой — «Вернуть как у типа»).
  *
  * Отвечает `{draft}` — применить; `{reset: true}` — вернуть как у типа; `null`
  * — закрыли или ничего не изменили. Сохраняет ответ вызывающий.
  */
-export function openDeviceWindow({ title, hint, profile, channels = 1, readOnly = false, own = false, resetable = false }) {
+export function openDeviceWindow({ title, hint, profile, channels = 1, aid = null, readOnly = false, own = false, resetable = false }) {
   return new Promise((resolve) => {
     const initial = deviceDraftOf(profile);
     let draft = initial;
@@ -375,6 +428,15 @@ export function openDeviceWindow({ title, hint, profile, channels = 1, readOnly 
       }
       const items = model.services.map((service) => {
         const head = [uiEl("span", { class: "device__serviceName", text: service.label })];
+        if (service.sids.length > 0) {
+          head.push(
+            uiEl("span", {
+              class: "device__sid",
+              text: text("deviceWindow.sid", { sids: service.sids.join(", ") }),
+              title: strings.deviceWindow.sidTitle,
+            }),
+          );
+        }
         if (service.aux) head.push(uiEl("span", { class: "device__aux", text: strings.deviceWindow.aux }));
         if (service.removable && !readOnly) {
           head.push(
@@ -395,6 +457,9 @@ export function openDeviceWindow({ title, hint, profile, channels = 1, readOnly 
         });
         return uiEl("div", { class: "device__service" }, [
           uiEl("div", { class: "device__serviceHead" }, head),
+          service.keyNote
+            ? uiEl("p", { class: "device__note", text: strings.deviceWindow.keyNote, title: strings.deviceWindow.keyNoteTitle })
+            : null,
           chars.length > 0 ? uiEl("div", { class: "device__chars" }, chars) : null,
         ]);
       });
@@ -473,14 +538,23 @@ export function openDeviceWindow({ title, hint, profile, channels = 1, readOnly 
       ]);
     }
 
+    // Идентификатор аксессуара (G12): у метки — свой `aid`, у типа — пояснение,
+    // что он у каждой метки свой.
+    function aidLine(model) {
+      if (model.kind === DEVICE_KIND_NONE) return null;
+      if (model.aid !== null) return uiEl("p", { class: "device__aid", text: text("deviceWindow.aid", { aid: model.aid }) });
+      return uiEl("p", { class: "device__aid", text: strings.deviceWindow.aidPerMark });
+    }
+
     function render() {
       bad = new Map();
       uiMarkBad(error, [], []);
-      const model = deviceWindowModel(draft, channels);
+      const model = deviceWindowModel(draft, channels, { aid });
       body.replaceChildren(
         ...[
           hint ? uiEl("p", { class: "modal__hint", text: hint }) : null,
           readOnly ? uiEl("p", { class: "device__viewOnly", text: strings.deviceWindow.viewOnly }) : null,
+          aidLine(model),
           kindSection(model),
           uiEl("div", { class: "device__group" }, [
             uiEl("h4", { class: "device__title", text: strings.deviceWindow.services }),

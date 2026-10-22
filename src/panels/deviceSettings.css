@@ -1,4 +1,4 @@
-/* Окно «Устройство»: вид, сервисы с характеристиками, клавиши, параметры. */
+/* Окно «Аксессуар»: идентификатор, вид, сервисы с характеристиками, клавиши, параметры. */
 
 .device {
   display: flex;
@@ -50,6 +50,31 @@
 }
 
 .device__aux {
+  font-size: 11px;
+  color: var(--panel-muted);
+}
+
+/* Идентификаторы (G12): aid под заголовком, sid у сервиса — моноширинно,
+   их переписывают в логические сценарии как адрес «aid.sid». */
+.device__aid,
+.device__sid {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--panel-muted);
+  user-select: text;
+}
+
+.device__aid {
+  margin: 0;
+}
+
+.device__sid {
+  white-space: nowrap;
+}
+
+/* Кнопка клавиши рядом с её «Выключателем» (G11). */
+.device__note {
+  margin: 0;
   font-size: 11px;
   color: var(--panel-muted);
 }
