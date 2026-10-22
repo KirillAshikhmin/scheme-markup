@@ -42,7 +42,7 @@ function measure(name) {
 }
 
 test("у каждой колонки строки справочника есть своя мера", () => {
-  for (const name of ["gap", "act", "count", "code", "sizes", "sign", "view"]) {
+  for (const name of ["gap", "act", "count", "code", "sizes", "device", "sign", "view"]) {
     assert.ok(measure(name) > 0, "мера --dict-" + name + " потерялась");
   }
   // Колонки, которые не тянутся: значок, код, выбор категории, вид, знак,
@@ -56,6 +56,8 @@ test("у каждой колонки строки справочника ест�
     // к строке ровно так, как ехала колонка размеров (D30).
     ".dict__view": "width: var(--dict-view)",
     ".dict__sizes": "width: var(--dict-sizes)",
+    // Кнопка «Устройство» (таск 03 сценариев): сводка у каждого типа своя.
+    ".dict__device": "width: var(--dict-device)",
     ".dict__count": "width: var(--dict-count)",
     ".dict__act": "width: var(--dict-act)",
   };
@@ -105,9 +107,10 @@ test("строка добавления считает весь хвост ст�
   for (const part of [
     "var(--dict-view)",
     "var(--dict-sizes)",
+    "var(--dict-device)",
     "var(--dict-count)",
     "var(--dict-act) * 2",
-    "var(--dict-gap) * 4",
+    "var(--dict-gap) * 5",
   ]) {
     assert.ok(body.includes(part), ".dict__add: в хвосте не посчитано " + part);
   }

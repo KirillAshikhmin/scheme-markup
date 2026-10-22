@@ -383,6 +383,10 @@
      ровно одна: тянуться имеет право **только название типа**. */
   --dict-code: 120px;
   --dict-sizes: 272px;
+  /* Кнопка «Устройство» (таск 03 сценариев): своя колонка той же природы, что
+     размеры, — сводка профиля у каждого типа своя, и без меры колонка ехала бы
+     по длине сводки. */
+  --dict-device: 150px;
   /* Клетка изображения (таск 218): кнопка с картинкой того, чем тип встанет на
      развёртку. Мера своя, как у знака и размеров, — у типа без своего имени на
      кнопке стоит подпись «по знаку», и она шире картинки: без меры колонка
@@ -397,7 +401,7 @@
      диалогов название типа ужималось до «Точеч». Ширину задаёт справочник, а
      карточка идёт за ним (`.modal--wide`); на узком экране остаётся вьюпорт,
      и строка прокручивается внутри списка, как и раньше. */
-  min-width: min(780px, 92vw);
+  min-width: min(900px, 92vw);
   max-height: 60vh;
   overflow: auto;
   /* Полоса прокрутки идёт поверх содержимого: без этого поля кнопка строки
@@ -487,7 +491,8 @@
 .dict__add {
   flex: none;
   width: calc(
-    var(--dict-view) + var(--dict-sizes) + var(--dict-count) + var(--dict-act) * 2 + var(--dict-gap) * 4
+    var(--dict-view) + var(--dict-sizes) + var(--dict-device) + var(--dict-count) + var(--dict-act) * 2 +
+      var(--dict-gap) * 5
   );
 }
 
@@ -553,6 +558,22 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/* Кнопка «Устройство» типа: колонка постоянной ширины, сводка — многоточием. */
+.dict__device {
+  flex: none;
+  width: var(--dict-device);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-align: left;
+  color: var(--panel-muted);
+}
+
+.dict__device.is-set {
+  color: var(--panel-text);
+  border-color: var(--accent);
 }
 
 /* Кнопка изображения типа (таск 218). Устроена как кнопка знака: клетка
@@ -1307,6 +1328,39 @@
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--panel-muted);
+}
+
+/* Устройство метки: кнопка в строке, пометка «своя настройка» и возврат к типу. */
+
+.mark-row__deviceRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.mark-row__device.ui-btn {
+  flex: 1 1 100%;
+  text-align: left;
+  color: var(--panel-muted);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  min-width: 0;
+  line-height: 1.35;
+}
+
+.mark-row__device.is-set {
+  color: var(--panel-text);
+  border-color: var(--accent);
+}
+
+.mark-row__deviceOwn {
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.mark-row__deviceReset {
+  margin-left: auto;
 }
 
 /* Размеры метки: кнопка в строке и окно с тремя числами. */

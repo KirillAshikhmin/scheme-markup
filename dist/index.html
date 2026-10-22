@@ -1111,6 +1111,79 @@
   border-color: var(--panel-text);
 }
 
+/* Окно «Устройство»: вид, сервисы с характеристиками, клавиши, параметры. */
+
+.device {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 340px;
+  max-width: 460px;
+}
+
+.device__group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.device__title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--panel-muted);
+}
+
+.device__services {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.device__service {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--panel-line);
+  border-radius: 6px;
+}
+
+.device__serviceHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.device__serviceName {
+  flex: 1;
+  font-weight: 600;
+}
+
+.device__aux {
+  font-size: 11px;
+  color: var(--panel-muted);
+}
+
+.device__chars {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.device__viewOnly,
+.device__empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--panel-muted);
+}
+
+.device__param {
+  width: 120px;
+}
+
 /* ——— окно «Что добавить» (таск 187, G280) ————————————————————————————————
    Три шага друг под другом, раскрыт один. Заголовок устроен как заголовок
    раздела колонки — галочка, имя, строка состояния: это то же движение, что
@@ -1860,6 +1933,10 @@
      ровно одна: тянуться имеет право **только название типа**. */
   --dict-code: 120px;
   --dict-sizes: 272px;
+  /* Кнопка «Устройство» (таск 03 сценариев): своя колонка той же природы, что
+     размеры, — сводка профиля у каждого типа своя, и без меры колонка ехала бы
+     по длине сводки. */
+  --dict-device: 150px;
   /* Клетка изображения (таск 218): кнопка с картинкой того, чем тип встанет на
      развёртку. Мера своя, как у знака и размеров, — у типа без своего имени на
      кнопке стоит подпись «по знаку», и она шире картинки: без меры колонка
@@ -1874,7 +1951,7 @@
      диалогов название типа ужималось до «Точеч». Ширину задаёт справочник, а
      карточка идёт за ним (`.modal--wide`); на узком экране остаётся вьюпорт,
      и строка прокручивается внутри списка, как и раньше. */
-  min-width: min(780px, 92vw);
+  min-width: min(900px, 92vw);
   max-height: 60vh;
   overflow: auto;
   /* Полоса прокрутки идёт поверх содержимого: без этого поля кнопка строки
@@ -1964,7 +2041,8 @@
 .dict__add {
   flex: none;
   width: calc(
-    var(--dict-view) + var(--dict-sizes) + var(--dict-count) + var(--dict-act) * 2 + var(--dict-gap) * 4
+    var(--dict-view) + var(--dict-sizes) + var(--dict-device) + var(--dict-count) + var(--dict-act) * 2 +
+      var(--dict-gap) * 5
   );
 }
 
@@ -2030,6 +2108,22 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/* Кнопка «Устройство» типа: колонка постоянной ширины, сводка — многоточием. */
+.dict__device {
+  flex: none;
+  width: var(--dict-device);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-align: left;
+  color: var(--panel-muted);
+}
+
+.dict__device.is-set {
+  color: var(--panel-text);
+  border-color: var(--accent);
 }
 
 /* Кнопка изображения типа (таск 218). Устроена как кнопка знака: клетка
@@ -2784,6 +2878,39 @@
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--panel-muted);
+}
+
+/* Устройство метки: кнопка в строке, пометка «своя настройка» и возврат к типу. */
+
+.mark-row__deviceRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.mark-row__device.ui-btn {
+  flex: 1 1 100%;
+  text-align: left;
+  color: var(--panel-muted);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  min-width: 0;
+  line-height: 1.35;
+}
+
+.mark-row__device.is-set {
+  color: var(--panel-text);
+  border-color: var(--accent);
+}
+
+.mark-row__deviceOwn {
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.mark-row__deviceReset {
+  margin-left: auto;
 }
 
 /* Размеры метки: кнопка в строке и окно с тремя числами. */
@@ -7501,6 +7628,18 @@ const strings = {
     addCategory: "новая категория",
     editCategory: "правка категории",
     removeCategory: "удаление категории",
+    // Устройство и сценарии (таск 01 сценариев): всё, что в файле, идёт через
+    // историю своим ярлыком.
+    typeDevice: "устройство типа",
+    markDevice: "устройство метки",
+    markDeviceReset: "устройство как у типа",
+    addScenario: "новый сценарий",
+    editScenario: "правка сценария",
+    removeScenario: "удаление сценария",
+    moveScenario: "порядок сценариев",
+    addLogicBinding: "привязка логики",
+    editLogicBinding: "правка привязки логики",
+    removeLogicBinding: "снятие привязки логики",
   },
   errors: {
     controlsSelf: "Метка не управляет сама собой",
@@ -7627,11 +7766,25 @@ const strings = {
     imagesNotMap: "Картинки для упаковки передаются Map «идентификатор → файл»",
     foreignProject: "Данные в файле не похожи на объект разметки схем",
     futureVersion: "Файл сделан более новой версией программы (формат {version}, здесь {current}) — обновите страницу",
+    // Устройство метки и сценарии (таск 01 сценариев).
+    commentNoDevice: "У комментария нет устройства",
+    deviceKindUnknown: "Такого вида устройства в словаре нет",
+    deviceServiceUnknown: "Такого сервиса в словаре устройств нет",
+    deviceDecoupledInvalid: "Номер отвязанной клавиши — целое число от 1 до {max}",
+    deviceParamInvalid: "Параметр устройства вне допустимого диапазона",
+    deviceDoorInvalid: "Дверь для датчика открытия не найдена",
+    scenarioNotFound: "Сценарий не найден",
+    scenarioKindUnknown: "Вид сценария — блочный, логический или глобальный",
+    logicBindingNotFound: "Привязка логики не найдена",
+    logicBindingNotLogic: "Привязать к устройству можно только логический сценарий",
+    logicBindingService: "Сервис устройства — номер с нуля",
   },
   // Чем назвать виновника, у которого своего обозначения нет: контур без
   // помещения, группа без меток, единица оборудования без метки.
   subjects: {
     mark: "Метка",
+    // Привязка логического сценария к устройству — в отчёте слияния.
+    logicBinding: "Привязка логики",
     outline: "Контур",
     group: "Группа",
     placement: "Единица оборудования",
@@ -7692,6 +7845,9 @@ const strings = {
     // ровно то, что есть: база предлагает. Чем именно — видно картинками в
     // самой строке, и словом их не назвать лучше, чем рисунком.
     typeViewOffer: "{code} — {name}: общая база предлагает другое изображение",
+    // Удалённая метка осталась в блоке сценария (таск 01 сценариев, история
+    // 1.15): блок красный и при исполнении пропускается.
+    scenarioDeviceMissing: "Сценарий «{name}» ссылается на удалённое устройство",
   },
   // Панель предупреждений: список того, что нашёл `validate`, и вопросы о виде
   // типов, которые раньше задавало окно при открытии объекта.
@@ -7770,6 +7926,7 @@ const strings = {
       sharedShape: "Знаков, которые носят несколько типов: {count}",
       closeColors: "Пар категорий с похожим цветом: {count}",
       typeViewOffer: "Типов, которым общая база предлагает изображение: {count}",
+      scenarioDeviceMissing: "Сценариев со ссылкой на удалённое устройство: {count}",
     },
     // Предложение изображения (таск 218). Правит его человек — кнопкой в
     // строке; крестиком «так и задумано» строка закрывается навсегда.
@@ -9943,6 +10100,227 @@ const strings = {
     cancel: "Отмена",
     save: "Сохранить",
     close: "Закрыть",
+  },
+  // Имитация умного дома (таск 01 сценариев): подписи словаря устройств
+  // `src/sim/catalog.js`. Имена сервисов, характеристик и констант — имена
+  // Sprut/HAP, подписи — по-русски, по образцу локали Sprut.Hub.
+  // Окно «Устройство» (таск 03 сценариев): профиль типа и своя настройка метки.
+  deviceWindow: {
+    open: "Устройство",
+    none: "без устройства",
+    typeOnly: "Устройство типа",
+    typeTitle: "Устройство типа {label}",
+    markTitle: "Устройство метки {label}",
+    typeHint:
+      "Что это за устройство в умном доме: какие у него сервисы и характеристики. Поправили здесь — поменялись все метки этого типа, у которых нет своей настройки.",
+    markHint:
+      "Своя настройка действует только на эту метку. Пока её нет, метка берёт устройство от типа и следует за его правками.",
+    viewOnly: "На телефоне устройство только смотрят. Править его можно на компьютере.",
+    own: "своя настройка",
+    ownTitle: "У этой метки своя настройка устройства — правка типа её не меняет",
+    reset: "Вернуть как у типа",
+    resetTitle: "Снять свою настройку: метка снова берёт устройство от типа",
+    kind: "Вид",
+    kindNone: "Без устройства",
+    services: "Сервисы",
+    noServices: "Сервисов нет: у этой метки нет устройства. Выберите вид — и появятся сервисы.",
+    perChannel: "{name} × {count}",
+    aux: "служебный",
+    addService: "Добавить сервис…",
+    removeService: "Убрать сервис",
+    keys: "Клавиши",
+    keyLabel: "Клавиша {n}",
+    decoupled: "Отвязана",
+    decoupledTitle: "Отвязанная клавиша сама ничего не переключает — она только шлёт нажатия в сценарии",
+    params: "Параметры",
+    paramBad: "Введите целое число от {min} до {max}",
+    apply: "Применить",
+    close: "Закрыть",
+    // «1 клавиша», «2 клавиши», «5 клавиш» — по числу каналов типа.
+    keysOne: "{n} клавиша",
+    keysFew: "{n} клавиши",
+    keysMany: "{n} клавиш",
+    summaryMore: "{head} + ещё {count}",
+  },
+  sim: {
+    // Имя сценария, которому человек имени не дал.
+    scenarioUntitled: "Новый сценарий",
+    kinds: {
+      none: "Без устройства",
+      light: "Светильник",
+      lightOnOff: "Светильник без диммера",
+      lightCct: "Светильник с цветовой температурой",
+      lightRgb: "Цветной светильник (RGB)",
+      switch: "Выключатель",
+      switchRelay: "Выключатель с реле",
+      button: "Кнопка (беспроводная)",
+      relay: "Реле",
+      relayMulti: "Реле на несколько каналов",
+      outlet: "Розетка",
+      virtualSwitch: "Виртуальный переключатель",
+      curtain: "Штора",
+      conditioner: "Кондиционер",
+      thermostat: "Термостат",
+      fan: "Вентиляция",
+      tv: "Телевизор",
+      speaker: "Колонка",
+      doorbell: "Звонок",
+      lock: "Замок",
+      valve: "Кран",
+      motion: "Датчик движения",
+      occupancy: "Датчик присутствия",
+      camera: "Камера с детектором",
+      contact: "Датчик открытия",
+      leak: "Датчик протечки",
+      smoke: "Датчик дыма",
+      temperature: "Датчик температуры",
+      climateSensor: "Датчик температуры и влажности",
+      lightSensor: "Датчик освещённости",
+      co2: "Датчик CO2",
+    },
+    services: {
+      Lightbulb: "Лампочка",
+      Switch: "Выключатель",
+      Outlet: "Розетка",
+      StatelessProgrammableSwitch: "Кнопка",
+      Doorbell: "Звонок",
+      MotionSensor: "Датчик движения",
+      OccupancySensor: "Датчик присутствия",
+      ContactSensor: "Датчик открытия (геркон)",
+      LeakSensor: "Датчик протечки",
+      SmokeSensor: "Датчик дыма",
+      TemperatureSensor: "Датчик температуры",
+      HumiditySensor: "Датчик влажности",
+      LightSensor: "Датчик освещённости",
+      C_AtmosphericPressureSensor: "Атмосферное давление",
+      CarbonDioxideSensor: "Датчик CO2",
+      WindowCovering: "Штора",
+      Thermostat: "Термостат",
+      HeaterCooler: "Нагреватель-охладитель",
+      Fan: "Вентилятор",
+      Television: "Телевизор",
+      Speaker: "Динамик",
+      LockMechanism: "Замок",
+      Valve: "Кран",
+      BatteryService: "Батарея",
+      C_WattMeter: "Ваттметр",
+      C_VoltMeter: "Вольтметр",
+      C_AmpereMeter: "Амперметр",
+      C_KiloWattHourMeter: "Счётчик энергии",
+    },
+    chars: {
+      On: "Включено",
+      Brightness: "Яркость",
+      ColorTemperature: "Цветовая температура",
+      Hue: "Оттенок",
+      Saturation: "Насыщенность",
+      C_ColorMode: "Режим цвета",
+      OutletInUse: "Нагрузка подключена",
+      ProgrammableSwitchEvent: "Нажатие",
+      ServiceLabelIndex: "Номер клавиши",
+      MotionDetected: "Движение",
+      OccupancyDetected: "Присутствие",
+      ContactSensorState: "Состояние контакта",
+      StatusTampered: "Вскрытие корпуса",
+      LeakDetected: "Протечка",
+      SmokeDetected: "Дым",
+      CurrentTemperature: "Текущая температура",
+      CurrentRelativeHumidity: "Влажность",
+      CurrentAmbientLightLevel: "Освещённость",
+      C_CurrentAtmosphericPressure: "Давление",
+      CarbonDioxideLevel: "Уровень CO2",
+      CarbonDioxideDetected: "Превышение CO2",
+      CurrentPosition: "Текущее положение",
+      TargetPosition: "Целевое положение",
+      PositionState: "Движение шторы",
+      C_TargetPositionState: "Команда шторе",
+      TargetTemperature: "Целевая температура",
+      CurrentHeatingCoolingState: "Текущий режим",
+      TargetHeatingCoolingState: "Целевой режим",
+      Active: "Активно",
+      CurrentHeaterCoolerState: "Текущее состояние",
+      TargetHeaterCoolerState: "Целевой режим",
+      CoolingThresholdTemperature: "Порог охлаждения",
+      HeatingThresholdTemperature: "Порог нагрева",
+      RotationSpeed: "Скорость вращения",
+      SwingMode: "Качание",
+      TargetFanState: "Режим вентилятора",
+      ActiveIdentifier: "Вход",
+      RemoteKey: "Кнопка пульта",
+      ConfiguredName: "Имя",
+      Mute: "Без звука",
+      Volume: "Громкость",
+      LockCurrentState: "Состояние замка",
+      LockTargetState: "Целевое состояние замка",
+      InUse: "Вода идёт",
+      ValveType: "Тип крана",
+      BatteryLevel: "Заряд",
+      ChargingState: "Зарядка",
+      StatusLowBattery: "Низкий заряд",
+      C_Watt: "Мощность",
+      C_Volt: "Напряжение",
+      C_Ampere: "Ток",
+      C_KiloWattHour: "Энергия",
+    },
+    // Подписи констант перечислений — по характеристике: одно и то же имя
+    // (`INACTIVE`, `AUTO`) у разных характеристик читается по-разному.
+    values: {
+      C_ColorMode: { UNKNOWN: "Неизвестно", HUE: "Цвет", TEMPERATURE: "Температура" },
+      ProgrammableSwitchEvent: { SINGLE_PRESS: "Одиночное", DOUBLE_PRESS: "Двойное", LONG_PRESS: "Долгое" },
+      OccupancyDetected: { OCCUPANCY_NOT_DETECTED: "Никого", OCCUPANCY_DETECTED: "Кто-то есть" },
+      ContactSensorState: { CONTACT_DETECTED: "Закрыто", CONTACT_NOT_DETECTED: "Открыто" },
+      StatusTampered: { NOT_TAMPERED: "Цел", TAMPERED: "Вскрыт" },
+      LeakDetected: { LEAK_NOT_DETECTED: "Сухо", LEAK_DETECTED: "Протечка" },
+      SmokeDetected: { SMOKE_NOT_DETECTED: "Дыма нет", SMOKE_DETECTED: "Дым" },
+      CarbonDioxideDetected: { CO2_LEVELS_NORMAL: "Норма", CO2_LEVELS_ABNORMAL: "Превышение" },
+      PositionState: { DECREASING: "Закрывается", INCREASING: "Открывается", STOPPED: "Стоит" },
+      C_TargetPositionState: { CLOSE: "Закрыть", OPEN: "Открыть", STOP: "Стоп" },
+      CurrentHeatingCoolingState: { OFF: "Выключен", HEAT: "Греет", COOL: "Охлаждает" },
+      TargetHeatingCoolingState: { OFF: "Выключен", HEAT: "Нагрев", COOL: "Охлаждение", AUTO: "Авто", ECO: "Эко" },
+      Active: { INACTIVE: "Выключено", ACTIVE: "Включено" },
+      CurrentHeaterCoolerState: { INACTIVE: "Выключен", IDLE: "Ожидает", HEATING: "Греет", COOLING: "Охлаждает" },
+      TargetHeaterCoolerState: { AUTO: "Авто", HEAT: "Нагрев", COOL: "Охлаждение" },
+      SwingMode: { SWING_DISABLED: "Выключено", SWING_ENABLED: "Включено" },
+      TargetFanState: { MANUAL: "Вручную", AUTO: "Авто" },
+      RemoteKey: {
+        REWIND: "Перемотка назад",
+        FAST_FORWARD: "Перемотка вперёд",
+        NEXT_TRACK: "Следующий",
+        PREVIOUS_TRACK: "Предыдущий",
+        ARROW_UP: "Вверх",
+        ARROW_DOWN: "Вниз",
+        ARROW_LEFT: "Влево",
+        ARROW_RIGHT: "Вправо",
+        SELECT: "Выбор",
+        BACK: "Назад",
+        EXIT: "Выход",
+        PLAY_PAUSE: "Пуск / пауза",
+        INFORMATION: "Информация",
+      },
+      LockCurrentState: { UNSECURED: "Открыт", SECURED: "Закрыт", JAMMED: "Заклинило", UNKNOWN: "Неизвестно" },
+      LockTargetState: { UNSECURED: "Открыть", SECURED: "Закрыть" },
+      InUse: { NOT_IN_USE: "Нет", IN_USE: "Да" },
+      ValveType: { GENERIC_VALVE: "Кран", IRRIGATION: "Полив", SHOWER_HEAD: "Душ", WATER_FAUCET: "Смеситель" },
+      ChargingState: { NOT_CHARGING: "Не заряжается", CHARGING: "Заряжается", NOT_CHARGEABLE: "Без зарядки" },
+      StatusLowBattery: { BATTERY_LEVEL_NORMAL: "Норма", BATTERY_LEVEL_LOW: "Низкий" },
+    },
+    units: {
+      percent: "%",
+      mired: "миред",
+      degree: "°",
+      celsius: "°C",
+      lux: "лк",
+      ppm: "ppm",
+      hpa: "гПа",
+      watt: "Вт",
+      volt: "В",
+      ampere: "А",
+      kwh: "кВт·ч",
+    },
+    params: {
+      resetSec: "Сброс через, с",
+      travelSec: "Время хода, с",
+    },
   },
   units: {
     megabytes: "{value} МБ",
@@ -13213,6 +13591,528 @@ function drawObjectView(ctx, icon, box, color) {
   ctx.restore();
 }
 
+// src/sim/catalog.js
+// Словарь устройств имитации умного дома: сервисы, характеристики и виды
+// устройств по образцу Sprut.Hub (таск 01 сценариев, истории 1.2–1.5, 1.13).
+//
+// Это **данные сборки**, а не справочник объекта: объект хранит у типа и у
+// метки только ключи — вид устройства, типы сервисов, выбранные характеристики
+// (`type.device`, `mark.device`), — а форматы, диапазоны и перечисления живут
+// здесь и одинаково читаются моделью, сборкой дома и движком.
+//
+// Откуда что взято (`research/sprut-templates.md`):
+//   — §3.2: форматы и диапазоны характеристик (HAP и то, что ставят шаблоны
+//     Sonoff, Yandex и SberDevices);
+//   — §7: виды устройств и их сервисы по умолчанию. Диапазоны, отличающиеся
+//     от HAP (температура −40…+80, CO2 0–5000, цветовая температура 153–370
+//     миред), — предложение для имитации, а не значения Sprut.
+// Охраны и газа здесь нет сознательно (спецификация, история 1.2).
+//
+// Имена сервисов и характеристик — имена Sprut/HAP (`Lightbulb`, `On`),
+// константы перечислений — тоже их строковые имена (`CONTACT_DETECTED`);
+// числовой код стоит рядом справочно — его отдаёт API хаба скриптам.
+// Русские подписи — в `strings.sim` (сервисы, характеристики, значения, виды).
+//
+// Модуль ничего не импортирует: его читают и страница, и бандл движка в
+// Worker, и модель — а модель сама импортирует его, так что обратная ссылка
+// дала бы циклический импорт.
+
+const RWE = Object.freeze(["read", "write", "event"]);
+const RE = Object.freeze(["read", "event"]);
+const R = Object.freeze(["read"]);
+const W = Object.freeze(["write"]);
+const RW = Object.freeze(["read", "write"]);
+
+// Одна форма записи на все характеристики: недостающее — `null`, а не
+// отсутствующее поле. Так читатель не гадает, «нет диапазона» это или «забыли».
+function simChar(format, options = {}) {
+  const values = Array.isArray(options.values)
+    ? Object.freeze(options.values.map(([key, code]) => Object.freeze({ key, code })))
+    : null;
+  return Object.freeze({
+    format,
+    min: options.min ?? null,
+    max: options.max ?? null,
+    step: options.step ?? null,
+    unit: options.unit ?? null,
+    values,
+    perms: options.perms || RWE,
+    // Начальное значение имитации: с чего дом стартует, пока его не трогали.
+    initial: options.initial === undefined ? null : options.initial,
+  });
+}
+
+/**
+ * Характеристики: `{format, min, max, step, unit, values, perms, initial}`.
+ * `format` — `bool | int | float | enum | event | string`; у перечисления и
+ * события `values` — `[{key, code}]`; `unit` — ключ подписи `strings.sim.units`.
+ */
+const SIM_CHARS = Object.freeze({
+  // — свет и реле —
+  On: simChar("bool", { initial: false }),
+  Brightness: simChar("int", { min: 0, max: 100, step: 1, unit: "percent", initial: 100 }),
+  ColorTemperature: simChar("int", { min: 153, max: 370, step: 1, unit: "mired", initial: 250 }),
+  Hue: simChar("float", { min: 0, max: 360, step: 1, unit: "degree", initial: 0 }),
+  Saturation: simChar("float", { min: 0, max: 100, step: 1, unit: "percent", initial: 0 }),
+  C_ColorMode: simChar("enum", {
+    values: [["UNKNOWN", 0], ["HUE", 1], ["TEMPERATURE", 2]],
+    perms: RE,
+    initial: "TEMPERATURE",
+  }),
+  OutletInUse: simChar("bool", { perms: RE, initial: false }),
+  // — кнопки —
+  ProgrammableSwitchEvent: simChar("event", {
+    values: [["SINGLE_PRESS", 0], ["DOUBLE_PRESS", 1], ["LONG_PRESS", 2]],
+    perms: RE,
+  }),
+  // Порядковый номер клавиши — константа: 1, 2, 3… (её ставит сборка дома).
+  ServiceLabelIndex: simChar("int", { min: 1, max: 255, step: 1, perms: R, initial: 1 }),
+  // — датчики —
+  MotionDetected: simChar("bool", { perms: RE, initial: false }),
+  OccupancyDetected: simChar("enum", {
+    values: [["OCCUPANCY_NOT_DETECTED", 0], ["OCCUPANCY_DETECTED", 1]],
+    perms: RE,
+    initial: "OCCUPANCY_NOT_DETECTED",
+  }),
+  ContactSensorState: simChar("enum", {
+    values: [["CONTACT_DETECTED", 0], ["CONTACT_NOT_DETECTED", 1]],
+    perms: RE,
+    initial: "CONTACT_DETECTED",
+  }),
+  StatusTampered: simChar("enum", { values: [["NOT_TAMPERED", 0], ["TAMPERED", 1]], perms: RE, initial: "NOT_TAMPERED" }),
+  LeakDetected: simChar("enum", {
+    values: [["LEAK_NOT_DETECTED", 0], ["LEAK_DETECTED", 1]],
+    perms: RE,
+    initial: "LEAK_NOT_DETECTED",
+  }),
+  SmokeDetected: simChar("enum", {
+    values: [["SMOKE_NOT_DETECTED", 0], ["SMOKE_DETECTED", 1]],
+    perms: RE,
+    initial: "SMOKE_NOT_DETECTED",
+  }),
+  CurrentTemperature: simChar("float", { min: -40, max: 80, step: 0.1, unit: "celsius", perms: RE, initial: 22 }),
+  CurrentRelativeHumidity: simChar("float", { min: 0, max: 100, step: 1, unit: "percent", perms: RE, initial: 45 }),
+  CurrentAmbientLightLevel: simChar("float", { min: 0.0001, max: 100000, step: 0.0001, unit: "lux", perms: RE, initial: 300 }),
+  C_CurrentAtmosphericPressure: simChar("float", { min: 300, max: 1100, step: 0.1, unit: "hpa", perms: RE, initial: 1013 }),
+  CarbonDioxideLevel: simChar("float", { min: 0, max: 5000, step: 1, unit: "ppm", perms: RE, initial: 450 }),
+  CarbonDioxideDetected: simChar("enum", {
+    values: [["CO2_LEVELS_NORMAL", 0], ["CO2_LEVELS_ABNORMAL", 1]],
+    perms: RE,
+    initial: "CO2_LEVELS_NORMAL",
+  }),
+  // — шторы —
+  CurrentPosition: simChar("int", { min: 0, max: 100, step: 1, unit: "percent", perms: RE, initial: 0 }),
+  TargetPosition: simChar("int", { min: 0, max: 100, step: 1, unit: "percent", initial: 0 }),
+  PositionState: simChar("enum", {
+    values: [["DECREASING", 0], ["INCREASING", 1], ["STOPPED", 2]],
+    perms: RE,
+    initial: "STOPPED",
+  }),
+  C_TargetPositionState: simChar("enum", { values: [["CLOSE", 0], ["OPEN", 1], ["STOP", 2]], initial: "STOP" }),
+  // — климат —
+  TargetTemperature: simChar("float", { min: 5, max: 35, step: 0.5, unit: "celsius", initial: 22 }),
+  CurrentHeatingCoolingState: simChar("enum", {
+    values: [["OFF", 0], ["HEAT", 1], ["COOL", 2]],
+    perms: RE,
+    initial: "OFF",
+  }),
+  TargetHeatingCoolingState: simChar("enum", {
+    values: [["OFF", 0], ["HEAT", 1], ["COOL", 2], ["AUTO", 3], ["ECO", -3]],
+    initial: "OFF",
+  }),
+  Active: simChar("enum", { values: [["INACTIVE", 0], ["ACTIVE", 1]], initial: "INACTIVE" }),
+  CurrentHeaterCoolerState: simChar("enum", {
+    values: [["INACTIVE", 0], ["IDLE", 1], ["HEATING", 2], ["COOLING", 3]],
+    perms: RE,
+    initial: "INACTIVE",
+  }),
+  TargetHeaterCoolerState: simChar("enum", { values: [["AUTO", 0], ["HEAT", 1], ["COOL", 2]], initial: "AUTO" }),
+  CoolingThresholdTemperature: simChar("float", { min: 16, max: 32, step: 0.5, unit: "celsius", initial: 24 }),
+  HeatingThresholdTemperature: simChar("float", { min: 16, max: 32, step: 0.5, unit: "celsius", initial: 20 }),
+  RotationSpeed: simChar("float", { min: 0, max: 100, step: 1, unit: "percent", initial: 50 }),
+  SwingMode: simChar("enum", { values: [["SWING_DISABLED", 0], ["SWING_ENABLED", 1]], initial: "SWING_DISABLED" }),
+  TargetFanState: simChar("enum", { values: [["MANUAL", 0], ["AUTO", 1]], initial: "MANUAL" }),
+  // — телевизор и звук —
+  ActiveIdentifier: simChar("int", { min: 0, max: 4294967295, step: 1, initial: 1 }),
+  RemoteKey: simChar("enum", {
+    values: [
+      ["REWIND", 0],
+      ["FAST_FORWARD", 1],
+      ["NEXT_TRACK", 2],
+      ["PREVIOUS_TRACK", 3],
+      ["ARROW_UP", 4],
+      ["ARROW_DOWN", 5],
+      ["ARROW_LEFT", 6],
+      ["ARROW_RIGHT", 7],
+      ["SELECT", 8],
+      ["BACK", 9],
+      ["EXIT", 10],
+      ["PLAY_PAUSE", 11],
+      ["INFORMATION", 15],
+    ],
+    perms: W,
+  }),
+  ConfiguredName: simChar("string", { perms: RW, initial: "" }),
+  Mute: simChar("bool", { initial: false }),
+  Volume: simChar("int", { min: 0, max: 100, step: 1, unit: "percent", initial: 30 }),
+  // — замок и кран —
+  LockCurrentState: simChar("enum", {
+    values: [["UNSECURED", 0], ["SECURED", 1], ["JAMMED", 2], ["UNKNOWN", 3]],
+    perms: RE,
+    initial: "SECURED",
+  }),
+  LockTargetState: simChar("enum", { values: [["UNSECURED", 0], ["SECURED", 1]], initial: "SECURED" }),
+  InUse: simChar("enum", { values: [["NOT_IN_USE", 0], ["IN_USE", 1]], perms: RE, initial: "NOT_IN_USE" }),
+  ValveType: simChar("enum", {
+    values: [["GENERIC_VALVE", 0], ["IRRIGATION", 1], ["SHOWER_HEAD", 2], ["WATER_FAUCET", 3]],
+    perms: RE,
+    initial: "GENERIC_VALVE",
+  }),
+  // — служебные: батарея и счётчики —
+  BatteryLevel: simChar("int", { min: 0, max: 100, step: 1, unit: "percent", perms: RE, initial: 100 }),
+  ChargingState: simChar("enum", {
+    values: [["NOT_CHARGING", 0], ["CHARGING", 1], ["NOT_CHARGEABLE", 2]],
+    perms: RE,
+    initial: "NOT_CHARGEABLE",
+  }),
+  StatusLowBattery: simChar("enum", {
+    values: [["BATTERY_LEVEL_NORMAL", 0], ["BATTERY_LEVEL_LOW", 1]],
+    perms: RE,
+    initial: "BATTERY_LEVEL_NORMAL",
+  }),
+  C_Watt: simChar("float", { min: 0, max: 100000, step: 0.1, unit: "watt", perms: RE, initial: 0 }),
+  C_Volt: simChar("float", { min: 0, max: 500, step: 0.1, unit: "volt", perms: RE, initial: 230 }),
+  C_Ampere: simChar("float", { min: 0, max: 100, step: 0.01, unit: "ampere", perms: RE, initial: 0 }),
+  C_KiloWattHour: simChar("float", { min: 0, max: 1000000, step: 0.01, unit: "kwh", perms: RE, initial: 0 }),
+});
+
+function simService(required, optional = [], options = {}) {
+  return Object.freeze({
+    required: Object.freeze(required),
+    optional: Object.freeze(optional),
+    // Служебный сервис (история 1.10): батарея, счётчики. Помечается в окне
+    // устройства и не считается «главным» сервисом метки.
+    aux: options.aux === true,
+    // Ограничения характеристик внутри сервиса: звонок умеет только одиночное
+    // нажатие, хотя событие кнопки знает три.
+    limits: Object.freeze(options.limits || {}),
+  });
+}
+
+/**
+ * Сервисы: `{required: [char], optional: [char], aux, limits}`. Порядок
+ * характеристик здесь — порядок их адресов `cid` в аксессуаре.
+ */
+const SIM_SERVICES = Object.freeze({
+  Lightbulb: simService(["On"], ["Brightness", "ColorTemperature", "Hue", "Saturation", "C_ColorMode"]),
+  Switch: simService(["On"]),
+  Outlet: simService(["On"], ["OutletInUse"]),
+  StatelessProgrammableSwitch: simService(["ProgrammableSwitchEvent"], ["ServiceLabelIndex"]),
+  Doorbell: simService(["ProgrammableSwitchEvent"], [], {
+    limits: { ProgrammableSwitchEvent: { values: ["SINGLE_PRESS"] } },
+  }),
+  MotionSensor: simService(["MotionDetected"]),
+  OccupancySensor: simService(["OccupancyDetected"]),
+  ContactSensor: simService(["ContactSensorState"], ["StatusTampered"]),
+  LeakSensor: simService(["LeakDetected"]),
+  SmokeSensor: simService(["SmokeDetected"]),
+  TemperatureSensor: simService(["CurrentTemperature"]),
+  HumiditySensor: simService(["CurrentRelativeHumidity"]),
+  LightSensor: simService(["CurrentAmbientLightLevel"]),
+  C_AtmosphericPressureSensor: simService(["C_CurrentAtmosphericPressure"]),
+  // Превышение CO2 Sprut вычисляет логикой из уровня; здесь оно — необязательная
+  // характеристика, которую вид «Датчик CO2» берёт сразу.
+  CarbonDioxideSensor: simService(["CarbonDioxideLevel"], ["CarbonDioxideDetected"]),
+  WindowCovering: simService(["CurrentPosition", "TargetPosition", "PositionState"], ["C_TargetPositionState"]),
+  Thermostat: simService(["CurrentTemperature", "TargetTemperature", "CurrentHeatingCoolingState", "TargetHeatingCoolingState"]),
+  HeaterCooler: simService(
+    ["Active", "CurrentTemperature", "CurrentHeaterCoolerState", "TargetHeaterCoolerState"],
+    ["CoolingThresholdTemperature", "HeatingThresholdTemperature", "RotationSpeed", "SwingMode"],
+  ),
+  Fan: simService(["Active"], ["RotationSpeed", "TargetFanState", "SwingMode"]),
+  Television: simService(["Active"], ["ActiveIdentifier", "RemoteKey", "ConfiguredName"]),
+  Speaker: simService(["Mute"], ["Volume"]),
+  LockMechanism: simService(["LockCurrentState", "LockTargetState"]),
+  Valve: simService(["Active", "InUse"], ["ValveType"]),
+  BatteryService: simService(["BatteryLevel", "ChargingState", "StatusLowBattery"], [], { aux: true }),
+  C_WattMeter: simService(["C_Watt"], [], { aux: true }),
+  C_VoltMeter: simService(["C_Volt"], [], { aux: true }),
+  C_AmpereMeter: simService(["C_Ampere"], [], { aux: true }),
+  C_KiloWattHourMeter: simService(["C_KiloWattHour"], [], { aux: true }),
+});
+
+/**
+ * Параметры поведения «как настоящее» (история 1.17): время сброса датчика
+ * движения, время хода шторы. Секунды имитации, целые.
+ */
+const DEVICE_PARAMS = Object.freeze({
+  resetSec: Object.freeze({ min: 1, max: 86400 }),
+  travelSec: Object.freeze({ min: 1, max: 600 }),
+});
+
+function simKind(key, services, options = {}) {
+  return Object.freeze({
+    key,
+    services: Object.freeze(
+      services.map(([type, chars, perChannel]) =>
+        Object.freeze({ type, chars: Object.freeze(chars), ...(perChannel ? { perChannel: true } : {}) }),
+      ),
+    ),
+    params: Object.freeze(options.params || {}),
+    // Что предложить в «Добавить сервис» первым делом: служебные и частые
+    // спутники (§7, колонка «Доп. сервисы»).
+    extras: Object.freeze(options.extras || []),
+  });
+}
+
+const KEY_CHARS = ["ProgrammableSwitchEvent", "ServiceLabelIndex"];
+const BATTERY_CHARS = ["BatteryLevel", "ChargingState", "StatusLowBattery"];
+
+/**
+ * Виды устройств: `[{key, services: [{type, chars, perChannel?}], params, extras}]`.
+ * `perChannel` — сервис разворачивается по одному на канал типа (клавиши ВВ,
+ * ВВВ, каналы реле). Порядок — порядок списка видов в окне устройства.
+ * «Без устройства» видом не является: это ключ `"none"` у типа или метки.
+ */
+const DEVICE_KINDS = Object.freeze([
+  simKind("light", [["Lightbulb", ["On", "Brightness"]]]),
+  simKind("lightOnOff", [["Lightbulb", ["On"]]]),
+  simKind("lightCct", [["Lightbulb", ["On", "Brightness", "ColorTemperature"]]]),
+  simKind("lightRgb", [["Lightbulb", ["On", "Brightness", "ColorTemperature", "Hue", "Saturation", "C_ColorMode"]]]),
+  simKind("switch", [["StatelessProgrammableSwitch", KEY_CHARS, true]]),
+  simKind("switchRelay", [
+    ["Switch", ["On"], true],
+    ["StatelessProgrammableSwitch", KEY_CHARS, true],
+  ]),
+  simKind("button", [
+    ["StatelessProgrammableSwitch", KEY_CHARS, true],
+    ["BatteryService", BATTERY_CHARS],
+  ]),
+  simKind("relay", [["Switch", ["On"]]], { extras: ["C_WattMeter"] }),
+  simKind("relayMulti", [["Switch", ["On"], true]], { extras: ["C_WattMeter"] }),
+  simKind("outlet", [["Outlet", ["On"]]], {
+    extras: ["C_WattMeter", "C_VoltMeter", "C_AmpereMeter", "C_KiloWattHourMeter"],
+  }),
+  simKind("virtualSwitch", [["Switch", ["On"]]]),
+  simKind("curtain", [["WindowCovering", ["CurrentPosition", "TargetPosition", "PositionState"]]], {
+    params: { travelSec: 20 },
+    extras: ["BatteryService"],
+  }),
+  simKind(
+    "conditioner",
+    [
+      [
+        "HeaterCooler",
+        [
+          "Active",
+          "CurrentTemperature",
+          "CurrentHeaterCoolerState",
+          "TargetHeaterCoolerState",
+          "CoolingThresholdTemperature",
+          "HeatingThresholdTemperature",
+        ],
+      ],
+    ],
+  ),
+  simKind(
+    "thermostat",
+    [["Thermostat", ["CurrentTemperature", "TargetTemperature", "CurrentHeatingCoolingState", "TargetHeatingCoolingState"]]],
+    { extras: ["BatteryService"] },
+  ),
+  simKind("fan", [["Fan", ["Active", "RotationSpeed"]]]),
+  simKind("tv", [["Television", ["Active"]]], { extras: ["Speaker"] }),
+  simKind("speaker", [["Speaker", ["Mute", "Volume"]]]),
+  simKind("doorbell", [["Doorbell", ["ProgrammableSwitchEvent"]]]),
+  simKind("lock", [["LockMechanism", ["LockCurrentState", "LockTargetState"]]], { extras: ["BatteryService"] }),
+  simKind("valve", [["Valve", ["Active", "InUse"]]], { extras: ["BatteryService"] }),
+  simKind("motion", [["MotionSensor", ["MotionDetected"]]], {
+    params: { resetSec: 60 },
+    extras: ["LightSensor", "BatteryService"],
+  }),
+  simKind("occupancy", [["OccupancySensor", ["OccupancyDetected"]]], {
+    params: { resetSec: 60 },
+    extras: ["LightSensor"],
+  }),
+  simKind("camera", [["MotionSensor", ["MotionDetected"]]], { params: { resetSec: 60 } }),
+  simKind("contact", [["ContactSensor", ["ContactSensorState"]]], { extras: ["BatteryService"] }),
+  simKind("leak", [["LeakSensor", ["LeakDetected"]]], { extras: ["BatteryService"] }),
+  simKind("smoke", [["SmokeSensor", ["SmokeDetected"]]], { extras: ["BatteryService"] }),
+  simKind("temperature", [["TemperatureSensor", ["CurrentTemperature"]]], { extras: ["BatteryService"] }),
+  simKind(
+    "climateSensor",
+    [
+      ["TemperatureSensor", ["CurrentTemperature"]],
+      ["HumiditySensor", ["CurrentRelativeHumidity"]],
+    ],
+    { extras: ["C_AtmosphericPressureSensor", "BatteryService"] },
+  ),
+  simKind("lightSensor", [["LightSensor", ["CurrentAmbientLightLevel"]]], { extras: ["BatteryService"] }),
+  simKind("co2", [["CarbonDioxideSensor", ["CarbonDioxideLevel", "CarbonDioxideDetected"]]]),
+]);
+
+const DEVICE_KIND_BY_KEY = new Map(DEVICE_KINDS.map((kind) => [kind.key, kind]));
+
+/** Вид устройства по ключу или `null`. */
+function deviceKind(key) {
+  return DEVICE_KIND_BY_KEY.get(key) || null;
+}
+
+// ——— код типа стартового справочника → вид ——————————————————————————————
+//
+// Таблица «тип → профиль» спецификации (раздел 1). Ключ — код в верхнем
+// регистре и без краёв: то же правило, что у строки общей базы
+// (`model.catalogRowKey`). Своей копии этого правила модель не держит —
+// сравнение идёт здесь, на нормализованных кодах, а сама таблица записана
+// кодами так, как они стоят в справочнике (у «РC» вторая буква **латинская**,
+// как у заказчика).
+//
+// `"none"` — тип справочника, который устройством не является (щит, витая
+// пара, канализация…); кода, которого здесь нет, таблица не знает вовсе.
+const DEVICE_KIND_BY_CODE_SOURCE = [
+  ["light", ["Т", "С", "ПК", "ТР", "ПС", "Л", "ПШ", "ППл", "ПКШ", "ЛЮ", "Н", "Бр", "ЛВ", "ПЛ", "ПЗ"]],
+  ["switch", ["В", "П", "МВ", "ВВ", "ПП", "ВВВ"]],
+  ["outlet", ["Р", "РC"]],
+  ["conditioner", ["К"]],
+  ["fan", ["Б", "ВЫТ", "ВЕНТ"]],
+  ["relay", ["ОВ", "СУШ", "РП", "ПОС", "ДЭП"]],
+  ["speaker", ["УК"]],
+  ["doorbell", ["Д"]],
+  ["curtain", ["КШ"]],
+  ["camera", ["КАМ"]],
+  ["tv", ["ТВ", "ПРО", "РЕС"]],
+  ["occupancy", ["ДП"]],
+  ["motion", ["ДД"]],
+  ["contact", ["ДО"]],
+  ["leak", ["ДПр"]],
+  ["valve", ["КВ"]],
+  ["none", ["Щ", "ЩС", "W", "ПУ", "ВП", "ВР", "КН"]],
+];
+
+function deviceCodeKey(code) {
+  return String(code == null ? "" : code).trim().toUpperCase();
+}
+
+const DEVICE_KIND_BY_CODE = new Map();
+for (const [kind, codes] of DEVICE_KIND_BY_CODE_SOURCE) {
+  for (const code of codes) DEVICE_KIND_BY_CODE.set(deviceCodeKey(code), kind);
+}
+
+/**
+ * Вид устройства для кода типа стартового справочника: ключ вида, `"none"` —
+ * тип, который устройством не является, `null` — код таблице незнаком (свой
+ * тип человека, переименованный тип).
+ */
+function deviceKindForTemplateCode(code) {
+  const key = deviceCodeKey(code);
+  if (!key) return null;
+  return DEVICE_KIND_BY_CODE.get(key) || null;
+}
+
+// ——— чтение словаря ——————————————————————————————————————————————————————
+
+/** Описание характеристики или `null`. */
+function simCharMeta(type) {
+  return Object.prototype.hasOwnProperty.call(SIM_CHARS, type) ? SIM_CHARS[type] : null;
+}
+
+/** Описание сервиса или `null`. */
+function simServiceMeta(type) {
+  return Object.prototype.hasOwnProperty.call(SIM_SERVICES, type) ? SIM_SERVICES[type] : null;
+}
+
+/**
+ * Характеристики сервиса из выбранных: обязательные всегда, необязательные —
+ * только названные, всё — в порядке словаря (он же порядок `cid`). Незнакомая
+ * характеристика выпадает молча, незнакомый сервис — `null`.
+ */
+function simServiceChars(type, chosen) {
+  const meta = simServiceMeta(type);
+  if (!meta) return null;
+  const wanted = new Set(Array.isArray(chosen) ? chosen : []);
+  return [...meta.required, ...meta.optional.filter((char) => wanted.has(char))];
+}
+
+/**
+ * Описание характеристики **внутри сервиса** — с его ограничениями (у звонка
+ * одно нажатие). `null`, если сервис этой характеристики не знает.
+ */
+function simServiceCharMeta(serviceType, charType) {
+  const service = simServiceMeta(serviceType);
+  const meta = simCharMeta(charType);
+  if (!service || !meta) return null;
+  if (!service.required.includes(charType) && !service.optional.includes(charType)) return null;
+  const limit = service.limits[charType];
+  if (!limit || !Array.isArray(limit.values) || !meta.values) return meta;
+  const allowed = new Set(limit.values);
+  return Object.freeze({ ...meta, values: Object.freeze(meta.values.filter((value) => allowed.has(value.key))) });
+}
+
+// Знаков после запятой у шага: 0,1 → 1, 0,0001 → 4. По ним округляется итог,
+// иначе 22,3 приходило бы как 22,299999999999997.
+function simStepDecimals(step) {
+  const text = String(step);
+  const dot = text.indexOf(".");
+  return dot < 0 ? 0 : text.length - dot - 1;
+}
+
+function simNumber(meta, value) {
+  let number = typeof value === "boolean" ? Number(value) : Number(value);
+  if (value === null || value === "" || !Number.isFinite(number)) number = meta.min ?? 0;
+  if (meta.min !== null) number = Math.max(number, meta.min);
+  if (meta.max !== null) number = Math.min(number, meta.max);
+  if (meta.step) {
+    const base = meta.min ?? 0;
+    number = base + Math.round((number - base) / meta.step) * meta.step;
+    number = Number(number.toFixed(Math.max(simStepDecimals(meta.step), simStepDecimals(base))));
+    if (meta.max !== null && number > meta.max) number = meta.max;
+  }
+  if (meta.format === "int") number = Math.round(number);
+  return number === 0 ? 0 : number;
+}
+
+function simEnumKey(meta, value) {
+  const values = meta.values || [];
+  const byKey = values.find((item) => item.key === value);
+  if (byKey) return byKey.key;
+  const code = typeof value === "string" && value.trim() !== "" ? Number(value) : value;
+  if (typeof code === "number") {
+    const byCode = values.find((item) => item.code === code);
+    if (byCode) return byCode.key;
+  }
+  return null;
+}
+
+/**
+ * Значение, приведённое к характеристике (история 1.13): число — в `min…max`
+ * с шагом, логика — к `true/false`, перечисление — к имени константы (число
+ * переводится по коду), строка — к строке. Чужое значение перечисления
+ * становится первым допустимым: неверное значение не ломает устройство.
+ * У события состояния нет — чужое нажатие даёт `null`.
+ */
+function simClamp(meta, value) {
+  if (!meta) return value;
+  switch (meta.format) {
+    case "bool":
+      if (value === true || value === 1 || value === "true" || value === "1") return true;
+      if (value === false || value === 0 || value === "false" || value === "0" || value == null) return false;
+      return Boolean(value);
+    case "int":
+    case "float":
+      return simNumber(meta, value);
+    case "enum": {
+      const key = simEnumKey(meta, value);
+      if (key !== null) return key;
+      return meta.values && meta.values.length > 0 ? meta.values[0].key : null;
+    }
+    case "event":
+      return simEnumKey(meta, value);
+    case "string":
+      return value == null ? "" : String(value);
+    default:
+      return value;
+  }
+}
+
 // src/model.js
 // Правила объекта: справочники, метки, группы, нумерация.
 // Чистый модуль: ни DOM, ни хранилища. Все функции возвращают новый объект,
@@ -13227,6 +14127,10 @@ function drawObjectView(ctx, icon, box, color) {
 // знать, какое имя изображения существует и к чему ведёт форма знака: имя, в
 // реестре не названное, справочник принимать не должен — у типа оказалось бы
 // поле, не рисующее ничего.
+
+// Словарь устройств имитации (таск 01 сценариев) — данные сборки, как
+// каталоги выше: объект хранит у типа и метки только ключи вида и сервисов,
+// а форматы и состав живут там.
 
 // Версия формата объекта. Поднимается, когда в project.json появляются поля,
 // без которых работа теряется. История:
@@ -13257,6 +14161,17 @@ function drawObjectView(ctx, icon, box, color) {
 // а слияние с чужой правкой выбросило бы её как ссылку в никуда. Поэтому
 // версия поднята — такой файл честно не откроется, а не потеряет вещи молча.
 const FORMAT_VERSION = 5;
+
+// 6 — сценарии и привязки логики (`project.scenarios`, `project.logicBindings`,
+//     таск 01 сценариев). **Только у объекта, где они есть**: версию файла
+//     считает `projectFormatVersion` по содержимому. Объект без сценариев
+//     пишется версией 5 и читается прежней сборкой как раньше, а объект со
+//     сценариями прежняя сборка честно откажется открывать — иначе слияние
+//     папки (`merge.js`) молча выбросило бы незнакомые ей коллекции.
+//     Профиль устройства у типа и своя настройка метки (`type.device`,
+//     `mark.device`) версию не поднимают: прежняя сборка их не читает, но и не
+//     теряет — поля едут внутри типа и метки целиком.
+const FORMAT_VERSION_MAX = 6;
 
 // Условные обозначения, которые предлагает сетка выбора. Их различают на
 // чёрно-белой распечатке в размере метки, поэтому семейства разведены контуром,
@@ -14983,7 +15898,9 @@ function deleteScheme(project, schemeId) {
     .filter((scheme) => scheme.id !== schemeId)
     .map((scheme, index) => ({ ...scheme, order: index }));
   const placements = dropPlacements(project, removed);
-  const patch = { schemes, marks, groups, outlines, placements };
+  // Привязки логики меток схемы уходят вместе с метками (таск 01 сценариев);
+  // ссылки сценариев на них остаются и показываются «устройство удалено».
+  const patch = { schemes, marks, groups, outlines, placements, ...dropLogicBindings(project, removed) };
   // Списки чертежа попадают в патч только у того объекта, у которого они уже
   // есть: иначе удаление схемы дописало бы старому объекту три пустых списка
   // на пустом месте (G68).
@@ -16345,7 +17262,13 @@ function deleteMark(project, markId) {
   const gone = new Set([markId]);
   const linked = dropControls(cleaned, gone);
   const placements = dropPlacements(project, gone);
-  return { project: withProject(project, { marks: linked, groups, placements }), deleted: mark };
+  // Привязки логики к метке уходят с ней, как единицы оборудования: стоять им
+  // негде. Ссылки сценариев на метку остаются (история 1.15) — блок
+  // становится красным, `validate` называет сценарий.
+  return {
+    project: withProject(project, { marks: linked, groups, placements, ...dropLogicBindings(project, gone) }),
+    deleted: mark,
+  };
 }
 
 // ——— копия метки —————————————————————————————————————————————————————
@@ -16393,6 +17316,11 @@ function markSnapshot(project, markId) {
   // этих полей нет вовсе, и `undefined` в снимке доехал бы до копии.
   const sizes = markDimensions(mark);
   for (const field of MARK_DIMENSION_FIELDS) snapshot[field] = sizes[field];
+  // Своя настройка устройства едет в копию (таск 01 сценариев): такой же
+  // светильник с цветовой температурой рядом — та же настройка. Ключ — только
+  // у метки, где она есть: копия обычной метки обязана выйти обычной.
+  const device = markDeviceCopy(mark);
+  if (device) snapshot.device = device;
   return snapshot;
 }
 
@@ -16449,9 +17377,14 @@ function pasteMark(project, snapshot, { schemeId, point } = {}) {
   // Про зажим у вставки своего слова нет, и оно ей не нужно: `markShapeAt`
   // двигает **всю** копию целиком, пока она не войдёт в план, — правило
   // старше таска 222 и лучше поточечного зажима, потому что не плющит форму.
-  if (Object.keys(patch).length === 0) return { project: result.project, mark: result.mark };
-  const updated = updateMark(result.project, result.mark.id, patch);
-  return { project: updated.project, mark: updated.mark };
+  let pasted = result;
+  if (Object.keys(patch).length > 0) pasted = updateMark(result.project, result.mark.id, patch);
+  if (deviceObject(snapshot.device)) {
+    const own = {};
+    for (const key of DEVICE_PROFILE_KEYS) if (deviceHas(snapshot.device, key)) own[key] = snapshot.device[key];
+    if (Object.keys(own).length > 0) pasted = setMarkDevice(pasted.project, pasted.mark.id, own);
+  }
+  return { project: pasted.project, mark: pasted.mark };
 }
 
 // ——— поиск по объекту ————————————————————————————————————————————————
@@ -16804,8 +17737,11 @@ function changeMarkType(project, markId, typeId) {
   const counters = { ...project.counters };
   const number = nextNumber(project, counters, type.code);
   counters[type.code] = number;
+  // Своя настройка устройства была настройкой прежнего устройства (история
+  // 1.14): метка берёт профиль нового типа. Ctrl+Z возвращает её целиком —
+  // шаг истории хранит объект до правки.
   const marks = project.marks.map((item) =>
-    item.id === markId ? { ...item, typeId, number } : item,
+    item.id === markId ? markWithoutOwnDevice({ ...item, typeId, number }) : item,
   );
   return { project: withProject(project, { marks, counters }), mark: marks.find((m) => m.id === markId) };
 }
@@ -16917,6 +17853,7 @@ function addType(
     kind = "point",
     channels = TYPE_CHANNELS_DEFAULT,
     view = null,
+    device,
   } = {},
 ) {
   const type = {
@@ -16944,6 +17881,11 @@ function addType(
     if (!objectViewByName(view)) throw modelError("unknownView");
     type.view = String(view);
   }
+  // Профиль устройства — только там, где его задали (таск 01 сценариев): тип
+  // без поля выводит профиль сам, и пустого поля в объекте быть не должно.
+  // `null` — «без устройства», объект — профиль; мусор — отказ вслух.
+  const record = deviceRecordFromEdit(device);
+  if (record !== undefined) type.device = record;
   if (!findCategory(project, categoryId)) throw modelError("categoryNotFound");
   return { project: withProject(project, { markTypes: [...project.markTypes, type] }), type };
 }
@@ -16972,6 +17914,13 @@ function updateType(project, typeId, patch = {}) {
     next.categoryId = patch.categoryId;
   }
   if (Object.prototype.hasOwnProperty.call(patch, "order")) next.order = patch.order;
+  // Профиль устройства — по правилу `setTypeDevice`: `undefined` снимает своё,
+  // `null` — «без устройства».
+  if (Object.prototype.hasOwnProperty.call(patch, "device")) {
+    const record = deviceRecordFromEdit(patch.device);
+    if (record === undefined) delete next.device;
+    else next.device = record;
+  }
 
   const markTypes = project.markTypes.map((type) => (type.id === typeId ? next : type));
   let counters = project.counters;
@@ -17111,6 +18060,10 @@ function catalogMerge(templates) {
         // Имя сверяется с реестром: шаблон мог быть сохранён давно, а
         // изображение — переименовано.
         view: objectViewByName(typeObjectView(type)) ? typeObjectView(type) : null,
+        // Профиль устройства едет из общей базы вместе с типом — но только
+        // свой, заданный руками в сохранённом шаблоне: встроенный справочник
+        // профилей не пишет, они выводятся по коду и у добавленного типа.
+        device: typeDeviceRecord(type),
         categoryKey,
       });
     }
@@ -17174,6 +18127,9 @@ function catalogOffer(project, templates) {
       // типом. Строка окна рисует знак, а не изображение: на плане стоит знак,
       // и обещать в окне картинку развёртки значило бы показать не то.
       view: entry.view,
+      // Свой профиль устройства из сохранённого шаблона — только там, где он
+      // есть: строка встроенной базы профиль выводит и поля не несёт.
+      ...(entry.device ? { device: entry.device } : {}),
     });
   }
   return [...groups.values()].filter((group) => group.types.length > 0);
@@ -17245,6 +18201,7 @@ function addTypesFromCatalog(project, templates, typeKeys) {
         blockMode: entry.blockMode,
         channels: entry.channels,
         view: entry.view,
+        device: entry.device || undefined,
       });
       next = added.project;
       types.push(added.type);
@@ -17263,6 +18220,417 @@ function addTypesFromCatalog(project, templates, typeKeys) {
     next = deleteCategory(next, category.id).project;
   }
   return { project: acceptFromDictionary(next, known), types, categories, skipped };
+}
+
+// ——— устройство метки: профиль у типа, своя настройка у метки ———————————————
+//
+// Таск 01 сценариев (истории 1.3–1.16). Метка-устройство в имитации — это
+// **аксессуар** Sprut.Hub: упорядоченный список сервисов с характеристиками.
+// Описание аксессуара живёт у типа (**профиль**) и может быть поправлено у
+// конкретной метки (**своя настройка**); собирает аксессуар `sim/home.js`.
+//
+// **Профиль выводится, а не пишется** (G68). У типа без поля `device` профиль
+// берётся из таблицы «тип → профиль» спецификации по коду стартового
+// справочника (`deviceKindForTemplateCode`) — чтением, на каждый спрос. В
+// объект от этого не попадает ни байта: уже размеченный объект открывается
+// таким, каким был, а его профили при этом видны. Записывается поле только
+// правкой человека — `setTypeDevice`, `addType`/`updateType` с `device`.
+//
+// Формы записи (подробно — `interfaces.md`, «Данные в объекте»):
+//   type.device = {kind, services?, decoupled?, params?}  — вид обязателен,
+//     `"none"` — явно «без устройства»; без `services` берутся сервисы вида;
+//   mark.device = {kind?, services?, decoupled?, params?, doorId?} — ключи
+//     частичные: отсутствующий наследуется от типа.
+// Сервис — `{type, chars, name?, perChannel?}`; `perChannel` разворачивается
+// в сервис на каждый канал типа (клавиши ВВ, ВВВ), см. `deviceExpand`.
+const DEVICE_KIND_NONE = "none";
+// Ключи своей настройки метки, которые составляют **профиль**. Дверь датчика
+// открытия (`doorId`) профилем не является: это место метки, а не устройство,
+// и «Вернуть как у типа» её не снимает.
+const DEVICE_PROFILE_KEYS = ["kind", "services", "decoupled", "params"];
+const DEVICE_SERVICE_NAME_MAX = 60;
+// Тип сервиса-клавиши: отметка «отвязана» имеет смысл только у неё (история 1.12).
+const DEVICE_KEY_SERVICE = "StatelessProgrammableSwitch";
+
+function deviceObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function deviceHas(source, key) {
+  return Object.prototype.hasOwnProperty.call(source, key) && source[key] !== undefined;
+}
+
+// Сервис профиля: `{type, chars, name?, perChannel?}` или `null`, если сервиса
+// словарь не знает. Характеристики приводятся к словарю: обязательные всегда,
+// необязательные — выбранные, в порядке словаря (он же порядок адресов).
+function deviceServiceFrom(raw) {
+  if (!deviceObject(raw)) return null;
+  const chars = simServiceChars(raw.type, raw.chars);
+  if (!chars) return null;
+  const service = { type: raw.type, chars };
+  const name = typeof raw.name === "string" ? raw.name.trim().slice(0, DEVICE_SERVICE_NAME_MAX) : "";
+  if (name) service.name = name;
+  if (raw.perChannel === true) service.perChannel = true;
+  return service;
+}
+
+function deviceServiceCopy(service) {
+  return {
+    type: service.type,
+    chars: [...service.chars],
+    ...(service.name ? { name: service.name } : {}),
+    ...(service.perChannel ? { perChannel: true } : {}),
+  };
+}
+
+// Строгий разбор — для правки человеком (ошибка вслух), терпимый — для
+// чтения объекта (мусор из файла читается как «не задано»).
+function deviceServicesFrom(raw, strict) {
+  if (!Array.isArray(raw)) {
+    if (strict) throw modelError("deviceServiceUnknown");
+    return null;
+  }
+  const services = [];
+  for (const item of raw) {
+    const service = deviceServiceFrom(item);
+    if (service) services.push(service);
+    else if (strict) throw modelError("deviceServiceUnknown");
+  }
+  return services;
+}
+
+function deviceDecoupledFrom(raw, strict) {
+  if (!Array.isArray(raw)) {
+    if (strict) throw modelError("deviceDecoupledInvalid", { max: TYPE_CHANNELS_MAX });
+    return null;
+  }
+  const keys = new Set();
+  for (const value of raw) {
+    if (Number.isInteger(value) && value >= 1 && value <= TYPE_CHANNELS_MAX) keys.add(value);
+    else if (strict) throw modelError("deviceDecoupledInvalid", { max: TYPE_CHANNELS_MAX });
+  }
+  return [...keys].sort((first, second) => first - second);
+}
+
+function deviceParamsFrom(raw, strict) {
+  if (!deviceObject(raw)) {
+    if (strict) throw modelError("deviceParamInvalid");
+    return null;
+  }
+  const params = {};
+  for (const [name, value] of Object.entries(raw)) {
+    const range = Object.prototype.hasOwnProperty.call(DEVICE_PARAMS, name) ? DEVICE_PARAMS[name] : null;
+    if (range && Number.isInteger(value) && value >= range.min && value <= range.max) params[name] = value;
+    else if (strict) throw modelError("deviceParamInvalid");
+  }
+  return params;
+}
+
+function deviceKindFrom(raw, strict) {
+  if (raw === DEVICE_KIND_NONE || (typeof raw === "string" && deviceKind(raw))) return raw;
+  if (strict) throw modelError("deviceKindUnknown");
+  return null;
+}
+
+// Запись профиля у типа — или `null`, если записи нет (мусор читается так же).
+function deviceRecord(raw, strict) {
+  if (!deviceObject(raw)) {
+    if (strict) throw modelError("deviceKindUnknown");
+    return null;
+  }
+  const kind = deviceKindFrom(raw.kind, strict);
+  if (!kind) return null;
+  if (kind === DEVICE_KIND_NONE) return { kind };
+  const record = { kind };
+  if (deviceHas(raw, "services")) {
+    const services = deviceServicesFrom(raw.services, strict);
+    if (services && services.length > 0) record.services = services;
+  }
+  if (deviceHas(raw, "decoupled")) {
+    const decoupled = deviceDecoupledFrom(raw.decoupled, strict);
+    if (decoupled && decoupled.length > 0) record.decoupled = decoupled;
+  }
+  if (deviceHas(raw, "params")) {
+    const params = deviceParamsFrom(raw.params, strict);
+    if (params && Object.keys(params).length > 0) record.params = params;
+  }
+  return record;
+}
+
+function deviceSame(first, second) {
+  return JSON.stringify(first === undefined ? null : first) === JSON.stringify(second === undefined ? null : second);
+}
+
+// Полный профиль из записи: сервисы вида там, где своих нет, параметры вида
+// под своими.
+function deviceProfile(record, derived) {
+  const kind = deviceKind(record.kind);
+  return {
+    kind: record.kind,
+    services: (record.services || kind.services).map(deviceServiceCopy),
+    decoupled: [...(record.decoupled || [])],
+    params: { ...kind.params, ...(record.params || {}) },
+    derived,
+  };
+}
+
+/**
+ * Своя запись профиля у типа, приведённая к словарю, — или `null`, если тип
+ * профиль не задавал (или в поле мусор). Её и только её везёт шаблон
+ * справочника: выведенный профиль в шаблон не пишется, он выведется и там.
+ */
+function typeDeviceRecord(type) {
+  if (!type || type.device === undefined) return null;
+  return deviceRecord(type.device, false);
+}
+
+/**
+ * Профиль устройства типа: `{kind, services, decoupled, params, derived}` или
+ * `null` — тип устройством не является (щит, витая пара, комментарий, своё
+ * «без устройства»). `derived: true` — профиль выведен по коду стартового
+ * справочника, а не задан руками. Сервисы с `perChannel` здесь ещё не
+ * развёрнуты: число каналов — у метки (`markDeviceOf`).
+ */
+function typeDeviceOf(project, typeId) {
+  const type = findType(project, typeId);
+  if (!type || typeId === COMMENT_TYPE_ID) return null;
+  const own = typeDeviceRecord(type);
+  if (own) return own.kind === DEVICE_KIND_NONE ? null : deviceProfile(own, false);
+  const key = deviceKindForTemplateCode(type.code);
+  if (!key || key === DEVICE_KIND_NONE) return null;
+  return deviceProfile({ kind: key }, true);
+}
+
+/** Задан ли профиль у типа руками (в том числе «без устройства»). */
+function typeDeviceOwn(project, typeId) {
+  return typeDeviceRecord(findType(project, typeId)) !== null;
+}
+
+/**
+ * Профиль типа не угадать (история 1.7): своего нет, а код стартовому
+ * справочнику незнаком. Такой тип остаётся «без устройства» и попадает в
+ * список на правку — догадка сама не применяется.
+ */
+function typeDeviceUnknown(project, typeId) {
+  const type = findType(project, typeId);
+  if (!type || typeId === COMMENT_TYPE_ID || typeDeviceRecord(type)) return false;
+  return deviceKindForTemplateCode(type.code) === null;
+}
+
+// Запись `device` для типа из правки: `undefined` — снять (профиль снова
+// выводится), `null` — «без устройства», объект — профиль.
+function deviceRecordFromEdit(profile) {
+  if (profile === undefined) return undefined;
+  if (profile === null) return { kind: DEVICE_KIND_NONE };
+  return deviceRecord(profile, true);
+}
+
+function typeWithDevice(type, record) {
+  const copy = { ...type };
+  if (record === undefined) delete copy.device;
+  else copy.device = record;
+  return copy;
+}
+
+/**
+ * Задать профиль типа: объект — профиль, `null` — «без устройства»,
+ * `undefined` — снять своё и вернуться к выведенному. Меняются все метки типа
+ * без своей настройки (история 1.8). Правка, которой нечего менять, отдаёт
+ * **тот же** объект: пустого шага истории быть не должно.
+ */
+function setTypeDevice(project, typeId, profile) {
+  const type = requireType(project, typeId);
+  if (typeId === COMMENT_TYPE_ID) throw modelError("commentNoDevice");
+  const record = deviceRecordFromEdit(profile);
+  if (deviceSame(type.device, record)) return { project, type };
+  const markTypes = project.markTypes.map((item) => (item.id === typeId ? typeWithDevice(item, record) : item));
+  return { project: withProject(project, { markTypes }), type: markTypes.find((item) => item.id === typeId) };
+}
+
+// Своя настройка метки, приведённая к словарю: частичная запись или `null`.
+function markDeviceRecord(raw) {
+  if (!deviceObject(raw)) return null;
+  const record = {};
+  if (deviceHas(raw, "kind")) {
+    const kind = deviceKindFrom(raw.kind, false);
+    if (kind) record.kind = kind;
+  }
+  if (deviceHas(raw, "services")) {
+    const services = deviceServicesFrom(raw.services, false);
+    if (services && services.length > 0) record.services = services;
+  }
+  // Пустой список у метки законен: «у этой клавиши ничего не отвязано»
+  // перебивает отвязку, заданную у типа.
+  if (deviceHas(raw, "decoupled")) {
+    const decoupled = deviceDecoupledFrom(raw.decoupled, false);
+    if (decoupled) record.decoupled = decoupled;
+  }
+  if (deviceHas(raw, "params")) {
+    const params = deviceParamsFrom(raw.params, false);
+    if (params && Object.keys(params).length > 0) record.params = params;
+  }
+  if (raw.doorId === null || (typeof raw.doorId === "string" && raw.doorId)) record.doorId = raw.doorId;
+  return Object.keys(record).length > 0 ? record : null;
+}
+
+function markDeviceRecordOwn(record) {
+  return Boolean(record) && DEVICE_PROFILE_KEYS.some((key) => deviceHas(record, key));
+}
+
+/**
+ * Развернуть профиль по каналам: сервис с `perChannel` становится сервисом на
+ * каждый канал (`channel` 1…N), остальные — одним (`channel: null`). У клавиши
+ * (`StatelessProgrammableSwitch`) — отметка `decoupled` по списку профиля.
+ * Индекс сервиса в развёрнутом списке — его место, по нему сценарии и
+ * привязки ссылаются на сервис.
+ */
+function deviceExpand(profile, channels) {
+  if (!profile) return null;
+  const count =
+    Number.isInteger(channels) && channels >= 1 ? Math.min(channels, TYPE_CHANNELS_MAX) : TYPE_CHANNELS_DEFAULT;
+  const decoupled = new Set(profile.decoupled || []);
+  const services = [];
+  for (const service of profile.services) {
+    const copies = service.perChannel ? count : 1;
+    for (let channel = 1; channel <= copies; channel += 1) {
+      const own = service.perChannel ? channel : null;
+      services.push({
+        type: service.type,
+        chars: [...service.chars],
+        ...(service.name ? { name: service.name } : {}),
+        channel: own,
+        decoupled: service.type === DEVICE_KEY_SERVICE && own !== null && decoupled.has(own),
+      });
+    }
+  }
+  return { ...profile, services };
+}
+
+/**
+ * Профиль устройства метки **без развёртки по каналам** — тот, что правят
+ * окна устройства: сервисы с `perChannel` в нём ещё одной строкой. Именно в
+ * этой форме сервисы и передаются в `setMarkDevice`/`setTypeDevice`:
+ * развёрнутый список (`markDeviceOf`) записал бы клавиши поштучно, без канала.
+ */
+function markDeviceProfile(project, markId) {
+  const mark = findMark(project, markId);
+  if (!mark || markIsComment(mark)) return null;
+  const base = typeDeviceOf(project, mark.typeId);
+  const own = markDeviceRecord(mark.device);
+  let profile;
+  if (!markDeviceRecordOwn(own)) {
+    profile = base ? { ...base, own: false } : null;
+  } else {
+    const key = own.kind || (base ? base.kind : DEVICE_KIND_NONE);
+    if (key === DEVICE_KIND_NONE) return null;
+    const kind = deviceKind(key);
+    const same = base && base.kind === key ? base : null;
+    profile = {
+      kind: key,
+      services: (own.services || (same ? same.services : kind.services)).map(deviceServiceCopy),
+      decoupled: [...(own.decoupled || (same ? same.decoupled : []))],
+      params: { ...kind.params, ...(same ? same.params : {}), ...(own.params || {}) },
+      derived: false,
+      own: true,
+    };
+  }
+  return profile;
+}
+
+/**
+ * Профиль устройства метки: профиль типа под своей настройкой метки, каналы
+ * развёрнуты (`deviceExpand`). `null` — метка устройством не является.
+ * `own: true` — у метки своя настройка (история 1.9).
+ */
+function markDeviceOf(project, markId) {
+  const profile = markDeviceProfile(project, markId);
+  if (!profile) return null;
+  return deviceExpand(profile, typeChannels(project, findMark(project, markId).typeId));
+}
+
+/** Есть ли у метки своя настройка устройства (дверь датчика не в счёт). */
+function markDeviceOwn(project, markId) {
+  const mark = findMark(project, markId);
+  return Boolean(mark) && markDeviceRecordOwn(markDeviceRecord(mark.device));
+}
+
+function markDeviceValue(project, key, value) {
+  if (key === "kind") return deviceKindFrom(value, true);
+  if (key === "services") {
+    const services = deviceServicesFrom(value, true);
+    return services.length > 0 ? services : undefined;
+  }
+  if (key === "decoupled") return deviceDecoupledFrom(value, true);
+  if (key === "params") {
+    const params = deviceParamsFrom(value, true);
+    return Object.keys(params).length > 0 ? params : undefined;
+  }
+  // Дверь датчика открытия: `null` — связь снята рукой, строка — своя дверь.
+  if (value !== null && !(typeof value === "string" && findOpening(project, value))) {
+    throw modelError("deviceDoorInvalid");
+  }
+  return value;
+}
+
+/**
+ * Своя настройка метки (история 1.9). `patch` частичный: ключ со значением —
+ * задать, ключ с `undefined` — снять (наследовать от типа), отсутствующий —
+ * оставить. `patch === undefined` — «Вернуть как у типа»: снимается весь
+ * профиль, дверь датчика остаётся. Смена вида без своих сервисов снимает
+ * прежние свои сервисы — они были сервисами другого устройства.
+ */
+function setMarkDevice(project, markId, patch) {
+  const mark = requireMark(project, markId);
+  if (markIsComment(mark)) throw modelError("commentNoDevice");
+  const current = deviceObject(mark.device) ? mark.device : null;
+  const next = current ? { ...current } : {};
+  if (patch === undefined) {
+    for (const key of DEVICE_PROFILE_KEYS) delete next[key];
+  } else {
+    if (!deviceObject(patch)) throw modelError("deviceKindUnknown");
+    for (const key of [...DEVICE_PROFILE_KEYS, "doorId"]) {
+      if (!Object.prototype.hasOwnProperty.call(patch, key)) continue;
+      const value = patch[key] === undefined ? undefined : markDeviceValue(project, key, patch[key]);
+      if (value === undefined) delete next[key];
+      else next[key] = value;
+    }
+    if (deviceHas(patch, "kind") && !Object.prototype.hasOwnProperty.call(patch, "services")) {
+      const before = markDeviceOf(project, markId);
+      if ((before ? before.kind : DEVICE_KIND_NONE) !== patch.kind) delete next.services;
+    }
+  }
+  const record = Object.keys(next).length > 0 ? next : undefined;
+  if (deviceSame(current || undefined, record)) return { project, mark };
+  const marks = project.marks.map((item) => {
+    if (item.id !== markId) return item;
+    const copy = { ...item };
+    if (record === undefined) delete copy.device;
+    else copy.device = record;
+    return copy;
+  });
+  return { project: withProject(project, { marks }), mark: marks.find((item) => item.id === markId) };
+}
+
+// Метка без своего профиля — для смены типа (история 1.14): своя настройка
+// была настройкой прежнего устройства. Дверь датчика остаётся — это место.
+function markWithoutOwnDevice(mark) {
+  if (!deviceObject(mark.device) || !DEVICE_PROFILE_KEYS.some((key) => key in mark.device)) return mark;
+  const device = { ...mark.device };
+  for (const key of DEVICE_PROFILE_KEYS) delete device[key];
+  const copy = { ...mark };
+  if (Object.keys(device).length > 0) copy.device = device;
+  else delete copy.device;
+  return copy;
+}
+
+// Что из своей настройки едет в копию метки: профиль — да (такой же
+// светильник рядом), дверь датчика — нет: копия стоит в другом месте.
+function markDeviceCopy(mark) {
+  const own = markDeviceRecord(mark.device);
+  if (!markDeviceRecordOwn(own)) return null;
+  const copy = {};
+  for (const key of DEVICE_PROFILE_KEYS) if (deviceHas(own, key)) copy[key] = clone(own[key]);
+  return copy;
 }
 
 // Все цвета объекта, которые уже чем-то заняты: и комнаты, и категории.
@@ -21997,6 +23365,298 @@ function dropPlacements(project, removed) {
     });
 }
 
+// ——— сценарии и привязки логики ————————————————————————————————————————————
+//
+// Таск 01 сценариев (раздел 7 спецификации). Две новые коллекции объекта:
+//
+//   project.scenarios     — сценарии трёх видов: блочный (`targets` — дерево
+//                           блоков «Если — Тогда — Иначе»), логический и
+//                           глобальный (`source` — текст JS Sprut.Hub);
+//   project.logicBindings — привязка логического сценария к сервису метки:
+//                           `{id, scenarioId, markId, service, options, active}`.
+//
+// Обе **необязательны**: у объекта прежней разметки их нет, и пустыми они не
+// заводятся — читаются терпимыми читателями, как `outlines` и чертёж. Дерево
+// блоков правит `scenarioTree.js` над значением сценария; здесь — только
+// хранение, порядок и связь с метками. Ссылки блоков на устройства — `markId`
+// и индекс сервиса: они переживают перенумерацию меток и приёмку файла
+// (`adoptLoadedProject` переприсваивает только `project.id`).
+//
+// Удаление метки привязки логики уносит с собой (как `placements`: стоять им
+// негде), а ссылки сценариев на метку **оставляет** — блок становится красным
+// «устройство удалено», а `validate` говорит об этом строкой
+// `scenarioDeviceMissing` (история 1.15).
+const SCENARIO_KINDS = ["block", "logic", "global"];
+const SCENARIO_ORIGINS = ["js", "json"];
+const SCENARIO_NAME_MAX = 120;
+
+function scenariosList(project) {
+  return project && Array.isArray(project.scenarios) ? project.scenarios : [];
+}
+
+function logicBindingsList(project) {
+  return project && Array.isArray(project.logicBindings) ? project.logicBindings : [];
+}
+
+/** Сценарии объекта в порядке хранения (терпимо: у прежнего объекта — `[]`). */
+function scenariosOf(project) {
+  return scenariosList(project);
+}
+
+/**
+ * Сценарии в порядке списка (поле `order`, при равенстве — порядок хранения).
+ * Единственный порядок сценариев в сборке: список режима, мини-план и журнал
+ * обходят их одинаково.
+ */
+function scenariosInOrder(project) {
+  return scenariosList(project)
+    .map((scenario, index) => ({ scenario, index }))
+    .sort((a, b) => {
+      const first = Number.isFinite(a.scenario.order) ? a.scenario.order : a.index;
+      const second = Number.isFinite(b.scenario.order) ? b.scenario.order : b.index;
+      return first === second ? a.index - b.index : first - second;
+    })
+    .map((item) => item.scenario);
+}
+function findScenario(project, scenarioId) {
+  return scenariosList(project).find((scenario) => scenario && scenario.id === scenarioId) || null;
+}
+
+function requireScenario(project, scenarioId) {
+  const scenario = findScenario(project, scenarioId);
+  if (!scenario) throw modelError("scenarioNotFound");
+  return scenario;
+}
+
+function scenarioName(value) {
+  const name = typeof value === "string" ? value.trim().slice(0, SCENARIO_NAME_MAX) : "";
+  return name || strings.sim.scenarioUntitled;
+}
+
+function scenarioFlag(value, fallback) {
+  return value === true || value === false ? value : fallback;
+}
+
+// Поля сценария из правки — по белому списку и с умолчаниями. Остальное в
+// `source` (`id`, `order`, `kind`) решает вызывающая команда.
+function scenarioFields(source, current) {
+  const has = (key) => Object.prototype.hasOwnProperty.call(source, key);
+  const kind = current.kind;
+  const next = { ...current };
+  if (has("name")) next.name = scenarioName(source.name);
+  if (has("active")) next.active = scenarioFlag(source.active, true);
+  if (has("onStart")) next.onStart = scenarioFlag(source.onStart, false);
+  if (has("sequential")) next.sequential = scenarioFlag(source.sequential, false);
+  if (has("description")) next.description = typeof source.description === "string" ? source.description : "";
+  if (kind === "block") {
+    if (has("targets")) next.targets = Array.isArray(source.targets) ? clone(source.targets) : [];
+  } else {
+    if (has("source")) next.source = typeof source.source === "string" ? source.source : "";
+    if (has("origin")) next.origin = SCENARIO_ORIGINS.includes(source.origin) ? source.origin : SCENARIO_ORIGINS[0];
+    if (has("fileName")) next.fileName = typeof source.fileName === "string" ? source.fileName : "";
+    if (has("template")) {
+      if (deviceObject(source.template)) next.template = clone(source.template);
+      else delete next.template;
+    }
+  }
+  return next;
+}
+
+function withScenarios(project, scenarios, extra = {}) {
+  return withProject(project, { scenarios, ...extra });
+}
+
+/**
+ * Добавить сценарий в конец списка: `{project, scenario}`. Вид обязателен
+ * (`block | logic | global`); id сохраняется, если он строка и не занят,
+ * иначе выдаётся новый.
+ */
+function addScenario(project, scenario = {}) {
+  const source = deviceObject(scenario) ? scenario : {};
+  if (!SCENARIO_KINDS.includes(source.kind)) throw modelError("scenarioKindUnknown");
+  const list = scenariosList(project);
+  const id = typeof source.id === "string" && source.id && !findScenario(project, source.id) ? source.id : newId();
+  const base = {
+    id,
+    kind: source.kind,
+    name: scenarioName(source.name),
+    order: list.length,
+    active: true,
+    onStart: false,
+    sequential: false,
+    description: "",
+    ...(source.kind === "block" ? { targets: [] } : { source: "", origin: SCENARIO_ORIGINS[0], fileName: "" }),
+  };
+  const created = scenarioFields(source, base);
+  return { project: withScenarios(project, [...list, created]), scenario: created };
+}
+
+/**
+ * Правка сценария: поля из `patch` по белому списку; `id`, `kind` и `order`
+ * здесь не меняются (порядок — `moveScenario`). Нечего менять — тот же объект.
+ */
+function updateScenario(project, scenarioId, patch = {}) {
+  const current = requireScenario(project, scenarioId);
+  const next = scenarioFields(deviceObject(patch) ? patch : {}, current);
+  if (JSON.stringify(next) === JSON.stringify(current)) return { project, scenario: current };
+  const scenarios = scenariosList(project).map((item) => (item === current ? next : item));
+  return { project: withScenarios(project, scenarios), scenario: next };
+}
+
+function scenariosRenumbered(list) {
+  return list.map((item, index) => (item.order === index ? item : { ...item, order: index }));
+}
+
+/**
+ * Удалить сценарий; его привязки логики уходят вместе с ним. Ссылки других
+ * сценариев на него («запустить сценарий») остаются — их покажет редактор.
+ */
+function deleteScenario(project, scenarioId) {
+  const scenario = requireScenario(project, scenarioId);
+  const scenarios = scenariosRenumbered(scenariosInOrder(project).filter((item) => item !== scenario));
+  const extra = {};
+  if (Array.isArray(project.logicBindings)) {
+    extra.logicBindings = project.logicBindings.filter((binding) => binding.scenarioId !== scenarioId);
+  }
+  return { project: withScenarios(project, scenarios, extra), deleted: scenario };
+}
+
+/** Переставить сценарий на место `index` списка (0 — первым). */
+function moveScenario(project, scenarioId, index) {
+  const scenario = requireScenario(project, scenarioId);
+  const ordered = scenariosInOrder(project);
+  const from = ordered.indexOf(scenario);
+  const rest = ordered.filter((item) => item !== scenario);
+  const target = Math.max(0, Math.min(rest.length, Number.isInteger(index) ? index : from));
+  rest.splice(target, 0, scenario);
+  const scenarios = scenariosRenumbered(rest);
+  const same = scenarios.length === scenariosList(project).length && scenarios.every((item, at) => item === scenariosList(project)[at]);
+  if (same) return { project, scenario };
+  return { project: withScenarios(project, scenarios), scenario: scenarios.find((item) => item.id === scenarioId) };
+}
+
+/** Привязки логики объекта (терпимо: у прежнего объекта — `[]`). */
+function logicBindingsOf(project) {
+  return logicBindingsList(project);
+}
+function findLogicBinding(project, bindingId) {
+  return logicBindingsList(project).find((binding) => binding && binding.id === bindingId) || null;
+}
+
+function requireLogicBinding(project, bindingId) {
+  const binding = findLogicBinding(project, bindingId);
+  if (!binding) throw modelError("logicBindingNotFound");
+  return binding;
+}
+
+function logicBindingChecked(project, binding) {
+  const scenario = requireScenario(project, binding.scenarioId);
+  if (scenario.kind !== "logic") throw modelError("logicBindingNotLogic");
+  requireMark(project, binding.markId);
+  if (!Number.isInteger(binding.service) || binding.service < 0) throw modelError("logicBindingService");
+  return binding;
+}
+
+/**
+ * Привязать логический сценарий к сервису метки: `{project, binding}`.
+ * `service` — индекс сервиса в развёрнутом профиле метки (`markDeviceOf`).
+ */
+function addLogicBinding(project, { scenarioId, markId, service = 0, options = {}, active = true } = {}) {
+  const binding = logicBindingChecked(project, {
+    id: newId(),
+    scenarioId,
+    markId,
+    service,
+    options: deviceObject(options) ? clone(options) : {},
+    active: active !== false,
+  });
+  return { project: withProject(project, { logicBindings: [...logicBindingsList(project), binding] }), binding };
+}
+
+/** Правка привязки: `markId`, `service`, `options`, `active`. Нечего менять — тот же объект. */
+function updateLogicBinding(project, bindingId, patch = {}) {
+  const current = requireLogicBinding(project, bindingId);
+  const source = deviceObject(patch) ? patch : {};
+  const has = (key) => Object.prototype.hasOwnProperty.call(source, key);
+  const next = { ...current };
+  if (has("markId")) next.markId = source.markId;
+  if (has("service")) next.service = source.service;
+  if (has("options")) next.options = deviceObject(source.options) ? clone(source.options) : {};
+  if (has("active")) next.active = source.active !== false;
+  logicBindingChecked(project, next);
+  if (JSON.stringify(next) === JSON.stringify(current)) return { project, binding: current };
+  const logicBindings = logicBindingsList(project).map((item) => (item === current ? next : item));
+  return { project: withProject(project, { logicBindings }), binding: next };
+}
+function deleteLogicBinding(project, bindingId) {
+  const binding = requireLogicBinding(project, bindingId);
+  const logicBindings = logicBindingsList(project).filter((item) => item !== binding);
+  return { project: withProject(project, { logicBindings }), deleted: binding };
+}
+
+// Метки ушли — их привязки логики уходят с ними. Патч только у объекта, у
+// которого список уже есть: удаление метки не дописывает старому объекту
+// пустого списка (G68).
+function dropLogicBindings(project, removed) {
+  if (!Array.isArray(project.logicBindings) || removed.size === 0) return {};
+  return { logicBindings: project.logicBindings.filter((binding) => !removed.has(binding.markId)) };
+}
+
+/**
+ * Версия формата файла по содержимому: `FORMAT_VERSION_MAX` (6), если в
+ * объекте есть хотя бы один сценарий или привязка логики, иначе
+ * `FORMAT_VERSION` (5). Объект без сценариев читается прежней сборкой как
+ * раньше, со сценариями — честно не читается (см. историю версий выше).
+ */
+function projectFormatVersion(project) {
+  return scenariosList(project).length > 0 || logicBindingsList(project).length > 0 ? FORMAT_VERSION_MAX : FORMAT_VERSION;
+}
+
+/**
+ * Миграция сценариев — одна на оба конвейера открытия (файл и база браузера).
+ * Ничего не дописывает: у объекта без сценариев возвращает **тот же** объект.
+ * Убирает только то, что прочесть нельзя: записи без `id` и привязки, чьей
+ * метки или логического сценария в объекте нет (их оставила бы правка вне
+ * этой сборки). Идемпотентна.
+ */
+function migrateScenarios(project) {
+  if (!project) return { project, changed: false };
+  const patch = {};
+  if (project.scenarios !== undefined) {
+    const scenarios = scenariosList(project).filter((item) => deviceObject(item) && typeof item.id === "string" && item.id);
+    if (!Array.isArray(project.scenarios) || scenarios.length !== project.scenarios.length) patch.scenarios = scenarios;
+  }
+  if (project.logicBindings !== undefined) {
+    const marks = new Set((project.marks || []).map((mark) => mark.id));
+    const logic = new Set(
+      (patch.scenarios || scenariosList(project)).filter((item) => item.kind === "logic").map((item) => item.id),
+    );
+    const bindings = logicBindingsList(project).filter(
+      (item) => deviceObject(item) && typeof item.id === "string" && marks.has(item.markId) && logic.has(item.scenarioId),
+    );
+    if (!Array.isArray(project.logicBindings) || bindings.length !== project.logicBindings.length) {
+      patch.logicBindings = bindings;
+    }
+  }
+  if (Object.keys(patch).length === 0) return { project, changed: false };
+  return { project: { ...project, ...patch }, changed: true };
+}
+
+// Ссылки блочного сценария на метки: каждый `markId` в дереве блоков (условия,
+// действия, «значение из» другого устройства). Обход по значению, а не по
+// формам блоков: форму ведёт `scenarioTree.js`, а метку удаляют здесь.
+function scenarioMarkRefs(value, out) {
+  if (Array.isArray(value)) {
+    for (const item of value) scenarioMarkRefs(item, out);
+  } else if (value && typeof value === "object") {
+    if (typeof value.markId === "string") out.push(value.markId);
+    for (const key of Object.keys(value)) {
+      if (key !== "markId") scenarioMarkRefs(value[key], out);
+    }
+  }
+  return out;
+}
+
 // ——— проверка объекта —————————————————————————————————————————————————
 
 // Вид проблемы: «error» — объект поломан, «warning» — сделано намеренно, но
@@ -22337,6 +23997,21 @@ function validate(project) {
     if (members.length < 2) problems.push(problem("smallGroup", { label }, group.id));
     if (new Set(members.map((mark) => mark.schemeId)).size > 1) {
       problems.push(problem("groupAcrossSchemes", { label }, group.id));
+    }
+  }
+
+  // **Сценарий ссылается на удалённое устройство** (история 1.15). Удаление
+  // метки сценарий не трогает: блок со ссылкой остаётся и при исполнении
+  // пропускается, — но молчать об этом нельзя. Одна строка на сценарий, а не
+  // на блок: чинят сценарий, открыв его. Обход линейный — `validate` зовётся
+  // на каждую правку.
+  const scenarios = scenariosList(project);
+  if (scenarios.length > 0) {
+    const live = new Set(project.marks.map((mark) => mark.id));
+    for (const scenario of scenarios) {
+      if (!scenario || scenario.kind !== "block") continue;
+      if (!scenarioMarkRefs(scenario.targets, []).some((markId) => !live.has(markId))) continue;
+      problems.push(problem("scenarioDeviceMissing", { name: scenario.name || "" }, scenario.id, "warning"));
     }
   }
 
@@ -23017,6 +24692,559 @@ async function estimateSpace() {
   }
 }
 
+// src/clockMath.js
+// Часы и солнце: формулы без DOM и без объекта (таск 02 сценариев, R09, R30i).
+//
+// Слова заказчика (раунд 3): часы — «Ускорение, перемотка и шаг», и они одни на
+// всё приложение. Поэтому формулы, по которым «Объём» знал, который час и когда
+// встаёт солнце, переехали сюда из `volume.js` **с прежними именами и прежним
+// счётом**: «Объём» читает их как читал, а движок имитации в отдельном потоке
+// (Worker) берёт ровно тот же счёт — и время у солнца и у сценариев не
+// разойдётся ни на секунду.
+//
+// Модуль чистый: ни импорта, ни DOM, ни хранилища. Состояние часов держит
+// `appClock.js`, а здесь — только «что показывает формула в этот миг».
+//
+// ——— время имитации одним числом ———————————————————————————————————————
+//
+// Часы живут номером суток и минутами (`{day, minutes}`), а очереди таймеров и
+// расписаниям нужно одно число. Это **местное время в миллисекундах**:
+// `день × 86 400 000 + минуты × 60 000` — то, что показали бы часы на стене,
+// записанное так, будто это UTC. Читать его — `getUTC…`-методами (`new
+// Date(ms).getUTCHours()` — час на часах имитации). Ни часового пояса, ни
+// перехода на летнее время в этом числе нет: «07:00» — всегда ровно
+// `день + 7 ч`, а сутки — всегда 86 400 000 мс.
+
+/** Градус в радианах: им считается склонение и рассвет. */
+const CLOCK_DEG = Math.PI / 180;
+/** Миллисекунд в сутках времени имитации — у местного числа сутки ровные. */
+const CLOCK_DAY_MS = 86400000;
+
+/** Минут в сутках. */
+const VOLUME_DAY_MIN = 1440;
+/** Рассвет и закат по умолчанию — слова заказчика: 9:00 и 21:00. */
+const VOLUME_SUNRISE_MIN = 9 * 60;
+const VOLUME_SUNSET_MIN = 21 * 60;
+/**
+ * Ускорение времени. Числа — слова заказчика (480, а не 280: «это опечатка»), и
+ * каждое читается как «во сколько раз время идёт быстрее настоящего»: 60 → сутки
+ * за 24 минуты, 120 → за 12, 240 → за 6, 480 → за 3, 960 → за полторы.
+ *
+ * **Первый пункт — единица** (G287): «добавь в Ускорение пункт первый — без
+ * ускорения. При нажатии Сейчас он и должен выбираться и время идти в реальном
+ * времени». Единица — это идущее время, а не стоячее: сутки проходят сутки, и
+ * таймер снимка часа при ней живёт, как при любом другом ускорении. Стоячее
+ * время — это `volumeClockFixed`, и оно устроено иначе.
+ */
+const VOLUME_CLOCK_SPEEDS = [1, 60, 120, 240, 480, 960];
+const VOLUME_CLOCK_SPEED_DEFAULT = 60;
+/** «Без ускорения» — то, что выбирает кнопка «Сейчас». */
+const VOLUME_CLOCK_SPEED_REAL = 1;
+/** Наклон земной оси: им считаются склонения и солнца, и месяца. */
+const VOLUME_EARTH_TILT_DEG = 23.44;
+/**
+ * Горизонт, по которому считаются рассвет и закат: −50′ на преломление воздуха
+ * и полупоперечник диска (та же мера, что у всех таблиц рассвета). Высота
+ * светила отсчитывается **от него**, поэтому ноль высоты приходится ровно на
+ * рассвет из подписи окна, а не примерно на него.
+ */
+const VOLUME_HORIZON_DEG = -0.833;
+
+/** Минуты суток у настоящих часов. */
+function volumeDayMinutesOf(date) {
+  const at = date || new Date();
+  return at.getHours() * 60 + at.getMinutes() + at.getSeconds() / 60;
+}
+
+/** Минуты в сутках, с переходом через полночь в обе стороны. */
+function volumeWrapMinutes(minutes) {
+  const value = Number(minutes);
+  if (!Number.isFinite(value)) return 0;
+  return ((value % VOLUME_DAY_MIN) + VOLUME_DAY_MIN) % VOLUME_DAY_MIN;
+}
+
+/** Часы и минуты строкой — для контрола с часами и для плашки. */
+function volumeClockText(minutes) {
+  const value = volumeWrapMinutes(minutes);
+  const hours = Math.floor(value / 60);
+  const left = Math.floor(value - hours * 60);
+  return String(hours).padStart(2, "0") + ":" + String(left).padStart(2, "0");
+}
+
+/** «09:30» → минуты суток. `null` — не время. */
+function volumeClockParse(text) {
+  const match = /^\s*(\d{1,2})\s*[:.]\s*(\d{1,2})/.exec(String(text || ""));
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (!(hours >= 0 && hours < 24) || !(minutes >= 0 && minutes < 60)) return null;
+  return hours * 60 + minutes;
+}
+
+// ——— дата своим числом (таск 190, G289) ————————————————————————————————
+//
+// Слова заказчика: «для положения солнца дата нужна, пусть отдельное поле будет
+// над полем время».
+//
+// Дата живёт **номером суток** — целым числом суток гражданского календаря от
+// эпохи. Не `Date` и не тройкой чисел, и причина простая: часам нужно
+// складывать её с минутами и переваливать через полночь одним сложением
+// (`volumeClockStamp`), а `Date` для этого пришлось бы собирать и разбирать на
+// каждый кадр. Перевод в обе стороны — `volumeDayNumberOf`/`volumeDayDateOf`,
+// и считаются они через `Date.UTC`, то есть не зависят ни от часового пояса, ни
+// от перехода на летнее время: номер суток — это «какое сегодня число», а не
+// «сколько миллисекунд прошло».
+
+/** Номер суток по гражданской дате: целое число суток от эпохи. */
+function volumeDayNumberOf(date) {
+  const at = date || new Date();
+  return Math.floor(Date.UTC(at.getFullYear(), at.getMonth(), at.getDate()) / 86400000);
+}
+
+/**
+ * Обратно: `Date` на полдень этих суток по месту.
+ *
+ * Полдень, а не полночь, нарочно: из этой даты читают год, месяц и число, а
+ * полночь в день перехода на летнее время умеет уехать на сутки назад.
+ */
+function volumeDayDateOf(dayNumber) {
+  const at = new Date((Number(dayNumber) || 0) * 86400000);
+  return new Date(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate(), 12);
+}
+
+/** «2026-10-20» — то, что просит и отдаёт поле даты. */
+function volumeDateText(dayNumber) {
+  const at = volumeDayDateOf(dayNumber);
+  return (
+    String(at.getFullYear()).padStart(4, "0") +
+    "-" +
+    String(at.getMonth() + 1).padStart(2, "0") +
+    "-" +
+    String(at.getDate()).padStart(2, "0")
+  );
+}
+
+/**
+ * **Дата для человека: «20.10.2026»** (таск 191, G300).
+ *
+ * Строка часов в углу поля читается боковым зрением, пока человек ходит по
+ * комнатам, — ей нужен привычный порядок «день, месяц, год», а не ISO. ISO
+ * остаётся у поля ввода (`volumeDateText`): его просит сам браузер, и смешивать
+ * эти две строки нельзя — одна для машины, другая для глаза.
+ */
+function volumeDateShort(dayNumber) {
+  const at = volumeDayDateOf(dayNumber);
+  return (
+    String(at.getDate()).padStart(2, "0") +
+    "." +
+    String(at.getMonth() + 1).padStart(2, "0") +
+    "." +
+    String(at.getFullYear()).padStart(4, "0")
+  );
+}
+
+/** «2026-10-20» → номер суток. `null` — не дата. */
+function volumeDateParse(text) {
+  const match = /^\s*(\d{4})-(\d{1,2})-(\d{1,2})\s*$/.exec(String(text || ""));
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (!(month >= 1 && month <= 12) || !(day >= 1 && day <= 31)) return null;
+  const at = new Date(Date.UTC(year, month - 1, day));
+  // Тридцатое февраля браузер молча переносит на март — такую дату не берём.
+  if (at.getUTCMonth() !== month - 1 || at.getUTCDate() !== day) return null;
+  return Math.floor(at.getTime() / 86400000);
+}
+
+/**
+ * Часы объёма.
+ *
+ * Идущее время — **не накопитель, а формула**: `откуда + (сейчас − когда) ×
+ * ускорение`. Поэтому пока объём закрыт, ничего не идёт и не считается, а
+ * вернувшийся человек видит время, которое «прошло» за его отсутствие, с
+ * одного умножения. Накопитель требовал бы живого таймера в закрытом режиме.
+ *
+ * `fixed` — время стоит: ровно то, что человек поставил, и ни пересчёта, ни
+ * таймера.
+ */
+function volumeClockNow(nowMs, date, speed = VOLUME_CLOCK_SPEED_DEFAULT) {
+  const at = date || new Date();
+  return {
+    fixed: false,
+    fromDay: volumeDayNumberOf(at),
+    fromMin: volumeDayMinutesOf(at),
+    atMs: Number(nowMs) || 0,
+    speed: volumeClockSpeedOf(speed),
+  };
+}
+function volumeClockFixed(minutes, speed = VOLUME_CLOCK_SPEED_DEFAULT, day = null) {
+  return {
+    fixed: true,
+    fromDay: day === null || day === undefined ? volumeDayNumberOf(new Date()) : Math.round(Number(day) || 0),
+    fromMin: volumeWrapMinutes(minutes),
+    atMs: 0,
+    speed: volumeClockSpeedOf(speed),
+  };
+}
+
+/** Своё ускорение: чужое число не берётся — у списка ровно шесть пунктов. */
+function volumeClockSpeedOf(speed) {
+  const value = Number(speed);
+  return VOLUME_CLOCK_SPEEDS.includes(value) ? value : VOLUME_CLOCK_SPEED_DEFAULT;
+}
+
+/** Сколько минут занимают сутки при этом ускорении: 1440, 24, 12, 6, 3 и 1,5. */
+function volumeClockDayMinutes(speed) {
+  return VOLUME_DAY_MIN / volumeClockSpeedOf(speed);
+}
+
+/**
+ * Который час и какое число на часах объёма.
+ *
+ * **Полночь переводит дату** (G289): время идёт формулой, и сутки у неё не
+ * последний разряд, а часть того же числа — минуты от начала `fromDay`. Сколько
+ * бы их ни набежало, целые сутки уезжают в номер дня, остаток — в часы. При
+ * ускорении 960 это случается каждые полторы минуты настоящего времени, и
+ * считается тем же одним сложением, что и час.
+ */
+function volumeClockStamp(clock, nowMs) {
+  if (!clock) return { day: volumeDayNumberOf(new Date()), minutes: VOLUME_SUNRISE_MIN };
+  const day = Number.isFinite(Number(clock.fromDay)) ? Number(clock.fromDay) : volumeDayNumberOf(new Date());
+  if (clock.fixed) {
+    const fixed = volumeWrapMinutes(clock.fromMin);
+    return { day: day + Math.floor(Number(clock.fromMin) / VOLUME_DAY_MIN || 0), minutes: fixed };
+  }
+  const gone = (Number(nowMs) - Number(clock.atMs)) / 60000;
+  const total = Number(clock.fromMin) + gone * volumeClockSpeedOf(clock.speed);
+  const over = Math.floor(total / VOLUME_DAY_MIN);
+  return { day: day + (Number.isFinite(over) ? over : 0), minutes: volumeWrapMinutes(total) };
+}
+
+/** Который час на часах объёма. */
+function volumeClockMinutes(clock, nowMs) {
+  return volumeClockStamp(clock, nowMs).minutes;
+}
+
+/**
+ * Сменить ускорение, не сдвинув время: часы перецепляются за ту минуту и то
+ * число, которые показывают сейчас. Иначе выбор «быстрее» прыгал бы временем.
+ */
+function volumeClockAt(clock, nowMs, speed) {
+  const stamp = volumeClockStamp(clock, nowMs);
+  if (clock && clock.fixed) return volumeClockFixed(stamp.minutes, speed, stamp.day);
+  return { fixed: false, fromDay: stamp.day, fromMin: stamp.minutes, atMs: Number(nowMs) || 0, speed: volumeClockSpeedOf(speed) };
+}
+
+/** Поставить другое число, не тронув ни час, ни ход часов. */
+function volumeClockOnDay(clock, nowMs, day) {
+  const stamp = volumeClockStamp(clock, nowMs);
+  const next = Math.round(Number(day));
+  const put = Number.isFinite(next) ? next : stamp.day;
+  if (clock && clock.fixed) return volumeClockFixed(stamp.minutes, clock.speed, put);
+  return {
+    fixed: false,
+    fromDay: put,
+    fromMin: stamp.minutes,
+    atMs: Number(nowMs) || 0,
+    speed: volumeClockSpeedOf(clock ? clock.speed : undefined),
+  };
+}
+
+/**
+ * Долгота солнца по эклиптике в этот день года — то, из чего выходит склонение.
+ *
+ * Счёт тот же, что был у склонения в таске 181 (формула Купера): нуль
+ * приходится на весеннее равноденствие, и за год долгота обходит круг. Держать
+ * её отдельным числом нужно месяцу: он ходит по той же эклиптике, только
+ * опережает солнце на свою фазу.
+ */
+function volumeSunLonDeg(date) {
+  const at = date || new Date();
+  const start = Date.UTC(at.getFullYear(), 0, 1);
+  const day = Math.floor((Date.UTC(at.getFullYear(), at.getMonth(), at.getDate()) - start) / 86400000) + 1;
+  return (360 / 365) * (284 + day);
+}
+
+/** Склонение светила по его долготе на эклиптике: ось Земли наклонена. */
+function volumeDeclDeg(lonDeg) {
+  return VOLUME_EARTH_TILT_DEG * Math.sin(Number(lonDeg) * CLOCK_DEG);
+}
+
+/**
+ * Рассвет и закат — и всё, из чего они выходят.
+ *
+ * Без координат — умолчание заказчика: 9:00 и 21:00. С координатами — по
+ * широте, дню года и долготе, с часовым поясом браузера.
+ *
+ * Отдаётся **не только пара минут**: в ответе лежат широта, склонение,
+ * солнечный полдень, долгота солнца по эклиптике, часовой пояс и номер суток —
+ * то есть всё, по чему место светила считает `volumeSunAt`. Так сделано
+ * нарочно: подпись и небо обязаны идти от одних и тех же чисел, иначе рассвет
+ * из подписи разойдётся с рассветом в кадре — ровно та ошибка, от которой таск
+ * 190 и затевался.
+ *
+ * **Чего здесь нет нарочно:** уравнения времени (до четверти часа у солнечного
+ * полудня) и преломления сверх стандартных 50′. Часы объёма — не астрономия, и
+ * четверть часа на рассвете видна только в таблице, а не в кадре.
+ *
+ * Полярный день и полярная ночь не ломают счёт: в первом сутки целиком день, во
+ * втором — ночь, и это правда, а не вырождение.
+ */
+function volumeDayTimes(site, date) {
+  // `Number(null)` — это нуль, то есть экватор: пустые координаты обязаны
+  // читаться пустыми, а не нулевой широтой в Атлантике.
+  const number = (value) => (value === null || value === undefined || value === "" ? NaN : Number(value));
+  const latDeg = site ? number(site.latDeg) : NaN;
+  const lonDeg = site ? number(site.lonDeg) : NaN;
+  const at = date || new Date();
+  // Номер суток и часовой пояс нужны и без координат: по ним считается возраст
+  // луны, а он от широты не зависит.
+  const day = { dayNumber: volumeDayNumberOf(at), tzHours: -at.getTimezoneOffset() / 60 };
+  if (!Number.isFinite(latDeg) || !Number.isFinite(lonDeg) || Math.abs(latDeg) > 90) {
+    return { riseMin: VOLUME_SUNRISE_MIN, setMin: VOLUME_SUNSET_MIN, bySite: false, ...day };
+  }
+  const sunLonDeg = volumeSunLonDeg(at);
+  const declDeg = volumeDeclDeg(sunLonDeg);
+  const noonMin = (12 - (lonDeg - 15 * day.tzHours) / 15) * 60;
+  const place = { bySite: true, latDeg, declDeg, sunLonDeg, noonMin, ...day };
+  const cosH = volumeDayCosH(latDeg, declDeg);
+  if (!(cosH > -1)) return { riseMin: noonMin - 720, setMin: noonMin + 720, ...place };
+  if (!(cosH < 1)) return { riseMin: noonMin, setMin: noonMin, ...place };
+  const half = (Math.acos(cosH) / CLOCK_DEG / 15) * 60;
+  return { riseMin: noonMin - half, setMin: noonMin + half, ...place };
+}
+
+/**
+ * Косинус полуденного часового угла: из него выходит половина дня.
+ *
+ * `cos H₀ = (sin h₀ − sin φ sin δ) / (cos φ cos δ)`, где `h₀` — горизонт с
+ * преломлением. За единицу вышло — солнце не встаёт (полярная ночь), ниже минус
+ * единицы — не садится (полярный день).
+ */
+function volumeDayCosH(latDeg, declDeg) {
+  const lat = Number(latDeg) * CLOCK_DEG;
+  const decl = Number(declDeg) * CLOCK_DEG;
+  return (
+    (Math.sin(VOLUME_HORIZON_DEG * CLOCK_DEG) - Math.sin(lat) * Math.sin(decl)) / (Math.cos(lat) * Math.cos(decl))
+  );
+}
+
+// ——— перевод часов в одно число и обратно (разбор — в начале модуля) ———————
+
+/**
+ * Время имитации в местных миллисекундах: та же формула, что у
+ * `volumeClockStamp`, только без разбора на сутки и минуты — поэтому число
+ * непрерывно и не теряет ни доли минуты на переходе через полночь.
+ */
+function clockSimMs(clock, nowMs) {
+  const stamp = volumeClockStamp(clock, nowMs);
+  if (!clock) return clockStampMs(stamp);
+  const day = Number.isFinite(Number(clock.fromDay)) ? Number(clock.fromDay) : stamp.day;
+  const from = Number(clock.fromMin) || 0;
+  if (clock.fixed) return day * CLOCK_DAY_MS + from * 60000;
+  const gone = (Number(nowMs) - Number(clock.atMs)) * volumeClockSpeedOf(clock.speed);
+  const total = day * CLOCK_DAY_MS + from * 60000 + gone;
+  return Number.isFinite(total) ? total : clockStampMs(stamp);
+}
+
+/** `{day, minutes}` → местные миллисекунды. */
+function clockStampMs(stamp) {
+  return Number(stamp.day) * CLOCK_DAY_MS + Number(stamp.minutes) * 60000;
+}
+
+/** Местные миллисекунды → `{day, minutes}`: номер суток и минуты суток (дробные). */
+function clockMsStamp(simMs) {
+  const value = Number(simMs) || 0;
+  const day = Math.floor(value / CLOCK_DAY_MS);
+  return { day, minutes: (value - day * CLOCK_DAY_MS) / 60000 };
+}
+
+/** Начало суток `day` в местных миллисекундах. */
+function clockDayMs(day) {
+  return Math.floor(Number(day) || 0) * CLOCK_DAY_MS;
+}
+
+/**
+ * День недели: 1 — понедельник … 7 — воскресенье (так считает Sprut.Hub и
+ * блоки сценариев). Первое января 1970 года — четверг.
+ */
+function clockWeekday(simMs) {
+  const day = Math.floor((Number(simMs) || 0) / CLOCK_DAY_MS);
+  return ((((day + 3) % 7) + 7) % 7) + 1;
+}
+
+// src/appClock.js
+// Часы приложения: одно время на солнце «Объёма» и на сценарии (таск 02
+// сценариев, R09, R30i; истории 3.1–3.6).
+//
+// Слова заказчика (раунд 3): часы — «Ускорение, перемотка и шаг», и они одни на
+// всё. До этого таска часами владел «Объём» (`panels/volumeParams.js`), и только
+// он их и читал. Теперь хозяин один — этот модуль; «Объём» ходит к нему через
+// свои прежние двери (`volumeParams*`), полоса часов «Схемы» и «Сценариев» и
+// имитация — напрямую.
+//
+// ——— что осталось как было ——————————————————————————————————————————————
+//
+// Формула та же: `{fixed, fromDay, fromMin, atMs, speed}` — не накопитель, а
+// «откуда + (сейчас − когда) × ускорение» (`clockMath.js`). Часы заводятся на
+// настоящем времени при первом спросе и в настройки не ложатся (слово
+// заказчика: «при открытии стоит реальное время»); ложится только ускорение —
+// прежним ключом `volumeClockSpeed`, так что выбор человека переживает этот
+// таск без миграции.
+//
+// ——— что изменилось ————————————————————————————————————————————————————
+//
+// Вход в «Объём» часы больше **не перецепляет** к настоящему времени: часы
+// одни, и переведённые шагом в «Схеме» они обязаны показывать то же время в
+// «Объёме». «Сейчас» — только по кнопке (`appClockRealNow`).
+//
+// Каждая дверь принимает последним доводом `nowMs` — настоящее время страницы.
+// Умолчание — `Date.now()`; довод нужен тестам и тем, кто уже держит «сейчас»
+// кадра, чтобы часы и кадр считали от одного мига.
+
+
+/** Ключ настроек браузера, в котором помнится ускорение. Прежний — «Объёма». */
+const APP_CLOCK_SPEED_SETTING = "volumeClockSpeed";
+
+/**
+ * Состояние часов: ускорение, которым время **пойдёт**, и сами часы. `clock`
+ * пуст, пока их никто не спросил, — как у «Объёма» до этого таска.
+ */
+const appClockState = { speed: VOLUME_CLOCK_SPEED_DEFAULT, clock: null };
+const appClockWatchers = new Set();
+let appClockLoaded = false;
+// Человек выбрал ускорение раньше, чем ответило хранилище, — его выбор старше.
+let appClockSpeedChosen = false;
+
+function appClockTell() {
+  const read = appClockRead();
+  for (const watcher of [...appClockWatchers]) watcher(read);
+}
+
+/** Снимок: ускорение и часы (`null`, пока их не спрашивали). */
+function appClockRead() {
+  return { speed: appClockState.speed, clock: appClockState.clock };
+}
+
+/**
+ * Подписка на любой перевод часов. Первый подписчик поднимает ускорение из
+ * настроек — тем же порядком, каким его поднимал «Объём».
+ */
+function appClockWatch(watcher) {
+  appClockWatchers.add(watcher);
+  appClockLoad();
+  return () => appClockWatchers.delete(watcher);
+}
+
+/** Поднять ускорение из настроек браузера (один раз за сеанс). */
+function appClockLoad() {
+  if (appClockLoaded) return;
+  appClockLoaded = true;
+  Promise.resolve(getSetting(APP_CLOCK_SPEED_SETTING))
+    .then((saved) => {
+      if (appClockSpeedChosen) return;
+      const speed = volumeClockSpeedOf(saved);
+      if (speed === appClockState.speed) return;
+      appClockState.speed = speed;
+      // Часы перецепляются за ту же минуту: приезд настройки — не перевод.
+      if (appClockState.clock) appClockState.clock = volumeClockAt(appClockState.clock, Date.now(), speed);
+      appClockTell();
+    })
+    .catch(() => {});
+}
+
+/** Часы; при первом спросе заводятся на настоящем времени. */
+function appClockNow(nowMs = Date.now()) {
+  if (!appClockState.clock) appClockState.clock = volumeClockNow(nowMs, new Date(), appClockState.speed);
+  return appClockState.clock;
+}
+
+/** Который день и час на часах: `{day, minutes}`. */
+function appClockStamp(nowMs = Date.now()) {
+  return volumeClockStamp(appClockNow(nowMs), nowMs);
+}
+
+/** Время имитации — местные миллисекунды (`clockMath.js`, «время одним числом»). */
+function appClockSimMs(nowMs = Date.now()) {
+  return clockSimMs(appClockNow(nowMs), nowMs);
+}
+
+/**
+ * Ускорение. Выбрал — время **идёт**: ускорение без хода ничего не значит.
+ * Время при этом не прыгает — часы перецепляются за ту минуту, что показывают.
+ */
+function appClockSpeed(speed, nowMs = Date.now()) {
+  const next = volumeClockSpeedOf(speed);
+  appClockState.speed = next;
+  appClockSpeedChosen = true;
+  setSetting(APP_CLOCK_SPEED_SETTING, next);
+  const stamp = appClockStamp(nowMs);
+  appClockState.clock = { fixed: false, fromDay: stamp.day, fromMin: stamp.minutes, atMs: nowMs, speed: next };
+  appClockTell();
+}
+
+/** Своё время: поставили час — он стоит. `null` — остановить на том, что есть. */
+function appClockFix(minutes, nowMs = Date.now()) {
+  const stamp = appClockStamp(nowMs);
+  const value = minutes === null || minutes === undefined ? stamp.minutes : minutes;
+  appClockState.clock = volumeClockFixed(value, appClockState.speed, stamp.day);
+  appClockTell();
+}
+
+/** Своя дата: число меняется, час и ход часов — нет. */
+function appClockDay(day, nowMs = Date.now()) {
+  appClockState.clock = volumeClockOnDay(appClockNow(nowMs), nowMs, day);
+  appClockTell();
+}
+
+/** «Сейчас»: сегодняшняя дата, настоящий час и «Без ускорения». */
+function appClockRealNow(nowMs = Date.now()) {
+  appClockState.speed = VOLUME_CLOCK_SPEED_REAL;
+  appClockSpeedChosen = true;
+  setSetting(APP_CLOCK_SPEED_SETTING, VOLUME_CLOCK_SPEED_REAL);
+  appClockState.clock = volumeClockNow(nowMs, new Date(), VOLUME_CLOCK_SPEED_REAL);
+  appClockTell();
+}
+
+/**
+ * Перевести часы на миг `simMs` (местные миллисекунды). Ход и ускорение не
+ * меняются: идущие часы идут дальше с него, стоячие стоят на нём. Назад —
+ * тоже можно: это просто более раннее время (история 3.4).
+ */
+function appClockJump(simMs, nowMs = Date.now()) {
+  const target = Number(simMs);
+  if (!Number.isFinite(target)) return;
+  const clock = appClockNow(nowMs);
+  const { day, minutes } = clockMsStamp(target);
+  appClockState.clock = clock.fixed
+    ? volumeClockFixed(minutes, clock.speed, day)
+    : { fixed: false, fromDay: day, fromMin: minutes, atMs: nowMs, speed: volumeClockSpeedOf(clock.speed) };
+  appClockTell();
+}
+
+/** Шаг: «+1 мин», «+10 мин», «+1 ч» — и любой другой, в том числе назад. */
+function appClockStep(ms, nowMs = Date.now()) {
+  const by = Number(ms);
+  if (!Number.isFinite(by)) return;
+  appClockJump(appClockSimMs(nowMs) + by, nowMs);
+}
+
+/**
+ * Пауза (история 3.6): время стоит там, где было, и идёт дальше с того же мига
+ * с прежним ускорением. Пауза — это те же стоячие часы, что «Остановить» в
+ * «Объёме»: двух видов «стоит» в часах не бывает.
+ */
+function appClockPause(on, nowMs = Date.now()) {
+  const clock = appClockNow(nowMs);
+  if (Boolean(on) === Boolean(clock.fixed)) return;
+  const stamp = volumeClockStamp(clock, nowMs);
+  appClockState.clock = on
+    ? volumeClockFixed(stamp.minutes, appClockState.speed, stamp.day)
+    : { fixed: false, fromDay: stamp.day, fromMin: stamp.minutes, atMs: nowMs, speed: appClockState.speed };
+  appClockTell();
+}
+
 // src/projectFile.js
 // Формат файла проекта: один zip с project.json, планами в schemes/ и README.txt.
 // Zip пишется и читается здесь же, без библиотек: CompressionStream("deflate-raw")
@@ -23367,12 +25595,16 @@ function looksLikeProject(value) {
 function migrateProject(loaded) {
   const version = Number(loaded.formatVersion);
   if (!Number.isFinite(version) || version < 1) throw fileError("foreignProject");
-  if (version > FORMAT_VERSION) {
-    throw fileError("futureVersion", { version, current: FORMAT_VERSION });
+  // Читаются обе версии этой сборки: 5 — объект без сценариев, 6 — с ними
+  // (таск 01 сценариев). Версия выше — файл более новой сборки.
+  if (version > FORMAT_VERSION_MAX) {
+    throw fileError("futureVersion", { version, current: FORMAT_VERSION_MAX });
   }
   const filled = {
     ...loaded,
-    formatVersion: FORMAT_VERSION,
+    // Версия — по содержимому (`projectFormatVersion`): объект без сценариев
+    // остаётся версией 5 и байт в байт прежним файлом.
+    formatVersion: projectFormatVersion(loaded),
     rooms: Array.isArray(loaded.rooms) ? loaded.rooms : [],
     // Файл версии 1 контуров не знает: поле дописывается здесь, чтобы дальше
     // по коду `project.outlines` всегда был списком, а не «иногда undefined».
@@ -23390,7 +25622,11 @@ function migrateProject(loaded) {
   // Размеры по умолчанию (D28) доходят до справочника, заведённого раньше них:
   // у типа без размеров они проставляются по шаблону. Трогается только
   // справочник — метки новых полей не получают.
-  return fillTypeSizes(migrateCommentType(migrateTypeKinds(filled).project).project).project;
+  // Сценарии (таск 01): терпимое чтение, у объекта без них — тот же объект.
+  const migrated = migrateScenarios(fillTypeSizes(migrateCommentType(migrateTypeKinds(filled).project).project).project).project;
+  // Миграция могла убрать нечитаемые записи — версия считается по итогу.
+  const current = projectFormatVersion(migrated);
+  return migrated.formatVersion === current ? migrated : { ...migrated, formatVersion: current };
 }
 
 // Календарный день пользователя, а не UTC: разметку правят вечером, и
@@ -23429,7 +25665,7 @@ function readmeText(project, date) {
     date: fileLocalStamp(date),
     schemes: project.schemes.length,
     marks: project.marks.length,
-    version: FORMAT_VERSION,
+    version: projectFormatVersion(project),
   }) + "\n";
 }
 
@@ -23441,7 +25677,7 @@ function imageEntryName(id, blob) {
 // Текст project.json. Объект проводится через ту же нормализацию, что и при
 // чтении: тогда сверка сравнивает текст с текстом, а не «почти то же самое».
 function projectJsonText(project) {
-  return JSON.stringify(migrateProject({ ...project, formatVersion: FORMAT_VERSION }), null, 2);
+  return JSON.stringify(migrateProject({ ...project, formatVersion: projectFormatVersion(project) }), null, 2);
 }
 
 /**
@@ -23493,7 +25729,7 @@ function writerJsonText(member, projectKey, date) {
 async function packProject(project, images, options = {}) {
   if (!looksLikeProject(project)) throw fileError("foreignProject");
   const date = options.date instanceof Date ? options.date : new Date();
-  const forFile = migrateProject({ ...project, formatVersion: FORMAT_VERSION });
+  const forFile = migrateProject({ ...project, formatVersion: projectFormatVersion(project) });
   const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
 
   const files = [{ name: PROJECT_ENTRY, data: projectJsonText(forFile) }];
@@ -23729,10 +25965,25 @@ const MERGE_ENTITIES = [
   "openings",
   "schemeObjects",
   "schemeObjectKinds",
+  // Сценарии и привязки логики (таск 01 сценариев) — самостоятельные вещи со
+  // своим `id`, и сливаются поштучно, как метки: сценарий, заведённый вторым
+  // участником, не пропадает, а одинаковый с двух машин не двоится. Профиль
+  // устройства у типа и своя настройка метки — поля внутри типа и метки и
+  // едут вместе с ними.
+  "scenarios",
+  "logicBindings",
 ];
 
 // Коллекции, у которых есть поле `order`: после слияния порядок пересобирается.
-const MERGE_ORDERED = ["categories", "markTypes", "schemes", "equipmentTypes", "equipment", "schemeObjectKinds"];
+const MERGE_ORDERED = [
+  "categories",
+  "markTypes",
+  "schemes",
+  "equipmentTypes",
+  "equipment",
+  "schemeObjectKinds",
+  "scenarios",
+];
 
 // Коллекции, которых у объекта прежней разметки нет вовсе. Слияние двух таких
 // объектов не должно заводить их пустыми: это была бы правка на пустом месте,
@@ -23746,6 +25997,8 @@ const MERGE_OPTIONAL = [
   "openings",
   "schemeObjects",
   "schemeObjectKinds",
+  "scenarios",
+  "logicBindings",
 ];
 
 /**
@@ -23940,6 +26193,8 @@ function mergeLabel(entity, item, typeCodes) {
   if (entity === "walls") return strings.subjects.wall;
   if (entity === "openings") return strings.subjects.opening;
   if (entity === "schemeObjects") return strings.subjects.schemeObject;
+  // У привязки логики имени нет — в отчёте её называет род, как стену.
+  if (entity === "logicBindings") return strings.subjects.logicBinding;
   return item.name || "";
 }
 
@@ -24421,6 +26676,19 @@ function mergeReferences(merged, report, sources, winner) {
       report.conflicts.push({ code: "danglingRef", entity: "placements", id: placement.id, kept: "none", item: placement });
       return false;
     });
+
+  // Привязка логики живёт, пока живы и метка, и логический сценарий: по
+  // правилу модели обе уходят вместе с тем, к чему привязаны (`deleteMark`,
+  // `deleteScenario`). Ссылки **блоков** сценариев на метки не чистятся — так
+  // же, как при удалении метки: блок остаётся и называется «устройство
+  // удалено», а `validate` говорит о сценарии строкой.
+  const scenarios = mergeIndex(merged.scenarios);
+  merged.logicBindings = merged.logicBindings.filter((binding) => {
+    const scenario = scenarios.get(binding.scenarioId);
+    if (marks.has(binding.markId) && scenario && scenario.kind === "logic") return true;
+    report.conflicts.push({ code: "danglingRef", entity: "logicBindings", id: binding.id, kept: "none", item: binding });
+    return false;
+  });
 
   merged.marks = merged.marks.map((mark) => {
     const patch = {};
@@ -48168,6 +50436,521 @@ function colorPickerButton({ value, used, title, dialogTitle, onPick }) {
   return button;
 }
 
+// src/panels/deviceSettings.js
+// Окно «Устройство»: профиль устройства у типа и своя настройка у метки
+// (таск 03 сценариев, истории 1.1, 1.8–1.13).
+//
+// Устройство метки в имитации — аксессуар: упорядоченный список сервисов с
+// характеристиками. Описание живёт у типа (профиль) и может быть поправлено у
+// одной метки (своя настройка). Читает и пишет его модель (`typeDeviceOf`,
+// `markDeviceProfile`, `setTypeDevice`, `setMarkDevice`); словарь видов,
+// сервисов и характеристик — `sim/catalog.js`. Здесь — три вещи:
+//
+//   1. **Чистая часть**: сводка профиля для кнопки (`deviceSummary`), состав
+//      окна (`deviceWindowModel`), правки черновика (`deviceDraft*`) и перевод
+//      черновика в то, что принимает модель (`deviceTypeRecord`,
+//      `deviceMarkPatch`). Они и проверяются тестами, без браузера.
+//   2. **Окно** (`openDeviceWindow`): рисует черновик, правит его и отвечает
+//      черновиком — сохраняет ответ не оно, а вызывающий, через `canvasCommit`.
+//   3. **Поле строки метки** (`deviceMarkField`): то, что `marksRowModel`
+//      кладёт в `head.fields.device`. Второй правды о метке тут нет — всё
+//      считается из модели на каждый спрос.
+//
+// **Черновик** — `{kind, services, decoupled, params}`; «без устройства» —
+// `kind: "none"` и пустые остальные. Сервис — как в профиле: `{type, chars,
+// perChannel?}`. Что записывать в объект, решает перевод: только то, что
+// отличается от умолчания вида (или от типа, если правка у метки), — чтобы
+// своя настройка не копировала профиль целиком и тип мог ею не мешать.
+
+
+
+
+// Тип сервиса-клавиши: отметка «отвязана» есть только у него.
+const DEVICE_KEY_TYPE = "StatelessProgrammableSwitch";
+// Характеристики, которые человеку не показываются галкой: номер клавиши
+// проставляет сборка дома.
+const DEVICE_HIDDEN_CHARS = ["ServiceLabelIndex"];
+
+function deviceCopyService(service) {
+  return {
+    type: service.type,
+    chars: [...service.chars],
+    ...(service.name ? { name: service.name } : {}),
+    ...(service.perChannel ? { perChannel: true } : {}),
+  };
+}
+
+function deviceSameJson(first, second) {
+  return JSON.stringify(first) === JSON.stringify(second);
+}
+
+// ——— черновик ————————————————————————————————————————————————————————————
+
+/**
+ * Черновик по профилю модели (`typeDeviceOf`, `markDeviceProfile`); `null` —
+ * «без устройства».
+ */
+function deviceDraftOf(profile) {
+  if (!profile) return { kind: DEVICE_KIND_NONE, services: [], decoupled: [], params: {} };
+  return {
+    kind: profile.kind,
+    services: profile.services.map(deviceCopyService),
+    decoupled: [...(profile.decoupled || [])],
+    params: { ...(profile.params || {}) },
+  };
+}
+
+/** Черновик вида с его умолчаниями; `"none"` — «без устройства». */
+function deviceDraftKind(draft, key) {
+  const kind = key === DEVICE_KIND_NONE ? null : deviceKind(key);
+  if (!kind) return deviceDraftOf(null);
+  return {
+    kind: kind.key,
+    services: kind.services.map(deviceCopyService),
+    decoupled: [],
+    params: { ...kind.params },
+  };
+}
+
+/** Включить или выключить необязательную характеристику сервиса. */
+function deviceDraftChar(draft, index, char, on) {
+  const service = draft.services[index];
+  const meta = service ? simServiceMeta(service.type) : null;
+  if (!meta || !meta.optional.includes(char)) return draft;
+  const chosen = new Set(service.chars);
+  if (on) chosen.add(char);
+  else chosen.delete(char);
+  const chars = simServiceChars(service.type, [...chosen]);
+  if (deviceSameJson(chars, service.chars)) return draft;
+  const services = draft.services.map((item, at) => (at === index ? { ...item, chars } : item));
+  return { ...draft, services };
+}
+
+/** Добавить сервис из словаря (с его обязательными характеристиками). */
+function deviceDraftAddService(draft, type) {
+  const chars = simServiceChars(type, []);
+  if (!chars || draft.kind === DEVICE_KIND_NONE) return draft;
+  return { ...draft, services: [...draft.services.map(deviceCopyService), { type, chars }] };
+}
+
+/** Убрать сервис по месту в списке. */
+function deviceDraftRemoveService(draft, index) {
+  if (!draft.services[index]) return draft;
+  return { ...draft, services: draft.services.filter((item, at) => at !== index).map(deviceCopyService) };
+}
+
+/** Отметить клавишу отвязанной или привязанной. */
+function deviceDraftDecoupled(draft, channel, on) {
+  const keys = new Set(draft.decoupled);
+  if (on) keys.add(channel);
+  else keys.delete(channel);
+  return { ...draft, decoupled: [...keys].sort((first, second) => first - second) };
+}
+
+/**
+ * Параметр вида (время сброса, ход шторы). Ответ — `{draft}` или `{error}`:
+ * мусор и выход за границы не применяются, а показываются у поля.
+ */
+function deviceDraftParam(draft, name, raw) {
+  const range = Object.prototype.hasOwnProperty.call(DEVICE_PARAMS, name) ? DEVICE_PARAMS[name] : null;
+  const message = range ? text("deviceWindow.paramBad", { min: range.min, max: range.max }) : "";
+  if (!range) return { error: strings.errors.deviceParamInvalid };
+  const source = String(raw == null ? "" : raw).trim().replace(",", ".");
+  const value = Number(source);
+  if (source === "" || !Number.isInteger(value) || value < range.min || value > range.max) return { error: message };
+  return { draft: { ...draft, params: { ...draft.params, [name]: value } } };
+}
+
+// ——— перевод черновика в запись модели ———————————————————————————————————
+
+// Что даёт вид сам, без правок: сервисы и параметры вида.
+function deviceKindBase(key) {
+  const kind = deviceKind(key);
+  if (!kind) return { services: [], decoupled: [], params: {} };
+  return { services: kind.services, decoupled: [], params: kind.params };
+}
+
+/**
+ * Запись профиля для `setTypeDevice`: `null` — «без устройства», иначе
+ * `{kind, services?, decoupled?, params?}`; ключ есть, только если отличается
+ * от умолчания вида.
+ */
+function deviceTypeRecord(draft) {
+  if (draft.kind === DEVICE_KIND_NONE) return null;
+  const base = deviceKindBase(draft.kind);
+  const record = { kind: draft.kind };
+  if (!deviceSameJson(draft.services.map(deviceCopyService), base.services.map(deviceCopyService))) {
+    record.services = draft.services.map(deviceCopyService);
+  }
+  if (draft.decoupled.length > 0) record.decoupled = [...draft.decoupled];
+  const params = {};
+  for (const [name, value] of Object.entries(draft.params)) if (base.params[name] !== value) params[name] = value;
+  if (Object.keys(params).length > 0) record.params = params;
+  return record;
+}
+
+/**
+ * Настройка метки для `setMarkDevice`. Если черновик совпал с профилем типа —
+ * все поля `undefined` («как у типа», своей настройки нет). Иначе метка
+ * получает **полный снимок** вида, сервисов, отвязанных клавиш и параметров:
+ * правка типа после этого метку не трогает (история 1.9). «Без устройства» —
+ * один вид `"none"`. `typeProfile` — профиль типа метки (`typeDeviceOf`)
+ * или `null`.
+ */
+function deviceMarkPatch(typeProfile, draft) {
+  if (deviceSameJson(draft, deviceDraftOf(typeProfile))) {
+    return { kind: undefined, services: undefined, decoupled: undefined, params: undefined };
+  }
+  if (draft.kind === DEVICE_KIND_NONE) {
+    return { kind: DEVICE_KIND_NONE, services: undefined, decoupled: undefined, params: undefined };
+  }
+  return {
+    kind: draft.kind,
+    services: draft.services.map(deviceCopyService),
+    // Пустой список у метки законен: он перебивает отвязку, заданную у типа.
+    decoupled: [...draft.decoupled],
+    params: Object.keys(draft.params).length > 0 ? { ...draft.params } : undefined,
+  };
+}
+
+// ——— сводка и состав окна ————————————————————————————————————————————————
+
+function deviceKeysText(count) {
+  const tail = count % 10;
+  const key =
+    count % 100 >= 11 && count % 100 <= 14
+      ? "keysMany"
+      : tail === 1
+        ? "keysOne"
+        : tail >= 2 && tail <= 4
+          ? "keysFew"
+          : "keysMany";
+  return text("deviceWindow." + key, { n: count });
+}
+
+function deviceIsAux(type) {
+  const meta = simServiceMeta(type);
+  return Boolean(meta && meta.aux);
+}
+
+/**
+ * Сводка профиля для кнопки: «Светильник: включено, яркость», «3 клавиши»,
+ * «без устройства». `profile` — как у `typeDeviceOf` (сервисы можно не
+ * разворачивать), `channels` — число каналов типа.
+ */
+function deviceSummary(profile, channels = 1) {
+  if (!profile || profile.kind === DEVICE_KIND_NONE || profile.services.length === 0) {
+    return strings.deviceWindow.none;
+  }
+  const main = profile.services.filter((service) => !deviceIsAux(service.type));
+  if (main.length > 0 && main.every((service) => service.type === DEVICE_KEY_TYPE) && profile.kind !== "button") {
+    const keys = main.reduce((sum, service) => sum + (service.perChannel ? channels : 1), 0);
+    return deviceKeysText(keys);
+  }
+  const first = main[0] || profile.services[0];
+  const chars = first.chars
+    .filter((char) => !DEVICE_HIDDEN_CHARS.includes(char))
+    .map((char) => (strings.sim.chars[char] || char).toLowerCase());
+  const head = (strings.sim.kinds[profile.kind] || profile.kind) + (chars.length > 0 ? ": " + chars.join(", ") : "");
+  const more = profile.services.length - 1;
+  return more > 0 ? text("deviceWindow.summaryMore", { head, count: more }) : head;
+}
+
+/**
+ * Поле `device` строки метки (`marksRowModel`) и кнопки типа: всё считается
+ * из модели. `own` — у метки своя настройка.
+ */
+function deviceMarkField(project, markId) {
+  const mark = findMark(project, markId);
+  if (!mark) return { summary: strings.deviceWindow.none, own: false };
+  const profile = markDeviceProfile(project, markId);
+  return {
+    summary: deviceSummary(profile, typeChannels(project, mark.typeId)),
+    own: markDeviceOwn(project, markId),
+  };
+}
+
+/** Сводка профиля типа для кнопки справочника. */
+function deviceTypeField(project, typeId) {
+  return deviceSummary(typeDeviceOf(project, typeId), typeChannels(project, typeId));
+}
+
+// Сервисы черновика, которых вид сам не даёт, — «добавленные»: их можно
+// убрать. Сопоставление по типу и числу: вид с двумя сервисами одного типа
+// теряет «свои» по очереди.
+function deviceAddedFlags(draft) {
+  const kind = deviceKind(draft.kind);
+  const pool = kind ? kind.services.map((service) => service.type) : [];
+  return draft.services.map((service) => {
+    const at = pool.indexOf(service.type);
+    if (at < 0) return true;
+    pool.splice(at, 1);
+    return false;
+  });
+}
+
+/**
+ * Состав окна по черновику: что показать и что можно. Чистая функция —
+ * по ней окно строится и по ней же тест проверяет состав.
+ */
+function deviceWindowModel(draft, channels = 1) {
+  const kinds = [
+    { key: DEVICE_KIND_NONE, label: strings.deviceWindow.kindNone },
+    ...DEVICE_KINDS.map((kind) => ({ key: kind.key, label: strings.sim.kinds[kind.key] || kind.key })),
+  ];
+  const added = deviceAddedFlags(draft);
+  const services = draft.services.map((service, index) => {
+    const meta = simServiceMeta(service.type);
+    const name = strings.sim.services[service.type] || service.type;
+    return {
+      index,
+      type: service.type,
+      label: service.perChannel ? text("deviceWindow.perChannel", { name, count: channels }) : name,
+      aux: Boolean(meta && meta.aux),
+      removable: added[index],
+      optional: (meta ? meta.optional : [])
+        .filter((char) => !DEVICE_HIDDEN_CHARS.includes(char))
+        .map((char) => ({ char, label: strings.sim.chars[char] || char, on: service.chars.includes(char) })),
+    };
+  });
+  const present = new Set(draft.services.map((service) => service.type));
+  const kind = deviceKind(draft.kind);
+  const extras = new Set(kind ? kind.extras : []);
+  const addable =
+    draft.kind === DEVICE_KIND_NONE
+      ? []
+      : Object.keys(SIM_SERVICES)
+          .filter((type) => !present.has(type))
+          .sort((first, second) => Number(extras.has(second)) - Number(extras.has(first)))
+          .map((type) => ({
+            type,
+            label: strings.sim.services[type] || type,
+            aux: Boolean(SIM_SERVICES[type].aux),
+          }));
+  const keyed = draft.services.some((service) => service.type === DEVICE_KEY_TYPE && service.perChannel);
+  const keys = keyed
+    ? Array.from({ length: channels }, (unused, at) => ({
+        channel: at + 1,
+        label: text("deviceWindow.keyLabel", { n: at + 1 }),
+        decoupled: draft.decoupled.includes(at + 1),
+      }))
+    : [];
+  const params = Object.keys(draft.params)
+    .filter((name) => Object.prototype.hasOwnProperty.call(DEVICE_PARAMS, name))
+    .map((name) => ({
+      name,
+      label: strings.sim.params[name] || name,
+      value: draft.params[name],
+      min: DEVICE_PARAMS[name].min,
+      max: DEVICE_PARAMS[name].max,
+    }));
+  return { kind: draft.kind, kinds, services, addable, keys, params };
+}
+
+// ——— окно ————————————————————————————————————————————————————————————————
+
+/**
+ * Окно «Устройство». Параметры: `title`, `hint`, `profile` (профиль модели
+ * или `null`), `channels`, `readOnly` (телефон), `own` и `resetable` (у
+ * метки со своей настройкой — кнопка «Вернуть как у типа»).
+ *
+ * Отвечает `{draft}` — применить; `{reset: true}` — вернуть как у типа; `null`
+ * — закрыли или ничего не изменили. Сохраняет ответ вызывающий.
+ */
+function openDeviceWindow({ title, hint, profile, channels = 1, readOnly = false, own = false, resetable = false }) {
+  return new Promise((resolve) => {
+    const initial = deviceDraftOf(profile);
+    let draft = initial;
+    const body = uiEl("div", { class: "device" });
+    const error = uiBadLine();
+    let bad = new Map();
+    let modal;
+
+    const done = (value) => {
+      modal.close();
+      resolve(value);
+    };
+
+    const set = (next) => {
+      draft = next;
+      render();
+    };
+
+    function kindSection(model) {
+      const select = uiEl("select", {
+        class: "ui-select device__kind",
+        title: strings.deviceWindow.kind,
+        on: { change: (event) => set(deviceDraftKind(draft, event.target.value)) },
+      });
+      for (const kind of model.kinds) select.append(uiEl("option", { value: kind.key, text: kind.label }));
+      select.value = model.kind;
+      select.disabled = readOnly;
+      return uiEl("label", { class: "ui-field device__field" }, [
+        uiEl("span", { class: "ui-field__label", text: strings.deviceWindow.kind }),
+        select,
+      ]);
+    }
+
+    function serviceSection(model) {
+      if (model.services.length === 0) {
+        return uiEl("p", { class: "panel__empty device__empty", text: strings.deviceWindow.noServices });
+      }
+      const items = model.services.map((service) => {
+        const head = [uiEl("span", { class: "device__serviceName", text: service.label })];
+        if (service.aux) head.push(uiEl("span", { class: "device__aux", text: strings.deviceWindow.aux }));
+        if (service.removable && !readOnly) {
+          head.push(
+            uiButton("×", {
+              class: "ui-btn ui-btn--icon device__remove",
+              title: strings.deviceWindow.removeService,
+              attrs: { "aria-label": strings.deviceWindow.removeService },
+              on: { click: () => set(deviceDraftRemoveService(draft, service.index)) },
+            }),
+          );
+        }
+        const chars = service.optional.map((item) => {
+          const box = uiEl("input", { type: "checkbox" });
+          box.checked = item.on;
+          box.disabled = readOnly;
+          box.addEventListener("change", () => set(deviceDraftChar(draft, service.index, item.char, box.checked)));
+          return uiCheckRow(box, item.label);
+        });
+        return uiEl("div", { class: "device__service" }, [
+          uiEl("div", { class: "device__serviceHead" }, head),
+          chars.length > 0 ? uiEl("div", { class: "device__chars" }, chars) : null,
+        ]);
+      });
+      return uiEl("div", { class: "device__services" }, items);
+    }
+
+    function addSection(model) {
+      if (readOnly || model.addable.length === 0) return null;
+      const select = uiEl("select", {
+        class: "ui-select device__add",
+        title: strings.deviceWindow.addService,
+        on: {
+          change: (event) => {
+            if (event.target.value) set(deviceDraftAddService(draft, event.target.value));
+          },
+        },
+      });
+      select.append(uiEl("option", { value: "", text: strings.deviceWindow.addService }));
+      for (const item of model.addable) {
+        select.append(
+          uiEl("option", {
+            value: item.type,
+            text: item.aux ? item.label + " (" + strings.deviceWindow.aux + ")" : item.label,
+          }),
+        );
+      }
+      select.value = "";
+      return select;
+    }
+
+    function keysSection(model) {
+      if (model.keys.length === 0) return null;
+      const rows = model.keys.map((key) => {
+        const box = uiEl("input", { type: "checkbox" });
+        box.checked = key.decoupled;
+        box.disabled = readOnly;
+        box.addEventListener("change", () => set(deviceDraftDecoupled(draft, key.channel, box.checked)));
+        return uiCheckRow(box, key.label + ": " + strings.deviceWindow.decoupled, strings.deviceWindow.decoupledTitle);
+      });
+      return uiEl("div", { class: "device__group" }, [
+        uiEl("h4", { class: "device__title", text: strings.deviceWindow.keys }),
+        ...rows,
+      ]);
+    }
+
+    function paramsSection(model) {
+      if (model.params.length === 0) return null;
+      const fields = model.params.map((param) => {
+        const input = uiEl("input", {
+          class: "ui-input device__param",
+          type: "text",
+          value: String(param.value),
+          title: param.label + " (" + param.min + "…" + param.max + ")",
+          attrs: { inputmode: "numeric" },
+        });
+        input.disabled = readOnly;
+        input.addEventListener("change", () => {
+          const result = deviceDraftParam(draft, param.name, input.value);
+          if (result.error) {
+            bad.set(input, result.error);
+            uiMarkBad(error, [...bad.keys()], [...bad].map(([field, message]) => ({ input: field, message })));
+            return;
+          }
+          bad.delete(input);
+          draft = result.draft;
+          uiMarkBad(error, [input], [...bad].map(([field, message]) => ({ input: field, message })));
+        });
+        return uiEl("label", { class: "ui-field device__field" }, [
+          uiEl("span", { class: "ui-field__label", text: param.label }),
+          input,
+        ]);
+      });
+      return uiEl("div", { class: "device__group" }, [
+        uiEl("h4", { class: "device__title", text: strings.deviceWindow.params }),
+        ...fields,
+      ]);
+    }
+
+    function render() {
+      bad = new Map();
+      uiMarkBad(error, [], []);
+      const model = deviceWindowModel(draft, channels);
+      body.replaceChildren(
+        ...[
+          hint ? uiEl("p", { class: "modal__hint", text: hint }) : null,
+          readOnly ? uiEl("p", { class: "device__viewOnly", text: strings.deviceWindow.viewOnly }) : null,
+          kindSection(model),
+          uiEl("div", { class: "device__group" }, [
+            uiEl("h4", { class: "device__title", text: strings.deviceWindow.services }),
+            serviceSection(model),
+            addSection(model),
+          ]),
+          keysSection(model),
+          paramsSection(model),
+          error,
+        ].filter(Boolean),
+      );
+    }
+
+    const apply = () => {
+      if (bad.size > 0) {
+        [...bad.keys()][0].focus();
+        return;
+      }
+      done(deviceSameJson(draft, initial) ? null : { draft });
+    };
+
+    const actions = [];
+    if (resetable && own && !readOnly) {
+      actions.push(
+        uiButton(strings.deviceWindow.reset, {
+          class: "ui-btn device__reset",
+          title: strings.deviceWindow.resetTitle,
+          on: { click: () => done({ reset: true }) },
+        }),
+      );
+    }
+    actions.push(uiButton(readOnly ? strings.deviceWindow.close : strings.dialog.cancel, { on: { click: () => done(null) } }));
+    if (!readOnly) {
+      actions.push(uiButton(strings.deviceWindow.apply, { class: "ui-btn ui-btn--accent", on: { click: apply } }));
+    }
+    render();
+    modal = uiModal({ title, body, actions, onCancel: () => resolve(null) });
+    if (modal.card) modal.card.classList.add("modal--fit");
+  });
+}
+
+/** Заголовок окна типа и метки — одна подстановка в одном месте. */
+function deviceWindowTitle(project, { typeId, markId }) {
+  if (markId) return text("deviceWindow.markTitle", { label: labelOf(project, markId) });
+  const type = findType(project, typeId);
+  return text("deviceWindow.typeTitle", { label: type ? type.code + " — " + type.name : "" });
+}
+
 // src/panels/typePicker.js
 // Своё окно выбора типа метки: «буква — пояснение», поиск и ввод нового кода
 // прямо здесь.
@@ -54410,6 +57193,7 @@ registerPanel(PANEL_IDS.rooms, mountRoomsPanel);
 
 
 
+
 // Сетка плиток с картинками — готовый кирпич окна выбора вещи (таск 187), и
 // второй её сборки в справочнике быть не должно: разойдись они, человек видел
 // бы в двух окнах два разных каталога.
@@ -54418,7 +57202,6 @@ const TYPES_SWATCH_SIZE = 34;
 // Цвет строки, у которой категории нет: справочник без категорий — это пустой
 // справочник, но рисовать знак ему всё равно чем-то нужно.
 const TYPES_NO_COLOR = "#57606A";
-
 function typesSnapshot(project) {
   return {
     categories: project.categories.map((category) => ({
@@ -54448,6 +57231,10 @@ function typesSnapshot(project) {
       // по знаку здесь нельзя — у типа его тогда не было, и этим он и
       // отличается от типа, которому имя задали руками.
       view: typeObjectView(type),
+      // Профиль устройства (таск 01 сценариев) — только свой, заданный руками:
+      // выведенный по коду профиль выведется и в новом объекте, а поле в
+      // шаблоне без нужды значило бы поле в каждом объекте из него.
+      ...(typeDeviceRecord(type) ? { device: typeDeviceRecord(type) } : {}),
     })),
   };
 }
@@ -54518,6 +57305,9 @@ function typesTemplateFrom(template) {
       // которого в реестре больше нет. Неизвестное имя не едет — ключ, не
       // рисующий ничего, хуже отсутствия ключа.
       ...(objectViewByName(typeObjectView(type)) ? { view: typeObjectView(type) } : {}),
+      // Свой профиль устройства, приведённый к словарю: шаблон мог быть
+      // сохранён давно, а вид или сервис — переименован. Мусор не едет.
+      ...(typeDeviceRecord(type) ? { device: typeDeviceRecord(type) } : {}),
       order: index,
     }));
   if (categories.length === 0 || markTypes.length === 0) return null;
@@ -55414,6 +58204,40 @@ function openTypesDictionary(api) {
     return button;
   }
 
+  /**
+   * Кнопка «Устройство» (таск 03 сценариев): сводка профиля типа, окно правки.
+   * На телефоне окно открывается только на просмотр.
+   */
+  function deviceButton(type) {
+    const summary = deviceTypeField(project(), type.id);
+    const none = summary === strings.deviceWindow.none;
+    // Подпись — сама сводка, без слова «Устройство»: колонка узкая, а что это
+    // за колонка, говорит подсказка; сводка целиком — в ней же.
+    return uiButton(summary, {
+      class: "ui-btn dict__device" + (none ? "" : " is-set"),
+      title: strings.deviceWindow.open + ": " + summary + " · " + strings.deviceWindow.typeHint,
+      on: {
+        click: async () => {
+          const before = project();
+          const editable = layoutAllows("editMarks", api.getState().layout);
+          const answer = await openDeviceWindow({
+            title: deviceWindowTitle(before, { typeId: type.id }),
+            hint: strings.deviceWindow.typeHint,
+            profile: typeDeviceOf(before, type.id),
+            channels: typeChannels(before, type.id),
+            readOnly: !editable,
+          });
+          if (!answer || !answer.draft || !editable) return;
+          if (!findType(project(), type.id)) return;
+          commit(
+            (current) => setTypeDevice(current, type.id, deviceTypeRecord(answer.draft)).project,
+            strings.history.typeDevice,
+          );
+        },
+      },
+    });
+  }
+
   function typeRow(type, count, used) {
     const category = findCategory(project(), type.categoryId);
     // Вид у объекта прежнего формата выведен по меткам, а не записан: читается
@@ -55523,6 +58347,7 @@ function openTypesDictionary(api) {
       // строке: строка типа и так собирает восемь полей, а числа заполняют
       // один раз на тип и потом не трогают. Окно то же, что у размеров метки.
       sizesButton(type),
+      deviceButton(type),
       uiEl("span", { class: "dict__count", text: String(count), title: strings.dictionary.marks }),
       compactButton,
       removeButton,
@@ -55949,6 +58774,7 @@ registerPanel(PANEL_IDS.properties, mountTypesPanel);
 // Прокрутка колонки одна на всю колонку (таск 194), и низ кадра закрывает не
 // только кнопка смыкания, но и рейка заголовков. Кто прокручивается, сколько
 // закрыто накладкой и какова рейка — общий счёт, свой у списка быть не должен.
+
 
 
 
@@ -56428,6 +59254,9 @@ function marksRowModel(project, row, options = {}) {
     // Посадка решает, какое из двух полей зовётся высотой (таск 161): у
     // потолочной люстры «В» стоит у того числа, которое свисает вниз.
     sizes: markSizesSummary(mark, markAxisSeat(project, mark)),
+    // Устройство метки (таск 03 сценариев): сводка и пометка «своя настройка».
+    // Считается из модели на каждый спрос — второй правды о метке здесь нет.
+    device: deviceMarkField(project, mark.id),
     // Длина линейной метки по плану — в метрах, и только когда у схемы есть
     // калибровка масштаба. Пусто значит «посчитать неоткуда»: без масштаба
     // строка остаётся ровно такой, какой была до этой задачи. Размер изделия
@@ -56821,6 +59650,52 @@ function mountMarksPanel(host, api) {
     }
   }
 
+  // Устройство метки: окно доступно и на телефоне, но там оно только
+  // показывает. Правка ложится на свежий снимок, как у размеров; ничего не
+  // изменили — шага истории нет.
+  async function editDevice(markId) {
+    const state = getState();
+    if (!state.project || !findMark(state.project, markId)) return;
+    const editable = layoutAllows("editMarks", state.layout);
+    const mark = findMark(state.project, markId);
+    const answer = await openDeviceWindow({
+      title: deviceWindowTitle(state.project, { markId }),
+      hint: strings.deviceWindow.markHint,
+      profile: markDeviceProfile(state.project, markId),
+      channels: typeChannels(state.project, mark.typeId),
+      readOnly: !editable,
+      own: markDeviceOwn(state.project, markId),
+      resetable: true,
+    });
+    if (!answer || !editable) return;
+    const fresh = getState();
+    if (!fresh.project || !findMark(fresh.project, markId)) return;
+    try {
+      if (answer.reset) {
+        const next = setMarkDevice(fresh.project, markId, undefined);
+        if (next.project !== fresh.project) canvasCommit(fresh.project, next.project, strings.history.markDeviceReset);
+        return;
+      }
+      const typeProfile = typeDeviceOf(fresh.project, findMark(fresh.project, markId).typeId);
+      const next = setMarkDevice(fresh.project, markId, deviceMarkPatch(typeProfile, answer.draft));
+      if (next.project !== fresh.project) canvasCommit(fresh.project, next.project, strings.history.markDevice);
+    } catch (error) {
+      fail(error);
+    }
+  }
+
+  // «Вернуть как у типа» прямо из строки: то же, что кнопка окна.
+  function resetDevice(markId) {
+    const state = getState();
+    if (!state.project || !layoutAllows("editMarks", state.layout)) return;
+    try {
+      const next = setMarkDevice(state.project, markId, undefined);
+      if (next.project !== state.project) canvasCommit(state.project, next.project, strings.history.markDeviceReset);
+    } catch (error) {
+      fail(error);
+    }
+  }
+
   async function askNewRoom(markId) {
     const name = await uiPrompt({ title: strings.rooms.newTitle, placeholder: strings.rooms.namePlaceholder });
     if (!name) {
@@ -57008,6 +59883,27 @@ function mountMarksPanel(host, api) {
           on: { click: () => editSizes(mark.id) },
         })
       : null;
+    // Устройство метки: четвёртая кнопка ряда. Говорит сводкой профиля; у метки
+    // со своей настройкой рядом пометка и кнопка «Вернуть как у типа».
+    const deviceButton = view.fields
+      ? uiEl("div", { class: "mark-row__deviceRow" }, [
+          uiButton(strings.deviceWindow.open + ": " + view.fields.device.summary, {
+            class: "ui-btn ui-btn--wide mark-row__device" + (view.fields.device.own ? " is-set" : ""),
+            title: view.fields.device.own ? strings.deviceWindow.ownTitle : strings.deviceWindow.markHint,
+            on: { click: () => editDevice(mark.id) },
+          }),
+          view.fields.device.own
+            ? uiEl("span", { class: "mark-row__deviceOwn", text: strings.deviceWindow.own })
+            : null,
+          view.fields.device.own && layoutAllows("editMarks", state.layout)
+            ? uiButton(strings.deviceWindow.reset, {
+                class: "ui-btn mark-row__deviceReset",
+                title: strings.deviceWindow.resetTitle,
+                on: { click: () => resetDevice(mark.id) },
+              })
+            : null,
+        ])
+      : null;
     const node = uiEl(
       "div",
       {
@@ -57072,6 +59968,7 @@ function mountMarksPanel(host, api) {
         controlsButton,
         equipmentButton,
         sizesButton,
+        deviceButton,
         // Обратная сторона связи — строкой и только для чтения: стоя у
         // светильника, надо видеть, какой выключатель его включает, а правится
         // связь там, где её завели, — у выключателя.
@@ -57631,6 +60528,20 @@ registerPanel(PANEL_IDS.canvasCard, mountMarkCard);
 
 const SAVE_DELAY_MS = 400;
 
+/**
+ * Объект из базы браузера, доведённый до этой сборки, — второй конвейер
+ * открытия рядом с `projectFile.migrateProject` (тот — для файла). Миграции
+ * те же и в том же порядке: иначе один объект открывался бы по-разному из
+ * базы и из архива. Каждая миграция у объекта, которому нечего менять,
+ * отдаёт тот же объект, — и прежний объект из базы открывается байт в байт
+ * таким, каким лёг туда (G68).
+ */
+function projectsMigrateStored(stored) {
+  const migrated = fillTypeSizes(migrateCommentType(migrateTypeKinds(stored).project).project).project;
+  // Сценарии и привязки логики (таск 01 сценариев): терпимое чтение.
+  return migrateScenarios(migrated).project;
+}
+
 function uniqueProjectName(list) {
   const base = strings.project.untitled;
   const taken = new Set(list.map((item) => item.name));
@@ -57788,7 +60699,7 @@ function mountProjectsPanel(host, api) {
     // он тем же правилом, что и при чтении файла, — иначе один и тот же объект
     // открывался бы по-разному из базы и из архива. Тем же правилом и там же
     // переезжает комментарий со строки справочника на встроенный тип (G173).
-    const migrated = fillTypeSizes(migrateCommentType(migrateTypeKinds(stored).project).project).project;
+    const migrated = projectsMigrateStored(stored);
     // Постоянный ключ у объектов, заведённых до его появления, дописывается
     // здесь — один раз, при открытии. Это не правка разметки: `updatedAt` не
     // трогается, в истории отмены ничего не появляется, а в базу объект
@@ -57991,6 +60902,9 @@ registerPanel(PANEL_IDS.projectActions, mountProjectsPanel);
 // **G68: режим только читает.** Ни одной записи в объект, ни одного нового
 // поля. Объект без чертежа честно отвечает `empty`.
 
+
+// Часы и рассвет живут в `clockMath.js` (таск 02 сценариев): одни на всё
+// приложение и на движок имитации. Здесь — только то, чем их читает небо.
 
 
 
@@ -66942,26 +69856,6 @@ function volumeDrawTree(ctx, aim, tree, palette) {
 // считает про время ничего. При остановленном времени снимок считается **один
 // раз**: ни пересчёта, ни перерисовки, ни таймера.
 
-/** Минут в сутках. */
-const VOLUME_DAY_MIN = 1440;
-/** Рассвет и закат по умолчанию — слова заказчика: 9:00 и 21:00. */
-const VOLUME_SUNRISE_MIN = 9 * 60;
-const VOLUME_SUNSET_MIN = 21 * 60;
-/**
- * Ускорение времени. Числа — слова заказчика (480, а не 280: «это опечатка»), и
- * каждое читается как «во сколько раз время идёт быстрее настоящего»: 60 → сутки
- * за 24 минуты, 120 → за 12, 240 → за 6, 480 → за 3, 960 → за полторы.
- *
- * **Первый пункт — единица** (G287): «добавь в Ускорение пункт первый — без
- * ускорения. При нажатии Сейчас он и должен выбираться и время идти в реальном
- * времени». Единица — это идущее время, а не стоячее: сутки проходят сутки, и
- * таймер снимка часа при ней живёт, как при любом другом ускорении. Стоячее
- * время — это `volumeClockFixed`, и оно устроено иначе.
- */
-const VOLUME_CLOCK_SPEEDS = [1, 60, 120, 240, 480, 960];
-const VOLUME_CLOCK_SPEED_DEFAULT = 60;
-/** «Без ускорения» — то, что выбирает кнопка «Сейчас». */
-const VOLUME_CLOCK_SPEED_REAL = 1;
 /** Чаще этого фон не пересчитывается — прямое требование заказчика. */
 const VOLUME_MOOD_MS = 1000;
 /**
@@ -67012,15 +69906,6 @@ const VOLUME_MOON_STEPS = 24;
  * нарисованный, он читался бы соринкой на стекле, а не луной.
  */
 const VOLUME_MOON_THIN = 0.01;
-/** Наклон земной оси: им считаются склонения и солнца, и месяца. */
-const VOLUME_EARTH_TILT_DEG = 23.44;
-/**
- * Горизонт, по которому считаются рассвет и закат: −50′ на преломление воздуха
- * и полупоперечник диска (та же мера, что у всех таблиц рассвета). Высота
- * светила отсчитывается **от него**, поэтому ноль высоты приходится ровно на
- * рассвет из подписи окна, а не примерно на него.
- */
-const VOLUME_HORIZON_DEG = -0.833;
 /**
  * Дом без координат: широта и склонение, по которым идёт дуга, когда координат
  * у объекта нет. Равноденствие в средней полосе — то есть дуга настоящая, а
@@ -67040,207 +69925,6 @@ const VOLUME_MOON_EPOCH_DAY = Date.UTC(2000, 0, 6, 18, 14) / 86400000;
 function volumeShare(value, from, to) {
   if (from === to) return value >= to ? 1 : 0;
   return Math.max(0, Math.min(1, (value - from) / (to - from)));
-}
-
-/** Минуты суток у настоящих часов. */
-function volumeDayMinutesOf(date) {
-  const at = date || new Date();
-  return at.getHours() * 60 + at.getMinutes() + at.getSeconds() / 60;
-}
-
-/** Минуты в сутках, с переходом через полночь в обе стороны. */
-function volumeWrapMinutes(minutes) {
-  const value = Number(minutes);
-  if (!Number.isFinite(value)) return 0;
-  return ((value % VOLUME_DAY_MIN) + VOLUME_DAY_MIN) % VOLUME_DAY_MIN;
-}
-
-/** Часы и минуты строкой — для контрола с часами и для плашки. */
-function volumeClockText(minutes) {
-  const value = volumeWrapMinutes(minutes);
-  const hours = Math.floor(value / 60);
-  const left = Math.floor(value - hours * 60);
-  return String(hours).padStart(2, "0") + ":" + String(left).padStart(2, "0");
-}
-
-/** «09:30» → минуты суток. `null` — не время. */
-function volumeClockParse(text) {
-  const match = /^\s*(\d{1,2})\s*[:.]\s*(\d{1,2})/.exec(String(text || ""));
-  if (!match) return null;
-  const hours = Number(match[1]);
-  const minutes = Number(match[2]);
-  if (!(hours >= 0 && hours < 24) || !(minutes >= 0 && minutes < 60)) return null;
-  return hours * 60 + minutes;
-}
-
-// ——— дата своим числом (таск 190, G289) ————————————————————————————————
-//
-// Слова заказчика: «для положения солнца дата нужна, пусть отдельное поле будет
-// над полем время».
-//
-// Дата живёт **номером суток** — целым числом суток гражданского календаря от
-// эпохи. Не `Date` и не тройкой чисел, и причина простая: часам нужно
-// складывать её с минутами и переваливать через полночь одним сложением
-// (`volumeClockStamp`), а `Date` для этого пришлось бы собирать и разбирать на
-// каждый кадр. Перевод в обе стороны — `volumeDayNumberOf`/`volumeDayDateOf`,
-// и считаются они через `Date.UTC`, то есть не зависят ни от часового пояса, ни
-// от перехода на летнее время: номер суток — это «какое сегодня число», а не
-// «сколько миллисекунд прошло».
-
-/** Номер суток по гражданской дате: целое число суток от эпохи. */
-function volumeDayNumberOf(date) {
-  const at = date || new Date();
-  return Math.floor(Date.UTC(at.getFullYear(), at.getMonth(), at.getDate()) / 86400000);
-}
-
-/**
- * Обратно: `Date` на полдень этих суток по месту.
- *
- * Полдень, а не полночь, нарочно: из этой даты читают год, месяц и число, а
- * полночь в день перехода на летнее время умеет уехать на сутки назад.
- */
-function volumeDayDateOf(dayNumber) {
-  const at = new Date((Number(dayNumber) || 0) * 86400000);
-  return new Date(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate(), 12);
-}
-
-/** «2026-10-20» — то, что просит и отдаёт поле даты. */
-function volumeDateText(dayNumber) {
-  const at = volumeDayDateOf(dayNumber);
-  return (
-    String(at.getFullYear()).padStart(4, "0") +
-    "-" +
-    String(at.getMonth() + 1).padStart(2, "0") +
-    "-" +
-    String(at.getDate()).padStart(2, "0")
-  );
-}
-
-/**
- * **Дата для человека: «20.10.2026»** (таск 191, G300).
- *
- * Строка часов в углу поля читается боковым зрением, пока человек ходит по
- * комнатам, — ей нужен привычный порядок «день, месяц, год», а не ISO. ISO
- * остаётся у поля ввода (`volumeDateText`): его просит сам браузер, и смешивать
- * эти две строки нельзя — одна для машины, другая для глаза.
- */
-function volumeDateShort(dayNumber) {
-  const at = volumeDayDateOf(dayNumber);
-  return (
-    String(at.getDate()).padStart(2, "0") +
-    "." +
-    String(at.getMonth() + 1).padStart(2, "0") +
-    "." +
-    String(at.getFullYear()).padStart(4, "0")
-  );
-}
-
-/** «2026-10-20» → номер суток. `null` — не дата. */
-function volumeDateParse(text) {
-  const match = /^\s*(\d{4})-(\d{1,2})-(\d{1,2})\s*$/.exec(String(text || ""));
-  if (!match) return null;
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  if (!(month >= 1 && month <= 12) || !(day >= 1 && day <= 31)) return null;
-  const at = new Date(Date.UTC(year, month - 1, day));
-  // Тридцатое февраля браузер молча переносит на март — такую дату не берём.
-  if (at.getUTCMonth() !== month - 1 || at.getUTCDate() !== day) return null;
-  return Math.floor(at.getTime() / 86400000);
-}
-
-/**
- * Часы объёма.
- *
- * Идущее время — **не накопитель, а формула**: `откуда + (сейчас − когда) ×
- * ускорение`. Поэтому пока объём закрыт, ничего не идёт и не считается, а
- * вернувшийся человек видит время, которое «прошло» за его отсутствие, с
- * одного умножения. Накопитель требовал бы живого таймера в закрытом режиме.
- *
- * `fixed` — время стоит: ровно то, что человек поставил, и ни пересчёта, ни
- * таймера.
- */
-function volumeClockNow(nowMs, date, speed = VOLUME_CLOCK_SPEED_DEFAULT) {
-  const at = date || new Date();
-  return {
-    fixed: false,
-    fromDay: volumeDayNumberOf(at),
-    fromMin: volumeDayMinutesOf(at),
-    atMs: Number(nowMs) || 0,
-    speed: volumeClockSpeedOf(speed),
-  };
-}
-function volumeClockFixed(minutes, speed = VOLUME_CLOCK_SPEED_DEFAULT, day = null) {
-  return {
-    fixed: true,
-    fromDay: day === null || day === undefined ? volumeDayNumberOf(new Date()) : Math.round(Number(day) || 0),
-    fromMin: volumeWrapMinutes(minutes),
-    atMs: 0,
-    speed: volumeClockSpeedOf(speed),
-  };
-}
-
-/** Своё ускорение: чужое число не берётся — у списка ровно шесть пунктов. */
-function volumeClockSpeedOf(speed) {
-  const value = Number(speed);
-  return VOLUME_CLOCK_SPEEDS.includes(value) ? value : VOLUME_CLOCK_SPEED_DEFAULT;
-}
-
-/** Сколько минут занимают сутки при этом ускорении: 1440, 24, 12, 6, 3 и 1,5. */
-function volumeClockDayMinutes(speed) {
-  return VOLUME_DAY_MIN / volumeClockSpeedOf(speed);
-}
-
-/**
- * Который час и какое число на часах объёма.
- *
- * **Полночь переводит дату** (G289): время идёт формулой, и сутки у неё не
- * последний разряд, а часть того же числа — минуты от начала `fromDay`. Сколько
- * бы их ни набежало, целые сутки уезжают в номер дня, остаток — в часы. При
- * ускорении 960 это случается каждые полторы минуты настоящего времени, и
- * считается тем же одним сложением, что и час.
- */
-function volumeClockStamp(clock, nowMs) {
-  if (!clock) return { day: volumeDayNumberOf(new Date()), minutes: VOLUME_SUNRISE_MIN };
-  const day = Number.isFinite(Number(clock.fromDay)) ? Number(clock.fromDay) : volumeDayNumberOf(new Date());
-  if (clock.fixed) {
-    const fixed = volumeWrapMinutes(clock.fromMin);
-    return { day: day + Math.floor(Number(clock.fromMin) / VOLUME_DAY_MIN || 0), minutes: fixed };
-  }
-  const gone = (Number(nowMs) - Number(clock.atMs)) / 60000;
-  const total = Number(clock.fromMin) + gone * volumeClockSpeedOf(clock.speed);
-  const over = Math.floor(total / VOLUME_DAY_MIN);
-  return { day: day + (Number.isFinite(over) ? over : 0), minutes: volumeWrapMinutes(total) };
-}
-
-/** Который час на часах объёма. */
-function volumeClockMinutes(clock, nowMs) {
-  return volumeClockStamp(clock, nowMs).minutes;
-}
-
-/**
- * Сменить ускорение, не сдвинув время: часы перецепляются за ту минуту и то
- * число, которые показывают сейчас. Иначе выбор «быстрее» прыгал бы временем.
- */
-function volumeClockAt(clock, nowMs, speed) {
-  const stamp = volumeClockStamp(clock, nowMs);
-  if (clock && clock.fixed) return volumeClockFixed(stamp.minutes, speed, stamp.day);
-  return { fixed: false, fromDay: stamp.day, fromMin: stamp.minutes, atMs: Number(nowMs) || 0, speed: volumeClockSpeedOf(speed) };
-}
-
-/** Поставить другое число, не тронув ни час, ни ход часов. */
-function volumeClockOnDay(clock, nowMs, day) {
-  const stamp = volumeClockStamp(clock, nowMs);
-  const next = Math.round(Number(day));
-  const put = Number.isFinite(next) ? next : stamp.day;
-  if (clock && clock.fixed) return volumeClockFixed(stamp.minutes, clock.speed, put);
-  return {
-    fixed: false,
-    fromDay: put,
-    fromMin: stamp.minutes,
-    atMs: Number(nowMs) || 0,
-    speed: volumeClockSpeedOf(clock ? clock.speed : undefined),
-  };
 }
 
 // ——— место объекта (таск 188) ——————————————————————————————————————————
@@ -67267,85 +69951,6 @@ function volumeSiteOf(project) {
     lonDeg: coords ? coords.lon : null,
     topDeg: projectTopAzimuth(project),
   };
-}
-
-/**
- * Долгота солнца по эклиптике в этот день года — то, из чего выходит склонение.
- *
- * Счёт тот же, что был у склонения в таске 181 (формула Купера): нуль
- * приходится на весеннее равноденствие, и за год долгота обходит круг. Держать
- * её отдельным числом нужно месяцу: он ходит по той же эклиптике, только
- * опережает солнце на свою фазу.
- */
-function volumeSunLonDeg(date) {
-  const at = date || new Date();
-  const start = Date.UTC(at.getFullYear(), 0, 1);
-  const day = Math.floor((Date.UTC(at.getFullYear(), at.getMonth(), at.getDate()) - start) / 86400000) + 1;
-  return (360 / 365) * (284 + day);
-}
-
-/** Склонение светила по его долготе на эклиптике: ось Земли наклонена. */
-function volumeDeclDeg(lonDeg) {
-  return VOLUME_EARTH_TILT_DEG * Math.sin(Number(lonDeg) * DEG);
-}
-
-/**
- * Рассвет и закат — и всё, из чего они выходят.
- *
- * Без координат — умолчание заказчика: 9:00 и 21:00. С координатами — по
- * широте, дню года и долготе, с часовым поясом браузера.
- *
- * Отдаётся **не только пара минут**: в ответе лежат широта, склонение,
- * солнечный полдень, долгота солнца по эклиптике, часовой пояс и номер суток —
- * то есть всё, по чему место светила считает `volumeSunAt`. Так сделано
- * нарочно: подпись и небо обязаны идти от одних и тех же чисел, иначе рассвет
- * из подписи разойдётся с рассветом в кадре — ровно та ошибка, от которой таск
- * 190 и затевался.
- *
- * **Чего здесь нет нарочно:** уравнения времени (до четверти часа у солнечного
- * полудня) и преломления сверх стандартных 50′. Часы объёма — не астрономия, и
- * четверть часа на рассвете видна только в таблице, а не в кадре.
- *
- * Полярный день и полярная ночь не ломают счёт: в первом сутки целиком день, во
- * втором — ночь, и это правда, а не вырождение.
- */
-function volumeDayTimes(site, date) {
-  // `Number(null)` — это нуль, то есть экватор: пустые координаты обязаны
-  // читаться пустыми, а не нулевой широтой в Атлантике.
-  const number = (value) => (value === null || value === undefined || value === "" ? NaN : Number(value));
-  const latDeg = site ? number(site.latDeg) : NaN;
-  const lonDeg = site ? number(site.lonDeg) : NaN;
-  const at = date || new Date();
-  // Номер суток и часовой пояс нужны и без координат: по ним считается возраст
-  // луны, а он от широты не зависит.
-  const day = { dayNumber: volumeDayNumberOf(at), tzHours: -at.getTimezoneOffset() / 60 };
-  if (!Number.isFinite(latDeg) || !Number.isFinite(lonDeg) || Math.abs(latDeg) > 90) {
-    return { riseMin: VOLUME_SUNRISE_MIN, setMin: VOLUME_SUNSET_MIN, bySite: false, ...day };
-  }
-  const sunLonDeg = volumeSunLonDeg(at);
-  const declDeg = volumeDeclDeg(sunLonDeg);
-  const noonMin = (12 - (lonDeg - 15 * day.tzHours) / 15) * 60;
-  const place = { bySite: true, latDeg, declDeg, sunLonDeg, noonMin, ...day };
-  const cosH = volumeDayCosH(latDeg, declDeg);
-  if (!(cosH > -1)) return { riseMin: noonMin - 720, setMin: noonMin + 720, ...place };
-  if (!(cosH < 1)) return { riseMin: noonMin, setMin: noonMin, ...place };
-  const half = (Math.acos(cosH) / DEG / 15) * 60;
-  return { riseMin: noonMin - half, setMin: noonMin + half, ...place };
-}
-
-/**
- * Косинус полуденного часового угла: из него выходит половина дня.
- *
- * `cos H₀ = (sin h₀ − sin φ sin δ) / (cos φ cos δ)`, где `h₀` — горизонт с
- * преломлением. За единицу вышло — солнце не встаёт (полярная ночь), ниже минус
- * единицы — не садится (полярный день).
- */
-function volumeDayCosH(latDeg, declDeg) {
-  const lat = Number(latDeg) * DEG;
-  const decl = Number(declDeg) * DEG;
-  return (
-    (Math.sin(VOLUME_HORIZON_DEG * DEG) - Math.sin(lat) * Math.sin(decl)) / (Math.cos(lat) * Math.cos(decl))
-  );
 }
 
 /**
@@ -68444,7 +71049,9 @@ function volumeMarkerFaces(at, yaw, out = [], radiusMm = VOLUME_MARKER_MM) {
 // (`createVolumeParamsFields`) — разбор у `volumeParamsHome` ниже.
 const VOLUME_BACKDROP_SETTING = "volumeBackdrop";
 const VOLUME_MINIMAP_SETTING = "volumeMinimap";
-const VOLUME_SPEED_SETTING = "volumeClockSpeed";
+// Ускорение помнится прежним ключом, но хозяин у него теперь — часы приложения
+// (`appClock.js`, таск 02 сценариев): «Объём» только показывает их и правит.
+const VOLUME_SPEED_SETTING = APP_CLOCK_SPEED_SETTING;
 // ——— две отметки таска 192 (G292) ———————————————————————————————————————
 //
 // Слова заказчика: «Сделай в параметрах отображения для Объёма опции:
@@ -68504,8 +71111,10 @@ const VOLUME_GHOST_SETTING = "volumeThroughWalls";
  * Выбор человека. Живёт в области модуля, а не в поверхности объёма: поверхность
  * пересобирается (сменили схему, закрыли объект), а выбор — нет.
  *
- * `clock` заводится при первом спросе и дальше идёт формулой — см.
- * `volumeClockMinutes`.
+ * **Часов и ускорения здесь больше нет** (таск 02 сценариев): они одни на всё
+ * приложение и живут в `appClock.js`. Снимок `volumeParamsRead` берёт их
+ * оттуда, а двери ниже (`volumeParamsSpeed`, `…Fix`, `…Day`, `…Now`) — тонкие
+ * переходы к дверям часов: второй правды о том, который час, у «Объёма» нет.
  */
 const params = {
   kind: VOLUME_BACKDROP_DEFAULT,
@@ -68513,8 +71122,6 @@ const params = {
   floorsAll: false,
   // Крыша снята (G350): объём открывается видом на планировку сверху.
   roofOff: true,
-  speed: VOLUME_CLOCK_SPEED_DEFAULT,
-  clock: null,
   smooth: false,
   ghost: false,
 };
@@ -68558,15 +71165,10 @@ function volumeParamsLoad() {
       })
       .catch(() => {});
   }
-  Promise.resolve(getSetting(VOLUME_SPEED_SETTING))
-    .then((saved) => {
-      const speed = volumeClockSpeedOf(saved);
-      if (speed === params.speed) return;
-      params.speed = speed;
-      if (params.clock) params.clock = { ...params.clock, speed };
-      tell();
-    })
-    .catch(() => {});
+  // Ускорение поднимают часы приложения, а «Объём» слышит каждый их перевод —
+  // и свой, и сделанный шагом в «Схеме»: поле перерисовывает час тем же путём,
+  // каким принимает правку в окне параметров.
+  appClockWatch(() => tell());
   // Отметки таска 192 — **отрицательные**: умолчание снято, и только
   // записанное `true` их включает. Поэтому читаются они одним правилом, а не
   // двумя: `saved !== true` — это «галки не ставили».
@@ -68592,32 +71194,32 @@ function volumeParamsRead() {
     minimap: params.minimap,
     floorsAll: params.floorsAll,
     roofOff: params.roofOff,
-    speed: params.speed,
-    clock: params.clock,
+    speed: appClockRead().speed,
+    clock: appClockRead().clock,
     smooth: params.smooth,
     ghost: params.ghost,
   };
 }
 
-/** Часы объёма; при первом спросе заводятся на настоящем времени. */
+/** Часы объёма — часы приложения; при первом спросе заводятся на настоящем времени. */
 function volumeParamsClock(nowMs) {
-  if (!params.clock) params.clock = volumeClockNow(nowMs, new Date(), params.speed);
-  return params.clock;
+  return appClockNow(nowMs);
 }
 
 /**
- * Вошли в режим: идущие часы перецепляются за **настоящее** время.
+ * Вошли в режим: часы **не перецепляются** (таск 02 сценариев, история 3.1).
  *
- * Слова заказчика — «при открытии стоит реальное время», и открытие режима и
- * есть та минута, о которой он говорит. Без этого человек, вернувшийся в объём
- * после обеда, попадал бы в случайный час: время идёт формулой и за час
- * отсутствия при ускорении 60 уходит на два с половиной дня вперёд.
+ * До этого таска вход в «Объём» ставил идущие часы на настоящее время — по
+ * слову заказчика «при открытии стоит реальное время» (G282). Часы стали одни на
+ * всё приложение, и тот же перецеп съедал бы шаги и перемотку имитации: перевёл
+ * часы на вечер в «Схеме», вошёл в «Объём» — а там снова день. «Реальное время
+ * при открытии» осталось правдой само: часы заводятся на настоящем времени при
+ * первом спросе за сеанс, а «Сейчас» — по кнопке.
  *
- * Остановленные часы не трогаются: их человек поставил нарочно.
+ * Дверь остаётся одним делом: часы есть — до первого кадра поля.
  */
 function volumeParamsArrive(nowMs) {
-  if (params.clock && params.clock.fixed) return;
-  params.clock = volumeClockNow(nowMs, new Date(), params.speed);
+  appClockNow(nowMs);
 }
 function volumeParamsKind(kind) {
   const next = volumeBackdropKindOf(kind);
@@ -68664,20 +71266,12 @@ function volumeParamsFlag(name, on) {
  * мёртвого пункта в окне быть не должно.
  */
 function volumeParamsSpeed(speed, nowMs) {
-  const next = volumeClockSpeedOf(speed);
-  params.speed = next;
-  setSetting(VOLUME_SPEED_SETTING, next);
-  const stamp = volumeClockStamp(volumeParamsClock(nowMs), nowMs);
-  params.clock = { fixed: false, fromDay: stamp.day, fromMin: stamp.minutes, atMs: nowMs, speed: next };
-  tell();
+  appClockSpeed(speed, nowMs);
 }
 
 /** Своё время: поставили час — он стоит (и фон не пересчитывается вовсе). */
 function volumeParamsFix(minutes, nowMs) {
-  const stamp = volumeClockStamp(volumeParamsClock(nowMs), nowMs);
-  const value = minutes === null || minutes === undefined ? stamp.minutes : minutes;
-  params.clock = volumeClockFixed(value, params.speed, stamp.day);
-  tell();
+  appClockFix(minutes, nowMs);
 }
 
 /**
@@ -68688,8 +71282,7 @@ function volumeParamsFix(minutes, nowMs) {
  * двух смыслов у одного поля быть не должно.
  */
 function volumeParamsDay(day, nowMs) {
-  params.clock = volumeClockOnDay(volumeParamsClock(nowMs), nowMs, day);
-  tell();
+  appClockDay(day, nowMs);
 }
 
 /**
@@ -68701,10 +71294,7 @@ function volumeParamsDay(day, nowMs) {
  * вернуть настоящим только первый миг.
  */
 function volumeParamsNow(nowMs) {
-  params.speed = VOLUME_CLOCK_SPEED_REAL;
-  setSetting(VOLUME_SPEED_SETTING, VOLUME_CLOCK_SPEED_REAL);
-  params.clock = volumeClockNow(nowMs, new Date(), VOLUME_CLOCK_SPEED_REAL);
-  tell();
+  appClockRealNow(nowMs);
 }
 
 /** Час словом: им подписаны и окно, и отрезки суток. */
@@ -69240,6 +71830,7 @@ function createVolumeParams(options) {
 // потому, что «без него не понять, где стоишь», а «показать заказчику»
 // начинается с общего вида. Поэтому первый кадр — вся схема сверху, а человек
 // переходит к первому лицу, уже зная, куда попал.
+
 
 
 
@@ -73113,8 +75704,8 @@ function createVolume({ api, hosts }) {
         if ("screen" in changed && state.screen === "volume") {
           resize();
           placeArrive(state);
-          // «При открытии стоит реальное время» (G282): идущие часы
-          // перецепляются за настоящий час, остановленные остаются стоять.
+          // Часы одни на всё приложение (таск 02 сценариев): вход в режим их
+          // не перецепляет — переведённые в «Схеме», они и здесь те же.
           volumeParamsArrive(Date.now());
           refreshHour();
           syncClock();
@@ -81690,6 +84281,10 @@ const WARNING_TARGETS = {
   // Этаж без точки привязки ведёт к своей схеме: точку задают в её свойствах
   // (таск 205).
   schemeAnchorMissing: "scheme",
+  // Сценарий со ссылкой на удалённую метку ведёт к самому сценарию (таск 01
+  // сценариев). Пока режима «Сценарии» нет, переход открывает «Схему» без
+  // выделения; к сценарию в его списке подведёт таск 10.
+  scenarioDeviceMissing: "scenario",
 };
 
 // Ошибки сверху, вопросы о виде снизу: сперва то, что сломано, потом то, что
@@ -81758,6 +84353,10 @@ function warningPlace(project, problem) {
   if (target === "placement") {
     const placement = findPlacement(project, problem.ref);
     return placement ? warningMarkPlace(project, placement.markId) : null;
+  }
+  if (target === "scenario") {
+    const scenario = findScenario(project, problem.ref);
+    return scenario ? { markId: null, typeId: null, schemeId: null, point: null, scenarioId: scenario.id } : null;
   }
   return null;
 }
@@ -81908,7 +84507,12 @@ function mountWarningsPanel(host, api) {
     const state = getState();
     if (!state.project) return;
     const patch = {};
-    if (place.markId) {
+    if (place.scenarioId) {
+      // Сценарий: пока — «Схема» без выделения (см. `WARNING_TARGETS`).
+      setScreen(SCREEN_DEFAULT);
+      patch.selectedMarkIds = [];
+      patch.selectedOutlineId = null;
+    } else if (place.markId) {
       patch.selectedMarkIds = [place.markId];
       patch.selectedOutlineId = null;
     } else if (place.outlineId) {
@@ -82336,6 +84940,803 @@ function mountWarningsPanel(host, api) {
 }
 
 registerPanel(PANEL_IDS.headerWarnings, mountWarningsPanel);
+
+// src/sim/home.js
+// Дом из объекта: аксессуары меток с адресами `aid.sid.cid` (таск 01
+// сценариев, истории 1.1, 1.16). Чистое чтение — объект не правится, DOM нет;
+// модуль идёт и в бандл движка (Worker), поэтому всё, что он отдаёт, —
+// структурно клонируемые данные.
+//
+// **Адреса.** `aid` — чистая функция от `mark.id` (FNV-1a по строке id в
+// диапазон 100000000…999999999): он не хранится и поэтому не меняется ни между
+// сеансами, ни после сохранения в файл, ни после слияния папки, ни после
+// приёмки файла (`adoptLoadedProject` переприсваивает только `project.id`).
+// Совпадение у двух меток объекта разводится пробой по порядку `markId`.
+// `sid` и `cid` идут подряд с 13 внутри аксессуара: сервис получает номер,
+// следом номера получают его характеристики — как в ScenarioSimulator
+// (`IdAllocator`, база 13). Они меняются только вместе с профилем.
+const DEVICE_AID_MIN = 100000000;
+const DEVICE_AID_MAX = 999999999;
+// Первый номер сервиса и характеристики внутри аксессуара (как в Sprut).
+const DEVICE_ID_START = 13;
+// Как далеко датчик открытия ищет свою дверь, если его не привязали рукой.
+const DEVICE_DOOR_REACH_MM = 600;
+
+const DEVICE_AID_SPAN = DEVICE_AID_MAX - DEVICE_AID_MIN + 1;
+const DEVICE_TEXT = new TextEncoder();
+
+/**
+ * Адрес аксессуара метки — чистая функция от `mark.id`: одно и то же число в
+ * любом вызове, на любой машине, после любой упаковки. Без разведения
+ * совпадений — их разводит `deviceAids` по всему объекту.
+ */
+function deviceAid(markId) {
+  let hash = 0x811c9dc5;
+  for (const byte of DEVICE_TEXT.encode(String(markId))) {
+    hash ^= byte;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return DEVICE_AID_MIN + (hash % DEVICE_AID_SPAN);
+}
+
+/**
+ * Адреса всех меток объекта: `Map<markId, aid>`, различные. Совпавшие
+ * разводятся пробой вверх по кольцу в порядке `markId` — тем, у кого id
+ * меньше, достаётся исходный адрес. Счёт идёт по всем меткам, а не только по
+ * устройствам: заведённый у соседа профиль не сдвигает чужой адрес.
+ */
+function deviceAids(project) {
+  const ids = (project && Array.isArray(project.marks) ? project.marks : [])
+    .map((mark) => mark.id)
+    .filter((id) => typeof id === "string")
+    .sort();
+  const taken = new Set();
+  const aids = new Map();
+  for (const id of ids) {
+    if (aids.has(id)) continue;
+    let aid = deviceAid(id);
+    while (taken.has(aid)) aid = aid === DEVICE_AID_MAX ? DEVICE_AID_MIN : aid + 1;
+    taken.add(aid);
+    aids.set(id, aid);
+  }
+  return aids;
+}
+
+function deviceAccessory(project, mark, aid) {
+  const profile = markDeviceOf(project, mark.id);
+  if (!profile) return null;
+  let next = DEVICE_ID_START;
+  const services = profile.services.map((service, index) => {
+    const sid = next;
+    next += 1;
+    const meta = simServiceMeta(service.type);
+    const chars = service.chars.map((type) => {
+      const cid = next;
+      next += 1;
+      const charMeta = simServiceCharMeta(service.type, type);
+      // Номер клавиши — константа сервиса: канал, а у одиночной кнопки — 1.
+      const value = type === "ServiceLabelIndex" ? service.channel || 1 : charMeta ? charMeta.initial : null;
+      return { cid, type, address: aid + "." + sid + "." + cid, meta: charMeta, value };
+    });
+    return {
+      sid,
+      index,
+      type: service.type,
+      name: service.name || null,
+      channel: service.channel,
+      decoupled: service.decoupled === true,
+      aux: Boolean(meta && meta.aux),
+      address: aid + "." + sid,
+      chars,
+    };
+  });
+  return {
+    aid,
+    markId: mark.id,
+    typeId: mark.typeId,
+    schemeId: mark.schemeId || null,
+    roomId: mark.roomId || null,
+    label: labelOf(project, mark.id),
+    kind: profile.kind,
+    own: profile.own === true,
+    params: { ...profile.params },
+    services,
+  };
+}
+
+/**
+ * Аксессуар метки: `{aid, markId, typeId, schemeId, roomId, label, kind, own,
+ * params, services: [{sid, index, type, name, channel, decoupled, aux,
+ * address, chars: [{cid, type, address, meta, value}]}]}` — или `null`, если
+ * метка не устройство. `value` — начальное значение имитации (у номера
+ * клавиши — сам номер).
+ */
+function markAccessory(project, markId) {
+  const mark = project ? findMark(project, markId) : null;
+  if (!mark || markIsComment(mark)) return null;
+  return deviceAccessory(project, mark, deviceAids(project).get(mark.id) || deviceAid(mark.id));
+}
+
+/** Аксессуары всех меток-устройств объекта, в порядке объекта. */
+function homeAccessories(project) {
+  if (!project || !Array.isArray(project.marks)) return [];
+  const aids = deviceAids(project);
+  const out = [];
+  for (const mark of project.marks) {
+    if (markIsComment(mark)) continue;
+    const accessory = deviceAccessory(project, mark, aids.get(mark.id) || deviceAid(mark.id));
+    if (accessory) out.push(accessory);
+  }
+  return out;
+}
+
+function deviceIsContact(project, markId) {
+  const profile = markDeviceOf(project, markId);
+  return Boolean(profile) && profile.services.some((service) => service.type === "ContactSensor");
+}
+
+/**
+ * Дверь датчика открытия: своя (`mark.device.doorId`; `null` — связь снята
+ * рукой) → проём, в который метка попала (`markOpeningHit`) → ближайшая
+ * открывающаяся дверь схемы не дальше `DEVICE_DOOR_REACH_MM`. `null` — двери
+ * нет или метка не датчик открытия.
+ */
+function markDoorOf(project, markId) {
+  const mark = project ? findMark(project, markId) : null;
+  if (!mark || !deviceIsContact(project, markId)) return null;
+  const device = mark.device && typeof mark.device === "object" ? mark.device : null;
+  if (device && Object.prototype.hasOwnProperty.call(device, "doorId")) {
+    if (device.doorId === null) return null;
+    if (typeof device.doorId === "string" && findOpening(project, device.doorId)) return device.doorId;
+  }
+  const hit = markOpeningHit(project, mark);
+  if (hit && openingOpens(hit.kind)) return hit.id;
+  const first = Array.isArray(mark.points) && mark.points.length > 0 ? mark.points[0] : null;
+  const at = first ? planFractionToMm(project, mark.schemeId, first) : null;
+  if (!at) return null;
+  let best = null;
+  for (const wall of wallsOnScheme(project, mark.schemeId)) {
+    const vectors = wallVectors(wall);
+    if (!vectors) continue;
+    for (const opening of openingsInWall(project, wall.id)) {
+      if (!openingOpens(opening.kind)) continue;
+      const from = Number(opening.atMm);
+      const to = from + Number(opening.widthMm);
+      const a = { x: wall.aMm.x + vectors.u.x * from, y: wall.aMm.y + vectors.u.y * from };
+      const b = { x: wall.aMm.x + vectors.u.x * to, y: wall.aMm.y + vectors.u.y * to };
+      const distance = segmentDistanceMm(at, a, b);
+      if (distance <= DEVICE_DOOR_REACH_MM && (!best || distance < best.distance)) best = { id: opening.id, distance };
+    }
+  }
+  return best ? best.id : null;
+}
+
+/**
+ * Всё, что движку нужно знать о доме, одним клонируемым значением:
+ * `{accessories, links, doors, scenarios, logicBindings}`. `links` — прямые
+ * связи клавиш «чем управляет» (`markControlsByChannel`): `[{markId, channel,
+ * targets: [markId]}]`; `doors` — `[{markId, openingId}]` для датчиков открытия.
+ */
+function buildHomeSpec(project) {
+  const accessories = homeAccessories(project);
+  const links = [];
+  const doors = [];
+  for (const accessory of accessories) {
+    if (accessory.services.some((service) => service.type === "StatelessProgrammableSwitch")) {
+      for (const group of markControlsByChannel(project, accessory.markId)) {
+        links.push({ markId: accessory.markId, channel: group.channel, targets: group.marks.map((mark) => mark.id) });
+      }
+    }
+    if (accessory.services.some((service) => service.type === "ContactSensor")) {
+      const openingId = markDoorOf(project, accessory.markId);
+      if (openingId) doors.push({ markId: accessory.markId, openingId });
+    }
+  }
+  return {
+    accessories,
+    links,
+    doors,
+    scenarios: structuredClone(scenariosInOrder(project)),
+    logicBindings: structuredClone(logicBindingsOf(project)),
+  };
+}
+
+// src/sim/live.js
+// Что рисовать по состоянию устройства (таск 01 сценариев): одно правило для
+// «Схемы», мини-плана и «Объёма». Чистая функция от аксессуара метки
+// (`sim/home.js`) и значений его характеристик — без DOM и без объекта.
+//
+// Значения — плоский словарь `{"<индекс сервиса>.<характеристика>": value}`
+// (ключ — `simValueKey`), как их шлёт движок (`changes {markId, service, char,
+// value}`), плюс `pressedAt` — время имитации последнего нажатия клавиши.
+// Подходит и `Map` с теми же ключами. Отсутствующее значение — начальное
+// (`char.value` аксессуара). Перечисления читаются и именем, и кодом.
+
+/** Ключ значения характеристики в словаре состояния. */
+function simValueKey(service, char) {
+  return service + "." + char;
+}
+
+function simLiveReader(values) {
+  const get =
+    values instanceof Map
+      ? (key) => values.get(key)
+      : (key) => (values && typeof values === "object" ? values[key] : undefined);
+  return (service, type) => {
+    const char = service.chars.find((item) => item.type === type);
+    if (!char) return undefined;
+    const raw = get(simValueKey(service.index, type));
+    return simClamp(char.meta, raw === undefined ? char.value : raw);
+  };
+}
+
+function simShare(value, max = 100) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  return Math.max(0, Math.min(1, number / max));
+}
+
+/**
+ * Живое состояние устройства: `{on, level, alert, open, pressedAt}`.
+ *   on    — устройство включено (свет, реле, розетка, вентиляция, ТВ, кран…);
+ *   level — 0…1: яркость включённого света, скорость вентилятора, громкость;
+ *   alert — датчик сработал (движение, присутствие, открыто, протечка, дым, CO2);
+ *   open  — 0…1: положение шторы, датчик открытия и замок — 1, когда открыты;
+ *   pressedAt — время имитации последнего нажатия клавиши или `null`.
+ */
+function simLiveOf(accessory, values) {
+  const live = { on: false, level: 0, alert: false, open: 0, pressedAt: null };
+  if (!accessory || !Array.isArray(accessory.services)) return live;
+  const read = simLiveReader(values);
+  const lit = (level) => {
+    live.on = true;
+    live.level = Math.max(live.level, level);
+  };
+  for (const service of accessory.services) {
+    switch (service.type) {
+      case "Lightbulb":
+        if (read(service, "On")) {
+          const brightness = read(service, "Brightness");
+          lit(brightness === undefined ? 1 : simShare(brightness));
+        }
+        break;
+      case "Switch":
+      case "Outlet":
+        if (read(service, "On")) lit(1);
+        break;
+      case "Fan":
+        if (read(service, "Active") === "ACTIVE") {
+          const speed = read(service, "RotationSpeed");
+          lit(speed === undefined ? 1 : simShare(speed));
+        }
+        break;
+      case "HeaterCooler":
+      case "Television":
+      case "Valve":
+        if (read(service, "Active") === "ACTIVE") lit(1);
+        break;
+      case "Thermostat":
+        if (read(service, "TargetHeatingCoolingState") !== "OFF") lit(1);
+        break;
+      case "Speaker":
+        if (read(service, "Mute") === false) {
+          const volume = read(service, "Volume");
+          lit(volume === undefined ? 1 : simShare(volume));
+        }
+        break;
+      case "WindowCovering":
+        live.open = Math.max(live.open, simShare(read(service, "CurrentPosition")));
+        break;
+      case "ContactSensor":
+        if (read(service, "ContactSensorState") === "CONTACT_NOT_DETECTED") {
+          live.open = 1;
+          live.alert = true;
+        }
+        break;
+      case "LockMechanism":
+        if (read(service, "LockCurrentState") === "UNSECURED") live.open = 1;
+        break;
+      case "MotionSensor":
+        if (read(service, "MotionDetected")) live.alert = true;
+        break;
+      case "OccupancySensor":
+        if (read(service, "OccupancyDetected") === "OCCUPANCY_DETECTED") live.alert = true;
+        break;
+      case "LeakSensor":
+        if (read(service, "LeakDetected") === "LEAK_DETECTED") live.alert = true;
+        break;
+      case "SmokeSensor":
+        if (read(service, "SmokeDetected") === "SMOKE_DETECTED") live.alert = true;
+        break;
+      case "CarbonDioxideSensor":
+        if (read(service, "CarbonDioxideDetected") === "CO2_LEVELS_ABNORMAL") live.alert = true;
+        break;
+      default:
+        break;
+    }
+  }
+  const pressedAt = values instanceof Map ? values.get("pressedAt") : values && values.pressedAt;
+  live.pressedAt = typeof pressedAt === "number" && Number.isFinite(pressedAt) ? pressedAt : null;
+  return live;
+}
+
+// src/sim/schedule.js
+// Математика расписаний имитации (таск 02 сценариев; истории 3.3–3.5, 4.9, 4.10).
+//
+// Здесь только счёт «когда»: следующее срабатывание планировщика, попадание в
+// период и его края, следующий миг `Cron.schedule`. Кто и что по ним делает —
+// движок и блоки сценариев; они ставят найденный миг в очередь виртуального
+// времени (`sim/timers.js`) и спрашивают следующий после срабатывания.
+//
+// Время — местные миллисекунды часов имитации (`clockMath.js`, «время одним
+// числом»): «07:00» — всегда `начало суток + 7 ч`, день недели и час читаются
+// без часового пояса. Дни недели — 1 = понедельник … 7 = воскресенье, как в
+// блоках и в Sprut.Hub. Списка дней нет вовсе — каждый день; пустой список —
+// ни одного дня (такое расписание не срабатывает).
+//
+// Все ответы — **строго после** данного мига: сработавшее в 07:00 расписание,
+// спрошенное из 07:00, отвечает завтрашними 07:00, а не тем же мигом снова.
+
+const SCHEDULE_MIN_MS = 60000;
+
+/** Дни недели условия: множество чисел 1…7. Нет списка — каждый день. */
+function scheduleDaysOf(days) {
+  if (!Array.isArray(days)) return new Set([1, 2, 3, 4, 5, 6, 7]);
+  return new Set(days.map(Number).filter((day) => Number.isInteger(day) && day >= 1 && day <= 7));
+}
+
+/**
+ * Восход и закат суток, в которые попадает `dayMs`, — **тем же счётом, что
+ * солнце «Объёма»** (`volumeDayTimes` на ту же дату). Без координат — 9:00 и
+ * 21:00, как в «Объёме». К ответу `volumeDayTimes` добавлены `day` (номер
+ * суток) и `riseAt`/`setAt` — миги в местных миллисекундах, до целой секунды:
+ * планировщик Sprut срабатывает «в ту минуту и секунду, когда случится восход».
+ */
+function sunTimes(dayMs, site) {
+  const day = Math.floor((Number(dayMs) || 0) / CLOCK_DAY_MS);
+  const times = volumeDayTimes(site || null, volumeDayDateOf(day));
+  const start = clockDayMs(day);
+  return {
+    ...times,
+    day,
+    riseAt: start + Math.round(times.riseMin * 60) * 1000,
+    setAt: start + Math.round(times.setMin * 60) * 1000,
+  };
+}
+
+/** Встаёт ли солнце в эти сутки: в полярный день и в полярную ночь — нет. */
+function scheduleSunCrosses(times) {
+  if (!times.bySite) return true;
+  const span = times.setMin - times.riseMin;
+  return span > 0 && span < 1440;
+}
+
+/**
+ * Следующее срабатывание планировщика строго после `afterMs` или `null`.
+ *
+ * `condition` — блок `{type: "schedule", mode, days, at?, everySec?, offsetSec?}`:
+ *
+ * - `"time"` — в `at` («ЧЧ:ММ») по выбранным дням;
+ * - `"every"` — каждые `everySec` секунд **от запуска** `fromMs` (дома или
+ *   ручного запуска сценария; по умолчанию — от `afterMs`, то есть цепочкой от
+ *   прошлого срабатывания); срабатывают только миги сетки, выпавшие на
+ *   выбранные дни;
+ * - `"sunrise"`/`"sunset"` — восход/закат по координатам `site`
+ *   (`{latDeg, lonDeg}`, как у `volumeSiteOf`) со смещением `offsetSec`
+ *   (минус — «до», плюс — «после»); день недели — день самого восхода/заката.
+ */
+function scheduleNextAt(condition, afterMs, site = null, fromMs = afterMs) {
+  const after = Number(afterMs);
+  if (!condition || !Number.isFinite(after)) return null;
+  const days = scheduleDaysOf(condition.days);
+  if (days.size === 0) return null;
+  if (condition.mode === "time") return scheduleTimeNext(condition, after, days);
+  if (condition.mode === "every") return scheduleEveryNext(condition, after, days, fromMs);
+  if (condition.mode === "sunrise" || condition.mode === "sunset") return scheduleSunNext(condition, after, days, site);
+  return null;
+}
+
+function scheduleTimeNext(condition, after, days) {
+  const minutes = volumeClockParse(condition.at);
+  if (minutes === null) return null;
+  const first = Math.floor(after / CLOCK_DAY_MS);
+  for (let day = first; day <= first + 7; day += 1) {
+    const at = clockDayMs(day) + minutes * SCHEDULE_MIN_MS;
+    if (at > after && days.has(clockWeekday(at))) return at;
+  }
+  return null;
+}
+
+function scheduleEveryNext(condition, after, days, fromMs) {
+  const step = Number(condition.everySec) * 1000;
+  if (!Number.isFinite(step) || step <= 0) return null;
+  const anchor = Number.isFinite(Number(fromMs)) ? Number(fromMs) : after;
+  let k = Math.floor((after - anchor) / step) + 1;
+  let at = anchor + k * step;
+  while (at <= after) {
+    k += 1;
+    at = anchor + k * step;
+  }
+  const limit = after + 8 * CLOCK_DAY_MS + step;
+  while (at <= limit) {
+    if (days.has(clockWeekday(at))) return at;
+    // День не выбран — сразу к первому мигу сетки в следующих сутках.
+    const next = clockDayMs(Math.floor(at / CLOCK_DAY_MS) + 1);
+    k = Math.max(k + 1, Math.ceil((next - anchor) / step));
+    at = anchor + k * step;
+  }
+  return null;
+}
+
+function scheduleSunNext(condition, after, days, site) {
+  const offset = (Number(condition.offsetSec) || 0) * 1000;
+  const key = condition.mode === "sunrise" ? "riseAt" : "setAt";
+  // Смещение может увести срабатывание в соседние сутки: начинаем с суток,
+  // чей восход со смещением ещё способен прийтись после `after`.
+  const back = Math.ceil(Math.abs(offset) / CLOCK_DAY_MS) + 1;
+  const first = Math.floor(after / CLOCK_DAY_MS) - back;
+  // Год с запасом: полярная ночь длится месяцами, а дальше года восхода нет
+  // только у неверных координат — их `volumeDayTimes` и так считает умолчанием.
+  for (let day = first; day <= first + back + 400; day += 1) {
+    const start = clockDayMs(day);
+    if (!days.has(clockWeekday(start))) continue;
+    const times = sunTimes(start, site);
+    if (!scheduleSunCrosses(times)) continue;
+    const at = times[key] + offset;
+    if (at > after) return at;
+  }
+  return null;
+}
+
+// ——— период времени (история 4.10) ——————————————————————————————————————
+//
+// Период «с ЧЧ:ММ по ЧЧ:ММ» начинается в выбранный день и длится до конца; через
+// полночь — до утра следующих суток: «пятница 22:00–06:00» — это ночь с пятницы
+// на субботу. Начало входит в период, конец — нет. «С 00:00 по 00:00» — сутки
+// целиком. Края — миги, когда «внутри» меняется: идущие подряд периоды без
+// зазора края не дают.
+
+/** `{from, len, days}` в минутах или `null`, если период не разобрать. */
+function periodSpan(condition) {
+  if (!condition) return null;
+  const from = volumeClockParse(condition.from);
+  const to = volumeClockParse(condition.to);
+  if (from === null || to === null) return null;
+  const len = (((to - from) % 1440) + 1440) % 1440 || 1440;
+  return { from, len, days: scheduleDaysOf(condition.days) };
+}
+
+function periodCovers(span, ms) {
+  const day = Math.floor(ms / CLOCK_DAY_MS);
+  for (const start of [day, day - 1]) {
+    const begin = clockDayMs(start) + span.from * SCHEDULE_MIN_MS;
+    if (!span.days.has(clockWeekday(begin))) continue;
+    if (ms >= begin && ms < begin + span.len * SCHEDULE_MIN_MS) return true;
+  }
+  return false;
+}
+
+/** Внутри ли миг `ms` периода `{type: "period", days, from, to}`. */
+function periodContains(condition, ms) {
+  const span = periodSpan(condition);
+  const at = Number(ms);
+  if (!span || !Number.isFinite(at)) return false;
+  return periodCovers(span, at);
+}
+
+/**
+ * Ближайший край периода строго после `afterMs`: `{at, edge: "start" | "end"}`
+ * — начало («Тогда» у периода-триггера) или конец («Иначе»); `null` — краёв
+ * нет (дней не выбрано, период сплошной или не разобран).
+ */
+function periodNextEdge(condition, afterMs) {
+  const span = periodSpan(condition);
+  const after = Number(afterMs);
+  if (!span || !Number.isFinite(after) || span.days.size === 0) return null;
+  const first = Math.floor(after / CLOCK_DAY_MS) - 1;
+  const marks = [];
+  for (let day = first; day <= first + 9; day += 1) {
+    const begin = clockDayMs(day) + span.from * SCHEDULE_MIN_MS;
+    marks.push(begin, begin + span.len * SCHEDULE_MIN_MS);
+  }
+  marks.sort((a, b) => a - b);
+  for (const at of marks) {
+    if (at <= after) continue;
+    const was = periodCovers(span, at - 1);
+    const now = periodCovers(span, at);
+    if (was !== now) return { at, edge: now ? "start" : "end" };
+  }
+  return null;
+}
+
+// ——— Cron.schedule Sprut.Hub ————————————————————————————————————————————
+//
+// Шесть полей, **секунды первые**: «сек мин час день месяц день-недели»
+// (research/spruthub-tools.md §3.2). Понимается то же, что у ScenarioSimulator
+// (cron-parser): `*` и `?` — любое; списки `a,b`; диапазоны `a-b`; шаги `*/N`,
+// `a/N`, `a-b/N`; месяцы `JAN…DEC`, дни недели `SUN…SAT`, а числами — 0…7, где
+// и 0, и 7 — воскресенье. Заданы и число, и день недели — срабатывает любое из
+// двух. Чего нет (`L`, `W`, `#`, седьмое поле года) — выражение негодно: `null`,
+// а не догадка.
+
+const CRON_FIELDS = [
+  { min: 0, max: 59 },
+  { min: 0, max: 59 },
+  { min: 0, max: 23 },
+  { min: 1, max: 31 },
+  { min: 1, max: 12, names: ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"], base: 1 },
+  { min: 0, max: 7, names: ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"], base: 0 },
+];
+
+function cronValue(text, field) {
+  const word = text.toUpperCase();
+  if (field.names && field.names.includes(word)) return field.names.indexOf(word) + field.base;
+  if (!/^\d+$/.test(text)) return null;
+  const value = Number(text);
+  return value >= field.min && value <= field.max ? value : null;
+}
+
+/** Поле cron → множество значений или `null`, если поле негодно. */
+function cronField(text, field) {
+  const out = new Set();
+  for (const part of text.split(",")) {
+    const match = /^([^/]+)(?:\/(\d+))?$/.exec(part);
+    if (!match) return null;
+    const step = match[2] === undefined ? 1 : Number(match[2]);
+    if (!(step >= 1)) return null;
+    let from;
+    let to;
+    if (match[1] === "*" || match[1] === "?") {
+      from = field.min;
+      to = field.max;
+    } else {
+      const range = match[1].split("-");
+      if (range.length > 2) return null;
+      from = cronValue(range[0], field);
+      to = range.length === 2 ? cronValue(range[1], field) : match[2] === undefined ? from : field.max;
+      if (from === null || to === null || from > to) return null;
+    }
+    for (let value = from; value <= to; value += step) out.add(value);
+  }
+  return out;
+}
+
+/** Разбор выражения: шесть множеств или `null`. */
+function cronParse(expr) {
+  const parts = String(expr === null || expr === undefined ? "" : expr)
+    .trim()
+    .split(/\s+/);
+  if (parts.length !== 6) return null;
+  const sets = parts.map((part, index) => cronField(part, CRON_FIELDS[index]));
+  if (sets.some((set) => set === null)) return null;
+  const weekdays = sets[5];
+  if (weekdays.delete(7)) weekdays.add(0);
+  return {
+    seconds: sets[0],
+    minutes: sets[1],
+    hours: sets[2],
+    dates: sets[3],
+    months: sets[4],
+    weekdays,
+    anyDate: sets[3].size === 31,
+    anyWeekday: weekdays.size === 7,
+  };
+}
+
+function cronDayMatches(cron, at) {
+  const date = cron.dates.has(at.getUTCDate());
+  const weekday = cron.weekdays.has(at.getUTCDay());
+  if (cron.anyDate && cron.anyWeekday) return true;
+  if (cron.anyDate) return weekday;
+  if (cron.anyWeekday) return date;
+  return date || weekday;
+}
+
+/**
+ * Следующий миг 6-полевого выражения `Cron.schedule` строго после `afterMs`
+ * (местные миллисекунды), до целой секунды; `null` — выражение негодно или не
+ * наступает в ближайшие восемь лет (31 февраля).
+ */
+function cronNextAt(expr6, afterMs) {
+  const cron = cronParse(expr6);
+  const after = Number(afterMs);
+  if (!cron || !Number.isFinite(after)) return null;
+  let t = Math.floor(after / 1000) * 1000 + 1000;
+  const limit = after + 8 * 366 * CLOCK_DAY_MS;
+  while (t <= limit) {
+    const at = new Date(t);
+    const year = at.getUTCFullYear();
+    const month = at.getUTCMonth();
+    const date = at.getUTCDate();
+    const hour = at.getUTCHours();
+    const minute = at.getUTCMinutes();
+    if (!cron.months.has(month + 1)) {
+      t = Date.UTC(year, month + 1, 1);
+      continue;
+    }
+    if (!cronDayMatches(cron, at)) {
+      t = Date.UTC(year, month, date + 1);
+      continue;
+    }
+    if (!cron.hours.has(hour)) {
+      t = Date.UTC(year, month, date, hour + 1);
+      continue;
+    }
+    if (!cron.minutes.has(minute)) {
+      t = Date.UTC(year, month, date, hour, minute + 1);
+      continue;
+    }
+    for (let second = at.getUTCSeconds(); second < 60; second += 1) {
+      if (cron.seconds.has(second)) return Date.UTC(year, month, date, hour, minute, second);
+    }
+    t = Date.UTC(year, month, date, hour, minute + 1);
+  }
+  return null;
+}
+
+// src/sim/timers.js
+// Виртуальное время имитации: очередь событий (таск 02 сценариев; истории 3.2–3.4).
+//
+// Слова спецификации: шаг часов — «события внутри шага срабатывают по порядку,
+// каждое со своим временем», перевод назад «ничего не запускает; задержки ждут
+// своего времени». Сюда встают задержки блоков, `setTimeout`/`setInterval`
+// скриптов, срабатывания планировщика и края периодов — одним способом, и
+// исполняет их одна очередь.
+//
+// Время — местные миллисекунды часов имитации (`clockMath.js`, «время одним
+// числом»). Сама очередь часов не знает: ей говорят «дойди до этого мига», а
+// она рассказывает, на каком миге сейчас исполняется событие (`setNow`), —
+// чтобы каждое событие видело своё время, а не конец шага.
+//
+// Устройство — двоичная куча по (время, номер постановки): одновременные
+// события идут в порядке постановки. Отмена не роется в куче, а гасит запись;
+// погашенные снимаются с вершины по дороге.
+
+/**
+ * Предохранитель шага: больше стольких событий за один `runUntil` не
+ * исполняется. Столько же берёт ScenarioSimulator Sprut.Hub_Tools — сценарий,
+ * который ставит себе таймер «через 0 мс» в ответ на свой же таймер, иначе
+ * повесил бы страницу в одном миге.
+ */
+const SIM_TIMERS_RUN_MAX = 100000;
+
+/**
+ * Очередь событий виртуального времени.
+ *
+ * - `add(atMs, fn, tag?) -> id` — событие на миг `atMs`; `fn(at)` получит своё
+ *   время. `tag` — метка для `cancelTag` (например, «задержка №2 сценария»).
+ * - `cancel(id)`, `cancelTag(tag)` — снять; снятое не исполнится, даже если
+ *   стоит в том же миге, что исполняемое сейчас.
+ * - `nextAt() -> ms | null` — ближайшее событие; `null` — ничего не ждёт.
+ * - `runUntil(simMs, setNow?) -> {ran, cut}` — исполнить всё, что наступает не
+ *   позже `simMs`, по порядку. Перед каждым событием — `setNow(его время)`,
+ *   в конце — `setNow(simMs)`. Поставленное по ходу шага исполняется в том же
+ *   шаге, если умещается в нём; поставленное в прошлое — в текущий миг (время
+ *   назад не идёт). `cut` — сработал предохранитель: время осталось на миге
+ *   последнего исполненного события, остальное ждёт в очереди.
+ *   Ошибка события летит наружу; очередь при этом цела, следующий
+ *   `runUntil` продолжит со следующего события.
+ * - `clear()`, `size()` — снять всё и сколько ждёт.
+ */
+function simTimers() {
+  const heap = [];
+  const live = new Map();
+  let seq = 0;
+  let lastId = 0;
+  // Миг, на котором очередь последний раз остановилась: событие, поставленное
+  // в прошлое между шагами, исполняется не раньше него.
+  let now = -Infinity;
+
+  function before(a, b) {
+    return a.at < b.at || (a.at === b.at && a.seq < b.seq);
+  }
+
+  function up(index) {
+    let at = index;
+    while (at > 0) {
+      const parent = (at - 1) >> 1;
+      if (!before(heap[at], heap[parent])) break;
+      [heap[at], heap[parent]] = [heap[parent], heap[at]];
+      at = parent;
+    }
+  }
+
+  function down(index) {
+    let at = index;
+    for (;;) {
+      const left = at * 2 + 1;
+      const right = left + 1;
+      let best = at;
+      if (left < heap.length && before(heap[left], heap[best])) best = left;
+      if (right < heap.length && before(heap[right], heap[best])) best = right;
+      if (best === at) return;
+      [heap[at], heap[best]] = [heap[best], heap[at]];
+      at = best;
+    }
+  }
+
+  function pop() {
+    const top = heap[0];
+    const last = heap.pop();
+    if (heap.length > 0) {
+      heap[0] = last;
+      down(0);
+    }
+    return top;
+  }
+
+  /** Вершина кучи без погашенных записей. */
+  function head() {
+    while (heap.length > 0 && heap[0].gone) pop();
+    return heap.length > 0 ? heap[0] : null;
+  }
+
+  function add(atMs, fn, tag) {
+    const at = Number(atMs);
+    if (!Number.isFinite(at)) throw new TypeError("simTimers.add: time must be a finite number");
+    if (typeof fn !== "function") throw new TypeError("simTimers.add: handler must be a function");
+    lastId += 1;
+    const entry = { id: lastId, at, seq: seq++, fn, tag: tag === undefined ? null : tag, gone: false };
+    heap.push(entry);
+    up(heap.length - 1);
+    live.set(entry.id, entry);
+    return entry.id;
+  }
+
+  function cancel(id) {
+    const entry = live.get(id);
+    if (!entry) return;
+    entry.gone = true;
+    live.delete(id);
+  }
+
+  function cancelTag(tag) {
+    for (const entry of [...live.values()]) {
+      if (entry.tag === tag) cancel(entry.id);
+    }
+  }
+
+  function nextAt() {
+    const top = head();
+    return top ? top.at : null;
+  }
+
+  function runUntil(simMs, setNow) {
+    const until = Number(simMs);
+    const tell = typeof setNow === "function" ? setNow : () => {};
+    let ran = 0;
+    // Время назад (часы перевели раньше) — нижняя граница уходит вместе с ним.
+    let cursor = Math.min(now, until);
+    for (;;) {
+      const top = head();
+      if (!top || top.at > until) break;
+      if (ran >= SIM_TIMERS_RUN_MAX) return { ran, cut: true };
+      pop();
+      live.delete(top.id);
+      top.gone = true;
+      const at = Math.max(top.at, cursor);
+      cursor = at;
+      now = at;
+      ran += 1;
+      tell(at);
+      top.fn(at);
+    }
+    if (Number.isFinite(until)) {
+      now = until;
+      tell(until);
+    }
+    return { ran, cut: false };
+  }
+
+  function clear() {
+    for (const entry of live.values()) entry.gone = true;
+    live.clear();
+    heap.length = 0;
+    now = -Infinity;
+  }
+
+  return { add, cancel, cancelTag, nextAt, runUntil, clear, size: () => live.size };
+}
 })();
     </script>
 </body>

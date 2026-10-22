@@ -24,6 +24,8 @@ import {
   markAxisSeat,
   markControls,
   markControlledBy,
+  markDeviceOwn,
+  markDeviceProfile,
   markControlsByChannel,
   markDimensions,
   markLengthMeters,
@@ -38,11 +40,14 @@ import {
   roomsInOrder,
   schemesInOrder,
   setMarkControls,
+  setMarkDevice,
   setMarkDimensions,
   setMarkFreeNumber,
   setMarkNumber,
   setMarkWall,
   styleOf,
+  typeChannels,
+  typeDeviceOf,
   typesInOrder,
   updateMark,
   wallName,
@@ -60,6 +65,12 @@ import { filtersActive, filtersBox, filtersMarkRows } from "./filters.js";
 import { openMarkControlsPicker } from "./markControls.js";
 import { openEquipmentWindow } from "./equipment.js";
 import { markSizesSummary, openMarkSizesPicker } from "./markSizes.js";
+import {
+  deviceMarkField,
+  deviceMarkPatch,
+  deviceWindowTitle,
+  openDeviceWindow,
+} from "./deviceSettings.js";
 import { roomsEnsure } from "./rooms.js";
 // Строки замен считает справочник — там же, где их считает уплотнение по
 // одному типу. Второй нумерации в сборке быть не должно: окно обещало бы одно,
@@ -537,6 +548,9 @@ export function marksRowModel(project, row, options = {}) {
     // Посадка решает, какое из двух полей зовётся высотой (таск 161): у
     // потолочной люстры «В» стоит у того числа, которое свисает вниз.
     sizes: markSizesSummary(mark, markAxisSeat(project, mark)),
+    // Устройство метки (таск 03 сценариев): сводка и пометка «своя настройка».
+    // Считается из модели на каждый спрос — второй правды о метке здесь нет.
+    device: deviceMarkField(project, mark.id),
     // Длина линейной метки по плану — в метрах, и только когда у схемы есть
     // калибровка масштаба. Пусто значит «посчитать неоткуда»: без масштаба
     // строка остаётся ровно такой, какой была до этой задачи. Размер изделия
@@ -931,6 +945,52 @@ function mountMarksPanel(host, api) {
     }
   }
 
+  // Устройство метки: окно доступно и на телефоне, но там оно только
+  // показывает. Правка ложится на свежий снимок, как у размеров; ничего не
+  // изменили — шага истории нет.
+  async function editDevice(markId) {
+    const state = getState();
+    if (!state.project || !findMark(state.project, markId)) return;
+    const editable = layoutAllows("editMarks", state.layout);
+    const mark = findMark(state.project, markId);
+    const answer = await openDeviceWindow({
+      title: deviceWindowTitle(state.project, { markId }),
+      hint: strings.deviceWindow.markHint,
+      profile: markDeviceProfile(state.project, markId),
+      channels: typeChannels(state.project, mark.typeId),
+      readOnly: !editable,
+      own: markDeviceOwn(state.project, markId),
+      resetable: true,
+    });
+    if (!answer || !editable) return;
+    const fresh = getState();
+    if (!fresh.project || !findMark(fresh.project, markId)) return;
+    try {
+      if (answer.reset) {
+        const next = setMarkDevice(fresh.project, markId, undefined);
+        if (next.project !== fresh.project) canvasCommit(fresh.project, next.project, strings.history.markDeviceReset);
+        return;
+      }
+      const typeProfile = typeDeviceOf(fresh.project, findMark(fresh.project, markId).typeId);
+      const next = setMarkDevice(fresh.project, markId, deviceMarkPatch(typeProfile, answer.draft));
+      if (next.project !== fresh.project) canvasCommit(fresh.project, next.project, strings.history.markDevice);
+    } catch (error) {
+      fail(error);
+    }
+  }
+
+  // «Вернуть как у типа» прямо из строки: то же, что кнопка окна.
+  function resetDevice(markId) {
+    const state = getState();
+    if (!state.project || !layoutAllows("editMarks", state.layout)) return;
+    try {
+      const next = setMarkDevice(state.project, markId, undefined);
+      if (next.project !== state.project) canvasCommit(state.project, next.project, strings.history.markDeviceReset);
+    } catch (error) {
+      fail(error);
+    }
+  }
+
   async function askNewRoom(markId) {
     const name = await uiPrompt({ title: strings.rooms.newTitle, placeholder: strings.rooms.namePlaceholder });
     if (!name) {
@@ -1118,6 +1178,27 @@ function mountMarksPanel(host, api) {
           on: { click: () => editSizes(mark.id) },
         })
       : null;
+    // Устройство метки: четвёртая кнопка ряда. Говорит сводкой профиля; у метки
+    // со своей настройкой рядом пометка и кнопка «Вернуть как у типа».
+    const deviceButton = view.fields
+      ? uiEl("div", { class: "mark-row__deviceRow" }, [
+          uiButton(strings.deviceWindow.open + ": " + view.fields.device.summary, {
+            class: "ui-btn ui-btn--wide mark-row__device" + (view.fields.device.own ? " is-set" : ""),
+            title: view.fields.device.own ? strings.deviceWindow.ownTitle : strings.deviceWindow.markHint,
+            on: { click: () => editDevice(mark.id) },
+          }),
+          view.fields.device.own
+            ? uiEl("span", { class: "mark-row__deviceOwn", text: strings.deviceWindow.own })
+            : null,
+          view.fields.device.own && layoutAllows("editMarks", state.layout)
+            ? uiButton(strings.deviceWindow.reset, {
+                class: "ui-btn mark-row__deviceReset",
+                title: strings.deviceWindow.resetTitle,
+                on: { click: () => resetDevice(mark.id) },
+              })
+            : null,
+        ])
+      : null;
     const node = uiEl(
       "div",
       {
@@ -1182,6 +1263,7 @@ function mountMarksPanel(host, api) {
         controlsButton,
         equipmentButton,
         sizesButton,
+        deviceButton,
         // Обратная сторона связи — строкой и только для чтения: стоя у
         // светильника, надо видеть, какой выключатель его включает, а правится
         // связь там, где её завели, — у выключателя.

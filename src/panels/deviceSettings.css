@@ -1,0 +1,72 @@
+/* Окно «Устройство»: вид, сервисы с характеристиками, клавиши, параметры. */
+
+.device {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 340px;
+  max-width: 460px;
+}
+
+.device__group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.device__title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--panel-muted);
+}
+
+.device__services {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.device__service {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--panel-line);
+  border-radius: 6px;
+}
+
+.device__serviceHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.device__serviceName {
+  flex: 1;
+  font-weight: 600;
+}
+
+.device__aux {
+  font-size: 11px;
+  color: var(--panel-muted);
+}
+
+.device__chars {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.device__viewOnly,
+.device__empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--panel-muted);
+}
+
+.device__param {
+  width: 120px;
+}

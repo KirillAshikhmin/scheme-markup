@@ -5,9 +5,15 @@
 // объекты. Общим остаётся только шаблон: снимок справочника в настройках
 // браузера, с которого панель объектов создаёт следующий объект; уже
 // созданные остаются как были.
-import { PANEL_IDS, registerPanel, reportAppError } from "../app.js";
+import { PANEL_IDS, layoutAllows, registerPanel, reportAppError } from "../app.js";
 import { strings, text } from "../strings.js";
 import { markSizesSummary, openTypeSizesPicker } from "./markSizes.js";
+import {
+  deviceTypeField,
+  deviceTypeRecord,
+  deviceWindowTitle,
+  openDeviceWindow,
+} from "./deviceSettings.js";
 import {
   CODE_MAX_LENGTH,
   BLOCK_MODES,
@@ -34,11 +40,13 @@ import {
   freeColor,
   typeAxisSeat,
   typeChannels,
+  typeDeviceOf,
   typeDeviceRecord,
   typeKindOf,
   typesInOrder,
   updateCategory,
   updateType,
+  setTypeDevice,
   setTypeSizes,
   setTypeView,
   typeObjectView,
@@ -1075,6 +1083,40 @@ export function openTypesDictionary(api) {
     return button;
   }
 
+  /**
+   * Кнопка «Устройство» (таск 03 сценариев): сводка профиля типа, окно правки.
+   * На телефоне окно открывается только на просмотр.
+   */
+  function deviceButton(type) {
+    const summary = deviceTypeField(project(), type.id);
+    const none = summary === strings.deviceWindow.none;
+    // Подпись — сама сводка, без слова «Устройство»: колонка узкая, а что это
+    // за колонка, говорит подсказка; сводка целиком — в ней же.
+    return uiButton(summary, {
+      class: "ui-btn dict__device" + (none ? "" : " is-set"),
+      title: strings.deviceWindow.open + ": " + summary + " · " + strings.deviceWindow.typeHint,
+      on: {
+        click: async () => {
+          const before = project();
+          const editable = layoutAllows("editMarks", api.getState().layout);
+          const answer = await openDeviceWindow({
+            title: deviceWindowTitle(before, { typeId: type.id }),
+            hint: strings.deviceWindow.typeHint,
+            profile: typeDeviceOf(before, type.id),
+            channels: typeChannels(before, type.id),
+            readOnly: !editable,
+          });
+          if (!answer || !answer.draft || !editable) return;
+          if (!findType(project(), type.id)) return;
+          commit(
+            (current) => setTypeDevice(current, type.id, deviceTypeRecord(answer.draft)).project,
+            strings.history.typeDevice,
+          );
+        },
+      },
+    });
+  }
+
   function typeRow(type, count, used) {
     const category = findCategory(project(), type.categoryId);
     // Вид у объекта прежнего формата выведен по меткам, а не записан: читается
@@ -1184,6 +1226,7 @@ export function openTypesDictionary(api) {
       // строке: строка типа и так собирает восемь полей, а числа заполняют
       // один раз на тип и потом не трогают. Окно то же, что у размеров метки.
       sizesButton(type),
+      deviceButton(type),
       uiEl("span", { class: "dict__count", text: String(count), title: strings.dictionary.marks }),
       compactButton,
       removeButton,
