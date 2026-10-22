@@ -39,6 +39,14 @@ const ICON_MASKABLE_FILE = "icon-maskable.svg";
 const WORKER_FILE = "sw.js";
 // Точка входа склеивается последней: к моменту её выполнения определены все модули.
 const entryFile = path.join(srcDir, "app.js");
+// Поток имитации умного дома (таск 07 сценариев): свой бандл — движок, блочные
+// сценарии и хозяин скриптов — едет в страницу строкой `SIM_WORKER_SOURCE`.
+const workerEntryFile = path.join(srcDir, "sim", "worker.js");
+const workerSourceFile = path.join(srcDir, "sim", "workerSource.js");
+// Пустая строка в исходнике, на место которой встаёт бандл; ровно одна.
+const WORKER_SOURCE_SLOT = /export const SIM_WORKER_SOURCE = "";/g;
+// Вызов, который сборка дописывает в конец бандла: модуль только объявляет функцию.
+const WORKER_BUNDLE_CALL = "simWorkerMain(self);";
 
 async function listFiles(dir, extension) {
   const entries = await readdir(dir, { withFileTypes: true });
@@ -198,13 +206,16 @@ function assertUniqueTopLevelNames(sources) {
   }
 }
 
-function orderModules(sources) {
+// Обход в глубину даёт единственную гарантию, которая тут и нужна: зависимость
+// склеивается раньше зависящего, а цикл ловится множеством walking.
+function walkModules(sources, starts) {
   const ordered = [];
   const done = new Set();
   const walking = new Set();
   const visit = (file) => {
     if (done.has(file)) return;
     if (walking.has(file)) throw new Error("Циклический импорт: " + path.relative(root, file));
+    if (!sources.has(file)) throw new Error("Нет модуля " + path.relative(root, file));
     walking.add(file);
     for (const dep of sources.get(file).deps) {
       if (!sources.has(dep)) throw new Error("Нет модуля " + path.relative(root, dep));
@@ -214,15 +225,99 @@ function orderModules(sources) {
     done.add(file);
     ordered.push(file);
   };
-  // Обход в глубину даёт единственную гарантию, которая тут и нужна: зависимость
-  // склеивается раньше зависящего, а цикл ловится множеством walking. Точка входа
-  // обходится последней, но «последняя в бандле» она лишь пока её никто не
-  // импортирует: панель, взявшая registerPanel из app.js, встанет после него.
-  // Поэтому каркас и не стартует на месте — startApp отложен в app.js.
-  const rest = [...sources.keys()].filter((file) => file !== entryFile).sort();
-  for (const file of rest) visit(file);
-  if (sources.has(entryFile)) visit(entryFile);
+  for (const file of starts) visit(file);
   return ordered;
+}
+
+// Точка входа обходится последней, но «последняя в бандле» она лишь пока её
+// никто не импортирует: панель, взявшая registerPanel из app.js, встанет после
+// него. Поэтому каркас и не стартует на месте — startApp отложен в app.js.
+function orderModules(sources) {
+  const rest = [...sources.keys()].filter((file) => file !== entryFile).sort();
+  return walkModules(sources, sources.has(entryFile) ? [...rest, entryFile] : rest);
+}
+
+function relativeName(file) {
+  return path.relative(root, file).split(path.sep).join("/");
+}
+
+// ——— поток имитации ————————————————————————————————————————————————————————
+//
+// В потоке нет страницы: ни `document`, ни `window`, ни хранилища. Модуль,
+// который до них дотягивается, в бандл воркера попасть не должен — там он
+// упадёт не при сборке, а у человека на первом же сообщении. Ловится по
+// обращению к этим именам (ключ объекта `window:` и свойство `.window` — не
+// обращение) и по месту модуля: панели и каркас — страница по определению.
+const WORKER_DOM_NAMES =
+  /(?<![.\w$])(document|window|localStorage|sessionStorage|indexedDB|requestAnimationFrame|cancelAnimationFrame|navigator|getComputedStyle|matchMedia|Image|FileReader|HTMLElement)\b(?!\s*:)/;
+
+export function assertWorkerPure(modules) {
+  for (const { name, source } of modules) {
+    if (name.startsWith("src/panels/") || name === "src/app.js") {
+      throw new Error("Бандл воркера тянет DOM-модуль " + name + ": в потоке имитации страницы нет");
+    }
+    const found = blankLiterals(source).match(WORKER_DOM_NAMES);
+    if (found) {
+      throw new Error(
+        "Бандл воркера тянет DOM-модуль " + name + " (" + found[1] + "): в потоке имитации страницы нет",
+      );
+    }
+  }
+}
+
+// Бандл потока: `worker.js` и всё, что он импортирует, — тем же разбором, что
+// страница, в той же одной области видимости, плюс вызов входа в конце.
+function workerBundleFrom(sources) {
+  const files = walkModules(sources, [workerEntryFile]);
+  assertWorkerPure(files.map((file) => ({ name: relativeName(file), source: sources.get(file).source })));
+  const body = files
+    .map((file) => "// " + relativeName(file) + "\n" + stripModuleSyntax(sources.get(file).source, file))
+    .join("\n\n");
+  return {
+    source: "(function () {\n" + body + "\n" + WORKER_BUNDLE_CALL + "\n})();\n",
+    modules: files.map(relativeName),
+  };
+}
+
+/**
+ * Бандл потока строкой JS для вставки в страницу. Страница — это один
+ * `<script>`, и вся строка проходит её проверки (`notes.md` §9 п.8):
+ * `</script` закрыл бы скрипт посреди строки, поэтому каждое `<` — экраном;
+ * управляющие символы и разделители строк — экранами; `src=`, `href=` и
+ * `url(` из кода движка проверка ссылок приняла бы за ссылку на файл —
+ * у них экранирован знак после имени. В памяти строка та же байт в байт.
+ */
+export function simWorkerLiteral(source) {
+  return JSON.stringify(String(source))
+    .replace(/</g, "\\u003c")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029")
+    .replace(/(src|href)(\s*)=/gi, (match, name, space) => name + space + "\\u003d")
+    .replace(/(url)(\s*)\(/gi, (match, name, space) => name + space + "\\u0028");
+}
+
+function withWorkerSource(source, bundle) {
+  const slots = source.match(WORKER_SOURCE_SLOT) || [];
+  if (slots.length !== 1) {
+    throw new Error("В src/sim/workerSource.js должна быть ровно одна строка `export const SIM_WORKER_SOURCE = \"\";`");
+  }
+  // Подстановка функцией: в бандле полно `$`, а строка замены их толковала бы.
+  return source.replace(WORKER_SOURCE_SLOT, () => "export const SIM_WORKER_SOURCE = " + simWorkerLiteral(bundle) + ";");
+}
+
+async function readSources() {
+  const jsFiles = await listFiles(srcDir, ".js");
+  const sources = new Map();
+  for (const file of jsFiles) {
+    const source = await readFile(file, "utf8");
+    sources.set(file, { source, deps: dependenciesOf(source, file) });
+  }
+  return sources;
+}
+
+/** Бандл потока имитации без записи на диск: `{source, modules}`. */
+export async function workerBundle() {
+  return workerBundleFrom(await readSources());
 }
 
 // Управляющий символ, доживший до страницы (например, живой U+0000 внутри
@@ -408,18 +503,23 @@ export async function workerScript(html, assets) {
   return result;
 }
 
-export async function build() {
-  const jsFiles = await listFiles(srcDir, ".js");
-  const sources = new Map();
-  for (const file of jsFiles) {
-    const source = await readFile(file, "utf8");
-    sources.set(file, { source, deps: dependenciesOf(source, file) });
-  }
+/**
+ * Собрать страницу и всё, что рядом, без записи на диск: `{html, extras,
+ * assets, worker, modules}`. Проверки те же, что у `build()`, — она пишет
+ * ровно это.
+ */
+export async function buildPage() {
+  const sources = await readSources();
 
   assertUniqueTopLevelNames(sources);
 
+  const worker = workerBundleFrom(sources);
   const script = orderModules(sources)
-    .map((file) => "// " + path.relative(root, file) + "\n" + stripModuleSyntax(sources.get(file).source, file))
+    .map((file) => {
+      const own = sources.get(file).source;
+      const source = file === workerSourceFile ? withWorkerSource(own, worker.source) : own;
+      return "// " + path.relative(root, file) + "\n" + stripModuleSyntax(source, file);
+    })
     .join("\n\n");
 
   const cssFiles = await listFiles(srcDir, ".css");
@@ -447,6 +547,12 @@ export async function build() {
   assertPlainText(html);
   assertOffline(html, [PAGE_FILE, ...extras.map(([name]) => name), ...assetNames]);
 
+  return { html, extras, assets, worker, modules: sources.size };
+}
+
+export async function build() {
+  const { html, extras, assets, worker, modules } = await buildPage();
+
   await mkdir(distDir, { recursive: true });
   const out = path.join(distDir, PAGE_FILE);
   await writeFile(out, html, "utf8");
@@ -461,9 +567,11 @@ export async function build() {
   return {
     file: out,
     bytes: Buffer.byteLength(html, "utf8"),
-    modules: jsFiles.length,
+    modules,
     extras: extras.map(([name]) => name),
-    assets: assetNames,
+    assets: assets.map((asset) => asset.name),
+    workerBytes: Buffer.byteLength(worker.source, "utf8"),
+    workerModules: worker.modules.length,
   };
 }
 
@@ -472,6 +580,9 @@ if (runDirectly) {
   const result = await build();
   console.log(
     "dist/index.html: " + (result.bytes / 1024).toFixed(1) + " КБ, модулей: " + result.modules,
+  );
+  console.log(
+    "поток имитации внутри страницы: " + (result.workerBytes / 1024).toFixed(1) + " КБ, модулей: " + result.workerModules,
   );
   if (result.assets.length > 0) console.log("ресурсы страницы: " + result.assets.join(", "));
   console.log("рядом для веб-версии: " + result.extras.join(", "));

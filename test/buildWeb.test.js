@@ -20,6 +20,7 @@ import {
   MANIFEST_FILE,
   PAGE_FILE,
   assertLocalLinks,
+  buildPage,
   iconSvgFrom,
   listAssets,
   manifestJson,
@@ -357,4 +358,18 @@ test("значок под маску — тот же рисунок, отодв�
   // Вложенного второго <svg> быть не должно: значок не рисуется заново,
   // а переносится содержимым.
   assert.equal(masked.split("<svg").length, 2);
+});
+
+test("страница со строкой потока имитации проходит все проверки сборки", async () => {
+  // Таск 07 сценариев: бандл движка едет внутри страницы строкой. `buildPage`
+  // — та же сборка без записи на диск: офлайн, свои ссылки, без управляющих
+  // символов, уникальные имена. Падает любая — падает и она.
+  const { html, extras, assets, worker } = await buildPage();
+  assert.ok(worker.source.length > 0, "бандл потока пуст");
+  assert.ok(html.includes("SIM_WORKER_SOURCE = \"(function () {"), "строка бандла не встала в страницу");
+  assert.doesNotThrow(() =>
+    assertLocalLinks(html, [PAGE_FILE, ...extras.map(([name]) => name), ...assets.map((asset) => asset.name)]),
+  );
+  assert.equal(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(html), false);
+  assert.equal(/<script[^>]+src=/i.test(html), false);
 });
