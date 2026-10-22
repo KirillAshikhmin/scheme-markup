@@ -57,6 +57,7 @@ import {
 } from "../model.js";
 import { drawDrawing, drawingUnitBridge, visibleMarks } from "../render.js";
 import { screenPlaceOf, screenPlacePlanRead, screenPlaceSet } from "../screenPlace.js";
+import { volumeClockStamp, volumeClockText, volumeDateShort, volumeDayDateOf, volumeDayTimes } from "../clockMath.js";
 import { strings, text } from "../strings.js";
 import {
   VOLUME_AROUND_NEAR_MM,
@@ -85,11 +86,6 @@ import {
   volumeChannelLines,
   volumeChannelLinks,
   volumeDoorAt,
-  volumeClockStamp,
-  volumeClockText,
-  volumeDateShort,
-  volumeDayDateOf,
-  volumeDayTimes,
   volumeDraw,
   volumeDrawBackdrop,
   volumeDrawBackdropNear,
@@ -3995,8 +3991,8 @@ function createVolume({ api, hosts }) {
         if ("screen" in changed && state.screen === "volume") {
           resize();
           placeArrive(state);
-          // «При открытии стоит реальное время» (G282): идущие часы
-          // перецепляются за настоящий час, остановленные остаются стоять.
+          // Часы одни на всё приложение (таск 02 сценариев): вход в режим их
+          // не перецепляет — переведённые в «Схеме», они и здесь те же.
           volumeParamsArrive(Date.now());
           refreshHour();
           syncClock();

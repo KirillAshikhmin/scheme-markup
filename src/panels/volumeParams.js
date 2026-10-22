@@ -37,31 +37,35 @@
 // (`createVolumeParamsFields`) — разбор у `volumeParamsHome` ниже.
 import { strings, text } from "../strings.js";
 import { getSetting, setSetting } from "../store.js";
+import { VOLUME_BACKDROP_DEFAULT, VOLUME_BACKDROP_KINDS, VOLUME_SLAB_MM, volumeBackdropKindOf } from "../volume.js";
 import {
-  VOLUME_BACKDROP_DEFAULT,
-  VOLUME_BACKDROP_KINDS,
   VOLUME_CLOCK_SPEEDS,
-  VOLUME_CLOCK_SPEED_DEFAULT,
   VOLUME_CLOCK_SPEED_REAL,
-  VOLUME_SLAB_MM,
-  volumeBackdropKindOf,
   volumeClockDayMinutes,
-  volumeClockFixed,
-  volumeClockNow,
-  volumeClockOnDay,
   volumeClockParse,
   volumeClockSpeedOf,
-  volumeClockStamp,
   volumeClockText,
   volumeDateParse,
   volumeDateText,
   volumeDayNumberOf,
-} from "../volume.js";
+} from "../clockMath.js";
+import {
+  APP_CLOCK_SPEED_SETTING,
+  appClockDay,
+  appClockFix,
+  appClockNow,
+  appClockRead,
+  appClockRealNow,
+  appClockSpeed,
+  appClockWatch,
+} from "../appClock.js";
 import { uiButton, uiCheckRow, uiEl, uiIconButton, uiModal } from "./ui.js";
 
 export const VOLUME_BACKDROP_SETTING = "volumeBackdrop";
 export const VOLUME_MINIMAP_SETTING = "volumeMinimap";
-export const VOLUME_SPEED_SETTING = "volumeClockSpeed";
+// Ускорение помнится прежним ключом, но хозяин у него теперь — часы приложения
+// (`appClock.js`, таск 02 сценариев): «Объём» только показывает их и правит.
+export const VOLUME_SPEED_SETTING = APP_CLOCK_SPEED_SETTING;
 // ——— две отметки таска 192 (G292) ———————————————————————————————————————
 //
 // Слова заказчика: «Сделай в параметрах отображения для Объёма опции:
@@ -121,8 +125,10 @@ export const VOLUME_GHOST_SETTING = "volumeThroughWalls";
  * Выбор человека. Живёт в области модуля, а не в поверхности объёма: поверхность
  * пересобирается (сменили схему, закрыли объект), а выбор — нет.
  *
- * `clock` заводится при первом спросе и дальше идёт формулой — см.
- * `volumeClockMinutes`.
+ * **Часов и ускорения здесь больше нет** (таск 02 сценариев): они одни на всё
+ * приложение и живут в `appClock.js`. Снимок `volumeParamsRead` берёт их
+ * оттуда, а двери ниже (`volumeParamsSpeed`, `…Fix`, `…Day`, `…Now`) — тонкие
+ * переходы к дверям часов: второй правды о том, который час, у «Объёма» нет.
  */
 const params = {
   kind: VOLUME_BACKDROP_DEFAULT,
@@ -130,8 +136,6 @@ const params = {
   floorsAll: false,
   // Крыша снята (G350): объём открывается видом на планировку сверху.
   roofOff: true,
-  speed: VOLUME_CLOCK_SPEED_DEFAULT,
-  clock: null,
   smooth: false,
   ghost: false,
 };
@@ -177,15 +181,10 @@ export function volumeParamsLoad() {
       })
       .catch(() => {});
   }
-  Promise.resolve(getSetting(VOLUME_SPEED_SETTING))
-    .then((saved) => {
-      const speed = volumeClockSpeedOf(saved);
-      if (speed === params.speed) return;
-      params.speed = speed;
-      if (params.clock) params.clock = { ...params.clock, speed };
-      tell();
-    })
-    .catch(() => {});
+  // Ускорение поднимают часы приложения, а «Объём» слышит каждый их перевод —
+  // и свой, и сделанный шагом в «Схеме»: поле перерисовывает час тем же путём,
+  // каким принимает правку в окне параметров.
+  appClockWatch(() => tell());
   // Отметки таска 192 — **отрицательные**: умолчание снято, и только
   // записанное `true` их включает. Поэтому читаются они одним правилом, а не
   // двумя: `saved !== true` — это «галки не ставили».
@@ -211,32 +210,32 @@ export function volumeParamsRead() {
     minimap: params.minimap,
     floorsAll: params.floorsAll,
     roofOff: params.roofOff,
-    speed: params.speed,
-    clock: params.clock,
+    speed: appClockRead().speed,
+    clock: appClockRead().clock,
     smooth: params.smooth,
     ghost: params.ghost,
   };
 }
 
-/** Часы объёма; при первом спросе заводятся на настоящем времени. */
+/** Часы объёма — часы приложения; при первом спросе заводятся на настоящем времени. */
 export function volumeParamsClock(nowMs) {
-  if (!params.clock) params.clock = volumeClockNow(nowMs, new Date(), params.speed);
-  return params.clock;
+  return appClockNow(nowMs);
 }
 
 /**
- * Вошли в режим: идущие часы перецепляются за **настоящее** время.
+ * Вошли в режим: часы **не перецепляются** (таск 02 сценариев, история 3.1).
  *
- * Слова заказчика — «при открытии стоит реальное время», и открытие режима и
- * есть та минута, о которой он говорит. Без этого человек, вернувшийся в объём
- * после обеда, попадал бы в случайный час: время идёт формулой и за час
- * отсутствия при ускорении 60 уходит на два с половиной дня вперёд.
+ * До этого таска вход в «Объём» ставил идущие часы на настоящее время — по
+ * слову заказчика «при открытии стоит реальное время» (G282). Часы стали одни на
+ * всё приложение, и тот же перецеп съедал бы шаги и перемотку имитации: перевёл
+ * часы на вечер в «Схеме», вошёл в «Объём» — а там снова день. «Реальное время
+ * при открытии» осталось правдой само: часы заводятся на настоящем времени при
+ * первом спросе за сеанс, а «Сейчас» — по кнопке.
  *
- * Остановленные часы не трогаются: их человек поставил нарочно.
+ * Дверь остаётся одним делом: часы есть — до первого кадра поля.
  */
 export function volumeParamsArrive(nowMs) {
-  if (params.clock && params.clock.fixed) return;
-  params.clock = volumeClockNow(nowMs, new Date(), params.speed);
+  appClockNow(nowMs);
 }
 
 export function volumeParamsKind(kind) {
@@ -285,20 +284,12 @@ export function volumeParamsFlag(name, on) {
  * мёртвого пункта в окне быть не должно.
  */
 export function volumeParamsSpeed(speed, nowMs) {
-  const next = volumeClockSpeedOf(speed);
-  params.speed = next;
-  setSetting(VOLUME_SPEED_SETTING, next);
-  const stamp = volumeClockStamp(volumeParamsClock(nowMs), nowMs);
-  params.clock = { fixed: false, fromDay: stamp.day, fromMin: stamp.minutes, atMs: nowMs, speed: next };
-  tell();
+  appClockSpeed(speed, nowMs);
 }
 
 /** Своё время: поставили час — он стоит (и фон не пересчитывается вовсе). */
 export function volumeParamsFix(minutes, nowMs) {
-  const stamp = volumeClockStamp(volumeParamsClock(nowMs), nowMs);
-  const value = minutes === null || minutes === undefined ? stamp.minutes : minutes;
-  params.clock = volumeClockFixed(value, params.speed, stamp.day);
-  tell();
+  appClockFix(minutes, nowMs);
 }
 
 /**
@@ -309,8 +300,7 @@ export function volumeParamsFix(minutes, nowMs) {
  * двух смыслов у одного поля быть не должно.
  */
 export function volumeParamsDay(day, nowMs) {
-  params.clock = volumeClockOnDay(volumeParamsClock(nowMs), nowMs, day);
-  tell();
+  appClockDay(day, nowMs);
 }
 
 /**
@@ -322,10 +312,7 @@ export function volumeParamsDay(day, nowMs) {
  * вернуть настоящим только первый миг.
  */
 export function volumeParamsNow(nowMs) {
-  params.speed = VOLUME_CLOCK_SPEED_REAL;
-  setSetting(VOLUME_SPEED_SETTING, VOLUME_CLOCK_SPEED_REAL);
-  params.clock = volumeClockNow(nowMs, new Date(), VOLUME_CLOCK_SPEED_REAL);
-  tell();
+  appClockRealNow(nowMs);
 }
 
 /** Час словом: им подписаны и окно, и отрезки суток. */
