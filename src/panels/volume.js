@@ -963,16 +963,22 @@ function createVolume({ api, hosts }) {
    */
   const floorPlan = (state) => volumeFloorPlan(state.project, schemeId);
   const stacking = (state, plan) => volumeParamsRead().floorsAll === true && (plan || floorPlan(state)).can;
+  // Сцена объёма — одна на поверхность, и её же прошлое состояние идёт доводом
+  // сборки (таск 232): стопка разобрана в ней на этажи, и каждый берётся
+  // готовым, если собран из того же. Открытая дверь чужих этажей не касается, а
+  // смена этажа прибытия — переставляет их, а не пересобирает. Второго ответа о
+  // сцене это не заводит: доводом идёт она сама.
+  let scene = null;
   const sceneOf = (state) => {
     const plan = floorPlan(state);
     if (stacking(state, plan)) {
-      const stack = volumeStackScene(state.project, plan, (id) => sceneOptions(state, id));
+      const stack = volumeStackScene(state.project, plan, (id) => sceneOptions(state, id), scene);
       if (stack) return stack;
     }
     return volumeScene(state.project, schemeId, sceneOptions(state, schemeId));
   };
 
-  let scene = sceneOf(getState());
+  scene = sceneOf(getState());
   // ——— час суток (таск 181, G282) ———
   //
   // Снимок часа (`volumeMood`) держится здесь и пересчитывается **не чаще раза

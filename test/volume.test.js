@@ -252,6 +252,7 @@ import {
   VOLUME_HEAD_MM,
   VOLUME_LANDING_GAP_MM,
   volumeFloorFaces,
+  volumeFaceMine,
   volumeFloorTopMm,
   volumeWallsTopMm,
   volumeFacesSpan,
@@ -6504,9 +6505,15 @@ test("шов совмещения схем: стопка спрашивает с
   // Сдвиг доезжает до граней: подключив привязку, таск 205 получит совмещение
   // без правок в стопке.
   const faces = [{ p: [{ x: 10, y: 20, z: 30 }], layer: VOLUME_LAYER_BODY, markId: "м", doorId: "д" }];
-  volumeFloorFaces(faces, { baseMm: 100, shiftMm: { x: 5, y: -7 }, index: 1, count: 2, own: false });
+  volumeFloorFaces(faces, { baseMm: 100, shiftMm: { x: 5, y: -7 }, floor: "второй" });
   assert.deepEqual(faces[0].p[0], { x: 15, y: 13, z: 130 });
-  assert.deepEqual([faces[0].markId, faces[0].doorId], [null, null]);
+  // Хозяева чужого этажа не снимаются с грани, а гаснут в кадре (таск 232):
+  // ключи целы, а свой этаж грань носит ярлыком.
+  assert.deepEqual([faces[0].markId, faces[0].doorId], ["м", "д"]);
+  assert.equal(faces[0].floor, "второй");
+  assert.equal(volumeFaceMine(faces[0], "второй"), true, "стоим на нём — хозяева свои");
+  assert.equal(volumeFaceMine(faces[0], "первый"), false, "стоим на другом — хозяев нет");
+  assert.equal(volumeFaceMine({ p: [] }, "первый"), true, "грань без этажа ничья, и хозяева у неё свои");
 });
 
 test("G68: стопка этажей не меняет объект ни одним полем", () => {
@@ -6525,6 +6532,255 @@ test("G68: стопка этажей не меняет объект ни одн�
     assert.equal(volumeStackScene(legacy, plan, () => ({})), null, "стопке не из чего собираться");
   }
   assert.equal(JSON.stringify(legacy), kept);
+});
+
+// ——— этаж стопки берётся готовым, а не пересобирается (таск 232) ——————————
+//
+// Долг тасков 202 и 229: открывание двери пересобирало все этажи, приземление и
+// переход по лестнице — тоже. Главное требование тикета — **не завести второго
+// источника правды о сцене**, поэтому проверяется не «кэш сработал», а два
+// свойства разом: собранное из готовых этажей **совпадает** с собранным заново,
+// и готовым берётся ровно то, что не менялось.
+
+/** Дом в три этажа, у каждого своя дверь и своя метка. */
+function stackCacheScene() {
+  const house = houseScene();
+  let project = house.project;
+  const doors = {};
+  const marks = {};
+  for (const [name, schemeId] of [
+    ["first", house.first],
+    ["second", house.second],
+    ["third", house.third],
+  ]) {
+    const wall = wallsOnScheme(project, schemeId)[0];
+    const put = addOpening(project, {
+      wallId: wall.id,
+      kind: "door",
+      atMm: 900,
+      widthMm: 800,
+      heightMm: 2000,
+      heightAboveFloorMm: 0,
+      hinge: "start",
+      swing: "left",
+    });
+    project = put.project;
+    doors[name] = put.opening.id;
+    const mark = addMark(project, {
+      schemeId,
+      typeId: project.markTypes[0].id,
+      points: [planMmToFraction(project, schemeId, { x: 0, y: 0 })],
+    });
+    project = mark.project;
+    marks[name] = mark.marks[0].id;
+  }
+  return { ...house, project, doors, marks };
+}
+
+/** Подпись грани: место, цвет, ярусы и хозяева — всё, чем она попадает в кадр. */
+const faceSign = (face) =>
+  [
+    face.line ? "l" : "f",
+    face.rgb,
+    face.layer,
+    face.markId || "-",
+    face.doorId || "-",
+    face.channel === undefined || face.channel === null ? "-" : face.channel,
+    face.floor === undefined || face.floor === null ? "-" : face.floor,
+    face.both ? "b" : "-",
+    face.p.map((point) => [point.x, point.y, point.z].map((v) => Math.round(v * 1000) / 1000 + 0).join(",")).join(";"),
+  ].join("|");
+
+/** Многоугольник кадра: место на экране, цвет и хозяева. */
+const shotSign = (polygon) =>
+  [
+    polygon.xy.map((v) => Math.round(v * 100) / 100 + 0).join(","),
+    polygon.fill,
+    polygon.stroke || "-",
+    polygon.layer,
+    polygon.pick || "-",
+    polygon.door || "-",
+    polygon.channel === undefined || polygon.channel === null ? "-" : polygon.channel,
+  ].join("|");
+
+/** Сцена к сцене: грани, кадр с четырёх ракурсов и поля, за которые держится ходьба. */
+function sameStack(kept, plain, what) {
+  assert.equal(kept.faces.length, plain.faces.length, what + ": граней стало другое число");
+  for (let at = 0; at < kept.faces.length; at += 1) {
+    assert.equal(faceSign(kept.faces[at]), faceSign(plain.faces[at]), what + ": грань " + at + " разошлась");
+  }
+  const box = { width: 320, height: 240 };
+  const bounds = kept.stackMm.boundsMm;
+  const middle = { x: (bounds.minX + bounds.maxX) / 2, y: (bounds.minY + bounds.maxY) / 2 };
+  const eyes = [
+    { at: { ...middle, z: 1500 }, yaw: 0.6, pitch: -0.1 },
+    { at: { ...middle, z: 1500 }, yaw: 2.9, pitch: 0.4 },
+    { at: { x: bounds.minX - 9000, y: bounds.minY - 9000, z: kept.stackMm.topMm + 4000 }, yaw: 0.78, pitch: -0.5 },
+    { at: { ...middle, z: kept.stackMm.topMm + 6000 }, yaw: 0, pitch: -Math.PI / 2 + 0.001 },
+  ];
+  for (const camera of eyes) {
+    const first = volumeFrame(kept, camera, box).map(shotSign);
+    const second = volumeFrame(plain, camera, box).map(shotSign);
+    assert.deepEqual(first, second, what + ": кадр разошёлся (yaw " + camera.yaw + ")");
+  }
+  for (const field of ["solids", "rooms", "marks", "stairs", "doors", "sheers", "sunSpots", "shadowBoxes"]) {
+    assert.equal((kept[field] || []).length, (plain[field] || []).length, what + ": поле " + field + " разошлось");
+  }
+  assert.deepEqual(kept.stackMm, plain.stackMm, what + ": габарит стопки разошёлся");
+  assert.equal(kept.ownFloor, plain.ownFloor, what + ": свой этаж разошёлся");
+}
+
+const stackOf = (project, schemeId, options, was = null) =>
+  volumeStackScene(project, volumeFloorPlan(project, schemeId), (id) => options(id), was);
+
+test("открытая дверь пересобирает свой этаж, а чужие берутся готовыми (таск 232)", () => {
+  const house = stackCacheScene();
+  const shut = () => ({ openDoorIds: new Set(), openCurtainIds: new Set(), hiddenObjectIds: [] });
+  const first = stackOf(house.project, house.first, shut);
+  assert.equal(first.stackParts.length, 3, "три этажа — три части");
+  const was = first.stackParts.map((part) => ({ part, faces: part.sub.faces, schemeId: part.schemeId }));
+  const open = () => ({ openDoorIds: new Set([house.doors.first]), openCurtainIds: new Set(), hiddenObjectIds: [] });
+  const after = stackOf(house.project, house.first, open, first);
+  // Свой этаж собран заново: и часть, и её грани — новые.
+  assert.notEqual(after.stackParts[0], was[0].part, "этаж с открытой дверью обязан собраться заново");
+  assert.notEqual(after.stackParts[0].sub.faces, was[0].faces);
+  // Чужие — те же части и те же грани, до объекта включительно.
+  for (const at of [1, 2]) {
+    assert.equal(after.stackParts[at], was[at].part, "этаж " + at + " пересобран, а менялось не у него");
+    assert.equal(after.stackParts[at].sub.faces, was[at].faces);
+  }
+  // И собранное из готовых совпадает с собранным заново — грань в грань.
+  sameStack(after, stackOf(house.project, house.first, open), "открытая дверь своего этажа");
+});
+
+test("дверь чужого этажа трогает только его: общее множество не пересобирает всех", () => {
+  const house = stackCacheScene();
+  const shut = () => ({ openDoorIds: new Set(), openCurtainIds: new Set(), hiddenObjectIds: [] });
+  const first = stackOf(house.project, house.first, shut);
+  const was = first.stackParts.map((part) => part);
+  // Открытые двери приходят **одним множеством на все этажи**: спроси его
+  // целиком — и дверь второго этажа пересобрала бы первый и третий.
+  const open = () => ({ openDoorIds: new Set([house.doors.second]), openCurtainIds: new Set(), hiddenObjectIds: [] });
+  const after = stackOf(house.project, house.first, open, first);
+  assert.equal(after.stackParts[0], was[0], "первый этаж пересобран из-за чужой двери");
+  assert.notEqual(after.stackParts[1], was[1], "второй этаж — тот, у кого дверь, и он обязан собраться заново");
+  assert.equal(after.stackParts[2], was[2], "третий этаж пересобран из-за чужой двери");
+  sameStack(after, stackOf(house.project, house.first, open), "открытая дверь чужого этажа");
+});
+
+test("смена этажа переставляет стопку, а не пересобирает её (таск 232)", () => {
+  const house = stackCacheScene();
+  const shut = () => ({ openDoorIds: new Set(), openCurtainIds: new Set(), hiddenObjectIds: [] });
+  const first = stackOf(house.project, house.first, shut);
+  const was = first.stackParts.map((part) => ({ part, faces: part.sub.faces }));
+  const second = stackOf(house.project, house.second, shut, first);
+  // Ни одного этажа не собрано заново: сменилась только база отсчёта.
+  for (let at = 0; at < 3; at += 1) {
+    assert.equal(second.stackParts[at], was[at].part, "этаж " + at + " собран заново, а менялась только база");
+    assert.equal(second.stackParts[at].sub.faces, was[at].faces);
+  }
+  sameStack(second, stackOf(house.project, house.second, shut), "поднялись на второй этаж");
+  // И обратно: перенос точен в обе стороны, вместе с деревом порядка.
+  const back = stackOf(house.project, house.first, shut, second);
+  sameStack(back, stackOf(house.project, house.first, shut), "вернулись на первый этаж");
+  // Третий заход — через два этажа сразу.
+  sameStack(
+    stackOf(house.project, house.third, shut, back),
+    stackOf(house.project, house.third, shut),
+    "ушли на третий этаж",
+  );
+});
+
+test("хозяева у граней того этажа, на котором стоишь, — и ярлык переставляется сам", () => {
+  const house = stackCacheScene();
+  const shut = () => ({ openDoorIds: new Set(), openCurtainIds: new Set(), hiddenObjectIds: [] });
+  const stack = stackOf(house.project, house.first, shut);
+  const marked = (built, markId) => built.faces.filter((face) => face.markId === markId);
+  // Грани носят свой этаж, а ключи при них целы: ничего не снято.
+  assert.ok(marked(stack, house.marks.second).length > 0, "метка второго этажа в сцене есть");
+  assert.equal(
+    marked(stack, house.marks.second).every((face) => face.floor === house.second),
+    true,
+    "и каждая её грань носит свой этаж",
+  );
+  assert.equal(stack.ownFloor, house.first);
+  // Хозяева достаются кадру только со своего этажа.
+  const box = { width: 320, height: 240 };
+  const picks = (built) => {
+    const camera = { at: { x: 0, y: 0, z: built.stackMm.topMm + 9000 }, yaw: 0, pitch: -Math.PI / 2 + 0.001 };
+    return new Set(volumeFrame(built, camera, box).map((polygon) => polygon.pick).filter(Boolean));
+  };
+  const faceMine = (built, markId) => marked(built, markId).every((face) => volumeFaceMine(face, built.ownFloor));
+  assert.equal(faceMine(stack, house.marks.first), true, "свой этаж — хозяева свои");
+  assert.equal(faceMine(stack, house.marks.second), false, "чужой этаж — хозяев нет");
+  assert.equal(picks(stack).has(house.marks.second), false, "метка чужого этажа в прицел не идёт");
+  // Поднялись — ярлыки на месте, а хозяевами стал второй этаж. Ни одной грани
+  // для этого не пересобрано.
+  const up = stackOf(house.project, house.second, shut, stack);
+  assert.equal(up.ownFloor, house.second);
+  assert.equal(faceMine(up, house.marks.second), true, "поднялись — хозяева перешли с нами");
+  assert.equal(faceMine(up, house.marks.first), false, "а оставленный этаж стал чужим");
+  assert.equal(picks(up).has(house.marks.first), false, "метка покинутого этажа в прицел не идёт");
+});
+
+test("ключ протухает сам: правка объекта, фильтр и спрятанная вещь собирают этаж заново", () => {
+  const house = stackCacheScene();
+  const shut = () => ({ openDoorIds: new Set(), openCurtainIds: new Set(), hiddenObjectIds: [] });
+  const first = stackOf(house.project, house.first, shut);
+  // Правка объекта — новый объект, и сверка ссылкой это видит: собирается всё.
+  const edited = setSchemeWallHeight(house.project, house.second, 3300).project;
+  const after = stackOf(edited, house.first, shut, first);
+  for (let at = 0; at < 3; at += 1) {
+    assert.notEqual(after.stackParts[at], first.stackParts[at], "этаж " + at + " взят готовым после правки объекта");
+  }
+  sameStack(after, stackOf(edited, house.first, shut), "объект поправили");
+  // Фильтр меток: список собран заново, и сверка идёт поштучно.
+  const empty = stackOf(house.project, house.first, () => ({ marks: [] }), stackOf(house.project, house.first, shut));
+  sameStack(empty, stackOf(house.project, house.first, () => ({ marks: [] })), "фильтр убрал метки");
+  // Два раза подряд без правок — ни одной пересборки.
+  const idle = stackOf(house.project, house.first, shut, first);
+  const twice = stackOf(house.project, house.first, shut, idle);
+  for (let at = 0; at < 3; at += 1) assert.equal(twice.stackParts[at], idle.stackParts[at]);
+  sameStack(twice, stackOf(house.project, house.first, shut), "ничего не менялось");
+});
+
+test("двусвет слипает этажи в одно дерево — и готовыми они берутся так же", () => {
+  const house = stackCacheScene();
+  // Так собран двусвет (таск 209): у комнаты сверху снят пол, комнате снизу
+  // задана высота в два этажа. Тела этажей от этого перекрываются по вертикали,
+  // и дерево порядка у них **одно на всех** (`volumeOrderStack`). Это случай
+  // объекта заказчика, и готовым этаж берётся в нём так же.
+  const off = setRoomFloor(house.project, house.secondRoomId, false).project;
+  const project = setRoomWallHeight(off, house.firstRoomId, 5800).project;
+  const shut = () => ({ openDoorIds: new Set(), openCurtainIds: new Set(), hiddenObjectIds: [] });
+  const first = stackOf(project, house.first, shut);
+  assert.deepEqual(first.stackParts[0].pack, [0, 1], "двусвет слепил первый этаж со вторым");
+  assert.equal(first.stackParts[1].pack, null, "у слипшегося этажа своего дерева нет");
+  const was = first.stackParts.map((part) => ({ part, faces: part.sub.faces, tree: part.tree }));
+  // Смена этажа: пачка уехала целиком и одинаково — дерево уехало с ней.
+  const up = stackOf(project, house.second, shut, first);
+  for (let at = 0; at < 3; at += 1) assert.equal(up.stackParts[at], was[at].part, "этаж " + at + " собран заново");
+  assert.equal(up.stackParts[0].tree, was[0].tree, "дерево пачки то же — его переставили");
+  sameStack(up, stackOf(project, house.second, shut), "двусвет: поднялись на второй этаж");
+  // Открытая дверь своего этажа: у пачки дерево одно, и оно строится заново —
+  // зато грани чужих этажей остаются как были.
+  const open = () => ({ openDoorIds: new Set([house.doors.second]), openCurtainIds: new Set(), hiddenObjectIds: [] });
+  const after = stackOf(project, house.second, open, up);
+  assert.equal(after.stackParts[0].sub.faces, was[0].faces, "грани первого этажа пересобраны напрасно");
+  assert.notEqual(after.stackParts[0].tree, was[0].tree, "дерево пачки обязано собраться заново");
+  sameStack(after, stackOf(project, house.second, open), "двусвет: открыли дверь");
+});
+
+test("G68: сцена из готовых этажей не меняет объект ни одним полем (таск 232)", () => {
+  const house = stackCacheScene();
+  const before = JSON.stringify(house.project);
+  const shut = () => ({ openDoorIds: new Set(), openCurtainIds: new Set(), hiddenObjectIds: [] });
+  let built = stackOf(house.project, house.first, shut);
+  built = stackOf(house.project, house.second, shut, built);
+  built = stackOf(house.project, house.second, () => ({ openDoorIds: new Set([house.doors.second]) }), built);
+  built = stackOf(house.project, house.third, shut, built);
+  built = stackOf(house.project, house.first, shut, built);
+  assert.equal(JSON.stringify(house.project), before, "объект изменился — это запрещено прямо (G68)");
 });
 
 // ——— прибытие по лестнице (дефект D58) ——————————————————————————————————
@@ -7027,6 +7283,11 @@ function byFloor(stack, baseMm) {
     order: undefined,
     faces: stack.faces.map((face) => ({
       ...face,
+      // Ярлык этажа читается из `pick` кадра, а его гасит чужой этаж грани
+      // (таск 232). На стенде этаж назван ярлыком, и пометка сцены тут только
+      // помешала бы: без этой строки грани чужого этажа пришли бы в кадр без
+      // ярлыка, и проба увидела бы пустоту.
+      floor: undefined,
       markId: Math.max(...face.p.map((point) => point.z)) < baseMm ? "низ" : "верх",
     })),
   };
