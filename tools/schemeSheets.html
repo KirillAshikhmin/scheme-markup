@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <title>Оснастка инструмента — листы объекта</title>
+    <!-- Стили сборки берутся как есть: в них @font-face чертёжного шрифта и
+         переменная `--font-gost`, у которой холст спрашивает начертание. Своего
+         объявления шрифта здесь нет — второе разошлось бы с первым. -->
+    <link rel="stylesheet" href="/src/styles.css" />
+    <style>
+      body {
+        margin: 0;
+        padding: 24px;
+        font: 14px system-ui, sans-serif;
+      }
+    </style>
+  </head>
+  <body>
+    <p id="say">Оснастка инструмента (`tools/scheme.mjs`). Страница служебная: кнопок нет, данные не пишутся.</p>
+    <script type="module">
+      // ——— охрана по адресу ————————————————————————————————————————————
+      //
+      // Страницу поднимает `tools/schemeSheets.mjs` на своём порте и сам же
+      // говорит ей этот адрес. Не совпал — не делаем ничего: в репозитории
+      // работает несколько агентов, у каждого свой порт, и скрипт, попавший в
+      // чужую вкладку, уже трижды стоил работы (AGENTS.md).
+      const home = new URLSearchParams(location.search).get("home");
+      const guarded = location.hostname === "127.0.0.1" && home === location.origin;
+      const node = document.getElementById("say");
+      if (!guarded) {
+        node.textContent = "Чужой адрес: оснастка ничего не делает.";
+        throw new Error("оснастка инструмента: адрес не тот, которым её подняли");
+      }
+
+      const { unpackProject } = await import("/src/projectFile.js");
+      const model = await import("/src/model.js");
+      const exporter = await import("/src/exporter.js");
+      const volume = await import("/src/volume.js");
+      const clock = await import("/src/clockMath.js");
+      const { strings } = await import("/src/strings.js");
+
+      const say = (line) => {
+        node.textContent = line;
+        return fetch("/say", { method: "POST", body: line });
+      };
+      const put = (name, blob) => fetch("/out?name=" + encodeURIComponent(name), { method: "POST", body: blob });
+
+      /** Подложка схемы — та же дверь, которой её берёт архив всех схем. */
+      async function planImage(images, scheme, job) {
+        const blob = exporter.exportSheetPlan(images, scheme, { plan: job.plan });
+        return blob ? createImageBitmap(blob) : null;
+      }
+
+      /** Стороны стен схемы: все, одного помещения или одной стены по имени. */
+      function sidesOf(project, schemeId, job) {
+        const plan = model.elevationPlan(project, schemeId);
+        const all = [
+          ...plan.rooms.map((room) => ({ room: room.name, sides: room.sides })),
+          ...(plan.loose.length > 0 ? [{ room: strings.elevationSheet.loose, sides: plan.loose }] : []),
+        ];
+        const byRoom = job.roomId
+          ? all.filter((item) =>
+              plan.rooms.some((room) => room.roomId === job.roomId && room.name === item.room),
+            )
+          : all;
+        if (!job.wall) return byRoom;
+        const needle = String(job.wall).toLowerCase();
+        return byRoom
+          .map((item) => ({
+            room: item.room,
+            sides: item.sides.filter((side) =>
+              String(model.wallName(project, side.wallId) || "").toLowerCase().includes(needle),
+            ),
+          }))
+          .filter((item) => item.sides.length > 0);
+      }
+
+      async function run() {
+        const job = await (await fetch("/job.json")).json();
+        const blob = await (await fetch("/object.zip")).blob();
+        const { project, images } = await unpackProject(blob);
+        await say("объект «" + project.name + "» прочитан: " + project.marks.length + " меток");
+
+        for (const schemeId of job.schemeIds) {
+          const scheme = model.findScheme(project, schemeId);
+          if (!scheme) throw new Error("в объекте нет схемы " + schemeId);
+          const filter = job.roomId ? { roomId: job.roomId } : null;
+          const common = {
+            area: "all",
+            scale: job.scale,
+            legend: job.legend,
+            outlines: true,
+            links: false,
+            mono: job.mono,
+            filter,
+            drawing: true,
+          };
+
+          if (job.kind === "plan") {
+            const image = await planImage(images, scheme, job);
+            await say("рисую план «" + scheme.name + "»");
+            const png = await exporter.schemePng(project, scheme, image, common);
+            await put(exporter.exportFileName(project, scheme.name, "png"), png);
+            continue;
+          }
+
+          if (job.kind === "gost") {
+            const image = await planImage(images, scheme, job);
+            const layout = exporter.gostSchemeSheet(project, scheme, {
+              area: "all",
+              filter,
+              format: job.format || undefined,
+              orientation: job.orientation || undefined,
+            });
+            const sheetName = layout.sheet.format + (layout.sheet.orientation === "landscape" ? " поперёк" : "");
+            await say("лист ГОСТ «" + scheme.name + "»: " + sheetName + ", масштаб " + layout.scaleText);
+            const png = await exporter.gostSchemePng(project, scheme, image, {
+              ...common,
+              layout,
+              format: job.format || undefined,
+              building: model.projectSite(project).address || "",
+            });
+            await put(exporter.exportFileName(project, "ГОСТ " + layout.sheet.format + " — " + scheme.name, "png"), png);
+            continue;
+          }
+
+          if (job.kind === "elevation") {
+            const groups = sidesOf(project, schemeId, job);
+            if (groups.length === 0) throw new Error(strings.elevationSheet.nothing);
+            for (const group of groups) {
+              const elevations = model.wallElevations(project, group.sides);
+              if (elevations.length === 0) continue;
+              await say("развёртки: " + group.room + ", сторон " + elevations.length);
+              const sheets = await exporter.elevationSheets(project, elevations, {
+                gost: true,
+                format: job.format || undefined,
+                scale: job.scale,
+                mono: job.mono,
+                views: true,
+                grow: false,
+                building: group.room,
+                drawing: [scheme.name, strings.elevationSheet.drawing].filter(Boolean).join(" · "),
+              });
+              for (let index = 0; index < sheets.length; index += 1) {
+                // Что отличает лист — **впереди**: имя режется по шестидесятому
+                // знаку (`projectFileBase`), и у схемы с длинным именем помещение
+                // до него не доживает.
+                const part = [group.room, strings.elevationSheet.button, scheme.name].filter(Boolean).join(" — ");
+                const tail = sheets.length > 1 ? " " + (index + 1) : "";
+                await put(exporter.exportFileName(project, part + tail, "png"), sheets[index]);
+              }
+            }
+            continue;
+          }
+
+          if (job.kind === "volume") {
+            // Кадр собирается теми же руками, что в окне объёма: сцена,
+            // снимок часа, тень дома и солнечные пятна приходят готовыми, а
+            // кадр их только выкладывает. Своего рисования здесь нет.
+            const scene = volume.volumeScene(project, schemeId, { roofOff: job.roofOff === true });
+            if (!scene || scene.empty) throw new Error("у схемы нет чертежа — объём рисовать нечем");
+            const site = volume.volumeSiteOf(project);
+            const day = clock.volumeDayNumberOf(job.date ? new Date(job.date) : new Date());
+            const times = clock.volumeDayTimes(site, clock.volumeDayDateOf(day));
+            const mood = volume.volumeMood({
+              minutes: job.minutes,
+              times,
+              topDeg: site.topDeg,
+              kind: job.backdrop || undefined,
+            });
+            const box = { width: job.size.width, height: job.size.height };
+            const canvas = document.createElement("canvas");
+            canvas.width = box.width;
+            canvas.height = box.height;
+            const ctx = canvas.getContext("2d");
+            const camera = job.camera;
+            await say(
+              "кадр объёма: камера " +
+                Math.round(camera.at.x) +
+                ", " +
+                Math.round(camera.at.y) +
+                ", " +
+                Math.round(camera.at.z) +
+                " мм; граней в сцене " +
+                scene.faces.length,
+            );
+            volume.volumeDrawBackdrop(ctx, box, camera, mood, scene.landMm);
+            const shadow = volume.volumeShadowFaces(scene.shadowBoxes, mood.shadow);
+            const spots = volume.volumeSunSpotFaces(scene.sunSpots, mood.shadow);
+            const polygons = volume.volumeFrame(scene, camera, box, [...shadow, ...spots], mood.tint);
+            volume.volumeDraw(ctx, polygons);
+            volume.volumeDrawBackdropNear(ctx, box, camera, mood, scene.landMm);
+            const png = await exporter.viewPng(canvas, exporter.EXPORT_SCREEN_DPI);
+            await put(exporter.exportFileName(project, "объём — " + scheme.name, "png"), png);
+            continue;
+          }
+
+          throw new Error("оснастка не знает задания: " + job.kind);
+        }
+      }
+
+      try {
+        await run();
+        await say("готово");
+        await fetch("/done", { method: "POST" });
+      } catch (error) {
+        await fetch("/fail", { method: "POST", body: String((error && error.stack) || error) });
+      }
+    </script>
+  </body>
+</html>
