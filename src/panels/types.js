@@ -50,7 +50,7 @@ import { lineStyleIcon, shapeIcon, typeIcon, typeSignIcon, typeSignPlan } from "
 import { canvasCommit } from "../canvas.js";
 import { colorPickerButton } from "./colorPicker.js";
 import { getSetting, setSetting } from "../store.js";
-import { uiButton, uiConfirm, uiEl, uiIconButton, uiModal, uiPickCard } from "./ui.js";
+import { uiButton, uiConfirm, uiEl, uiIconButton, uiModal, uiPickCard, uiSignCell } from "./ui.js";
 import { openEquipmentWindow } from "./equipment.js";
 // Сетка плиток с картинками — готовый кирпич окна выбора вещи (таск 187), и
 // второй её сборки в справочнике быть не должно: разойдись они, человек видел
@@ -292,13 +292,13 @@ export function openTypesShapePicker({ shape, color, allowInherit, inheritShape 
 const TYPES_LINE_CELL = { size: 30, length: 140 };
 const TYPES_LINE_BUTTON = { size: 26, length: 56 };
 // Значок в начале строки справочника: у точечного типа фигура, у линейного —
-// образец линии. Ширина у них общая и задана в CSS (`.dict__badge`), а холсту
+// образец линии. Клетка общая (`uiSignCell`, таск 233), а холсту
 // нужны свои числа: сплющить отрезок до ширины фигуры нельзя — точечную линию
 // от штрихпунктирной в 26px не отличить. Поэтому образец рисуется во всю
 // клетку, а фигура садится в клетку той же ширины по центру.
 const TYPES_BADGE = { size: 20, length: 48 };
 // Значок строки окна «Добавить из общей базы»: та же пара мер и та же клетка
-// постоянной ширины (`.catalog__icon`), что в справочнике, — линейный тип базы
+// постоянной ширины (`uiSignCell`), что в справочнике, — линейный тип базы
 // рисуется линией, а не точкой (D31).
 const TYPES_CATALOG_ICON = { size: 20, length: 44 };
 
@@ -860,9 +860,9 @@ export function openTypesCatalog(project, template) {
           // Знак категории — фигура: вида у категории нет, она задаёт
           // умолчание и точечным типам, и линейным. Клетка та же, что у строк
           // типов, — иначе названия категорий и кодов стоят не в колонку.
-          uiEl("span", { class: "catalog__icon" }, [
-            shapeIcon(group.category.shape, group.category.color, TYPES_CATALOG_ICON.size - 2),
-          ]),
+          uiSignCell(shapeIcon(group.category.shape, group.category.color, TYPES_CATALOG_ICON.size - 2), {
+            length: TYPES_CATALOG_ICON.length,
+          }),
           name,
         ]),
       );
@@ -888,7 +888,7 @@ export function openTypesCatalog(project, template) {
             // этой строки в объекте ещё нет — её и предлагают добавить. То же
             // расхождение, что и в окне выбора (D31): линейные типы базы
             // рисовались точками, хотя их вид в записи указан.
-            uiEl("span", { class: "catalog__icon" }, [
+            uiSignCell(
               typeSignIcon(
                 typeSignPlan({
                   kind: type.kind,
@@ -899,7 +899,8 @@ export function openTypesCatalog(project, template) {
                 TYPES_CATALOG_ICON.size,
                 TYPES_CATALOG_ICON.length,
               ),
-            ]),
+              { length: TYPES_CATALOG_ICON.length },
+            ),
             uiEl("span", { class: "catalog__code", text: type.code }),
             uiEl("span", { class: "catalog__name", text: type.name }),
           ]),
@@ -1098,9 +1099,10 @@ export function openTypesDictionary(api) {
     // тот же, что в окне выбора типа и на плашке выбранного (D31): здесь было
     // верно, а там нет, и расхождение жило ровно потому, что рисовальщиков
     // было три.
-    const badge = uiEl("span", { class: "dict__badge" }, [
-      typeIcon(project(), type.id, TYPES_BADGE.size, TYPES_BADGE.length),
-    ]);
+    const badge = uiSignCell(typeIcon(project(), type.id, TYPES_BADGE.size, TYPES_BADGE.length), {
+      length: TYPES_BADGE.length,
+      cell: "dict__badge",
+    });
     return uiEl("div", { class: "dict__row" }, [
       badge,
       uiEl("input", {
@@ -1297,9 +1299,10 @@ export function openTypesDictionary(api) {
       // Типа в объекте ещё нет — спрашивать `typeKindOf` не о чем, вид берётся
       // у черновика. Рисует знак тот же общий проход, что и строки заведённых
       // типов.
-      return uiEl("span", { class: "dict__badge" }, [
+      return uiSignCell(
         typeSignIcon(typeSignPlan(typesDraftStyle(draft, category())), TYPES_BADGE.size, TYPES_BADGE.length),
-      ]);
+        { length: TYPES_BADGE.length, cell: "dict__badge" },
+      );
     }
 
     function kindNode() {

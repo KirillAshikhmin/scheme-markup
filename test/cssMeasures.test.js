@@ -33,6 +33,12 @@ const ELEVATION_CSS = readFileSync(new URL("../src/panels/elevation.css", import
 const TYPE_PICKER_CSS = readFileSync(new URL("../src/panels/typePicker.css", import.meta.url), "utf8");
 const OBJECT_PICKER_CSS = readFileSync(new URL("../src/panels/objectPicker.css", import.meta.url), "utf8");
 const PANELS_CSS = readFileSync(new URL("../src/panels/panels.css", import.meta.url), "utf8");
+const CANVAS_CSS = readFileSync(new URL("../src/panels/canvas.css", import.meta.url), "utf8");
+const MARKS_CSS = readFileSync(new URL("../src/panels/marks.css", import.meta.url), "utf8");
+const TYPES_JS = readFileSync(new URL("../src/panels/types.js", import.meta.url), "utf8");
+// Мера значка справочника наружу не отдаётся (имя внутреннее), поэтому читается
+// текстом — тем же приёмом, которым сверяются мерки чертежа в measures.test.js.
+const TYPES_BADGE_LENGTH = Number((TYPES_JS.match(/TYPES_BADGE = \{ size: \d+, length: (\d+) \}/) || [])[1]);
 
 // Сколько раз кусок встречается в стиле. Ноль — расхождение: число в JS
 // поправили, а в стиле нет (или наоборот).
@@ -88,14 +94,36 @@ test("счёт колонок стиль не считает сам — он п�
   assert.ok(count(OBJECT_PICKER_CSS, "var(--picker-columns, 1)") >= 2);
 });
 
-test("клетка знака метки: ширина в стиле — та же, что длина образца линии", () => {
-  // Знак рисуется на холсте шириной `length`, а стоит в клетке шириной из
-  // стиля. Разойдись они — образец линии либо обрежется клеткой, либо вылезет
-  // из неё и сдвинет подпись только у линейных строк.
-  assert.equal(count(PANELS_CSS, "  width: " + UI_SIGN.length + "px;"), 1, "`.ui-sign` разошлась с UI_SIGN.length");
+test("клетка знака: правило одно, а число у неё спрашивают, а не повторяют", () => {
+  // Знак рисуется на холсте шириной `length`, а стоит в клетке. Разойдись
+  // они — образец линии либо обрежется клеткой, либо вылезет из неё и сдвинет
+  // подпись только у линейных строк. Записей этого правила было четыре (таск
+  // 228 завёл четвёртую), и свёл их таск 233: правило одно — `.ui-sign`, а
+  // ширину ему ставит JS переменной той же мерой, которой нарисован знак.
+  const at = PANELS_CSS.indexOf("\n.ui-sign {");
+  assert.ok(at >= 0, "правила клетки знака не стало");
+  const body = PANELS_CSS.slice(PANELS_CSS.indexOf("{", at) + 1, PANELS_CSS.indexOf("}", at));
+  assert.match(body, /width:\s*var\(--ui-sign-width\);/, "ширина клетки перестала спрашиваться: " + body.trim());
+  assert.doesNotMatch(body, /width:\s*\d/, "в клетку знака вернулось число: " + body.trim());
+  // Второй записи правила нет ни в одном стиле: ни у окна выбора, ни у
+  // справочника, ни у общей базы.
+  for (const [name, css] of [
+    ["canvas.css", CANVAS_CSS],
+    ["marks.css", MARKS_CSS],
+    ["panels.css", PANELS_CSS],
+  ]) {
+    for (const dead of [".picker__icon {", ".catalog__icon {", ".ui-sign--small {"]) {
+      assert.ok(!css.includes(dead), name + ": вторая запись клетки знака — " + dead);
+    }
+  }
+  // Числа живут в JS и в стиль не уезжают: сверяется, что они вообще есть и
+  // что у мелкой клетки она своя (поиск и свёрнутая карточка).
+  assert.ok(UI_SIGN.length > UI_SIGN_SMALL.length, "мелкая клетка перестала быть мельче");
+  // Свотч цвета в строке справочника — не клетка знака, а кнопка, и колонку он
+  // держит повтором: вот этот повтор и сверяется.
   assert.equal(
-    count(PANELS_CSS, "  width: " + UI_SIGN_SMALL.length + "px;"),
+    count(MARKS_CSS, "  width: " + TYPES_BADGE_LENGTH + "px;"),
     1,
-    "`.ui-sign--small` разошлась с UI_SIGN_SMALL.length",
+    "свотч цвета в строке справочника разошёлся с мерой значка",
   );
 });

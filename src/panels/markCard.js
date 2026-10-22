@@ -269,7 +269,9 @@ function mountMarkCard(host, api) {
             on: { click: () => flip(false) },
           },
           [
-            uiSignCell(typeSignIcon(model.sign, UI_SIGN_SMALL.size, UI_SIGN_SMALL.length), { small: true }),
+            uiSignCell(typeSignIcon(model.sign, UI_SIGN_SMALL.size, UI_SIGN_SMALL.length), {
+              length: UI_SIGN_SMALL.length,
+            }),
             uiEl("span", { class: "mark-card__label", text: model.label }),
             uiIcon("chevron"),
           ],

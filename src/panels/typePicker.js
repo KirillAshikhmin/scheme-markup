@@ -13,7 +13,7 @@
 // Окно открывается один раз на серию: выбранный тип «залипает» в панели
 // инструментов, и дальше метки ставятся кликами без единого диалога.
 import { strings, text } from "../strings.js";
-import { uiEl, uiButton, uiPickCard, uiPickKeys, uiPickSearch } from "./ui.js";
+import { uiEl, uiButton, uiPickCard, uiPickKeys, uiPickSearch, uiSignCell } from "./ui.js";
 import {
   COMMENT_TYPE_ID,
   addType,
@@ -41,9 +41,8 @@ const PICKER_ICON = { size: 22, length: 44 };
 // начертания (дефект D31 — здесь рисовались точки у всех). Вид спрашивает сам
 // `typeIcon` у `typeKindOf`: у объекта прежнего формата поля `kind` нет.
 function pickerIcon(project, typeId, size = PICKER_ICON.size) {
-  return uiEl("span", { class: "picker__icon" }, [
-    typeIcon(project, typeId, size, PICKER_ICON.length),
-  ]);
+  // Клетка знака — общая (`uiSignCell`, таск 233): своя у окна только мера.
+  return uiSignCell(typeIcon(project, typeId, size, PICKER_ICON.length), { length: PICKER_ICON.length });
 }
 
 // Больше шести колонок в ряд не ставим: седьмая ужимает остальные до каши.

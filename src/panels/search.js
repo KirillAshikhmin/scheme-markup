@@ -22,7 +22,9 @@ function searchRowNode(project, row, active, onPick, onHover) {
   const parts = [
     // Знак — общей лестницей (таск 228, находка 15): у линейного типа образец
     // его начертания, а не точка. Выдачу читают, сверяя её со справочником.
-    uiSignCell(typeIcon(project, row.typeId, UI_SIGN_SMALL.size, UI_SIGN_SMALL.length), { small: true }),
+    uiSignCell(typeIcon(project, row.typeId, UI_SIGN_SMALL.size, UI_SIGN_SMALL.length), {
+      length: UI_SIGN_SMALL.length,
+    }),
     uiEl("span", { class: "search__label", text: row.label }),
     uiEl("span", { class: "search__type", text: row.typeName }),
     uiEl("span", { class: "search__where", text: where }),
