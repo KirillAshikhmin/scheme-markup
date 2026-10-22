@@ -12,6 +12,15 @@ import { openingCatalogEntry, openingCatalogKinds } from "./openingCatalog.js";
 // реестре не названное, справочник принимать не должен — у типа оказалось бы
 // поле, не рисующее ничего.
 import { objectViewByName, objectViewForShape } from "./objectViews/registry.js";
+// Словарь устройств имитации (таск 01 сценариев) — данные сборки, как
+// каталоги выше: объект хранит у типа и метки только ключи вида и сервисов,
+// а форматы и состав живут там.
+import {
+  DEVICE_PARAMS,
+  deviceKind,
+  deviceKindForTemplateCode,
+  simServiceChars,
+} from "./sim/catalog.js";
 
 // Версия формата объекта. Поднимается, когда в project.json появляются поля,
 // без которых работа теряется. История:
@@ -42,6 +51,17 @@ import { objectViewByName, objectViewForShape } from "./objectViews/registry.js"
 // а слияние с чужой правкой выбросило бы её как ссылку в никуда. Поэтому
 // версия поднята — такой файл честно не откроется, а не потеряет вещи молча.
 export const FORMAT_VERSION = 5;
+
+// 6 — сценарии и привязки логики (`project.scenarios`, `project.logicBindings`,
+//     таск 01 сценариев). **Только у объекта, где они есть**: версию файла
+//     считает `projectFormatVersion` по содержимому. Объект без сценариев
+//     пишется версией 5 и читается прежней сборкой как раньше, а объект со
+//     сценариями прежняя сборка честно откажется открывать — иначе слияние
+//     папки (`merge.js`) молча выбросило бы незнакомые ей коллекции.
+//     Профиль устройства у типа и своя настройка метки (`type.device`,
+//     `mark.device`) версию не поднимают: прежняя сборка их не читает, но и не
+//     теряет — поля едут внутри типа и метки целиком.
+export const FORMAT_VERSION_MAX = 6;
 
 // Условные обозначения, которые предлагает сетка выбора. Их различают на
 // чёрно-белой распечатке в размере метки, поэтому семейства разведены контуром,
@@ -1786,7 +1806,9 @@ export function deleteScheme(project, schemeId) {
     .filter((scheme) => scheme.id !== schemeId)
     .map((scheme, index) => ({ ...scheme, order: index }));
   const placements = dropPlacements(project, removed);
-  const patch = { schemes, marks, groups, outlines, placements };
+  // Привязки логики меток схемы уходят вместе с метками (таск 01 сценариев);
+  // ссылки сценариев на них остаются и показываются «устройство удалено».
+  const patch = { schemes, marks, groups, outlines, placements, ...dropLogicBindings(project, removed) };
   // Списки чертежа попадают в патч только у того объекта, у которого они уже
   // есть: иначе удаление схемы дописало бы старому объекту три пустых списка
   // на пустом месте (G68).
@@ -3153,7 +3175,13 @@ export function deleteMark(project, markId) {
   const gone = new Set([markId]);
   const linked = dropControls(cleaned, gone);
   const placements = dropPlacements(project, gone);
-  return { project: withProject(project, { marks: linked, groups, placements }), deleted: mark };
+  // Привязки логики к метке уходят с ней, как единицы оборудования: стоять им
+  // негде. Ссылки сценариев на метку остаются (история 1.15) — блок
+  // становится красным, `validate` называет сценарий.
+  return {
+    project: withProject(project, { marks: linked, groups, placements, ...dropLogicBindings(project, gone) }),
+    deleted: mark,
+  };
 }
 
 // ——— копия метки —————————————————————————————————————————————————————
@@ -3201,6 +3229,11 @@ export function markSnapshot(project, markId) {
   // этих полей нет вовсе, и `undefined` в снимке доехал бы до копии.
   const sizes = markDimensions(mark);
   for (const field of MARK_DIMENSION_FIELDS) snapshot[field] = sizes[field];
+  // Своя настройка устройства едет в копию (таск 01 сценариев): такой же
+  // светильник с цветовой температурой рядом — та же настройка. Ключ — только
+  // у метки, где она есть: копия обычной метки обязана выйти обычной.
+  const device = markDeviceCopy(mark);
+  if (device) snapshot.device = device;
   return snapshot;
 }
 
@@ -3257,9 +3290,14 @@ export function pasteMark(project, snapshot, { schemeId, point } = {}) {
   // Про зажим у вставки своего слова нет, и оно ей не нужно: `markShapeAt`
   // двигает **всю** копию целиком, пока она не войдёт в план, — правило
   // старше таска 222 и лучше поточечного зажима, потому что не плющит форму.
-  if (Object.keys(patch).length === 0) return { project: result.project, mark: result.mark };
-  const updated = updateMark(result.project, result.mark.id, patch);
-  return { project: updated.project, mark: updated.mark };
+  let pasted = result;
+  if (Object.keys(patch).length > 0) pasted = updateMark(result.project, result.mark.id, patch);
+  if (deviceObject(snapshot.device)) {
+    const own = {};
+    for (const key of DEVICE_PROFILE_KEYS) if (deviceHas(snapshot.device, key)) own[key] = snapshot.device[key];
+    if (Object.keys(own).length > 0) pasted = setMarkDevice(pasted.project, pasted.mark.id, own);
+  }
+  return { project: pasted.project, mark: pasted.mark };
 }
 
 // ——— поиск по объекту ————————————————————————————————————————————————
@@ -3613,8 +3651,11 @@ export function changeMarkType(project, markId, typeId) {
   const counters = { ...project.counters };
   const number = nextNumber(project, counters, type.code);
   counters[type.code] = number;
+  // Своя настройка устройства была настройкой прежнего устройства (история
+  // 1.14): метка берёт профиль нового типа. Ctrl+Z возвращает её целиком —
+  // шаг истории хранит объект до правки.
   const marks = project.marks.map((item) =>
-    item.id === markId ? { ...item, typeId, number } : item,
+    item.id === markId ? markWithoutOwnDevice({ ...item, typeId, number }) : item,
   );
   return { project: withProject(project, { marks, counters }), mark: marks.find((m) => m.id === markId) };
 }
@@ -3727,6 +3768,7 @@ export function addType(
     kind = "point",
     channels = TYPE_CHANNELS_DEFAULT,
     view = null,
+    device,
   } = {},
 ) {
   const type = {
@@ -3754,6 +3796,11 @@ export function addType(
     if (!objectViewByName(view)) throw modelError("unknownView");
     type.view = String(view);
   }
+  // Профиль устройства — только там, где его задали (таск 01 сценариев): тип
+  // без поля выводит профиль сам, и пустого поля в объекте быть не должно.
+  // `null` — «без устройства», объект — профиль; мусор — отказ вслух.
+  const record = deviceRecordFromEdit(device);
+  if (record !== undefined) type.device = record;
   if (!findCategory(project, categoryId)) throw modelError("categoryNotFound");
   return { project: withProject(project, { markTypes: [...project.markTypes, type] }), type };
 }
@@ -3783,6 +3830,13 @@ export function updateType(project, typeId, patch = {}) {
     next.categoryId = patch.categoryId;
   }
   if (Object.prototype.hasOwnProperty.call(patch, "order")) next.order = patch.order;
+  // Профиль устройства — по правилу `setTypeDevice`: `undefined` снимает своё,
+  // `null` — «без устройства».
+  if (Object.prototype.hasOwnProperty.call(patch, "device")) {
+    const record = deviceRecordFromEdit(patch.device);
+    if (record === undefined) delete next.device;
+    else next.device = record;
+  }
 
   const markTypes = project.markTypes.map((type) => (type.id === typeId ? next : type));
   let counters = project.counters;
@@ -3926,6 +3980,10 @@ function catalogMerge(templates) {
         // Имя сверяется с реестром: шаблон мог быть сохранён давно, а
         // изображение — переименовано.
         view: objectViewByName(typeObjectView(type)) ? typeObjectView(type) : null,
+        // Профиль устройства едет из общей базы вместе с типом — но только
+        // свой, заданный руками в сохранённом шаблоне: встроенный справочник
+        // профилей не пишет, они выводятся по коду и у добавленного типа.
+        device: typeDeviceRecord(type),
         categoryKey,
       });
     }
@@ -3989,6 +4047,9 @@ export function catalogOffer(project, templates) {
       // типом. Строка окна рисует знак, а не изображение: на плане стоит знак,
       // и обещать в окне картинку развёртки значило бы показать не то.
       view: entry.view,
+      // Свой профиль устройства из сохранённого шаблона — только там, где он
+      // есть: строка встроенной базы профиль выводит и поля не несёт.
+      ...(entry.device ? { device: entry.device } : {}),
     });
   }
   return [...groups.values()].filter((group) => group.types.length > 0);
@@ -4060,6 +4121,7 @@ export function addTypesFromCatalog(project, templates, typeKeys) {
         blockMode: entry.blockMode,
         channels: entry.channels,
         view: entry.view,
+        device: entry.device || undefined,
       });
       next = added.project;
       types.push(added.type);
@@ -4078,6 +4140,418 @@ export function addTypesFromCatalog(project, templates, typeKeys) {
     next = deleteCategory(next, category.id).project;
   }
   return { project: acceptFromDictionary(next, known), types, categories, skipped };
+}
+
+// ——— устройство метки: профиль у типа, своя настройка у метки ———————————————
+//
+// Таск 01 сценариев (истории 1.3–1.16). Метка-устройство в имитации — это
+// **аксессуар** Sprut.Hub: упорядоченный список сервисов с характеристиками.
+// Описание аксессуара живёт у типа (**профиль**) и может быть поправлено у
+// конкретной метки (**своя настройка**); собирает аксессуар `sim/home.js`.
+//
+// **Профиль выводится, а не пишется** (G68). У типа без поля `device` профиль
+// берётся из таблицы «тип → профиль» спецификации по коду стартового
+// справочника (`deviceKindForTemplateCode`) — чтением, на каждый спрос. В
+// объект от этого не попадает ни байта: уже размеченный объект открывается
+// таким, каким был, а его профили при этом видны. Записывается поле только
+// правкой человека — `setTypeDevice`, `addType`/`updateType` с `device`.
+//
+// Формы записи (подробно — `interfaces.md`, «Данные в объекте»):
+//   type.device = {kind, services?, decoupled?, params?}  — вид обязателен,
+//     `"none"` — явно «без устройства»; без `services` берутся сервисы вида;
+//   mark.device = {kind?, services?, decoupled?, params?, doorId?} — ключи
+//     частичные: отсутствующий наследуется от типа.
+// Сервис — `{type, chars, name?, perChannel?}`; `perChannel` разворачивается
+// в сервис на каждый канал типа (клавиши ВВ, ВВВ), см. `deviceExpand`.
+
+export const DEVICE_KIND_NONE = "none";
+// Ключи своей настройки метки, которые составляют **профиль**. Дверь датчика
+// открытия (`doorId`) профилем не является: это место метки, а не устройство,
+// и «Вернуть как у типа» её не снимает.
+const DEVICE_PROFILE_KEYS = ["kind", "services", "decoupled", "params"];
+const DEVICE_SERVICE_NAME_MAX = 60;
+// Тип сервиса-клавиши: отметка «отвязана» имеет смысл только у неё (история 1.12).
+const DEVICE_KEY_SERVICE = "StatelessProgrammableSwitch";
+
+function deviceObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function deviceHas(source, key) {
+  return Object.prototype.hasOwnProperty.call(source, key) && source[key] !== undefined;
+}
+
+// Сервис профиля: `{type, chars, name?, perChannel?}` или `null`, если сервиса
+// словарь не знает. Характеристики приводятся к словарю: обязательные всегда,
+// необязательные — выбранные, в порядке словаря (он же порядок адресов).
+function deviceServiceFrom(raw) {
+  if (!deviceObject(raw)) return null;
+  const chars = simServiceChars(raw.type, raw.chars);
+  if (!chars) return null;
+  const service = { type: raw.type, chars };
+  const name = typeof raw.name === "string" ? raw.name.trim().slice(0, DEVICE_SERVICE_NAME_MAX) : "";
+  if (name) service.name = name;
+  if (raw.perChannel === true) service.perChannel = true;
+  return service;
+}
+
+function deviceServiceCopy(service) {
+  return {
+    type: service.type,
+    chars: [...service.chars],
+    ...(service.name ? { name: service.name } : {}),
+    ...(service.perChannel ? { perChannel: true } : {}),
+  };
+}
+
+// Строгий разбор — для правки человеком (ошибка вслух), терпимый — для
+// чтения объекта (мусор из файла читается как «не задано»).
+function deviceServicesFrom(raw, strict) {
+  if (!Array.isArray(raw)) {
+    if (strict) throw modelError("deviceServiceUnknown");
+    return null;
+  }
+  const services = [];
+  for (const item of raw) {
+    const service = deviceServiceFrom(item);
+    if (service) services.push(service);
+    else if (strict) throw modelError("deviceServiceUnknown");
+  }
+  return services;
+}
+
+function deviceDecoupledFrom(raw, strict) {
+  if (!Array.isArray(raw)) {
+    if (strict) throw modelError("deviceDecoupledInvalid", { max: TYPE_CHANNELS_MAX });
+    return null;
+  }
+  const keys = new Set();
+  for (const value of raw) {
+    if (Number.isInteger(value) && value >= 1 && value <= TYPE_CHANNELS_MAX) keys.add(value);
+    else if (strict) throw modelError("deviceDecoupledInvalid", { max: TYPE_CHANNELS_MAX });
+  }
+  return [...keys].sort((first, second) => first - second);
+}
+
+function deviceParamsFrom(raw, strict) {
+  if (!deviceObject(raw)) {
+    if (strict) throw modelError("deviceParamInvalid");
+    return null;
+  }
+  const params = {};
+  for (const [name, value] of Object.entries(raw)) {
+    const range = Object.prototype.hasOwnProperty.call(DEVICE_PARAMS, name) ? DEVICE_PARAMS[name] : null;
+    if (range && Number.isInteger(value) && value >= range.min && value <= range.max) params[name] = value;
+    else if (strict) throw modelError("deviceParamInvalid");
+  }
+  return params;
+}
+
+function deviceKindFrom(raw, strict) {
+  if (raw === DEVICE_KIND_NONE || (typeof raw === "string" && deviceKind(raw))) return raw;
+  if (strict) throw modelError("deviceKindUnknown");
+  return null;
+}
+
+// Запись профиля у типа — или `null`, если записи нет (мусор читается так же).
+function deviceRecord(raw, strict) {
+  if (!deviceObject(raw)) {
+    if (strict) throw modelError("deviceKindUnknown");
+    return null;
+  }
+  const kind = deviceKindFrom(raw.kind, strict);
+  if (!kind) return null;
+  if (kind === DEVICE_KIND_NONE) return { kind };
+  const record = { kind };
+  if (deviceHas(raw, "services")) {
+    const services = deviceServicesFrom(raw.services, strict);
+    if (services && services.length > 0) record.services = services;
+  }
+  if (deviceHas(raw, "decoupled")) {
+    const decoupled = deviceDecoupledFrom(raw.decoupled, strict);
+    if (decoupled && decoupled.length > 0) record.decoupled = decoupled;
+  }
+  if (deviceHas(raw, "params")) {
+    const params = deviceParamsFrom(raw.params, strict);
+    if (params && Object.keys(params).length > 0) record.params = params;
+  }
+  return record;
+}
+
+function deviceSame(first, second) {
+  return JSON.stringify(first === undefined ? null : first) === JSON.stringify(second === undefined ? null : second);
+}
+
+// Полный профиль из записи: сервисы вида там, где своих нет, параметры вида
+// под своими.
+function deviceProfile(record, derived) {
+  const kind = deviceKind(record.kind);
+  return {
+    kind: record.kind,
+    services: (record.services || kind.services).map(deviceServiceCopy),
+    decoupled: [...(record.decoupled || [])],
+    params: { ...kind.params, ...(record.params || {}) },
+    derived,
+  };
+}
+
+/**
+ * Своя запись профиля у типа, приведённая к словарю, — или `null`, если тип
+ * профиль не задавал (или в поле мусор). Её и только её везёт шаблон
+ * справочника: выведенный профиль в шаблон не пишется, он выведется и там.
+ */
+export function typeDeviceRecord(type) {
+  if (!type || type.device === undefined) return null;
+  return deviceRecord(type.device, false);
+}
+
+/**
+ * Профиль устройства типа: `{kind, services, decoupled, params, derived}` или
+ * `null` — тип устройством не является (щит, витая пара, комментарий, своё
+ * «без устройства»). `derived: true` — профиль выведен по коду стартового
+ * справочника, а не задан руками. Сервисы с `perChannel` здесь ещё не
+ * развёрнуты: число каналов — у метки (`markDeviceOf`).
+ */
+export function typeDeviceOf(project, typeId) {
+  const type = findType(project, typeId);
+  if (!type || typeId === COMMENT_TYPE_ID) return null;
+  const own = typeDeviceRecord(type);
+  if (own) return own.kind === DEVICE_KIND_NONE ? null : deviceProfile(own, false);
+  const key = deviceKindForTemplateCode(type.code);
+  if (!key || key === DEVICE_KIND_NONE) return null;
+  return deviceProfile({ kind: key }, true);
+}
+
+/** Задан ли профиль у типа руками (в том числе «без устройства»). */
+export function typeDeviceOwn(project, typeId) {
+  return typeDeviceRecord(findType(project, typeId)) !== null;
+}
+
+/**
+ * Профиль типа не угадать (история 1.7): своего нет, а код стартовому
+ * справочнику незнаком. Такой тип остаётся «без устройства» и попадает в
+ * список на правку — догадка сама не применяется.
+ */
+export function typeDeviceUnknown(project, typeId) {
+  const type = findType(project, typeId);
+  if (!type || typeId === COMMENT_TYPE_ID || typeDeviceRecord(type)) return false;
+  return deviceKindForTemplateCode(type.code) === null;
+}
+
+// Запись `device` для типа из правки: `undefined` — снять (профиль снова
+// выводится), `null` — «без устройства», объект — профиль.
+function deviceRecordFromEdit(profile) {
+  if (profile === undefined) return undefined;
+  if (profile === null) return { kind: DEVICE_KIND_NONE };
+  return deviceRecord(profile, true);
+}
+
+function typeWithDevice(type, record) {
+  const copy = { ...type };
+  if (record === undefined) delete copy.device;
+  else copy.device = record;
+  return copy;
+}
+
+/**
+ * Задать профиль типа: объект — профиль, `null` — «без устройства»,
+ * `undefined` — снять своё и вернуться к выведенному. Меняются все метки типа
+ * без своей настройки (история 1.8). Правка, которой нечего менять, отдаёт
+ * **тот же** объект: пустого шага истории быть не должно.
+ */
+export function setTypeDevice(project, typeId, profile) {
+  const type = requireType(project, typeId);
+  if (typeId === COMMENT_TYPE_ID) throw modelError("commentNoDevice");
+  const record = deviceRecordFromEdit(profile);
+  if (deviceSame(type.device, record)) return { project, type };
+  const markTypes = project.markTypes.map((item) => (item.id === typeId ? typeWithDevice(item, record) : item));
+  return { project: withProject(project, { markTypes }), type: markTypes.find((item) => item.id === typeId) };
+}
+
+// Своя настройка метки, приведённая к словарю: частичная запись или `null`.
+function markDeviceRecord(raw) {
+  if (!deviceObject(raw)) return null;
+  const record = {};
+  if (deviceHas(raw, "kind")) {
+    const kind = deviceKindFrom(raw.kind, false);
+    if (kind) record.kind = kind;
+  }
+  if (deviceHas(raw, "services")) {
+    const services = deviceServicesFrom(raw.services, false);
+    if (services && services.length > 0) record.services = services;
+  }
+  // Пустой список у метки законен: «у этой клавиши ничего не отвязано»
+  // перебивает отвязку, заданную у типа.
+  if (deviceHas(raw, "decoupled")) {
+    const decoupled = deviceDecoupledFrom(raw.decoupled, false);
+    if (decoupled) record.decoupled = decoupled;
+  }
+  if (deviceHas(raw, "params")) {
+    const params = deviceParamsFrom(raw.params, false);
+    if (params && Object.keys(params).length > 0) record.params = params;
+  }
+  if (raw.doorId === null || (typeof raw.doorId === "string" && raw.doorId)) record.doorId = raw.doorId;
+  return Object.keys(record).length > 0 ? record : null;
+}
+
+function markDeviceRecordOwn(record) {
+  return Boolean(record) && DEVICE_PROFILE_KEYS.some((key) => deviceHas(record, key));
+}
+
+/**
+ * Развернуть профиль по каналам: сервис с `perChannel` становится сервисом на
+ * каждый канал (`channel` 1…N), остальные — одним (`channel: null`). У клавиши
+ * (`StatelessProgrammableSwitch`) — отметка `decoupled` по списку профиля.
+ * Индекс сервиса в развёрнутом списке — его место, по нему сценарии и
+ * привязки ссылаются на сервис.
+ */
+export function deviceExpand(profile, channels) {
+  if (!profile) return null;
+  const count =
+    Number.isInteger(channels) && channels >= 1 ? Math.min(channels, TYPE_CHANNELS_MAX) : TYPE_CHANNELS_DEFAULT;
+  const decoupled = new Set(profile.decoupled || []);
+  const services = [];
+  for (const service of profile.services) {
+    const copies = service.perChannel ? count : 1;
+    for (let channel = 1; channel <= copies; channel += 1) {
+      const own = service.perChannel ? channel : null;
+      services.push({
+        type: service.type,
+        chars: [...service.chars],
+        ...(service.name ? { name: service.name } : {}),
+        channel: own,
+        decoupled: service.type === DEVICE_KEY_SERVICE && own !== null && decoupled.has(own),
+      });
+    }
+  }
+  return { ...profile, services };
+}
+
+/**
+ * Профиль устройства метки **без развёртки по каналам** — тот, что правят
+ * окна устройства: сервисы с `perChannel` в нём ещё одной строкой. Именно в
+ * этой форме сервисы и передаются в `setMarkDevice`/`setTypeDevice`:
+ * развёрнутый список (`markDeviceOf`) записал бы клавиши поштучно, без канала.
+ */
+export function markDeviceProfile(project, markId) {
+  const mark = findMark(project, markId);
+  if (!mark || markIsComment(mark)) return null;
+  const base = typeDeviceOf(project, mark.typeId);
+  const own = markDeviceRecord(mark.device);
+  let profile;
+  if (!markDeviceRecordOwn(own)) {
+    profile = base ? { ...base, own: false } : null;
+  } else {
+    const key = own.kind || (base ? base.kind : DEVICE_KIND_NONE);
+    if (key === DEVICE_KIND_NONE) return null;
+    const kind = deviceKind(key);
+    const same = base && base.kind === key ? base : null;
+    profile = {
+      kind: key,
+      services: (own.services || (same ? same.services : kind.services)).map(deviceServiceCopy),
+      decoupled: [...(own.decoupled || (same ? same.decoupled : []))],
+      params: { ...kind.params, ...(same ? same.params : {}), ...(own.params || {}) },
+      derived: false,
+      own: true,
+    };
+  }
+  return profile;
+}
+
+/**
+ * Профиль устройства метки: профиль типа под своей настройкой метки, каналы
+ * развёрнуты (`deviceExpand`). `null` — метка устройством не является.
+ * `own: true` — у метки своя настройка (история 1.9).
+ */
+export function markDeviceOf(project, markId) {
+  const profile = markDeviceProfile(project, markId);
+  if (!profile) return null;
+  return deviceExpand(profile, typeChannels(project, findMark(project, markId).typeId));
+}
+
+/** Есть ли у метки своя настройка устройства (дверь датчика не в счёт). */
+export function markDeviceOwn(project, markId) {
+  const mark = findMark(project, markId);
+  return Boolean(mark) && markDeviceRecordOwn(markDeviceRecord(mark.device));
+}
+
+function markDeviceValue(project, key, value) {
+  if (key === "kind") return deviceKindFrom(value, true);
+  if (key === "services") {
+    const services = deviceServicesFrom(value, true);
+    return services.length > 0 ? services : undefined;
+  }
+  if (key === "decoupled") return deviceDecoupledFrom(value, true);
+  if (key === "params") {
+    const params = deviceParamsFrom(value, true);
+    return Object.keys(params).length > 0 ? params : undefined;
+  }
+  // Дверь датчика открытия: `null` — связь снята рукой, строка — своя дверь.
+  if (value !== null && !(typeof value === "string" && findOpening(project, value))) {
+    throw modelError("deviceDoorInvalid");
+  }
+  return value;
+}
+
+/**
+ * Своя настройка метки (история 1.9). `patch` частичный: ключ со значением —
+ * задать, ключ с `undefined` — снять (наследовать от типа), отсутствующий —
+ * оставить. `patch === undefined` — «Вернуть как у типа»: снимается весь
+ * профиль, дверь датчика остаётся. Смена вида без своих сервисов снимает
+ * прежние свои сервисы — они были сервисами другого устройства.
+ */
+export function setMarkDevice(project, markId, patch) {
+  const mark = requireMark(project, markId);
+  if (markIsComment(mark)) throw modelError("commentNoDevice");
+  const current = deviceObject(mark.device) ? mark.device : null;
+  const next = current ? { ...current } : {};
+  if (patch === undefined) {
+    for (const key of DEVICE_PROFILE_KEYS) delete next[key];
+  } else {
+    if (!deviceObject(patch)) throw modelError("deviceKindUnknown");
+    for (const key of [...DEVICE_PROFILE_KEYS, "doorId"]) {
+      if (!Object.prototype.hasOwnProperty.call(patch, key)) continue;
+      const value = patch[key] === undefined ? undefined : markDeviceValue(project, key, patch[key]);
+      if (value === undefined) delete next[key];
+      else next[key] = value;
+    }
+    if (deviceHas(patch, "kind") && !Object.prototype.hasOwnProperty.call(patch, "services")) {
+      const before = markDeviceOf(project, markId);
+      if ((before ? before.kind : DEVICE_KIND_NONE) !== patch.kind) delete next.services;
+    }
+  }
+  const record = Object.keys(next).length > 0 ? next : undefined;
+  if (deviceSame(current || undefined, record)) return { project, mark };
+  const marks = project.marks.map((item) => {
+    if (item.id !== markId) return item;
+    const copy = { ...item };
+    if (record === undefined) delete copy.device;
+    else copy.device = record;
+    return copy;
+  });
+  return { project: withProject(project, { marks }), mark: marks.find((item) => item.id === markId) };
+}
+
+// Метка без своего профиля — для смены типа (история 1.14): своя настройка
+// была настройкой прежнего устройства. Дверь датчика остаётся — это место.
+function markWithoutOwnDevice(mark) {
+  if (!deviceObject(mark.device) || !DEVICE_PROFILE_KEYS.some((key) => key in mark.device)) return mark;
+  const device = { ...mark.device };
+  for (const key of DEVICE_PROFILE_KEYS) delete device[key];
+  const copy = { ...mark };
+  if (Object.keys(device).length > 0) copy.device = device;
+  else delete copy.device;
+  return copy;
+}
+
+// Что из своей настройки едет в копию метки: профиль — да (такой же
+// светильник рядом), дверь датчика — нет: копия стоит в другом месте.
+function markDeviceCopy(mark) {
+  const own = markDeviceRecord(mark.device);
+  if (!markDeviceRecordOwn(own)) return null;
+  const copy = {};
+  for (const key of DEVICE_PROFILE_KEYS) if (deviceHas(own, key)) copy[key] = clone(own[key]);
+  return copy;
 }
 
 // Все цвета объекта, которые уже чем-то заняты: и комнаты, и категории.
@@ -8870,6 +9344,302 @@ function dropPlacements(project, removed) {
     });
 }
 
+// ——— сценарии и привязки логики ————————————————————————————————————————————
+//
+// Таск 01 сценариев (раздел 7 спецификации). Две новые коллекции объекта:
+//
+//   project.scenarios     — сценарии трёх видов: блочный (`targets` — дерево
+//                           блоков «Если — Тогда — Иначе»), логический и
+//                           глобальный (`source` — текст JS Sprut.Hub);
+//   project.logicBindings — привязка логического сценария к сервису метки:
+//                           `{id, scenarioId, markId, service, options, active}`.
+//
+// Обе **необязательны**: у объекта прежней разметки их нет, и пустыми они не
+// заводятся — читаются терпимыми читателями, как `outlines` и чертёж. Дерево
+// блоков правит `scenarioTree.js` над значением сценария; здесь — только
+// хранение, порядок и связь с метками. Ссылки блоков на устройства — `markId`
+// и индекс сервиса: они переживают перенумерацию меток и приёмку файла
+// (`adoptLoadedProject` переприсваивает только `project.id`).
+//
+// Удаление метки привязки логики уносит с собой (как `placements`: стоять им
+// негде), а ссылки сценариев на метку **оставляет** — блок становится красным
+// «устройство удалено», а `validate` говорит об этом строкой
+// `scenarioDeviceMissing` (история 1.15).
+
+export const SCENARIO_KINDS = ["block", "logic", "global"];
+const SCENARIO_ORIGINS = ["js", "json"];
+const SCENARIO_NAME_MAX = 120;
+
+function scenariosList(project) {
+  return project && Array.isArray(project.scenarios) ? project.scenarios : [];
+}
+
+function logicBindingsList(project) {
+  return project && Array.isArray(project.logicBindings) ? project.logicBindings : [];
+}
+
+/** Сценарии объекта в порядке хранения (терпимо: у прежнего объекта — `[]`). */
+export function scenariosOf(project) {
+  return scenariosList(project);
+}
+
+/**
+ * Сценарии в порядке списка (поле `order`, при равенстве — порядок хранения).
+ * Единственный порядок сценариев в сборке: список режима, мини-план и журнал
+ * обходят их одинаково.
+ */
+export function scenariosInOrder(project) {
+  return scenariosList(project)
+    .map((scenario, index) => ({ scenario, index }))
+    .sort((a, b) => {
+      const first = Number.isFinite(a.scenario.order) ? a.scenario.order : a.index;
+      const second = Number.isFinite(b.scenario.order) ? b.scenario.order : b.index;
+      return first === second ? a.index - b.index : first - second;
+    })
+    .map((item) => item.scenario);
+}
+
+export function findScenario(project, scenarioId) {
+  return scenariosList(project).find((scenario) => scenario && scenario.id === scenarioId) || null;
+}
+
+function requireScenario(project, scenarioId) {
+  const scenario = findScenario(project, scenarioId);
+  if (!scenario) throw modelError("scenarioNotFound");
+  return scenario;
+}
+
+function scenarioName(value) {
+  const name = typeof value === "string" ? value.trim().slice(0, SCENARIO_NAME_MAX) : "";
+  return name || strings.sim.scenarioUntitled;
+}
+
+function scenarioFlag(value, fallback) {
+  return value === true || value === false ? value : fallback;
+}
+
+// Поля сценария из правки — по белому списку и с умолчаниями. Остальное в
+// `source` (`id`, `order`, `kind`) решает вызывающая команда.
+function scenarioFields(source, current) {
+  const has = (key) => Object.prototype.hasOwnProperty.call(source, key);
+  const kind = current.kind;
+  const next = { ...current };
+  if (has("name")) next.name = scenarioName(source.name);
+  if (has("active")) next.active = scenarioFlag(source.active, true);
+  if (has("onStart")) next.onStart = scenarioFlag(source.onStart, false);
+  if (has("sequential")) next.sequential = scenarioFlag(source.sequential, false);
+  if (has("description")) next.description = typeof source.description === "string" ? source.description : "";
+  if (kind === "block") {
+    if (has("targets")) next.targets = Array.isArray(source.targets) ? clone(source.targets) : [];
+  } else {
+    if (has("source")) next.source = typeof source.source === "string" ? source.source : "";
+    if (has("origin")) next.origin = SCENARIO_ORIGINS.includes(source.origin) ? source.origin : SCENARIO_ORIGINS[0];
+    if (has("fileName")) next.fileName = typeof source.fileName === "string" ? source.fileName : "";
+    if (has("template")) {
+      if (deviceObject(source.template)) next.template = clone(source.template);
+      else delete next.template;
+    }
+  }
+  return next;
+}
+
+function withScenarios(project, scenarios, extra = {}) {
+  return withProject(project, { scenarios, ...extra });
+}
+
+/**
+ * Добавить сценарий в конец списка: `{project, scenario}`. Вид обязателен
+ * (`block | logic | global`); id сохраняется, если он строка и не занят,
+ * иначе выдаётся новый.
+ */
+export function addScenario(project, scenario = {}) {
+  const source = deviceObject(scenario) ? scenario : {};
+  if (!SCENARIO_KINDS.includes(source.kind)) throw modelError("scenarioKindUnknown");
+  const list = scenariosList(project);
+  const id = typeof source.id === "string" && source.id && !findScenario(project, source.id) ? source.id : newId();
+  const base = {
+    id,
+    kind: source.kind,
+    name: scenarioName(source.name),
+    order: list.length,
+    active: true,
+    onStart: false,
+    sequential: false,
+    description: "",
+    ...(source.kind === "block" ? { targets: [] } : { source: "", origin: SCENARIO_ORIGINS[0], fileName: "" }),
+  };
+  const created = scenarioFields(source, base);
+  return { project: withScenarios(project, [...list, created]), scenario: created };
+}
+
+/**
+ * Правка сценария: поля из `patch` по белому списку; `id`, `kind` и `order`
+ * здесь не меняются (порядок — `moveScenario`). Нечего менять — тот же объект.
+ */
+export function updateScenario(project, scenarioId, patch = {}) {
+  const current = requireScenario(project, scenarioId);
+  const next = scenarioFields(deviceObject(patch) ? patch : {}, current);
+  if (JSON.stringify(next) === JSON.stringify(current)) return { project, scenario: current };
+  const scenarios = scenariosList(project).map((item) => (item === current ? next : item));
+  return { project: withScenarios(project, scenarios), scenario: next };
+}
+
+function scenariosRenumbered(list) {
+  return list.map((item, index) => (item.order === index ? item : { ...item, order: index }));
+}
+
+/**
+ * Удалить сценарий; его привязки логики уходят вместе с ним. Ссылки других
+ * сценариев на него («запустить сценарий») остаются — их покажет редактор.
+ */
+export function deleteScenario(project, scenarioId) {
+  const scenario = requireScenario(project, scenarioId);
+  const scenarios = scenariosRenumbered(scenariosInOrder(project).filter((item) => item !== scenario));
+  const extra = {};
+  if (Array.isArray(project.logicBindings)) {
+    extra.logicBindings = project.logicBindings.filter((binding) => binding.scenarioId !== scenarioId);
+  }
+  return { project: withScenarios(project, scenarios, extra), deleted: scenario };
+}
+
+/** Переставить сценарий на место `index` списка (0 — первым). */
+export function moveScenario(project, scenarioId, index) {
+  const scenario = requireScenario(project, scenarioId);
+  const ordered = scenariosInOrder(project);
+  const from = ordered.indexOf(scenario);
+  const rest = ordered.filter((item) => item !== scenario);
+  const target = Math.max(0, Math.min(rest.length, Number.isInteger(index) ? index : from));
+  rest.splice(target, 0, scenario);
+  const scenarios = scenariosRenumbered(rest);
+  const same = scenarios.length === scenariosList(project).length && scenarios.every((item, at) => item === scenariosList(project)[at]);
+  if (same) return { project, scenario };
+  return { project: withScenarios(project, scenarios), scenario: scenarios.find((item) => item.id === scenarioId) };
+}
+
+/** Привязки логики объекта (терпимо: у прежнего объекта — `[]`). */
+export function logicBindingsOf(project) {
+  return logicBindingsList(project);
+}
+
+export function findLogicBinding(project, bindingId) {
+  return logicBindingsList(project).find((binding) => binding && binding.id === bindingId) || null;
+}
+
+function requireLogicBinding(project, bindingId) {
+  const binding = findLogicBinding(project, bindingId);
+  if (!binding) throw modelError("logicBindingNotFound");
+  return binding;
+}
+
+function logicBindingChecked(project, binding) {
+  const scenario = requireScenario(project, binding.scenarioId);
+  if (scenario.kind !== "logic") throw modelError("logicBindingNotLogic");
+  requireMark(project, binding.markId);
+  if (!Number.isInteger(binding.service) || binding.service < 0) throw modelError("logicBindingService");
+  return binding;
+}
+
+/**
+ * Привязать логический сценарий к сервису метки: `{project, binding}`.
+ * `service` — индекс сервиса в развёрнутом профиле метки (`markDeviceOf`).
+ */
+export function addLogicBinding(project, { scenarioId, markId, service = 0, options = {}, active = true } = {}) {
+  const binding = logicBindingChecked(project, {
+    id: newId(),
+    scenarioId,
+    markId,
+    service,
+    options: deviceObject(options) ? clone(options) : {},
+    active: active !== false,
+  });
+  return { project: withProject(project, { logicBindings: [...logicBindingsList(project), binding] }), binding };
+}
+
+/** Правка привязки: `markId`, `service`, `options`, `active`. Нечего менять — тот же объект. */
+export function updateLogicBinding(project, bindingId, patch = {}) {
+  const current = requireLogicBinding(project, bindingId);
+  const source = deviceObject(patch) ? patch : {};
+  const has = (key) => Object.prototype.hasOwnProperty.call(source, key);
+  const next = { ...current };
+  if (has("markId")) next.markId = source.markId;
+  if (has("service")) next.service = source.service;
+  if (has("options")) next.options = deviceObject(source.options) ? clone(source.options) : {};
+  if (has("active")) next.active = source.active !== false;
+  logicBindingChecked(project, next);
+  if (JSON.stringify(next) === JSON.stringify(current)) return { project, binding: current };
+  const logicBindings = logicBindingsList(project).map((item) => (item === current ? next : item));
+  return { project: withProject(project, { logicBindings }), binding: next };
+}
+
+export function deleteLogicBinding(project, bindingId) {
+  const binding = requireLogicBinding(project, bindingId);
+  const logicBindings = logicBindingsList(project).filter((item) => item !== binding);
+  return { project: withProject(project, { logicBindings }), deleted: binding };
+}
+
+// Метки ушли — их привязки логики уходят с ними. Патч только у объекта, у
+// которого список уже есть: удаление метки не дописывает старому объекту
+// пустого списка (G68).
+function dropLogicBindings(project, removed) {
+  if (!Array.isArray(project.logicBindings) || removed.size === 0) return {};
+  return { logicBindings: project.logicBindings.filter((binding) => !removed.has(binding.markId)) };
+}
+
+/**
+ * Версия формата файла по содержимому: `FORMAT_VERSION_MAX` (6), если в
+ * объекте есть хотя бы один сценарий или привязка логики, иначе
+ * `FORMAT_VERSION` (5). Объект без сценариев читается прежней сборкой как
+ * раньше, со сценариями — честно не читается (см. историю версий выше).
+ */
+export function projectFormatVersion(project) {
+  return scenariosList(project).length > 0 || logicBindingsList(project).length > 0 ? FORMAT_VERSION_MAX : FORMAT_VERSION;
+}
+
+/**
+ * Миграция сценариев — одна на оба конвейера открытия (файл и база браузера).
+ * Ничего не дописывает: у объекта без сценариев возвращает **тот же** объект.
+ * Убирает только то, что прочесть нельзя: записи без `id` и привязки, чьей
+ * метки или логического сценария в объекте нет (их оставила бы правка вне
+ * этой сборки). Идемпотентна.
+ */
+export function migrateScenarios(project) {
+  if (!project) return { project, changed: false };
+  const patch = {};
+  if (project.scenarios !== undefined) {
+    const scenarios = scenariosList(project).filter((item) => deviceObject(item) && typeof item.id === "string" && item.id);
+    if (!Array.isArray(project.scenarios) || scenarios.length !== project.scenarios.length) patch.scenarios = scenarios;
+  }
+  if (project.logicBindings !== undefined) {
+    const marks = new Set((project.marks || []).map((mark) => mark.id));
+    const logic = new Set(
+      (patch.scenarios || scenariosList(project)).filter((item) => item.kind === "logic").map((item) => item.id),
+    );
+    const bindings = logicBindingsList(project).filter(
+      (item) => deviceObject(item) && typeof item.id === "string" && marks.has(item.markId) && logic.has(item.scenarioId),
+    );
+    if (!Array.isArray(project.logicBindings) || bindings.length !== project.logicBindings.length) {
+      patch.logicBindings = bindings;
+    }
+  }
+  if (Object.keys(patch).length === 0) return { project, changed: false };
+  return { project: { ...project, ...patch }, changed: true };
+}
+
+// Ссылки блочного сценария на метки: каждый `markId` в дереве блоков (условия,
+// действия, «значение из» другого устройства). Обход по значению, а не по
+// формам блоков: форму ведёт `scenarioTree.js`, а метку удаляют здесь.
+function scenarioMarkRefs(value, out) {
+  if (Array.isArray(value)) {
+    for (const item of value) scenarioMarkRefs(item, out);
+  } else if (value && typeof value === "object") {
+    if (typeof value.markId === "string") out.push(value.markId);
+    for (const key of Object.keys(value)) {
+      if (key !== "markId") scenarioMarkRefs(value[key], out);
+    }
+  }
+  return out;
+}
+
 // ——— проверка объекта —————————————————————————————————————————————————
 
 // Вид проблемы: «error» — объект поломан, «warning» — сделано намеренно, но
@@ -9211,6 +9981,21 @@ export function validate(project) {
     if (members.length < 2) problems.push(problem("smallGroup", { label }, group.id));
     if (new Set(members.map((mark) => mark.schemeId)).size > 1) {
       problems.push(problem("groupAcrossSchemes", { label }, group.id));
+    }
+  }
+
+  // **Сценарий ссылается на удалённое устройство** (история 1.15). Удаление
+  // метки сценарий не трогает: блок со ссылкой остаётся и при исполнении
+  // пропускается, — но молчать об этом нельзя. Одна строка на сценарий, а не
+  // на блок: чинят сценарий, открыв его. Обход линейный — `validate` зовётся
+  // на каждую правку.
+  const scenarios = scenariosList(project);
+  if (scenarios.length > 0) {
+    const live = new Set(project.marks.map((mark) => mark.id));
+    for (const scenario of scenarios) {
+      if (!scenario || scenario.kind !== "block") continue;
+      if (!scenarioMarkRefs(scenario.targets, []).some((markId) => !live.has(markId))) continue;
+      problems.push(problem("scenarioDeviceMissing", { name: scenario.name || "" }, scenario.id, "warning"));
     }
   }
 

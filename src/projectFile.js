@@ -2,7 +2,15 @@
 // Zip пишется и читается здесь же, без библиотек: CompressionStream("deflate-raw")
 // там, где он есть, и «stored» (без сжатия) там, где его нет. Читаются оба варианта.
 import { strings, text } from "./strings.js";
-import { FORMAT_VERSION, fillTypeSizes, migrateCommentType, migrateTypeKinds } from "./model.js";
+import {
+  FORMAT_VERSION,
+  FORMAT_VERSION_MAX,
+  fillTypeSizes,
+  migrateCommentType,
+  migrateScenarios,
+  migrateTypeKinds,
+  projectFormatVersion,
+} from "./model.js";
 
 export { FORMAT_VERSION };
 
@@ -353,12 +361,16 @@ function looksLikeProject(value) {
 function migrateProject(loaded) {
   const version = Number(loaded.formatVersion);
   if (!Number.isFinite(version) || version < 1) throw fileError("foreignProject");
-  if (version > FORMAT_VERSION) {
-    throw fileError("futureVersion", { version, current: FORMAT_VERSION });
+  // Читаются обе версии этой сборки: 5 — объект без сценариев, 6 — с ними
+  // (таск 01 сценариев). Версия выше — файл более новой сборки.
+  if (version > FORMAT_VERSION_MAX) {
+    throw fileError("futureVersion", { version, current: FORMAT_VERSION_MAX });
   }
   const filled = {
     ...loaded,
-    formatVersion: FORMAT_VERSION,
+    // Версия — по содержимому (`projectFormatVersion`): объект без сценариев
+    // остаётся версией 5 и байт в байт прежним файлом.
+    formatVersion: projectFormatVersion(loaded),
     rooms: Array.isArray(loaded.rooms) ? loaded.rooms : [],
     // Файл версии 1 контуров не знает: поле дописывается здесь, чтобы дальше
     // по коду `project.outlines` всегда был списком, а не «иногда undefined».
@@ -376,7 +388,11 @@ function migrateProject(loaded) {
   // Размеры по умолчанию (D28) доходят до справочника, заведённого раньше них:
   // у типа без размеров они проставляются по шаблону. Трогается только
   // справочник — метки новых полей не получают.
-  return fillTypeSizes(migrateCommentType(migrateTypeKinds(filled).project).project).project;
+  // Сценарии (таск 01): терпимое чтение, у объекта без них — тот же объект.
+  const migrated = migrateScenarios(fillTypeSizes(migrateCommentType(migrateTypeKinds(filled).project).project).project).project;
+  // Миграция могла убрать нечитаемые записи — версия считается по итогу.
+  const current = projectFormatVersion(migrated);
+  return migrated.formatVersion === current ? migrated : { ...migrated, formatVersion: current };
 }
 
 // Календарный день пользователя, а не UTC: разметку правят вечером, и
@@ -415,7 +431,7 @@ function readmeText(project, date) {
     date: fileLocalStamp(date),
     schemes: project.schemes.length,
     marks: project.marks.length,
-    version: FORMAT_VERSION,
+    version: projectFormatVersion(project),
   }) + "\n";
 }
 
@@ -427,7 +443,7 @@ function imageEntryName(id, blob) {
 // Текст project.json. Объект проводится через ту же нормализацию, что и при
 // чтении: тогда сверка сравнивает текст с текстом, а не «почти то же самое».
 function projectJsonText(project) {
-  return JSON.stringify(migrateProject({ ...project, formatVersion: FORMAT_VERSION }), null, 2);
+  return JSON.stringify(migrateProject({ ...project, formatVersion: projectFormatVersion(project) }), null, 2);
 }
 
 /**
@@ -479,7 +495,7 @@ function writerJsonText(member, projectKey, date) {
 export async function packProject(project, images, options = {}) {
   if (!looksLikeProject(project)) throw fileError("foreignProject");
   const date = options.date instanceof Date ? options.date : new Date();
-  const forFile = migrateProject({ ...project, formatVersion: FORMAT_VERSION });
+  const forFile = migrateProject({ ...project, formatVersion: projectFormatVersion(project) });
   const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
 
   const files = [{ name: PROJECT_ENTRY, data: projectJsonText(forFile) }];

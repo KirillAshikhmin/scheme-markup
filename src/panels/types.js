@@ -34,6 +34,7 @@ import {
   freeColor,
   typeAxisSeat,
   typeChannels,
+  typeDeviceRecord,
   typeKindOf,
   typesInOrder,
   updateCategory,
@@ -70,7 +71,7 @@ const TYPES_SWATCH_SIZE = 34;
 // справочник, но рисовать знак ему всё равно чем-то нужно.
 const TYPES_NO_COLOR = "#57606A";
 
-function typesSnapshot(project) {
+export function typesSnapshot(project) {
   return {
     categories: project.categories.map((category) => ({
       id: category.id,
@@ -99,6 +100,10 @@ function typesSnapshot(project) {
       // по знаку здесь нельзя — у типа его тогда не было, и этим он и
       // отличается от типа, которому имя задали руками.
       view: typeObjectView(type),
+      // Профиль устройства (таск 01 сценариев) — только свой, заданный руками:
+      // выведенный по коду профиль выведется и в новом объекте, а поле в
+      // шаблоне без нужды значило бы поле в каждом объекте из него.
+      ...(typeDeviceRecord(type) ? { device: typeDeviceRecord(type) } : {}),
     })),
   };
 }
@@ -169,6 +174,9 @@ export function typesTemplateFrom(template) {
       // которого в реестре больше нет. Неизвестное имя не едет — ключ, не
       // рисующий ничего, хуже отсутствия ключа.
       ...(objectViewByName(typeObjectView(type)) ? { view: typeObjectView(type) } : {}),
+      // Свой профиль устройства, приведённый к словарю: шаблон мог быть
+      // сохранён давно, а вид или сервис — переименован. Мусор не едет.
+      ...(typeDeviceRecord(type) ? { device: typeDeviceRecord(type) } : {}),
       order: index,
     }));
   if (categories.length === 0 || markTypes.length === 0) return null;

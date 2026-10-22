@@ -56,10 +56,25 @@ export const MERGE_ENTITIES = [
   "openings",
   "schemeObjects",
   "schemeObjectKinds",
+  // Сценарии и привязки логики (таск 01 сценариев) — самостоятельные вещи со
+  // своим `id`, и сливаются поштучно, как метки: сценарий, заведённый вторым
+  // участником, не пропадает, а одинаковый с двух машин не двоится. Профиль
+  // устройства у типа и своя настройка метки — поля внутри типа и метки и
+  // едут вместе с ними.
+  "scenarios",
+  "logicBindings",
 ];
 
 // Коллекции, у которых есть поле `order`: после слияния порядок пересобирается.
-const MERGE_ORDERED = ["categories", "markTypes", "schemes", "equipmentTypes", "equipment", "schemeObjectKinds"];
+const MERGE_ORDERED = [
+  "categories",
+  "markTypes",
+  "schemes",
+  "equipmentTypes",
+  "equipment",
+  "schemeObjectKinds",
+  "scenarios",
+];
 
 // Коллекции, которых у объекта прежней разметки нет вовсе. Слияние двух таких
 // объектов не должно заводить их пустыми: это была бы правка на пустом месте,
@@ -73,6 +88,8 @@ const MERGE_OPTIONAL = [
   "openings",
   "schemeObjects",
   "schemeObjectKinds",
+  "scenarios",
+  "logicBindings",
 ];
 
 /**
@@ -267,6 +284,8 @@ function mergeLabel(entity, item, typeCodes) {
   if (entity === "walls") return strings.subjects.wall;
   if (entity === "openings") return strings.subjects.opening;
   if (entity === "schemeObjects") return strings.subjects.schemeObject;
+  // У привязки логики имени нет — в отчёте её называет род, как стену.
+  if (entity === "logicBindings") return strings.subjects.logicBinding;
   return item.name || "";
 }
 
@@ -748,6 +767,19 @@ function mergeReferences(merged, report, sources, winner) {
       report.conflicts.push({ code: "danglingRef", entity: "placements", id: placement.id, kept: "none", item: placement });
       return false;
     });
+
+  // Привязка логики живёт, пока живы и метка, и логический сценарий: по
+  // правилу модели обе уходят вместе с тем, к чему привязаны (`deleteMark`,
+  // `deleteScenario`). Ссылки **блоков** сценариев на метки не чистятся — так
+  // же, как при удалении метки: блок остаётся и называется «устройство
+  // удалено», а `validate` говорит о сценарии строкой.
+  const scenarios = mergeIndex(merged.scenarios);
+  merged.logicBindings = merged.logicBindings.filter((binding) => {
+    const scenario = scenarios.get(binding.scenarioId);
+    if (marks.has(binding.markId) && scenario && scenario.kind === "logic") return true;
+    report.conflicts.push({ code: "danglingRef", entity: "logicBindings", id: binding.id, kept: "none", item: binding });
+    return false;
+  });
 
   merged.marks = merged.marks.map((mark) => {
     const patch = {};

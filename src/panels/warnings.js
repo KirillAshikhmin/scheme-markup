@@ -17,7 +17,7 @@
 // простыня на полтора десятка строк поверх плана; строкой панели тот же вопрос
 // ждёт, пока до него дойдут руки. Отметка «разобрано» как была в объекте
 // (`type.kindGuessed`), так и осталась: она уезжает вместе с файлом.
-import { layoutAllows, PANEL_IDS, registerPanel, reportAppError } from "../app.js";
+import { layoutAllows, PANEL_IDS, registerPanel, reportAppError, SCREEN_DEFAULT, setScreen } from "../app.js";
 import {
   acceptProblem,
   acceptedProblems,
@@ -28,6 +28,7 @@ import {
   findOutline,
   findPlacement,
   findRoom,
+  findScenario,
   findScheme,
   findType,
   problemAccepted,
@@ -97,6 +98,10 @@ export const WARNING_TARGETS = {
   // Этаж без точки привязки ведёт к своей схеме: точку задают в её свойствах
   // (таск 205).
   schemeAnchorMissing: "scheme",
+  // Сценарий со ссылкой на удалённую метку ведёт к самому сценарию (таск 01
+  // сценариев). Пока режима «Сценарии» нет, переход открывает «Схему» без
+  // выделения; к сценарию в его списке подведёт таск 10.
+  scenarioDeviceMissing: "scenario",
 };
 
 // Ошибки сверху, вопросы о виде снизу: сперва то, что сломано, потом то, что
@@ -165,6 +170,10 @@ export function warningPlace(project, problem) {
   if (target === "placement") {
     const placement = findPlacement(project, problem.ref);
     return placement ? warningMarkPlace(project, placement.markId) : null;
+  }
+  if (target === "scenario") {
+    const scenario = findScenario(project, problem.ref);
+    return scenario ? { markId: null, typeId: null, schemeId: null, point: null, scenarioId: scenario.id } : null;
   }
   return null;
 }
@@ -315,7 +324,12 @@ function mountWarningsPanel(host, api) {
     const state = getState();
     if (!state.project) return;
     const patch = {};
-    if (place.markId) {
+    if (place.scenarioId) {
+      // Сценарий: пока — «Схема» без выделения (см. `WARNING_TARGETS`).
+      setScreen(SCREEN_DEFAULT);
+      patch.selectedMarkIds = [];
+      patch.selectedOutlineId = null;
+    } else if (place.markId) {
       patch.selectedMarkIds = [place.markId];
       patch.selectedOutlineId = null;
     } else if (place.outlineId) {

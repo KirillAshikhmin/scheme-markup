@@ -15,6 +15,7 @@ import {
   FORMAT_VERSION,
 } from "../src/projectFile.js";
 import {
+  FORMAT_VERSION_MAX,
   acceptProblem,
   acceptedProblems,
   createProject,
@@ -270,15 +271,17 @@ test("битый project.json отвергается без падения", asy
 
 test("версия формата из будущего отвергается с внятным текстом", async () => {
   const project = sampleProject();
+  // Версий у этой сборки две (таск 01 сценариев): 5 — объект без сценариев,
+  // 6 — с ними. Из будущего — всё, что выше старшей из них.
   const future = await writeZip([
     {
       name: "project.json",
-      data: JSON.stringify({ ...project, formatVersion: FORMAT_VERSION + 1 }),
+      data: JSON.stringify({ ...project, formatVersion: FORMAT_VERSION_MAX + 1 }),
     },
   ]);
   const error = await refusal(unpackProject(future));
   assert.equal(error.code, "futureVersion");
-  assert.ok(error.message.includes(String(FORMAT_VERSION + 1)), "в тексте названа версия файла");
+  assert.ok(error.message.includes(String(FORMAT_VERSION_MAX + 1)), "в тексте названа версия файла");
 });
 
 test("повреждённые байты внутри архива не проходят проверку", async () => {

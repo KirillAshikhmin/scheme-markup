@@ -6,6 +6,7 @@ import {
   ensureProjectKey,
   fillTypeSizes,
   migrateCommentType,
+  migrateScenarios,
   migrateTypeKinds,
 } from "../model.js";
 import {
@@ -28,6 +29,20 @@ import { TYPE_TEMPLATE_KEY, typesTemplateFrom } from "./types.js";
 import { openProjectFileDialog } from "./file.js";
 
 const SAVE_DELAY_MS = 400;
+
+/**
+ * Объект из базы браузера, доведённый до этой сборки, — второй конвейер
+ * открытия рядом с `projectFile.migrateProject` (тот — для файла). Миграции
+ * те же и в том же порядке: иначе один объект открывался бы по-разному из
+ * базы и из архива. Каждая миграция у объекта, которому нечего менять,
+ * отдаёт тот же объект, — и прежний объект из базы открывается байт в байт
+ * таким, каким лёг туда (G68).
+ */
+export function projectsMigrateStored(stored) {
+  const migrated = fillTypeSizes(migrateCommentType(migrateTypeKinds(stored).project).project).project;
+  // Сценарии и привязки логики (таск 01 сценариев): терпимое чтение.
+  return migrateScenarios(migrated).project;
+}
 
 function uniqueProjectName(list) {
   const base = strings.project.untitled;
@@ -186,7 +201,7 @@ function mountProjectsPanel(host, api) {
     // он тем же правилом, что и при чтении файла, — иначе один и тот же объект
     // открывался бы по-разному из базы и из архива. Тем же правилом и там же
     // переезжает комментарий со строки справочника на встроенный тип (G173).
-    const migrated = fillTypeSizes(migrateCommentType(migrateTypeKinds(stored).project).project).project;
+    const migrated = projectsMigrateStored(stored);
     // Постоянный ключ у объектов, заведённых до его появления, дописывается
     // здесь — один раз, при открытии. Это не правка разметки: `updatedAt` не
     // трогается, в истории отмены ничего не появляется, а в базу объект

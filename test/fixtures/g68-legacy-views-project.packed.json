@@ -1,0 +1,1464 @@
+{
+  "formatVersion": 5,
+  "id": "bc37a403-34f8-4562-8570-2cda00423993",
+  "key": "d4e98d28-ca51-4ed4-8c86-e8106871d2ac",
+  "name": "Старый объект",
+  "createdAt": "2026-02-10T09:15:00+03:00",
+  "updatedAt": "2026-02-10T09:40:00+03:00",
+  "categories": [
+    {
+      "id": "241bc6fd-6564-441f-bd77-f5b5d10759fa",
+      "name": "Свет",
+      "color": "#1F6FEB",
+      "shape": "circle-cross",
+      "lineStyle": null,
+      "order": 0
+    },
+    {
+      "id": "be50cda6-0657-4367-986a-4d409e646fc2",
+      "name": "Выключатели",
+      "color": "#2DA44E",
+      "shape": "circle",
+      "lineStyle": null,
+      "order": 1
+    },
+    {
+      "id": "c9e9f2d5-e370-45dc-9907-b11d86b41a9c",
+      "name": "Розетки",
+      "color": "#D1242F",
+      "shape": "square",
+      "lineStyle": null,
+      "order": 2
+    },
+    {
+      "id": "a3096d9e-67e0-4530-a71d-d0989b0e7258",
+      "name": "Климат",
+      "color": "#E36209",
+      "shape": "triangle",
+      "lineStyle": null,
+      "order": 3
+    },
+    {
+      "id": "3b63b8dc-c138-47e1-9274-9a84591e4ee8",
+      "name": "Сетевое оборудование",
+      "color": "#8250DF",
+      "shape": "star",
+      "lineStyle": null,
+      "order": 4
+    },
+    {
+      "id": "8b097a37-e77e-4223-adb6-13fc75ddf0c1",
+      "name": "Домофон",
+      "color": "#D901C4",
+      "shape": "triangle-down",
+      "lineStyle": null,
+      "order": 5
+    },
+    {
+      "id": "5b760832-f3cd-482a-8554-7d3be9b2d8c8",
+      "name": "Карнизы",
+      "color": "#9d4c01",
+      "shape": "diamond",
+      "lineStyle": null,
+      "order": 6
+    },
+    {
+      "id": "9c2ad491-af3d-4334-a088-f1c97443b3e2",
+      "name": "Электроприборы",
+      "color": "#1DAB1D",
+      "shape": "square-bolt",
+      "lineStyle": null,
+      "order": 7
+    },
+    {
+      "id": "5ad47179-9e92-4e2a-bab0-08d27d2ed6e4",
+      "name": "Кинотеатр",
+      "color": "#001BDD",
+      "shape": "square-wave",
+      "lineStyle": null,
+      "order": 8
+    },
+    {
+      "id": "c2c07a1f-b06e-437c-a60b-9bdfdda7974b",
+      "name": "Датчики",
+      "color": "#164E63",
+      "shape": "circle-ring",
+      "lineStyle": null,
+      "order": 9
+    },
+    {
+      "id": "ca398320-63bb-4e3b-8806-752fb90b357c",
+      "name": "Щит",
+      "color": "#6E4B1F",
+      "shape": "square-bolt",
+      "lineStyle": null,
+      "order": 10
+    },
+    {
+      "id": "5119baca-6129-48fa-8543-a2c5588044b8",
+      "name": "Сантехника",
+      "color": "#E80098",
+      "shape": "drop-dot",
+      "lineStyle": null,
+      "order": 11
+    }
+  ],
+  "markTypes": [
+    {
+      "shape": null,
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "aad3f668-b539-4734-9789-4c5735d88c95",
+      "categoryId": "241bc6fd-6564-441f-bd77-f5b5d10759fa",
+      "code": "Т",
+      "name": "Точечный светильник",
+      "lineStyle": null,
+      "sizes": {
+        "length": 90,
+        "width": 90,
+        "depth": 0
+      },
+      "order": 0
+    },
+    {
+      "shape": null,
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "fe58912a-48ad-4b39-814f-29d2f771706d",
+      "categoryId": "241bc6fd-6564-441f-bd77-f5b5d10759fa",
+      "code": "С",
+      "name": "Светильник",
+      "lineStyle": null,
+      "sizes": {
+        "length": 200,
+        "width": 120,
+        "depth": 90
+      },
+      "order": 1
+    },
+    {
+      "shape": null,
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "6faed87e-138b-4bfe-8de8-baa497d662da",
+      "categoryId": "241bc6fd-6564-441f-bd77-f5b5d10759fa",
+      "code": "ПК",
+      "name": "Подсветка кровати",
+      "lineStyle": null,
+      "sizes": {
+        "length": 40,
+        "width": 40,
+        "depth": 15
+      },
+      "order": 2
+    },
+    {
+      "shape": null,
+      "blockMode": "each",
+      "kind": "line",
+      "channels": 1,
+      "id": "5ea19e3b-a7bc-43be-a961-8fe6ad1d1305",
+      "categoryId": "241bc6fd-6564-441f-bd77-f5b5d10759fa",
+      "code": "ТР",
+      "name": "Трек",
+      "lineStyle": "double",
+      "sizes": {
+        "length": 60,
+        "width": 60,
+        "depth": 60
+      },
+      "order": 3
+    },
+    {
+      "shape": null,
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "77258441-6d04-4ef5-9422-30cccb589310",
+      "categoryId": "241bc6fd-6564-441f-bd77-f5b5d10759fa",
+      "code": "ПС",
+      "name": "Подсветка",
+      "lineStyle": null,
+      "sizes": {
+        "length": 40,
+        "width": 40,
+        "depth": 15
+      },
+      "order": 4
+    },
+    {
+      "shape": null,
+      "blockMode": "each",
+      "kind": "line",
+      "channels": 1,
+      "id": "0933153f-5292-4de2-98b0-f8b9a9705543",
+      "categoryId": "241bc6fd-6564-441f-bd77-f5b5d10759fa",
+      "code": "Л",
+      "name": "Лента",
+      "lineStyle": null,
+      "sizes": {
+        "length": 10,
+        "width": 10,
+        "depth": 10
+      },
+      "order": 5
+    },
+    {
+      "shape": null,
+      "blockMode": "each",
+      "kind": "line",
+      "channels": 1,
+      "id": "6fc0aec8-29a0-4e2a-b7a5-ffa7961f7f09",
+      "categoryId": "241bc6fd-6564-441f-bd77-f5b5d10759fa",
+      "code": "ПШ",
+      "name": "Подсветка шкафа",
+      "lineStyle": "dashed",
+      "sizes": {
+        "length": 10,
+        "width": 10,
+        "depth": 10
+      },
+      "order": 6
+    },
+    {
+      "shape": "square",
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "cd918170-e0a7-49cf-b1c6-43965fa1abc3",
+      "categoryId": "be50cda6-0657-4367-986a-4d409e646fc2",
+      "code": "В",
+      "name": "Выключатель",
+      "lineStyle": null,
+      "sizes": {
+        "length": 80,
+        "width": 80,
+        "depth": 10,
+        "heightAboveFloor": 900
+      },
+      "order": 7
+    },
+    {
+      "shape": "square-bar",
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 2,
+      "id": "eb45e483-53fe-4598-8e0f-0c76e44015aa",
+      "categoryId": "be50cda6-0657-4367-986a-4d409e646fc2",
+      "code": "ВВ",
+      "name": "Выключатель двойной",
+      "lineStyle": null,
+      "sizes": {
+        "length": 80,
+        "width": 80,
+        "depth": 10,
+        "heightAboveFloor": 900
+      },
+      "order": 8
+    },
+    {
+      "shape": "circle-socket",
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "697d272a-32c1-4c7b-936e-e7e08e03c0ca",
+      "categoryId": "c9e9f2d5-e370-45dc-9907-b11d86b41a9c",
+      "code": "Р",
+      "name": "Розетка",
+      "lineStyle": null,
+      "sizes": {
+        "length": 80,
+        "width": 80,
+        "depth": 10,
+        "heightAboveFloor": 300
+      },
+      "order": 9
+    },
+    {
+      "shape": "dome-dot",
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "e2c99194-484b-4930-ab37-d69ab6936e31",
+      "categoryId": "a3096d9e-67e0-4530-a71d-d0989b0e7258",
+      "code": "Б",
+      "name": "Бризер",
+      "lineStyle": null,
+      "sizes": {
+        "length": 600,
+        "width": 350,
+        "depth": 200,
+        "heightAboveFloor": 2100
+      },
+      "order": 10
+    },
+    {
+      "shape": "circle-thermo",
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "5a16a940-9c76-4075-842b-175dd143123d",
+      "categoryId": "a3096d9e-67e0-4530-a71d-d0989b0e7258",
+      "code": "К",
+      "name": "Кондиционер",
+      "lineStyle": null,
+      "sizes": {
+        "length": 900,
+        "width": 300,
+        "depth": 200,
+        "heightAboveFloor": 2300
+      },
+      "order": 11
+    },
+    {
+      "shape": "circle-wave",
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "bbbe0488-6a7c-4f80-ab38-d39f2ef0c7c4",
+      "categoryId": "3b63b8dc-c138-47e1-9274-9a84591e4ee8",
+      "code": "W",
+      "name": "WiFi точка",
+      "lineStyle": null,
+      "sizes": {
+        "length": 120,
+        "width": 120,
+        "depth": 35,
+        "heightAboveFloor": 2400
+      },
+      "order": 12
+    },
+    {
+      "shape": null,
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "3c1fca60-8ab8-40fc-8b47-319340ffa78e",
+      "categoryId": "8b097a37-e77e-4223-adb6-13fc75ddf0c1",
+      "code": "Д",
+      "name": "Домофон",
+      "lineStyle": null,
+      "sizes": {
+        "length": 150,
+        "width": 200,
+        "depth": 25,
+        "heightAboveFloor": 1500
+      },
+      "order": 13
+    },
+    {
+      "shape": null,
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "ce343579-ce53-4041-85db-fb371486a134",
+      "categoryId": "5b760832-f3cd-482a-8554-7d3be9b2d8c8",
+      "code": "КШ",
+      "name": "Карниз штор",
+      "lineStyle": null,
+      "sizes": {
+        "length": 400,
+        "width": 120,
+        "depth": 120,
+        "heightAboveFloor": 2400
+      },
+      "order": 14
+    },
+    {
+      "shape": null,
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "bf80dc27-be65-4945-870e-fb09bcabd6fd",
+      "categoryId": "241bc6fd-6564-441f-bd77-f5b5d10759fa",
+      "code": "ППл",
+      "name": "Подсветка пола",
+      "lineStyle": null,
+      "sizes": {
+        "length": 40,
+        "width": 40,
+        "depth": 15,
+        "heightAboveFloor": 100
+      },
+      "order": 15
+    },
+    {
+      "shape": null,
+      "blockMode": "each",
+      "kind": "line",
+      "channels": 1,
+      "id": "70a623b4-4018-4648-a700-6beec9b2bc86",
+      "categoryId": "241bc6fd-6564-441f-bd77-f5b5d10759fa",
+      "code": "ПКШ",
+      "name": "Подсветка карниза штор",
+      "lineStyle": "wave",
+      "sizes": {
+        "length": 40,
+        "width": 40,
+        "depth": 15,
+        "heightAboveFloor": 2400
+      },
+      "order": 16
+    },
+    {
+      "shape": null,
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "e722965d-1da0-4243-9bcf-edbd6d9aeb64",
+      "categoryId": "241bc6fd-6564-441f-bd77-f5b5d10759fa",
+      "code": "ЛЮ",
+      "name": "Люстра",
+      "lineStyle": null,
+      "sizes": {
+        "length": 500,
+        "width": 400,
+        "depth": 300
+      },
+      "order": 17
+    },
+    {
+      "shape": "square-chevron",
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "ff42c33e-8007-44f5-bd65-8f8a9ece4612",
+      "categoryId": "be50cda6-0657-4367-986a-4d409e646fc2",
+      "code": "П",
+      "name": "Переключатель",
+      "lineStyle": null,
+      "sizes": {
+        "length": 80,
+        "width": 80,
+        "depth": 10,
+        "heightAboveFloor": 900
+      },
+      "order": 18
+    },
+    {
+      "shape": "square-cross",
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 2,
+      "id": "bccd7652-6bca-4465-98a2-d39dcb485164",
+      "categoryId": "be50cda6-0657-4367-986a-4d409e646fc2",
+      "code": "ПП",
+      "name": "Переключатель двойной",
+      "lineStyle": null,
+      "sizes": {
+        "length": 80,
+        "width": 80,
+        "depth": 10,
+        "heightAboveFloor": 900
+      },
+      "order": 19
+    },
+    {
+      "shape": "circle-drain",
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "0eb65762-7e1f-4a9c-83ca-5a4ae2197a0c",
+      "categoryId": "241bc6fd-6564-441f-bd77-f5b5d10759fa",
+      "code": "Н",
+      "name": "Ночник",
+      "lineStyle": null,
+      "sizes": {
+        "length": 80,
+        "width": 80,
+        "depth": 25,
+        "heightAboveFloor": 300
+      },
+      "order": 20
+    },
+    {
+      "shape": "circle-triple",
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "303b54a3-c366-4a59-b1c0-f49a329ca16c",
+      "categoryId": "c9e9f2d5-e370-45dc-9907-b11d86b41a9c",
+      "code": "РC",
+      "name": "Розетка 380",
+      "lineStyle": null,
+      "sizes": {
+        "length": 80,
+        "width": 80,
+        "depth": 12,
+        "heightAboveFloor": 300
+      },
+      "order": 21
+    },
+    {
+      "shape": "circle-fan",
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "7b1caafa-4c01-456a-8193-bb9792e96c44",
+      "categoryId": "c2c07a1f-b06e-437c-a60b-9bdfdda7974b",
+      "code": "ДП",
+      "name": "Датчик присутствия",
+      "lineStyle": null,
+      "sizes": {
+        "length": 70,
+        "width": 70,
+        "depth": 25,
+        "heightAboveFloor": 2400
+      },
+      "order": 22
+    },
+    {
+      "shape": null,
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "6a910432-233d-43e1-83be-f870756af29d",
+      "categoryId": "9c2ad491-af3d-4334-a088-f1c97443b3e2",
+      "code": "СУШ",
+      "name": "Сушилка Электрическая",
+      "lineStyle": null,
+      "sizes": {
+        "length": 500,
+        "width": 800,
+        "depth": 110,
+        "heightAboveFloor": 900
+      },
+      "order": 23
+    },
+    {
+      "shape": "square-hatch",
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "d2eb8ebe-1378-46c3-bc73-7f732d8486c7",
+      "categoryId": "ca398320-63bb-4e3b-8806-752fb90b357c",
+      "code": "Щ",
+      "name": "Электрощит",
+      "lineStyle": null,
+      "sizes": {
+        "length": 450,
+        "width": 600,
+        "depth": -30,
+        "heightAboveFloor": 1400
+      },
+      "order": 24
+    },
+    {
+      "shape": "circle-fill",
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "7cab265d-a272-41ab-8f50-b6b825b4d2c2",
+      "categoryId": "a3096d9e-67e0-4530-a71d-d0989b0e7258",
+      "code": "ВЫТ",
+      "name": "Вытяжка",
+      "lineStyle": null,
+      "sizes": {
+        "length": 600,
+        "width": 350,
+        "depth": 500,
+        "heightAboveFloor": 1700
+      },
+      "order": 25
+    },
+    {
+      "shape": null,
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "026f7c89-72f2-44a9-9d05-bc4766d39d66",
+      "categoryId": "241bc6fd-6564-441f-bd77-f5b5d10759fa",
+      "code": "Бр",
+      "name": "Бра",
+      "lineStyle": null,
+      "sizes": {
+        "length": 150,
+        "width": 250,
+        "depth": 120,
+        "heightAboveFloor": 1800
+      },
+      "order": 26
+    },
+    {
+      "shape": null,
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "7a2a83b7-6c0f-442d-a070-54d78558df82",
+      "categoryId": "9c2ad491-af3d-4334-a088-f1c97443b3e2",
+      "code": "ДЭП",
+      "name": "Дверца в мебели с эл приводом",
+      "lineStyle": null,
+      "sizes": {
+        "length": 400,
+        "width": 500,
+        "depth": 20,
+        "heightAboveFloor": 600
+      },
+      "order": 27
+    },
+    {
+      "shape": "square-jack",
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "27ccc1ff-270e-455f-9761-6e08445ecd9d",
+      "categoryId": "3b63b8dc-c138-47e1-9274-9a84591e4ee8",
+      "code": "ПУ",
+      "name": "Панель Управления",
+      "lineStyle": null,
+      "sizes": {
+        "length": 120,
+        "width": 120,
+        "depth": 12,
+        "heightAboveFloor": 1400
+      },
+      "order": 28
+    },
+    {
+      "shape": "drop-dot",
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "b1dfd0c8-7721-4e20-9b89-5548f5acd8c4",
+      "categoryId": "a3096d9e-67e0-4530-a71d-d0989b0e7258",
+      "code": "ОВ",
+      "name": "Осушитель",
+      "lineStyle": null,
+      "sizes": {
+        "length": 400,
+        "width": 600,
+        "depth": 250,
+        "heightAboveFloor": 0
+      },
+      "order": 29
+    },
+    {
+      "shape": "square-cross",
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "c6f62aa6-ef80-4157-ae10-de453aef8afa",
+      "categoryId": "3b63b8dc-c138-47e1-9274-9a84591e4ee8",
+      "code": "ВП",
+      "name": "Витая пара Интер",
+      "lineStyle": null,
+      "sizes": {
+        "length": 80,
+        "width": 80,
+        "depth": 10,
+        "heightAboveFloor": 300
+      },
+      "order": 30
+    },
+    {
+      "shape": null,
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "d93372ad-dd91-4871-9371-27ad85e62ea2",
+      "categoryId": "5ad47179-9e92-4e2a-bab0-08d27d2ed6e4",
+      "code": "РЕС",
+      "name": "Ресивер",
+      "lineStyle": null,
+      "sizes": {
+        "length": 430,
+        "width": 80,
+        "depth": 300,
+        "heightAboveFloor": 400
+      },
+      "order": 31
+    },
+    {
+      "shape": "diamond-dot",
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "ecdfc94b-035e-4a98-95c4-4ab49a704afd",
+      "categoryId": "5ad47179-9e92-4e2a-bab0-08d27d2ed6e4",
+      "code": "ПРО",
+      "name": "Проектор",
+      "lineStyle": null,
+      "sizes": {
+        "length": 300,
+        "width": 120,
+        "depth": 250,
+        "heightAboveFloor": 2400
+      },
+      "order": 32
+    },
+    {
+      "shape": "circle-antenna",
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "51622d6b-5805-4edf-9296-6d488ae053a7",
+      "categoryId": "3b63b8dc-c138-47e1-9274-9a84591e4ee8",
+      "code": "УК",
+      "name": "Умная Колонка",
+      "lineStyle": null,
+      "sizes": {
+        "length": 150,
+        "width": 180,
+        "depth": 90,
+        "heightAboveFloor": 900
+      },
+      "order": 33
+    },
+    {
+      "shape": "rect-vertical",
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "c1a16651-007a-4f91-a878-97265c8daab3",
+      "categoryId": "241bc6fd-6564-441f-bd77-f5b5d10759fa",
+      "code": "ЛВ",
+      "name": "Лента вертикальная",
+      "lineStyle": null,
+      "sizes": {
+        "length": 40,
+        "width": 600,
+        "depth": 15,
+        "heightAboveFloor": 900
+      },
+      "order": 34
+    },
+    {
+      "shape": "square-bar-two",
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 3,
+      "id": "bbfb9d6a-6d12-45c4-aa5d-3be5c20b2081",
+      "categoryId": "be50cda6-0657-4367-986a-4d409e646fc2",
+      "code": "ВВВ",
+      "name": "Выключатель тройной",
+      "lineStyle": null,
+      "sizes": {
+        "length": 80,
+        "width": 80,
+        "depth": 10,
+        "heightAboveFloor": 900
+      },
+      "order": 35
+    },
+    {
+      "shape": "triangle-dot",
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "65e22d7d-1453-41a4-b104-7458fec19933",
+      "categoryId": "c2c07a1f-b06e-437c-a60b-9bdfdda7974b",
+      "code": "ДД",
+      "name": "Датчик движения",
+      "lineStyle": null,
+      "sizes": {
+        "length": 70,
+        "width": 70,
+        "depth": 30,
+        "heightAboveFloor": 2200
+      },
+      "order": 36
+    },
+    {
+      "shape": "square-split",
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "eaa9ea75-09c2-4e72-a858-e3ac8585cd76",
+      "categoryId": "c2c07a1f-b06e-437c-a60b-9bdfdda7974b",
+      "code": "ДО",
+      "name": "Датчик открытия",
+      "lineStyle": null,
+      "sizes": {
+        "length": 70,
+        "width": 40,
+        "depth": 15,
+        "heightAboveFloor": 2000
+      },
+      "order": 37
+    },
+    {
+      "shape": "drop",
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "a3e02c4b-0409-45a3-9ac7-b52f302fbd07",
+      "categoryId": "c2c07a1f-b06e-437c-a60b-9bdfdda7974b",
+      "code": "ДПр",
+      "name": "Датчик протечки",
+      "lineStyle": null,
+      "sizes": {
+        "length": 60,
+        "width": 60,
+        "depth": 15,
+        "heightAboveFloor": 0
+      },
+      "order": 38
+    },
+    {
+      "shape": "square-cross",
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "02bd2d77-e432-446a-bd32-3990a294b010",
+      "categoryId": "ca398320-63bb-4e3b-8806-752fb90b357c",
+      "code": "ЩС",
+      "name": "Слаботочный щит",
+      "lineStyle": null,
+      "sizes": {
+        "length": 300,
+        "width": 400,
+        "depth": 90,
+        "heightAboveFloor": 1400
+      },
+      "order": 39
+    },
+    {
+      "shape": "trapezoid-bar",
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "2a284848-64ed-4458-992c-58a0dd9aa238",
+      "categoryId": "9c2ad491-af3d-4334-a088-f1c97443b3e2",
+      "code": "РП",
+      "name": "Робот пылесос",
+      "lineStyle": null,
+      "sizes": {
+        "length": 350,
+        "width": 100,
+        "depth": 100,
+        "heightAboveFloor": 0
+      },
+      "order": 40
+    },
+    {
+      "shape": null,
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "e4d2622c-1015-4255-a2ac-36a10b191b28",
+      "categoryId": "5119baca-6129-48fa-8543-a2c5588044b8",
+      "code": "ВР",
+      "name": "Водорозетка",
+      "lineStyle": null,
+      "sizes": {
+        "length": 60,
+        "width": 60,
+        "depth": 20,
+        "heightAboveFloor": 600
+      },
+      "order": 41
+    },
+    {
+      "shape": "circle-drain",
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "d9608dca-cb6c-44cd-a848-12b97c06a79a",
+      "categoryId": "5119baca-6129-48fa-8543-a2c5588044b8",
+      "code": "КН",
+      "name": "Выход канализации",
+      "lineStyle": null,
+      "sizes": {
+        "length": 110,
+        "width": 110,
+        "depth": 40,
+        "heightAboveFloor": 100
+      },
+      "order": 42
+    },
+    {
+      "shape": "circle-valve",
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "7f655c72-b629-4b21-947d-0003facce089",
+      "categoryId": "5119baca-6129-48fa-8543-a2c5588044b8",
+      "code": "КВ",
+      "name": "Кран воды с электроприводом",
+      "lineStyle": null,
+      "sizes": {
+        "length": 100,
+        "width": 100,
+        "depth": 60,
+        "heightAboveFloor": 400
+      },
+      "order": 43
+    },
+    {
+      "shape": null,
+      "blockMode": "each",
+      "kind": "line",
+      "channels": 1,
+      "id": "a6e7cd99-9759-4378-b049-c64597de8984",
+      "categoryId": "241bc6fd-6564-441f-bd77-f5b5d10759fa",
+      "code": "ПЛ",
+      "name": "Подсветка лестницы",
+      "lineStyle": "meander",
+      "sizes": {
+        "length": 40,
+        "width": 40,
+        "depth": 10,
+        "heightAboveFloor": 100
+      },
+      "order": 44
+    },
+    {
+      "shape": "circle-ring",
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "0400065e-4400-4648-b150-6d5083194362",
+      "categoryId": "241bc6fd-6564-441f-bd77-f5b5d10759fa",
+      "code": "ПЗ",
+      "name": "Подсветка зеркала",
+      "lineStyle": null,
+      "sizes": {
+        "length": 600,
+        "width": 600,
+        "depth": 30,
+        "heightAboveFloor": 1600
+      },
+      "order": 45
+    },
+    {
+      "shape": "diamond-ring",
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "74bad0fc-47cb-4bc9-9f2a-d52b932da3d0",
+      "categoryId": "9c2ad491-af3d-4334-a088-f1c97443b3e2",
+      "code": "КАМ",
+      "name": "Камера",
+      "lineStyle": null,
+      "sizes": {
+        "length": 120,
+        "width": 80,
+        "depth": 70,
+        "heightAboveFloor": 2300
+      },
+      "order": 46
+    },
+    {
+      "shape": "rect-horizontal-ticks",
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "c2a8c456-4d3b-4195-81f1-8a77198fceda",
+      "categoryId": "a3096d9e-67e0-4530-a71d-d0989b0e7258",
+      "code": "ВЕНТ",
+      "name": "Вентиляция",
+      "lineStyle": null,
+      "sizes": {
+        "length": 150,
+        "width": 150,
+        "depth": 25,
+        "heightAboveFloor": 2300
+      },
+      "order": 47
+    },
+    {
+      "shape": "circle-slash",
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "2c16bd42-3335-4b44-9dee-6e4cad9bf332",
+      "categoryId": "be50cda6-0657-4367-986a-4d409e646fc2",
+      "code": "МВ",
+      "name": "Мастер-выключатель",
+      "lineStyle": null,
+      "sizes": {
+        "length": 80,
+        "width": 80,
+        "depth": 10,
+        "heightAboveFloor": 900
+      },
+      "order": 48
+    },
+    {
+      "shape": "square-fill",
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "bea2c186-1816-4a8d-878b-75bfe7fce99c",
+      "categoryId": "5ad47179-9e92-4e2a-bab0-08d27d2ed6e4",
+      "code": "ТВ",
+      "name": "Телевизор",
+      "lineStyle": null,
+      "sizes": {
+        "length": 1240,
+        "width": 720,
+        "depth": 80,
+        "heightAboveFloor": 850
+      },
+      "order": 49
+    },
+    {
+      "shape": "rect-vertical-ticks",
+      "blockMode": "each",
+      "kind": "point",
+      "channels": 1,
+      "id": "6485b3a6-692b-4590-96e2-e460dd2cc473",
+      "categoryId": "5119baca-6129-48fa-8543-a2c5588044b8",
+      "code": "ПОС",
+      "name": "Полотенцесушитель",
+      "lineStyle": null,
+      "sizes": {
+        "length": 500,
+        "width": 800,
+        "depth": 100,
+        "heightAboveFloor": 900
+      },
+      "order": 50
+    }
+  ],
+  "rooms": [
+    {
+      "id": "52c23efe-3036-4d53-9e1e-8fe5f1ca31f1",
+      "name": "Комната",
+      "color": "#0F766E"
+    }
+  ],
+  "schemes": [
+    {
+      "id": "221cdda8-2c4d-4d42-b4b6-43c21278cc17",
+      "name": "1 этаж",
+      "imageId": "img-1",
+      "width": 1200,
+      "height": 800,
+      "order": 0
+    }
+  ],
+  "marks": [
+    {
+      "id": "1b67206f-e313-41f9-a159-54c300d9a959",
+      "schemeId": "221cdda8-2c4d-4d42-b4b6-43c21278cc17",
+      "typeId": "e722965d-1da0-4243-9bcf-edbd6d9aeb64",
+      "number": 1,
+      "kind": "point",
+      "points": [
+        {
+          "x": 0.3,
+          "y": 0.5
+        }
+      ],
+      "closed": false,
+      "groupId": null,
+      "labelOffset": null,
+      "roomId": null,
+      "roomManual": false,
+      "location": "",
+      "original": "",
+      "length": null,
+      "width": null,
+      "heightAboveFloor": null,
+      "controls": []
+    },
+    {
+      "id": "f15af841-befb-4f02-94a5-58bcbefbde3b",
+      "schemeId": "221cdda8-2c4d-4d42-b4b6-43c21278cc17",
+      "typeId": "0eb65762-7e1f-4a9c-83ca-5a4ae2197a0c",
+      "number": 1,
+      "kind": "point",
+      "points": [
+        {
+          "x": 0.4,
+          "y": 0.5
+        }
+      ],
+      "closed": false,
+      "groupId": null,
+      "labelOffset": null,
+      "roomId": null,
+      "roomManual": false,
+      "location": "",
+      "original": "",
+      "length": null,
+      "width": null,
+      "heightAboveFloor": null,
+      "controls": []
+    },
+    {
+      "id": "cafb46a2-b0b2-4966-9d25-2942da03ccce",
+      "schemeId": "221cdda8-2c4d-4d42-b4b6-43c21278cc17",
+      "typeId": "bccd7652-6bca-4465-98a2-d39dcb485164",
+      "number": 1,
+      "kind": "point",
+      "points": [
+        {
+          "x": 0.5,
+          "y": 0.5
+        }
+      ],
+      "closed": false,
+      "groupId": null,
+      "labelOffset": null,
+      "roomId": null,
+      "roomManual": false,
+      "location": "",
+      "original": "",
+      "length": null,
+      "width": null,
+      "heightAboveFloor": null,
+      "controls": []
+    },
+    {
+      "id": "96fc69fb-78b9-4532-82cd-613bbe528477",
+      "schemeId": "221cdda8-2c4d-4d42-b4b6-43c21278cc17",
+      "typeId": "d9608dca-cb6c-44cd-a848-12b97c06a79a",
+      "number": 1,
+      "kind": "point",
+      "points": [
+        {
+          "x": 0.6,
+          "y": 0.5
+        }
+      ],
+      "closed": false,
+      "groupId": null,
+      "labelOffset": null,
+      "roomId": null,
+      "roomManual": false,
+      "location": "",
+      "original": "",
+      "length": null,
+      "width": null,
+      "heightAboveFloor": null,
+      "controls": []
+    },
+    {
+      "id": "6655ead5-f136-48a9-abbc-e5558cf46219",
+      "schemeId": "221cdda8-2c4d-4d42-b4b6-43c21278cc17",
+      "typeId": "0400065e-4400-4648-b150-6d5083194362",
+      "number": 1,
+      "kind": "point",
+      "points": [
+        {
+          "x": 0.7,
+          "y": 0.5
+        }
+      ],
+      "closed": false,
+      "groupId": null,
+      "labelOffset": null,
+      "roomId": null,
+      "roomManual": false,
+      "location": "",
+      "original": "",
+      "length": null,
+      "width": null,
+      "heightAboveFloor": null,
+      "controls": []
+    },
+    {
+      "id": "429fd9f9-066e-4356-b329-3a129846cc89",
+      "schemeId": "221cdda8-2c4d-4d42-b4b6-43c21278cc17",
+      "typeId": "aad3f668-b539-4734-9789-4c5735d88c95",
+      "number": 1,
+      "kind": "point",
+      "points": [
+        {
+          "x": 0.8,
+          "y": 0.5
+        }
+      ],
+      "closed": false,
+      "groupId": null,
+      "labelOffset": null,
+      "roomId": null,
+      "roomManual": false,
+      "location": "",
+      "original": "",
+      "length": null,
+      "width": null,
+      "heightAboveFloor": null,
+      "controls": []
+    }
+  ],
+  "groups": [],
+  "outlines": [],
+  "equipment": [],
+  "placements": [],
+  "equipmentTypes": [
+    {
+      "id": "229c9d92-38a9-4eac-a678-3520a96e069b",
+      "name": "Светильник точечный",
+      "order": 0
+    },
+    {
+      "id": "44bcf6f7-12c6-48a9-a010-89ef07e2a843",
+      "name": "Светильник",
+      "order": 1
+    },
+    {
+      "id": "d7739bbc-4d33-4616-a553-f14b42f2d6c0",
+      "name": "Светодиодная лента",
+      "order": 2
+    },
+    {
+      "id": "722e017e-20c7-422a-b26c-b9f157d93c3e",
+      "name": "Трековый светильник",
+      "order": 3
+    },
+    {
+      "id": "5cf0afc6-4547-4859-a3ef-2201def90428",
+      "name": "Выключатель",
+      "order": 4
+    },
+    {
+      "id": "e37e122f-8de2-479b-adf7-4f4fd85c33bc",
+      "name": "Розетка",
+      "order": 5
+    },
+    {
+      "id": "123a6dfb-99d1-4a9b-9d29-cacf80bb8f40",
+      "name": "Бризер",
+      "order": 6
+    },
+    {
+      "id": "6cb0108f-3743-4b79-85b9-8dfc2d72459c",
+      "name": "Кондиционер",
+      "order": 7
+    },
+    {
+      "id": "2be261e0-8bd3-4809-b562-3ff38ba7d490",
+      "name": "Точка доступа WiFi",
+      "order": 8
+    },
+    {
+      "id": "0e9bd937-37aa-4a10-9666-12772fc947a9",
+      "name": "Розетка RJ45",
+      "order": 9
+    },
+    {
+      "id": "f0b363ba-313c-4168-b729-c05f74989fbe",
+      "name": "Датчик движения",
+      "order": 10
+    },
+    {
+      "id": "d1e69b63-f237-4473-9653-6924837e6ce7",
+      "name": "Датчик открытия",
+      "order": 11
+    },
+    {
+      "id": "93a92ca1-6556-419e-be8a-4844fdf98dc0",
+      "name": "Датчик протечки",
+      "order": 12
+    },
+    {
+      "id": "8467b299-5e1a-4184-941e-bef5a2d8067e",
+      "name": "Датчик дыма",
+      "order": 13
+    },
+    {
+      "id": "16f0ea5f-2abc-488c-b0ab-a94646418af4",
+      "name": "Датчик температуры и влажности",
+      "order": 14
+    },
+    {
+      "id": "ab30baf9-1d5c-43c9-8c59-81fff09ef903",
+      "name": "Кран с электроприводом",
+      "order": 15
+    },
+    {
+      "id": "d77faaad-52e8-451d-91a4-a6a0d2f3f229",
+      "name": "Реле 1 канал",
+      "order": 16
+    },
+    {
+      "id": "693c2300-5dfd-4ba6-8b60-66df7b7efe38",
+      "name": "Реле 2 канала",
+      "order": 17
+    },
+    {
+      "id": "243d9b4e-4ed2-4f82-a964-0a6ecc234b8e",
+      "name": "Реле 3 канала",
+      "order": 18
+    },
+    {
+      "id": "2fdf4c20-a67e-4333-87d9-8ded4019a9d4",
+      "name": "Реле 4 канала",
+      "order": 19
+    },
+    {
+      "id": "d26d1f41-c739-45d3-a5cd-1e8366f8b788",
+      "name": "Диммер",
+      "order": 20
+    },
+    {
+      "id": "88f46f71-a592-4b76-b085-591f3e71c92e",
+      "name": "Контроллер одноцветной ленты",
+      "order": 21
+    },
+    {
+      "id": "b3f15d75-02b9-46e1-912f-53aff5f7c4db",
+      "name": "Контроллер ленты RGB",
+      "order": 22
+    },
+    {
+      "id": "b058204f-66d0-4751-9151-f67f27b3f09b",
+      "name": "Контроллер ленты RGBW",
+      "order": 23
+    },
+    {
+      "id": "f938aa72-c096-41e3-afbc-2f83f2ad7430",
+      "name": "Контроллер ленты CCT",
+      "order": 24
+    },
+    {
+      "id": "426a5eb4-7a50-475b-8160-9dd3b3d7a649",
+      "name": "Блок питания",
+      "order": 25
+    },
+    {
+      "id": "7659258f-7cc2-4a60-bf0b-c0d980c0082b",
+      "name": "Беспроводная кнопка",
+      "order": 26
+    },
+    {
+      "id": "fc47dd90-c7c5-4147-ac4b-b4cf288a260e",
+      "name": "Сценарная панель",
+      "order": 27
+    },
+    {
+      "id": "55e494f6-29ce-4294-ab0b-9abd22dc4b61",
+      "name": "Шлюз Zigbee или Z-Wave",
+      "order": 28
+    },
+    {
+      "id": "0f337f9b-f12f-4d05-b280-e05c9948567d",
+      "name": "Контроллер умного дома",
+      "order": 29
+    },
+    {
+      "id": "5ad0477a-9483-4d56-bcf2-96bafafd511b",
+      "name": "Встраиваемый модуль",
+      "order": 30
+    },
+    {
+      "id": "93e1c119-29ce-4abf-9486-d4dd35299aa7",
+      "name": "Привод штор",
+      "order": 31
+    },
+    {
+      "id": "8e18bfd4-dea3-42ba-8053-cfc09b4faca8",
+      "name": "Термостат",
+      "order": 32
+    },
+    {
+      "id": "5c8f2b89-5db5-423a-823a-fcc1d21c6b54",
+      "name": "ИК-передатчик",
+      "order": 33
+    },
+    {
+      "id": "16e630ed-0029-49b6-8c62-d13139348821",
+      "name": "Коммутатор",
+      "order": 34
+    },
+    {
+      "id": "1823a755-e3ce-45e7-99e4-55ab177cabf7",
+      "name": "Роутер",
+      "order": 35
+    },
+    {
+      "id": "61592cb2-3abe-4fa6-9f0c-4c274783e21b",
+      "name": "Автоматический выключатель",
+      "order": 36
+    },
+    {
+      "id": "3248eda3-086e-4752-a5ca-7bfb9bb4c427",
+      "name": "УЗО или дифавтомат",
+      "order": 37
+    },
+    {
+      "id": "0bae45c7-9d58-4336-bccc-a085f60e7b1a",
+      "name": "Контактор",
+      "order": 38
+    },
+    {
+      "id": "9a4408e5-396c-42a9-ad1f-ed903a4ecdc0",
+      "name": "Щит (корпус)",
+      "order": 39
+    }
+  ],
+  "accepted": [
+    {
+      "key": "sharedShape:circle-cross#026f7c89-72f2-44a9-9d05-bc4766d39d66,6faed87e-138b-4bfe-8de8-baa497d662da,77258441-6d04-4ef5-9422-30cccb589310,aad3f668-b539-4734-9789-4c5735d88c95,bf80dc27-be65-4945-870e-fb09bcabd6fd,e722965d-1da0-4243-9bcf-edbd6d9aeb64,fe58912a-48ad-4b39-814f-29d2f771706d",
+      "code": "sharedShape",
+      "kind": "warning",
+      "label": "Знак «Круг с крестом» носят несколько типов: Т, С, ПК, ПС, ППл, ЛЮ, Бр",
+      "at": "2026-10-21T15:52:57.669Z"
+    },
+    {
+      "key": "sharedShape:circle-drain#0eb65762-7e1f-4a9c-83ca-5a4ae2197a0c,d9608dca-cb6c-44cd-a848-12b97c06a79a",
+      "code": "sharedShape",
+      "kind": "warning",
+      "label": "Знак «Круг со стрелкой вниз» носят несколько типов: Н, КН",
+      "at": "2026-10-21T15:52:57.669Z"
+    },
+    {
+      "key": "sharedShape:square-cross#02bd2d77-e432-446a-bd32-3990a294b010,bccd7652-6bca-4465-98a2-d39dcb485164,c6f62aa6-ef80-4157-ae10-de453aef8afa",
+      "code": "sharedShape",
+      "kind": "warning",
+      "label": "Знак «Квадрат с крестом» носят несколько типов: ПП, ВП, ЩС",
+      "at": "2026-10-21T15:52:57.669Z"
+    },
+    {
+      "key": "sharedShape:drop-dot#b1dfd0c8-7721-4e20-9b89-5548f5acd8c4,e4d2622c-1015-4255-a2ac-36a10b191b28",
+      "code": "sharedShape",
+      "kind": "warning",
+      "label": "Знак «Капля с точкой» носят несколько типов: ОВ, ВР",
+      "at": "2026-10-21T15:52:57.669Z"
+    },
+    {
+      "key": "sharedShape:square-bolt#6a910432-233d-43e1-83be-f870756af29d,7a2a83b7-6c0f-442d-a070-54d78558df82",
+      "code": "sharedShape",
+      "kind": "warning",
+      "label": "Знак «Квадрат с молнией» носят несколько типов: СУШ, ДЭП",
+      "at": "2026-10-21T15:52:57.669Z"
+    },
+    {
+      "key": "closeColors:9c2ad491-af3d-4334-a088-f1c97443b3e2+be50cda6-0657-4367-986a-4d409e646fc2",
+      "code": "closeColors",
+      "kind": "warning",
+      "label": "Цвета категорий «Выключатели» и «Электроприборы» похожи — 23,7",
+      "at": "2026-10-21T15:52:57.669Z"
+    },
+    {
+      "key": "closeColors:5b760832-f3cd-482a-8554-7d3be9b2d8c8+a3096d9e-67e0-4530-a71d-d0989b0e7258",
+      "code": "closeColors",
+      "kind": "warning",
+      "label": "Цвета категорий «Климат» и «Карнизы» похожи — 26,3",
+      "at": "2026-10-21T15:52:57.669Z"
+    },
+    {
+      "key": "closeColors:5119baca-6129-48fa-8543-a2c5588044b8+8b097a37-e77e-4223-adb6-13fc75ddf0c1",
+      "code": "closeColors",
+      "kind": "warning",
+      "label": "Цвета категорий «Домофон» и «Сантехника» похожи — 27,4",
+      "at": "2026-10-21T15:52:57.669Z"
+    },
+    {
+      "key": "closeColors:5b760832-f3cd-482a-8554-7d3be9b2d8c8+ca398320-63bb-4e3b-8806-752fb90b357c",
+      "code": "closeColors",
+      "kind": "warning",
+      "label": "Цвета категорий «Карнизы» и «Щит» похожи — 28,9",
+      "at": "2026-10-21T15:52:57.669Z"
+    }
+  ],
+  "counters": {
+    "ЛЮ": 1,
+    "Н": 1,
+    "ПП": 1,
+    "КН": 1,
+    "ПЗ": 1,
+    "Т": 1
+  },
+  "view": {
+    "markSize": 16,
+    "labelSize": 20
+  }
+}

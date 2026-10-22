@@ -31,6 +31,17 @@ import {
   setMarkNumber,
   updateEquipment,
   validate,
+  addLogicBinding,
+  addScenario,
+  deleteScenario,
+  findScenario,
+  logicBindingsOf,
+  markDeviceOf,
+  scenariosInOrder,
+  setMarkDevice,
+  setTypeDevice,
+  typeDeviceOf,
+  updateScenario,
 } from "../src/model.js";
 
 // Общий предок: объект с одной схемой, комнатой и парой меток.
@@ -833,4 +844,73 @@ test("слияние копий старого объекта не заводи�
       assert.equal(Object.prototype.hasOwnProperty.call(mark, field), false, "поле " + field + " завелось само");
     }
   }
+});
+
+// ——— сценарии, привязки логики и устройства (таск 01 сценариев, история 7.3) ———
+
+function scenarioBase() {
+  const { project, schemeId } = ancestor();
+  const [lamp, other] = project.marks.map((mark) => mark.id);
+  const logic = addScenario(project, { kind: "logic", name: "Логика", source: "info = {}" });
+  const bound = addLogicBinding(logic.project, { scenarioId: logic.scenario.id, markId: lamp, service: 0 });
+  return { project: stamp(bound.project, "2026-10-22T10:00:00.000Z"), schemeId, lamp, other, logicId: logic.scenario.id, bindingId: bound.binding.id };
+}
+
+test("сценарии с двух сторон складываются, одинаковый с двух машин не двоится", () => {
+  const base = scenarioBase();
+  const ours = stamp(addScenario(copyOf(base.project), { kind: "block", name: "Наш" }).project, "2026-10-22T11:00:00.000Z");
+  const theirs = stamp(addScenario(copyOf(base.project), { kind: "block", name: "Их" }).project, "2026-10-22T12:00:00.000Z");
+  const merged = mergeProjects(ours, theirs, base.project).project;
+  assert.deepEqual(scenariosInOrder(merged).map((item) => item.name).sort(), ["Их", "Логика", "Наш"]);
+  assert.deepEqual(scenariosInOrder(merged).map((item) => item.order), [0, 1, 2], "порядок не пересобран");
+  // Один и тот же сценарий (тот же файл с двух машин) — одной строкой.
+  const same = mergeProjects(copyOf(base.project), copyOf(base.project), base.project).project;
+  assert.equal(same.scenarios.length, 1);
+  assert.equal(same.logicBindings.length, 1);
+  // Правка с одной стороны приезжает к другой.
+  const edited = stamp(updateScenario(copyOf(base.project), base.logicId, { name: "Свет по датчику" }).project, "2026-10-22T13:00:00.000Z");
+  const result = mergeProjects(copyOf(base.project), edited, base.project);
+  assert.equal(findScenario(result.project, base.logicId).name, "Свет по датчику");
+  assert.ok(result.changes.some((change) => change.entity === "scenarios" && change.label === "Свет по датчику"));
+});
+
+test("привязка без метки или без сценария после слияния уходит — и об этом сказано", () => {
+  const base = scenarioBase();
+  // У нас удалили метку, у них к ней добавили вторую привязку.
+  const ours = stamp(deleteMark(copyOf(base.project), base.lamp).project, "2026-10-22T11:00:00.000Z");
+  const theirs = stamp(
+    addLogicBinding(copyOf(base.project), { scenarioId: base.logicId, markId: base.lamp, service: 0, options: { x: 1 } }).project,
+    "2026-10-22T12:00:00.000Z",
+  );
+  const merged = mergeProjects(ours, theirs, base.project);
+  assert.ok(!merged.project.marks.some((mark) => mark.id === base.lamp));
+  assert.deepEqual(logicBindingsOf(merged.project), [], "привязка к удалённой метке пережила слияние");
+  const dropped = merged.conflicts.filter((item) => item.entity === "logicBindings" && item.code === "danglingRef");
+  assert.equal(dropped.length, 1);
+  assert.ok(dropped[0].label, "строка отчёта без подлежащего");
+
+  // У них удалили логический сценарий, у нас к нему привязали вторую метку.
+  const mine = stamp(addLogicBinding(copyOf(base.project), { scenarioId: base.logicId, markId: base.other }).project, "2026-10-22T11:00:00.000Z");
+  const gone = stamp(deleteScenario(copyOf(base.project), base.logicId).project, "2026-10-22T12:00:00.000Z");
+  const result = mergeProjects(mine, gone, base.project).project;
+  assert.equal(findScenario(result, base.logicId), null);
+  assert.deepEqual(logicBindingsOf(result), [], "привязка к удалённому сценарию пережила слияние");
+});
+
+test("профиль типа и своя настройка метки сливаются вместе с типом и меткой", () => {
+  const base = scenarioBase();
+  const typeId = base.project.markTypes[0].id;
+  const ours = stamp(setTypeDevice(copyOf(base.project), typeId, { kind: "lightCct" }).project, "2026-10-22T11:00:00.000Z");
+  const theirs = stamp(setMarkDevice(copyOf(base.project), base.other, { kind: "lightRgb" }).project, "2026-10-22T12:00:00.000Z");
+  const merged = mergeProjects(ours, theirs, base.project).project;
+  assert.equal(typeDeviceOf(merged, typeId).kind, "lightCct");
+  assert.equal(markDeviceOf(merged, base.other).kind, "lightRgb");
+  assert.equal(markDeviceOf(merged, base.lamp).kind, "lightCct");
+});
+
+test("слияние объектов без сценариев не заводит их коллекций", () => {
+  const { project } = ancestor();
+  const merged = mergeProjects(copyOf(project, "2026-10-22T11:00:00.000Z"), copyOf(project, "2026-10-22T12:00:00.000Z"), project).project;
+  assert.equal(Object.prototype.hasOwnProperty.call(merged, "scenarios"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(merged, "logicBindings"), false);
 });
