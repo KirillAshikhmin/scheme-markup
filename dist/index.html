@@ -58452,6 +58452,12 @@ function volumeFace(points, rgb, options = {}) {
     // Чьё это полотно: по нему кадр отвечает, какую дверь открывает E (G207).
     // Есть только у полотна и его ручки — больше ни у чего в сцене.
     doorId: options.doorId || null,
+    // С какого этажа стопки пришла грань (таск 232). Ставит его
+    // `volumeFloorFaces`, и по нему кадр решает, достаются ли грани хозяева:
+    // на чужом этаже их нет. Объявлено **здесь**, а не приписывается потом:
+    // приписанное поле меняет породу всех граней сцены, и сборка стопки на
+    // объекте заказчика дорожала от этого на 2–3 мс.
+    floor: null,
   };
 }
 
@@ -58479,6 +58485,7 @@ function volumeLine(points, color, options = {}) {
     n: options.normal || null,
     layer: options.layer === undefined ? VOLUME_LAYER_BODY : options.layer,
     markId: options.markId || null,
+    floor: null,
   };
 }
 
@@ -61399,13 +61406,25 @@ function volumeFloorPlan(project, schemeId) {
  * у кого на руках, а копия стопки из трёх этажей — это десятки тысяч лишних
  * точек на каждую сборку сцены.
  *
- * **У этажа, на котором не стоишь, хозяев нет.** Снимаются `markId`, `channel`
- * и `doorId`: выделение, прицел, клавиши выключателя и двери остаются на своём
- * этаже. Иначе щелчок по розетке чужого этажа выделил бы метку чужой схемы —
- * карточка, список меток и подсветка на плане говорили бы о том, чего в кадре
- * нет, — а «все двери» открывало бы двери двух этажей через одну.
+ * **У этажа, на котором не стоишь, хозяев нет.** Выделение, прицел, клавиши
+ * выключателя и двери остаются на своём этаже: иначе щелчок по розетке чужого
+ * этажа выделил бы метку чужой схемы — карточка, список меток и подсветка на
+ * плане говорили бы о том, чего в кадре нет, — а «все двери» открывало бы двери
+ * двух этажей через одну.
+ *
+ * Правило то же, а записано оно иначе: грань носит **свой этаж** (`face.floor`
+ * — схема, с которой она пришла), а хозяева достаются граням того этажа, на
+ * котором стоит человек (`scene.ownFloor`); решает это кадр, одним сравнением
+ * (`volumeFrame`). Прежде `markId`, `channel` и `doorId` у чужого этажа
+ * **обнулялись**, и это было необратимо: поднявшись туда по лестнице, человек
+ * получал этаж уже без хозяев — то есть этаж приходилось собирать заново.
+ * Ярлык не снимается ничем, его наследуют и куски от резов дерева, и смена
+ * этажа перестала быть пересборкой: меняется одно поле сцены (таск 232).
+ *
+ * `floor` не задан — грань ничья, и хозяева у неё свои: так приходит сцена
+ * одной схемы, у которой этажа нет вовсе.
  */
-function volumeFloorFaces(faces, { baseMm = 0, shiftMm = null, own = true } = {}) {
+function volumeFloorFaces(faces, { baseMm = 0, shiftMm = null, floor = null } = {}) {
   const lift = Number(baseMm) || 0;
   const dx = Number(shiftMm && shiftMm.x) || 0;
   const dy = Number(shiftMm && shiftMm.y) || 0;
@@ -61417,12 +61436,17 @@ function volumeFloorFaces(faces, { baseMm = 0, shiftMm = null, own = true } = {}
         point.z += lift;
       }
     }
-    if (own) continue;
-    face.markId = null;
-    if (face.channel !== undefined) face.channel = null;
-    if (face.doorId !== undefined) face.doorId = null;
+    if (floor !== null) face.floor = floor;
   }
   return faces;
+}
+
+/**
+ * Своя ли это грань: ничья (этажа нет) или с того этажа, на котором стоят.
+ * Хозяева — `markId`, `channel`, `doorId` — достаются только своим.
+ */
+function volumeFaceMine(face, ownFloor) {
+  return !face || face.floor === undefined || face.floor === null || face.floor === ownFloor;
 }
 
 /**
@@ -61646,6 +61670,150 @@ function volumeCeilingUnderVoid(room, voids, capMm) {
   return voids.some((hole) => volumePolysOverlap(room.pointsMm, hole));
 }
 
+/**
+ * ——— этаж стопки переставляется, а не пересобирается (таск 232) ———
+ *
+ * Долг тасков 202 и 229: открывание двери пересобирало все этажи (26 мс на
+ * трёх), приземление после падения и переход по лестнице — тоже (61 мс на
+ * объекте заказчика, 80 % из них — дерево порядка). Между двумя сборками при
+ * этом менялась мелочь: у одного этажа дверь, у остальных — только та база, от
+ * которой считается высота.
+ *
+ * **Второго источника правды тут нет.** Этаж, однажды собранный, остаётся
+ * лежать в самой сцене (`scene.stackParts`) — той единственной, которая и есть
+ * ответ на «что показано». Ключ этажа (`volumeFloorKey`) собран из тех же
+ * доводов, по которым этаж собирают: объекта, схемы, видимых меток, своих
+ * открытых дверей и штор, своих спрятанных вещей, снятой крыши и накрытия
+ * сверху. Сошлось — этаж берут как есть; не сошлось — собирают заново. Другого
+ * способа устареть у него нет: сцена живёт один кадр, ключ — вывод из данных.
+ *
+ * Переезд этажа — это **перенос**, и он точен: сдвиг не меняет ни одной
+ * взаимной дальности, поэтому дерево порядка переносится вместе с гранями
+ * (плоскость узла уезжает на `n·t`), а не строится заново. Правило «дерево
+ * строится при сборке сцены, а не покадрово» от этого не трогается: и сборка, и
+ * перенос случаются по событию — дверь, лестница, падение, — а не в кадре.
+ */
+
+/** Ящик этажа опустел: дерева нет, точки резов и состав пачки брошены. */
+function volumeBoxEmpty(box) {
+  if (!box) return;
+  box.tree = null;
+  box.pack = null;
+  if (box.cuts) box.cuts.length = 0;
+}
+
+/** Плоскости дерева уезжают вместе с гранями: перенос сдвигает `d` на `n·t`. */
+function volumeMovePlanes(node, dx, dy, dz) {
+  if (!node) return;
+  node.plane.d += node.plane.x * dx + node.plane.y * dy + node.plane.z * dz;
+  volumeMovePlanes(node.front, dx, dy, dz);
+  volumeMovePlanes(node.back, dx, dy, dz);
+}
+
+/**
+ * Этаж встаёт на новое место: своя база и своё смещение плана.
+ *
+ * `part` — этаж из `scene.stackParts`: `{sub, cuts, tree, at}`. Переносятся
+ * **все** точки, какие у этажа есть: точки граней сцены (у каждой грани свои,
+ * общих между гранями нет) и точки резов дерева (`cuts`) — их в сцене нет
+ * нигде, и без списка они остались бы на прежнем месте. Дерево, лежащее в
+ * этаже, уезжает вместе с ними.
+ *
+ * Перенос записывается в `part.move`: по нему сшивка узнаёт, что пачка этажей
+ * уехала целиком и одинаково, — только тогда её дерево годится как есть.
+ */
+function volumeFloorPlace(part, { baseMm = 0, shiftMm = null } = {}) {
+  if (!part || !part.at) return part;
+  const lift = Number(baseMm) || 0;
+  const toX = Number(shiftMm && shiftMm.x) || 0;
+  const toY = Number(shiftMm && shiftMm.y) || 0;
+  const dz = lift - part.at.baseMm;
+  const dx = toX - part.at.dx;
+  const dy = toY - part.at.dy;
+  part.fresh = false;
+  part.move = { dx, dy, dz };
+  if (dx === 0 && dy === 0 && dz === 0) return part;
+  for (const face of part.sub.faces) {
+    for (const point of face.p) {
+      point.x += dx;
+      point.y += dy;
+      point.z += dz;
+    }
+  }
+  for (const point of part.cuts) {
+    point.x += dx;
+    point.y += dy;
+    point.z += dz;
+  }
+  volumeMovePlanes(part.tree, dx, dy, dz);
+  part.at.baseMm = lift;
+  part.at.dx = toX;
+  part.at.dy = toY;
+  return part;
+}
+
+/**
+ * Ключ этажа: доводы, из которых он собран. Сошлись все — этаж тот же.
+ *
+ * `project` сравнивается **ссылкой**: правка объекта заводит новый объект
+ * (`model.js` возвращает новый из каждой функции), и равенство ссылок значит
+ * «не менялось ничего». Ошибиться в эту сторону нельзя: разошлись ссылки —
+ * этаж соберётся заново, даже если правили чужую схему.
+ *
+ * Открытые двери, шторы и спрятанные вещи приходят **одним множеством на все
+ * этажи**, и спрашивать его целиком нельзя: дверь первого этажа пересобирала бы
+ * второй. Поэтому у каждого этажа берётся его доля — `known` — те двери, шторы
+ * и вещи, которые есть у него самого.
+ *
+ * Чего в ключе нет нарочно: база этажа, смещение плана и «свой ли он». Это не
+ * то, из чего этаж собран, а то, куда он поставлен, — и меняется переносом
+ * (`volumeFloorPlace`).
+ */
+function volumeFloorKey(project, schemeId, options, cover, upper, known) {
+  const mine = known || { doors: [], sheers: [], objects: [] };
+  const chosen = (ids, open) => {
+    const out = [];
+    for (const id of ids || []) if (volumeDoorOpen(open, id)) out.push(id);
+    return out.join(" ");
+  };
+  return {
+    project,
+    schemeId,
+    marks: options.marks || null,
+    roofOff: options.roofOff === true,
+    upper: upper === true,
+    capMm: cover && cover.capMm !== undefined ? cover.capMm : null,
+    coverX: (cover && cover.dx) || 0,
+    coverY: (cover && cover.dy) || 0,
+    doors: chosen(mine.doors, options.openDoorIds),
+    sheers: chosen(mine.sheers, options.openCurtainIds),
+    hidden: chosen(mine.objects, options.hiddenObjectIds),
+  };
+}
+
+/** Тот же ключ или нет. Метки сравниваются поштучно: список собран заново. */
+function volumeFloorKeySame(was, now) {
+  if (!was || !now) return false;
+  if (
+    was.project !== now.project ||
+    was.schemeId !== now.schemeId ||
+    was.roofOff !== now.roofOff ||
+    was.upper !== now.upper ||
+    was.capMm !== now.capMm ||
+    was.coverX !== now.coverX ||
+    was.coverY !== now.coverY ||
+    was.doors !== now.doors ||
+    was.sheers !== now.sheers ||
+    was.hidden !== now.hidden
+  ) {
+    return false;
+  }
+  if (was.marks === now.marks) return true;
+  if (!was.marks || !now.marks || was.marks.length !== now.marks.length) return false;
+  for (let at = 0; at < was.marks.length; at += 1) if (was.marks[at] !== now.marks[at]) return false;
+  return true;
+}
+
 /** Снизу и сверху: насколько грани уходят по вертикали. `null` — граней нет. */
 function volumeFacesSpan(faces) {
   let minZ = Infinity;
@@ -61673,10 +61841,24 @@ function volumeFacesSpan(faces) {
  * перекрылись по вертикали (метка, посаженная выше стен своего этажа), сшивать
  * нечем — такие этажи сливаются в одно дерево. Это дороже, зато верно: порядок
  * в объёме обязан быть точным в каждом пикселе.
+ *
+ * `boxes` — этажи стопки (таск 232), по одному на каждую запись `groups`.
+ * Дерево пачки лежит **у первого её этажа** (`box.tree`, состав пачки —
+ * `box.pack`), и берётся готовым, когда сошлись три условия: состав пачки тот
+ * же, ни один её этаж не собран заново (`box.fresh`) и все уехали одинаково
+ * (`box.move`). Иначе ящики всей пачки пустеют, а дерево строится здесь: оно
+ * ложится в ящик первого этажа, точки резов — в его `cuts`, и по ним пачка
+ * потом переезжает целиком.
+ *
+ * Пачка из одного этажа и пачка из слипшихся считаются одинаково, второго
+ * правила для них нет: у перекрывшихся этажей дерево просто одно на всех, а
+ * хозяин ему — нижний.
  */
-function volumeOrderStack(groups) {
+function volumeOrderStack(groups, boxes = null) {
+  const boxAt = (at) => (boxes && at >= 0 && boxes[at]) || null;
   const parts = [];
-  for (const faces of groups || []) {
+  for (let group = 0; group < (groups || []).length; group += 1) {
+    const faces = groups[group];
     const inTree = (faces || []).filter((face) => !face.line && face.layer === VOLUME_LAYER_BODY);
     const span = volumeFacesSpan(inTree);
     if (!span) continue;
@@ -61688,14 +61870,43 @@ function volumeOrderStack(groups) {
     if (last && span.minZ < last.span.maxZ - VOLUME_PLANE_EPS_MM) {
       last.faces = [...last.faces, ...inTree];
       last.span = { minZ: Math.min(last.span.minZ, span.minZ), maxZ: Math.max(last.span.maxZ, span.maxZ) };
+      last.pack.push(group);
       continue;
     }
-    parts.push({ faces: inTree, span });
+    parts.push({ faces: inTree, span, pack: [group] });
   }
   if (parts.length === 0) return null;
-  let tree = volumeOrderTree(parts[0].faces);
+  /** Готовое дерево пачки или `null`: состав, свежесть и переезд — у всех. */
+  const ready = (part) => {
+    const box = boxAt(part.pack[0]);
+    if (!box || !box.tree) return null;
+    const was = box.pack || [];
+    if (was.length !== part.pack.length) return null;
+    for (let at = 0; at < was.length; at += 1) if (was[at] !== part.pack[at]) return null;
+    const move = box.move || { dx: 0, dy: 0, dz: 0 };
+    for (const group of part.pack) {
+      const one = boxAt(group);
+      if (!one || one.fresh) return null;
+      const step = one.move || { dx: 0, dy: 0, dz: 0 };
+      if (step.dx !== move.dx || step.dy !== move.dy || step.dz !== move.dz) return null;
+    }
+    return box.tree;
+  };
+  const treeOf = (part) => {
+    const done = ready(part);
+    if (done) return done;
+    for (const group of part.pack) volumeBoxEmpty(boxAt(group));
+    const box = boxAt(part.pack[0]);
+    const built = volumeOrderTree(part.faces, box ? box.cuts : null);
+    if (box) {
+      box.tree = built;
+      box.pack = part.pack;
+    }
+    return built;
+  };
+  let tree = treeOf(parts[0]);
   for (let at = 1; at < parts.length; at += 1) {
-    const upper = volumeOrderTree(parts[at].faces);
+    const upper = treeOf(parts[at]);
     if (!upper) continue;
     if (!tree) {
       tree = upper;
@@ -61728,12 +61939,19 @@ function volumeOrderStack(groups) {
  * `optionsOf(schemeId)` — доводы сборки для каждой схемы (видимые метки,
  * открытые двери, спрятанные вещи): фильтр и отметки обязаны значить на всех
  * этажах одно и то же.
+ *
+ * `was` — **прошлая сцена стопки** (таск 232). Этажи лежат в ней разобранными
+ * (`was.stackParts`), и каждый берётся готовым, если его ключ сошёлся: открытая
+ * дверь, снятый пол и смена часа чужих этажей не касаются, а смена этажа
+ * прибытия не касается ни одного — она переставляет их, а не пересобирает.
+ * Второго ответа о сцене от этого не завелось: `stackParts` — это та же сцена,
+ * разобранная на то, из чего она сложена, и живёт она ровно столько, сколько
+ * живёт сцена. Не передали `was` — всё собирается заново, как собиралось.
  */
-function volumeStackScene(project, plan, optionsOf) {
+function volumeStackScene(project, plan, optionsOf, was = null) {
   const floors = (plan && plan.floors) || [];
   const mineAt = floors.findIndex((item) => item.current);
   if (mineAt < 0 || floors.length < 2) return null;
-  const mine = floors[mineAt];
   const take = (schemeId) => (typeof optionsOf === "function" ? optionsOf(schemeId) || {} : {});
   // **У этажа выше нижнего плиты нет вовсе**: земля у дома одна и лежит под
   // нижним этажом, а перекрытие собирается из полов помещений (таск 209).
@@ -61749,12 +61967,23 @@ function volumeStackScene(project, plan, optionsOf) {
    * которых этаж выше поставил свою стену на то же место. Стены соседа
    * переводятся в координаты этого этажа — разницу привязок знает план стопки.
    */
+  // Насколько сосед сверху сдвинут в плане и где потолок этой полосы. Обе
+  // мерки — **разницы**, то есть от выбранного этажа не зависят, и ровно
+  // поэтому они годятся в ключ этажа (`volumeFloorKey`).
+  const coverShift = (at) => {
+    const above = floors[at + 1];
+    if (!above) return { dx: 0, dy: 0, capMm: null };
+    return {
+      dx: above.shiftMm.x - floors[at].shiftMm.x,
+      dy: above.shiftMm.y - floors[at].shiftMm.y,
+      capMm: above.baseMm - floors[at].baseMm,
+    };
+  };
   const coverOf = (at) => {
     const here = floors[at];
     const above = floors[at + 1];
     if (!above) return {};
-    const dx = above.shiftMm.x - here.shiftMm.x;
-    const dy = above.shiftMm.y - here.shiftMm.y;
+    const { dx, dy } = coverShift(at);
     const uppers = wallsOnScheme(project, above.schemeId).map((wall) => ({
       aMm: { x: Number(wall.aMm.x) + dx, y: Number(wall.aMm.y) + dy },
       bMm: { x: Number(wall.bMm.x) + dx, y: Number(wall.bMm.y) + dy },
@@ -61776,14 +62005,67 @@ function volumeStackScene(project, plan, optionsOf) {
     // своя, то есть высота этажа вместе с перекрытием.
     return { capMm: above.baseMm - here.baseMm, covers, voids };
   };
-  const base = volumeScene(project, mine.schemeId, {
-    ...take(mine.schemeId),
-    ...coverOf(mineAt),
-    order: false,
-    upper: upperOf(mineAt),
-  });
-  if (!base || base.empty) return base;
+  // Этажи прошлой сцены — по схеме. Ключ сошёлся, значит этаж собран из того же
+  // и годится как есть; разошёлся — этот этаж собирается заново, и только он.
+  const had = new Map();
+  for (const part of (was && was.stackParts) || []) if (!had.has(part.schemeId)) had.set(part.schemeId, part);
+
+  /** Этаж стопки: готовый из прошлой сцены или собранный заново. */
+  const floorPart = (at) => {
+    const item = floors[at];
+    const options = take(item.schemeId);
+    const upper = upperOf(at);
+    const cover = coverShift(at);
+    const place = { baseMm: item.baseMm, shiftMm: item.shiftMm, floor: item.schemeId };
+    const ready = had.get(item.schemeId) || null;
+    if (ready) {
+      const key = volumeFloorKey(project, item.schemeId, options, cover, upper, ready.known);
+      if (volumeFloorKeySame(ready.key, key)) {
+        ready.key = key;
+        return volumeFloorPlace(ready, place);
+      }
+    }
+    const sub = volumeScene(project, item.schemeId, { ...options, ...coverOf(at), order: false, upper });
+    if (!sub) return null;
+    if (sub.empty) return { schemeId: item.schemeId, sub };
+    volumeFloorFaces(sub.faces, place);
+    // Своя доля общих множеств: двери, шторы и вещи **этого** этажа. Ими ключ
+    // отвечает на «моё ли это открыли» (см. `volumeFloorKey`).
+    const known = {
+      doors: sub.doors || [],
+      sheers: sub.sheers || [],
+      objects: schemeObjectsOnScheme(project, item.schemeId).map((object) => object.id),
+    };
+    return {
+      schemeId: item.schemeId,
+      sub,
+      known,
+      key: volumeFloorKey(project, item.schemeId, options, cover, upper, known),
+      cuts: [],
+      tree: null,
+      pack: null,
+      // Собран заново — значит грани у него новые, и прежнее дерево пачки на
+      // них уже не ссылается.
+      fresh: true,
+      move: { dx: 0, dy: 0, dz: 0 },
+      at: {
+        baseMm: Number(item.baseMm) || 0,
+        dx: Number(item.shiftMm && item.shiftMm.x) || 0,
+        dy: Number(item.shiftMm && item.shiftMm.y) || 0,
+      },
+    };
+  };
+
+  // Свой этаж — первым: пустой он значит, что показывать нечего, и соседей ради
+  // него собирать незачем (прежнее правило `base`).
+  const parts = new Array(floors.length).fill(null);
+  parts[mineAt] = floorPart(mineAt);
+  const base = parts[mineAt] && parts[mineAt].sub;
+  if (!base || base.empty) return base || null;
+  for (let at = 0; at < floors.length; at += 1) if (at !== mineAt) parts[at] = floorPart(at);
+
   const groups = [];
+  const boxes = [];
   const faces = [];
   const shadowBoxes = [];
   const sunSpots = [];
@@ -61794,19 +62076,12 @@ function volumeStackScene(project, plan, optionsOf) {
   let topMm = 0;
   for (let at = 0; at < floors.length; at += 1) {
     const item = floors[at];
-    const own = at === mineAt;
-    const sub = own
-      ? base
-      : volumeScene(project, item.schemeId, {
-          ...take(item.schemeId),
-          ...coverOf(at),
-          order: false,
-          upper: upperOf(at),
-        });
+    const part = parts[at];
+    const sub = part && part.sub;
     if (!sub || sub.empty) continue;
     if (at === 0) landMm = sub.landMm;
-    volumeFloorFaces(sub.faces, { baseMm: item.baseMm, shiftMm: item.shiftMm, own });
     groups.push(sub.faces);
+    boxes.push(part);
     faces.push(...sub.faces);
     if (sub.boundsMm) {
       const box = {
@@ -61852,7 +62127,16 @@ function volumeStackScene(project, plan, optionsOf) {
   return {
     ...base,
     faces,
-    order: volumeOrderStack(groups),
+    order: volumeOrderStack(groups, boxes),
+    // Та же сцена, разобранная на этажи: из них она и сложена, и из них
+    // следующая сборка возьмёт всё, что не изменилось (таск 232). Это не второй
+    // ответ о сцене — это её же части, и живут они ровно её срок.
+    stackParts: boxes,
+    // На каком этаже стоит человек. **Единственное**, чем свой этаж отличается
+    // от чужого в гранях: хозяева (выделение, прицел, двери, клавиши) достаются
+    // граням с этим ярлыком, и решает это кадр. Поднялись по лестнице — поле
+    // меняется, грани остаются как есть (таск 232).
+    ownFloor: floors[mineAt].schemeId,
     shadowBoxes,
     sunSpots,
     // Земля — у нижнего этажа: у него плита работает землёй, у остальных она
@@ -64435,8 +64719,14 @@ function volumeFaceSide(plane, face) {
  *
  * Грань выпуклая или нет — обход один и тот же: вершины раскладываются по
  * сторонам, точка пересечения ребра попадает в обе половины.
+ *
+ * `cuts` — куда складывать **новые** точки реза. Нужны они одному: этажу
+ * стопки, который потом переставляют на другую базу (таск 232). Вершины
+ * половин — это точки самой грани: они лежат в сцене и переедут вместе с ней, а
+ * точка пересечения ребра не лежит в сцене нигде и осталась бы на месте. В обе
+ * половины попадает **одна** точка, и в список она кладётся один раз.
  */
-function volumeSplitFace(face, plane) {
+function volumeSplitFace(face, plane, cuts = null) {
   const side = volumeFaceSide(plane, face);
   if (side === 1 || side === 0) return { front: face, back: null };
   if (side === -1) return { front: null, back: face };
@@ -64455,6 +64745,7 @@ function volumeSplitFace(face, plane) {
       const db = plane.x * b.x + plane.y * b.y + plane.z * b.z - plane.d;
       const t = da / (da - db);
       const cut = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, z: a.z + (b.z - a.z) * t };
+      if (cuts) cuts.push(cut);
       front.push(cut);
       back.push(cut);
     }
@@ -64470,15 +64761,19 @@ function volumeSplitFace(face, plane) {
  *
  * Строится один раз на сцену и живёт в ней (`scene.order`): сцена пересобирается
  * при правке объекта и при открытии двери, и дерево вместе с ней.
+ *
+ * `cuts` — список точек реза (см. `volumeSplitFace`). Собирает его только
+ * стопка: по нему этаж переставляется на другую базу целиком, вместе с уже
+ * построенным деревом (таск 232).
  */
-function volumeOrderTree(faces) {
+function volumeOrderTree(faces, cuts = null) {
   const items = [];
   for (const face of faces || []) {
     if (!face || face.line) continue;
     if (face.layer !== undefined && face.layer !== VOLUME_LAYER_BODY) continue;
     items.push(face);
   }
-  return volumeOrderNode(items);
+  return volumeOrderNode(items, cuts);
 }
 
 /**
@@ -64486,7 +64781,7 @@ function volumeOrderTree(faces) {
  * Грань-кандидат всегда лежит в своей же плоскости, поэтому узел забирает хотя
  * бы одну грань — построение не зацикливается.
  */
-function volumeOrderNode(items) {
+function volumeOrderNode(items, cuts = null) {
   if (items.length === 0) return null;
   let best = null;
   const tries = Math.min(items.length, VOLUME_ORDER_TRIES);
@@ -64526,11 +64821,11 @@ function volumeOrderNode(items) {
       back.push(item);
       continue;
     }
-    const cut = volumeSplitFace(item, plane);
+    const cut = volumeSplitFace(item, plane, cuts);
     if (cut.front) front.push(cut.front);
     if (cut.back) back.push(cut.back);
   }
-  const node = { plane, same, front: volumeOrderNode(front), back: volumeOrderNode(back), count: 0 };
+  const node = { plane, same, front: volumeOrderNode(front, cuts), back: volumeOrderNode(back, cuts), count: 0 };
   node.count = same.length + (node.front ? node.front.count : 0) + (node.back ? node.back.count : 0);
   return node;
 }
@@ -64618,8 +64913,25 @@ function volumeFrame(scene, camera, box, extra = null, tint = null) {
   // У собранной сцены дерево уже есть; у наскоро составленной (стенд, тест) его
   // строят на месте — кадр обязан быть верным и там.
   const tree = scene.order === undefined ? volumeOrderTree(scene.faces) : scene.order;
+  // Хозяева — только у своего этажа (`volumeFloorFaces`, таск 232). Правило
+  // одно и живёт в `volumeFaceMine`; кадр его слушается, а не повторяет. У
+  // сцены одной схемы этажей нет вовсе — там и спрашивать нечего.
+  const ownFloor = scene.ownFloor;
+  const stacked = ownFloor !== undefined && ownFloor !== null;
   const take = (face, order) =>
-    volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, box, polygons, order, tint);
+    volumeFacePolygons(
+      face,
+      camera,
+      basis,
+      focal,
+      halfWidth,
+      halfHeight,
+      box,
+      polygons,
+      order,
+      tint,
+      !stacked || volumeFaceMine(face, ownFloor),
+    );
   // Половина — чтобы линия встала **между** гранями, а не спорила с одной из них.
   const rankOf = (face) => volumeOrderRank(tree, camera.at, volumeMiddleOf(face.p)) - 0.5;
   let rank = 0;
@@ -64714,9 +65026,9 @@ function volumeOutlineOrder(polygons) {
  * `order` — место в очереди: ранг из дерева у яруса тел, `null` у всех
  * остальных, и тогда порядок внутри яруса решает дальность, как прежде.
  */
-function volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, box, out, order = null, tint = null) {
+function volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, box, out, order = null, tint = null, mine = true) {
   if (face.line) {
-    const line = volumeLinePolygon(face, camera, basis, focal, halfWidth, halfHeight, box);
+    const line = volumeLinePolygon(face, camera, basis, focal, halfWidth, halfHeight, box, mine);
     if (line) {
       line.order = order === null ? -line.depth : order;
       out.push(line);
@@ -64765,11 +65077,14 @@ function volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, b
     // дальше — если за ним есть кому отвечать (таск 189, см. `volumeSightAt`).
     // Рисование об этом не спрашивает — прозрачность уже в цвете.
     clear: Boolean(face.clear),
-    pick: face.markId || null,
-    door: face.doorId || null,
+    // Хозяева — только у своего этажа (`volumeFloorFaces`): у грани чужого
+    // этажа их нет, и кадр не отдаёт её ни прицелу, ни щелчку, ни клавише
+    // выключателя. Своего правила здесь нет — только послушание пометке.
+    pick: (mine && face.markId) || null,
+    door: (mine && face.doorId) || null,
     // Клавиша выключателя (таск 177): по ней окно отвечает, в какой канал
     // попал щелчок. У остальных многоугольников `null`.
-    channel: face.channel === undefined ? null : face.channel,
+    channel: mine && face.channel !== undefined ? face.channel : null,
   });
   return out;
 }
@@ -64785,7 +65100,7 @@ function volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, b
  * отказа нулевая: контур вещи длиной в полметра оказывается наполовину за
  * спиной только тогда, когда человек уткнулся в него носом.
  */
-function volumeLinePolygon(line, camera, basis, focal, halfWidth, halfHeight, box) {
+function volumeLinePolygon(line, camera, basis, focal, halfWidth, halfHeight, box, mine = true) {
   if (line.n) {
     const first = line.p[0];
     const facing =
@@ -64822,7 +65137,7 @@ function volumeLinePolygon(line, camera, basis, focal, halfWidth, halfHeight, bo
     closed: line.closed,
     dash: line.dash,
     arrow: line.arrow,
-    pick: line.markId || null,
+    pick: (mine && line.markId) || null,
   };
 }
 
@@ -69475,16 +69790,22 @@ function createVolume({ api, hosts }) {
    */
   const floorPlan = (state) => volumeFloorPlan(state.project, schemeId);
   const stacking = (state, plan) => volumeParamsRead().floorsAll === true && (plan || floorPlan(state)).can;
+  // Сцена объёма — одна на поверхность, и её же прошлое состояние идёт доводом
+  // сборки (таск 232): стопка разобрана в ней на этажи, и каждый берётся
+  // готовым, если собран из того же. Открытая дверь чужих этажей не касается, а
+  // смена этажа прибытия — переставляет их, а не пересобирает. Второго ответа о
+  // сцене это не заводит: доводом идёт она сама.
+  let scene = null;
   const sceneOf = (state) => {
     const plan = floorPlan(state);
     if (stacking(state, plan)) {
-      const stack = volumeStackScene(state.project, plan, (id) => sceneOptions(state, id));
+      const stack = volumeStackScene(state.project, plan, (id) => sceneOptions(state, id), scene);
       if (stack) return stack;
     }
     return volumeScene(state.project, schemeId, sceneOptions(state, schemeId));
   };
 
-  let scene = sceneOf(getState());
+  scene = sceneOf(getState());
   // ——— час суток (таск 181, G282) ———
   //
   // Снимок часа (`volumeMood`) держится здесь и пересчитывается **не чаще раза
