@@ -41,9 +41,11 @@ import {
 import { drawDrawingGrid, drawRuler, drawScheme, drawingBridge, drawingUnitBridge, planToScreen, rulerTicks } from "../src/render.js";
 import {
   SCREEN_LOOK_VIEWS,
+  SCREEN_OPEN_MAX,
   screenPlaceForget,
   screenPlaceFrom,
   screenPlaceLookFrom,
+  screenPlaceOpenFrom,
   screenPlaceScreen,
   screenPlaceOf,
   screenPlacePlanRead,
@@ -61,6 +63,7 @@ import {
   workshopGridValue,
 } from "../src/panels/workshop.js";
 import { viewMemoryEntry, viewMemoryFrom, viewMemoryPatch } from "../src/app.js";
+import { volumeOpenAlive } from "../src/panels/volume.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const LEGACY_TEXT = readFileSync(join(HERE, "legacy-project.json"), "utf8").replace(/\n$/, "");
@@ -203,7 +206,13 @@ test("память вида: что ложится в настройки и чт
   }
   // Негодный масштаб не роняет место: оно читается, а приближение остаётся
   // тем, которое выбрал человек. Взгляда в такой записи нет — его пишет объём.
-  assert.deepEqual(screenPlaceFrom({ x: 5, y: 6, pxPerMm: -1 }), { x: 5, y: 6, pxPerMm: null, look: null });
+  assert.deepEqual(screenPlaceFrom({ x: 5, y: 6, pxPerMm: -1 }), {
+    x: 5,
+    y: 6,
+    pxPerMm: null,
+    look: null,
+    open: null,
+  });
 });
 
 test("память вида поднимается в общее место и становится чужой записью", () => {
@@ -602,6 +611,107 @@ test("G339: взгляд поднимается из памяти вместе �
   const entry = viewMemoryEntry({ screen: "volume", schemeId: "с-1" }, place);
   assert.deepEqual(entry.place.look, saved.look);
   assert.equal("look" in entry, false, "взгляд завёл вторую запись рядом с местом");
+  screenPlaceForget();
+  screenPlaceScreen(null);
+});
+
+// ——— G352: что в доме открыто — в той же записи ————————————————————————
+//
+// Долг таска 227, закрытый по правилу «долг закрывай». Двери и шторы — это не
+// свойство дома, а то, как человек настроил показ: в `project.json` от них не
+// попадает ничего (G68), а правило «все двери закрыты» (G207) — про новый
+// объект, а не про возвращение к своему.
+
+test("G352: что годится в «открыто», а что отбрасывается молча", () => {
+  assert.deepEqual(screenPlaceOpenFrom({ doors: ["д1", "д2"], sheers: ["ш1"] }), {
+    doors: ["д1", "д2"],
+    sheers: ["ш1"],
+  });
+  // Повторы схлопываются, мусор уходит: ключ — это строка, и только строка.
+  assert.deepEqual(screenPlaceOpenFrom({ doors: ["д1", "д1", "", 7, null], sheers: "не список" }), {
+    doors: ["д1"],
+    sheers: [],
+  });
+  // Пустое — это ответ «всё закрыто», а не молчание: иначе закрытые двери
+  // нечем было бы записать.
+  assert.deepEqual(screenPlaceOpenFrom({ doors: [], sheers: [] }), { doors: [], sheers: [] });
+  // А молчание — это `null`: кадру нечего сказать, и запись бережёт прежнее.
+  for (const bad of [null, undefined, "строка", 7]) assert.equal(screenPlaceOpenFrom(bad), null);
+  // Потолок: мусор в настройке не растёт без края.
+  const many = Array.from({ length: SCREEN_OPEN_MAX + 50 }, (item, at) => "д" + at);
+  assert.equal(screenPlaceOpenFrom({ doors: many }).doors.length, SCREEN_OPEN_MAX);
+});
+
+test("G352: открытое пишет объём, плоские поля его берегут", () => {
+  screenPlaceForget();
+  screenPlaceScreen("volume");
+  screenPlaceSet("volume", "с-1", { x: 0, y: 0 }, { open: { doors: ["д1", "д2"], sheers: ["ш1"] } });
+  assert.deepEqual(screenPlaceOf("с-1").open, { doors: ["д1", "д2"], sheers: ["ш1"] });
+  // Схема двигает место и масштаб — открытое не трогает.
+  screenPlaceScreen("scheme");
+  screenPlaceSet("scheme", "с-1", { x: 100, y: 200 }, { pxPerMm: 0.3 });
+  assert.deepEqual(screenPlaceOf("с-1").open, { doors: ["д1", "д2"], sheers: ["ш1"] });
+  // Запись из погасшего объёма не проходит (T210).
+  screenPlaceSet("volume", "с-1", { x: 0, y: 0 }, { open: { doors: [], sheers: [] } });
+  assert.deepEqual(screenPlaceOf("с-1").open, { doors: ["д1", "д2"], sheers: ["ш1"] });
+  // Кадр молчит об открытом (ничего не меняли) — запись остаётся прежней.
+  screenPlaceScreen("volume");
+  screenPlaceSet("volume", "с-1", { x: 5, y: 5 });
+  assert.deepEqual(screenPlaceOf("с-1").open, { doors: ["д1", "д2"], sheers: ["ш1"] });
+  // Закрыли всё — так и записано: пустое «открыто» это тоже ответ.
+  screenPlaceSet("volume", "с-1", { x: 5, y: 5 }, { open: { doors: [], sheers: [] } });
+  assert.deepEqual(screenPlaceOf("с-1").open, { doors: [], sheers: [] });
+  // В настройку пустое не кладётся: закрытый дом и так умолчание (G207).
+  assert.equal("open" in screenPlaceStored(screenPlaceOf("с-1")), false);
+  // Другой этаж — другие двери: запись одна, и чужого знания в ней не бывает.
+  screenPlaceSet("volume", "с-1", { x: 5, y: 5 }, { open: { doors: ["д1"], sheers: [] } });
+  screenPlaceScreen("scheme");
+  screenPlaceSet("scheme", "с-2", { x: 0, y: 0 }, { pxPerMm: 0.3 });
+  assert.equal(screenPlaceOf("с-2").open, null, "двери прежнего этажа утекли на новый");
+  assert.equal(screenPlaceOf("с-1"), null, "запись одна: прежний этаж в ней не остаётся");
+  screenPlaceForget();
+  screenPlaceScreen(null);
+});
+
+test("G352: мёртвый ключ не ломает сцену и не копится", () => {
+  // Дверь стёрли между сеансами: в памяти её ключ есть, в сцене — нет.
+  const scene = { doors: ["д1", "д2"], sheers: ["ш1"] };
+  assert.deepEqual(volumeOpenAlive(scene, { doors: ["д1", "стёртая"], sheers: ["ш1", "нет такой"] }), {
+    doors: ["д1"],
+    sheers: ["ш1"],
+  });
+  // Стопка этажей (таск 202): дверь соседнего этажа — тоже своя.
+  const stack = {
+    doors: ["д1"],
+    sheers: [],
+    stackParts: [{ sub: { doors: ["д2"], sheers: ["ш2"] } }, { sub: { doors: ["д3"], sheers: [] } }],
+  };
+  assert.deepEqual(volumeOpenAlive(stack, { doors: ["д1", "д3", "призрак"], sheers: ["ш2"] }), {
+    doors: ["д1", "д3"],
+    sheers: ["ш2"],
+  });
+  // Пустая память и пустая сцена — пустой ответ, а не падение.
+  assert.deepEqual(volumeOpenAlive({}, null), { doors: [], sheers: [] });
+  assert.deepEqual(volumeOpenAlive(null, { doors: ["д1"] }), { doors: [], sheers: [] });
+});
+
+test("G352: открытое ложится в память и поднимается из неё одной записью", () => {
+  screenPlaceForget();
+  screenPlaceScreen("volume");
+  const saved = {
+    x: 10,
+    y: 20,
+    pxPerMm: 0.2,
+    look: { view: "person", yaw: 1, pitch: 0 },
+    open: { doors: ["д1", "д2"], sheers: ["ш1"] },
+  };
+  assert.deepEqual(screenPlaceStored(saved).open, { doors: ["д1", "д2"], sheers: ["ш1"] });
+  assert.ok(screenPlaceRestore("с-1", saved) > 0);
+  assert.deepEqual(screenPlaceOf("с-1").open, saved.open);
+  // Вся память объекта — по-прежнему одна запись, и открытое лежит внутри неё.
+  const entry = viewMemoryEntry({ screen: "volume", schemeId: "с-1" }, screenPlaceOf("с-1"));
+  assert.deepEqual(entry.place.open, saved.open);
+  assert.equal("open" in entry, false, "открытое завело вторую запись рядом с местом");
   screenPlaceForget();
   screenPlaceScreen(null);
 });

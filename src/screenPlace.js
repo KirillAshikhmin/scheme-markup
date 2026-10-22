@@ -36,7 +36,9 @@
 //   `pxPerMm`   — плана и чертежа: у камеры приближения нет вовсе, и объём,
 //                 записывая место, оставляет прежнее;
 //   `look`      — только объёма: у плоских полей взгляда нет, и они, записывая
-//                 место, оставляют прежний.
+//                 место, оставляют прежний;
+//   `open`      — только объёма: что в доме открыто (двери и шторы), и плоские
+//                 поля это тоже берегут.
 //
 // То есть каждое поле пишет то, чем владеет, и **бережёт** то, чем не владеет.
 // Поэтому «ушёл из объёма, повозил схему, вернулся» возвращает тот же взгляд:
@@ -145,6 +147,9 @@ export function screenPlaceSet(from, schemeId, pointMm, options = {}) {
   // какой объём оставляет чужой `pxPerMm`.
   const look = screenPlaceLookFrom(options.look);
   next.look = look || (same ? place.look : null);
+  // Открытые двери и шторы — тоже поле объёма, и бережётся оно так же.
+  const open = screenPlaceOpenFrom(options.open);
+  next.open = open || (same ? place.open : null);
   // Запись, ничего не меняющая, не двигает отметку: мастерская и холст говорят
   // это на каждый кадр, и память вида иначе писалась бы в хранилище впустую.
   if (
@@ -153,7 +158,8 @@ export function screenPlaceSet(from, schemeId, pointMm, options = {}) {
     place.x === next.x &&
     place.y === next.y &&
     place.pxPerMm === next.pxPerMm &&
-    sameLook(place.look, next.look)
+    sameLook(place.look, next.look) &&
+    sameOpen(place.open, next.open)
   ) {
     return placeStamp;
   }
@@ -177,6 +183,7 @@ export function screenPlaceOf(schemeId) {
     y: place.y,
     pxPerMm: place.pxPerMm,
     look: place.look ? { ...place.look } : null,
+    open: place.open ? { doors: [...place.open.doors], sheers: [...place.open.sheers] } : null,
     stamp: place.stamp,
   };
 }
@@ -205,7 +212,7 @@ export function screenPlaceRestore(schemeId, saved) {
   // Мимо хозяина (D61): память — не поле, она поднимает то самое последнее
   // движение, которым человек закончил прошлый сеанс, и спорить ей не с кем —
   // ни одно поле ещё ничего не нарисовало.
-  return screenPlaceSet(owner, schemeId, next, { pxPerMm: next.pxPerMm, look: next.look });
+  return screenPlaceSet(owner, schemeId, next, { pxPerMm: next.pxPerMm, look: next.look, open: next.open });
 }
 
 /**
@@ -223,7 +230,54 @@ export function screenPlaceFrom(value) {
     y,
     pxPerMm: Number.isFinite(scale) && scale > 0 ? scale : null,
     look: screenPlaceLookFrom(value.look),
+    open: screenPlaceOpenFrom(value.open),
   };
+}
+
+// ——— что в доме открыто (таск 234, G352) ————————————————————————————————
+//
+// `{doors, sheers}` — ключи раскрытых дверей и раздвинутых штор. Это **не
+// свойство дома, а то, как человек настроил показ**: в `project.json` от них
+// не попадает ничего (G68, правило G207 «все двери закрыты» — про новый
+// объект, а не про возвращение к своему).
+//
+// Лежат они здесь по той же причине, что взгляд: «где я, куда смотрю и что у
+// меня открыто» — один ответ, и хозяин у него один. Пишет только объём, плоские
+// поля берегут.
+//
+// **Мёртвых ключей не копится.** Проём могли стереть между сеансами, и ключ
+// остался бы висеть. Поэтому список, поднятый из памяти, при входе в объём
+// просеивается по живой сцене (`volumeOpenAlive`), а первый же кадр записывает
+// просеянное обратно: мёртвый ключ не доживает до второго возвращения. Потолок
+// на всякий случай тоже есть — `SCREEN_OPEN_MAX`: мусор в настройке (чужая
+// версия, правка руками) не должен расти без края.
+export const SCREEN_OPEN_MAX = 500;
+
+/**
+ * Что годится в «открыто». Мусор отбрасывается молча.
+ *
+ * **Пустое — это ответ, а не молчание**: закрыл все двери — так и записано. Не
+ * сказано вовсе (`undefined` от кадра, которому нечего добавить) — `null`, и
+ * тогда запись бережёт прежнее.
+ */
+export function screenPlaceOpenFrom(value) {
+  if (!value || typeof value !== "object") return null;
+  const keys = (list) =>
+    Array.isArray(list)
+      ? [...new Set(list.filter((id) => typeof id === "string" && id !== ""))].slice(0, SCREEN_OPEN_MAX)
+      : [];
+  return { doors: keys(value.doors), sheers: keys(value.sheers) };
+}
+
+function sameList(a, b) {
+  if (a.length !== b.length) return false;
+  for (let at = 0; at < a.length; at += 1) if (a[at] !== b[at]) return false;
+  return true;
+}
+
+function sameOpen(a, b) {
+  if (!a || !b) return !a && !b;
+  return sameList(a.doors, b.doors) && sameList(a.sheers, b.sheers);
 }
 
 // ——— взгляд камеры объёма (таск 227, G339) ———————————————————————————————
@@ -283,12 +337,18 @@ export function screenPlaceStored(value) {
   if (next.pxPerMm) stored.pxPerMm = Math.round(next.pxPerMm * 1e6) / 1e6;
   // Углы — в радианах и до четвёртого знака: это шесть тысячных градуса, мельче
   // которых человек не целится, а в хранилище экономит половину строки.
+  // Пустое «открыто» в настройку не кладётся: закрытый дом — это умолчание
+  // (G207), и ключ с двумя пустыми списками хранил бы ровно его.
+  if (next.open && (next.open.doors.length > 0 || next.open.sheers.length > 0)) {
+    stored.open = { doors: [...next.open.doors], sheers: [...next.open.sheers] };
+  }
   if (next.look) {
     stored.look = {
       view: next.look.view,
       yaw: Math.round(next.look.yaw * 1e4) / 1e4,
       pitch: Math.round(next.look.pitch * 1e4) / 1e4,
     };
+    // Открытое ложится как есть: это ключи, а не числа.
     // Глаз — в целых миллиметрах: доля миллиметра на экране не видна.
     if (next.look.eye) {
       stored.look.eye = {
