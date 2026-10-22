@@ -1,0 +1,104 @@
+{
+  "name": "Автоматизация света по движению — кухня",
+  "description": "Кухня с лампой (привязанный сервис), датчиком движения, датчиком освещённости и настенным выключателем. Логика сценария висит на характеристике On лампы.",
+  "options": {
+    "motion1": "",
+    "motion2": "",
+    "motion3": "",
+    "manualControl1": "",
+    "manualControl2": "",
+    "manualControl3": "",
+    "luxSensor": "",
+    "maxAmbientLux": 50,
+    "gateAutoSwitch": "",
+    "gateAutoSwitchInvert": false,
+    "gateBlocksManualInputs": false,
+    "noAutoOffWhenManualOn": false,
+    "noAutoOnAfterManualOff": false,
+    "ignoreManualWithin5sAfterSensorOn": true,
+    "offDelaySeconds": 30,
+    "manualHoldSafetyOffDelayMinutes": 240,
+    "debug": false
+  },
+  "variables": {},
+  "rooms": [{ "name": "Кухня" }],
+  "accessories": [
+    {
+      "id": 100,
+      "name": "Лампа",
+      "room": "Кухня",
+      "target": true,
+      "services": [
+        {
+          "type": "AccessoryInformation",
+          "characteristics": [{ "type": "C_Online", "value": true }]
+        },
+        {
+          "type": "Lightbulb",
+          "name": "Лампа",
+          "characteristics": [{ "type": "On", "value": false }]
+        }
+      ]
+    },
+    {
+      "id": 101,
+      "name": "Датчик движения",
+      "room": "Кухня",
+      "services": [
+        {
+          "type": "AccessoryInformation",
+          "characteristics": [{ "type": "C_Online", "value": true }]
+        },
+        {
+          "type": "MotionSensor",
+          "characteristics": [{ "type": "MotionDetected", "value": false }]
+        }
+      ]
+    },
+    {
+      "id": 102,
+      "name": "Датчик освещённости",
+      "room": "Кухня",
+      "services": [
+        {
+          "type": "AccessoryInformation",
+          "characteristics": [{ "type": "C_Online", "value": true }]
+        },
+        {
+          "type": "LightSensor",
+          "characteristics": [{ "type": "CurrentAmbientLightLevel", "value": 15 }]
+        }
+      ]
+    },
+    {
+      "id": 103,
+      "name": "Настенный выключатель",
+      "room": "Кухня",
+      "services": [
+        {
+          "type": "AccessoryInformation",
+          "characteristics": [{ "type": "C_Online", "value": true }]
+        },
+        {
+          "type": "Switch",
+          "characteristics": [{ "type": "On", "value": false }]
+        }
+      ]
+    },
+    {
+      "id": 104,
+      "name": "Датчик открытия двери",
+      "room": "Кухня",
+      "services": [
+        {
+          "type": "AccessoryInformation",
+          "characteristics": [{ "type": "C_Online", "value": true }]
+        },
+        {
+          "type": "ContactSensor",
+          "characteristics": [{ "type": "ContactSensorState", "value": 0 }]
+        }
+      ]
+    }
+  ]
+}
