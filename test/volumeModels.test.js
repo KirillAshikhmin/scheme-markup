@@ -950,36 +950,41 @@ test("модель метки стоит лицом в комнату, на то
   const place = volumeMarkPlacement(stand.project, stand.mark, []);
   assert.equal(place.mode, "wall", "стенд обязан поставить метку на стену, иначе он проверяет другое");
   assert.equal(place.model.key, "socket", "розетка нашла свою модель по форме знака");
+  // Призмы — коробки модели: у евро-розетки (таск 15 сценариев, G18) это
+  // перемычка с контактами, гнёзда и рамка. Круг углубления — лежачий цилиндр,
+  // призмой он не бывает, и его грани сверяются ниже отдельно.
   const prisms = volumeModelPrisms(place.frame, place.model.parts);
-  assert.equal(prisms.length, 2);
+  assert.equal(prisms.length, 3);
   // Стена северная, её наружная сторона смотрит в комнату (к большим `y`).
-  // Лицо габарита — доля −0.5 по глубине; сердцевина розетки лежит на нём, и
-  // ни одно тело не выходит за коробку, которая была до модели.
+  // Лицо габарита — доля −0.5 по глубине; переднее тело розетки лежит на нём,
+  // и ни одно тело не выходит за коробку, которая была до модели.
   const box = place.prisms[0];
   // Мерим по направлению лица: `f` габарита смотрит от лица назад, значит
   // перёд — это −`f`, и в какую сторону стены повернулась метка, тесту знать
   // незачем.
-  const ahead = (points) =>
-    Math.max(...points.map((point) => -(point.x * place.frame.f.x + point.y * place.frame.f.y)));
-  const behind = (points) =>
-    Math.min(...points.map((point) => -(point.x * place.frame.f.x + point.y * place.frame.f.y)));
+  const along = (point) => -(point.x * place.frame.f.x + point.y * place.frame.f.y);
+  const ahead = (points) => Math.max(...points.map(along));
+  const behind = (points) => Math.min(...points.map(along));
   const boxAhead = ahead(box.corners);
   for (const prism of prisms) {
     assert.ok(ahead(prism.corners) <= boxAhead + 0.01, "тело вышло вперёд за габарит");
     assert.ok(behind(prism.corners) >= behind(box.corners) - 0.01, "тело вышло назад за габарит");
     assert.ok(prism.bottomMm >= box.bottomMm - 0.01 && prism.topMm <= box.topMm + 0.01, "тело вышло по высоте");
   }
-  // Сердцевина — переднее тело: она ближе к комнате, чем рамка за ней.
-  const core = prisms.find((prism) => prism.name === "core");
+  // Грани лежачего цилиндра тоже внутри коробки — и по глубине, и по высоте.
+  for (const face of volumeMarkFaces(place)) {
+    assert.ok(ahead(face.p) <= boxAhead + 0.01 && behind(face.p) >= behind(box.corners) - 0.01, "грань вышла за габарит");
+    for (const point of face.p) {
+      assert.ok(point.z >= box.bottomMm - 0.01 && point.z <= box.topMm + 0.01, "грань вышла по высоте");
+    }
+  }
+  // Перемычка — переднее тело: она ближе к комнате, чем рамка за ней, и
+  // стоит ровно на лице габарита — у коробки недотяга нет.
+  const earth = prisms.find((prism) => prism.name === "earth");
   const frame = prisms.find((prism) => prism.name === "frame");
-  assert.ok(ahead(core.corners) > ahead(frame.corners), "сердцевина впереди рамки");
-  // Лицо модели — лицо габарита, но **с точностью вписанности**: цилиндр вписан
-  // в своё тело, и у восьмиугольника вершины не ложатся на плоскость боков —
-  // круглая сердцевина не дотягивается до лица на 1,3 % своей глубины (здесь
-  // это доли миллиметра). Это свойство низкополигонального круга, а не промах
-  // счёта: у коробки недотяг ровно нулевой, и ниже это проверено на рамке.
-  assert.ok(boxAhead - ahead(core.corners) < 0.5, "сердцевина стоит на лице габарита");
-  const back = Math.min(...box.corners.map((point) => -(point.x * place.frame.f.x + point.y * place.frame.f.y)));
+  assert.ok(ahead(earth.corners) > ahead(frame.corners), "перемычка впереди рамки");
+  assert.ok(boxAhead - ahead(earth.corners) < 0.01, "переднее тело стоит на лице габарита");
+  const back = Math.min(...box.corners.map(along));
   assert.equal(Math.round(behind(frame.corners)), Math.round(back), "рамка коробкой упирается в задник ровно");
   // Лицо габарита — то же, на котором рисуется контур изображения: модель и
   // рисунок стоят на одной плоскости, а не спорят за неё.
@@ -991,7 +996,7 @@ test("у всех граней модели хозяин — сама метка
   const stand = wallMark("Р");
   const place = volumeMarkPlacement(stand.project, stand.mark, []);
   const faces = volumeMarkFaces(place);
-  assert.ok(faces.length >= 10, "граней у двух тел: " + faces.length);
+  assert.ok(faces.length >= 10, "граней у розетки: " + faces.length);
   for (const face of faces) assert.equal(face.markId, place.markId);
   // Выделение и прицел смотрят на лицо, а лицо модель не трогает.
   assert.ok(place.face, "лицо осталось на месте");
