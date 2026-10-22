@@ -860,17 +860,6 @@
   flex: 0 0 auto;
 }
 
-/* Клетка знака постоянной ширины — та же мера на оба вида (`PICKER_ICON` в
-   typePicker.js). Образец линии втрое шире фигуры, и без клетки код с
-   названием уезжали бы на каждой линейной строке: это то же правило колонок,
-   каким выровнен справочник. */
-.picker__icon {
-  flex: 0 0 44px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
 .picker__code {
   font-weight: 700;
   min-width: 26px;
@@ -1925,18 +1914,19 @@
 
    Ширину диктует не фигура, а образец линии: сплющить его до значка фигуры
    нельзя — точечную линию от штрихпунктирной в 26px не отличить. Поэтому
-   фигура садится в клетку той же ширины, что и образец. */
+   фигура садится в клетку той же ширины, что и образец.
+
+   Сама клетка — общая (`.ui-sign`, таск 233), и ширину ей ставит JS мерой
+   `TYPES_BADGE`. Своего у строки справочника осталась **высота**: строка
+   держит её, чтобы знак не менял рост от типа к типу. */
 .dict__badge {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 48px;
   height: 30px;
 }
 
 /* Свотч цвета в строке категории занимает ту же колонку, что значок типа:
-   иначе название категории начинается не там, где код типа. */
+   иначе название категории начинается не там, где код типа. Клеткой знака он
+   не является (это кнопка цвета), поэтому мера здесь повторена — и повтор
+   держит `test/cssMeasures.test.js` против `TYPES_BADGE.length`. */
 .dict__row .colorpick__button {
   width: 48px;
   height: 30px;
@@ -2152,16 +2142,6 @@
 
 .catalog__row:hover {
   background: var(--panel-bg-deep);
-}
-
-/* Клетка знака в строке общей базы: одна мера на фигуру точечного типа и на
-   образец линии линейного (`TYPES_CATALOG_ICON`). Без неё коды и названия
-   стоят лестницей — линейная строка шире точечной на весь образец. */
-.catalog__icon {
-  flex: 0 0 44px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
 }
 
 /* Заголовок категории: её цвет задаёт панель, здесь только вес и воздух. */
@@ -3055,20 +3035,22 @@
   margin-bottom: 10px;
 }
 
-/* Клетка знака метки в строке списка (`uiSignCell`, таск 228): ширина одна на
-   фигуру точечного типа и на образец линии линейного, чтобы строки стояли
-   колонка в колонку. Числа принадлежат JS (`UI_SIGN`, `UI_SIGN_SMALL` в
-   ui.js), здесь они повторены — повтор держит test/cssMeasures.test.js. */
+/* Клетка знака (`uiSignCell`, таск 228; четыре записи сведены в одну таском
+   233). Правило одно на все списки: клетка не тянется, ширина у неё постоянная
+   — одна на фигуру точечного типа и на образец линии линейного, — а знак стоит
+   по центру. Без этого строки шли бы лестницей: линейная шире точечной на весь
+   образец.
+
+   Число здесь не написано ни одно: ширину ставит JS переменной той же мерой,
+   которой нарисован знак (`UI_SIGN`, `UI_SIGN_SMALL`, `PICKER_ICON`,
+   `TYPES_BADGE`, `TYPES_CATALOG_ICON`). Своя мера у каждого места нарочно:
+   разный масштаб. */
 .ui-sign {
   flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-}
-
-.ui-sign--small {
-  width: 32px;
+  width: var(--ui-sign-width);
 }
 
 .ui-select,
@@ -3780,6 +3762,22 @@
 .search__row.is-active .search__where,
 .search__row.is-active .search__match {
   color: #dbeafe;
+}
+
+/* Знак на подсвеченной строке (долг таска 228, закрыт таском 233).
+   Подсветка строки — акцент `#1f6feb`, и ровно этим синим покрашена категория
+   «Свет»: её знак на подсвеченной строке пропадал совсем, а до таска 228 так
+   же пропадала фигура. Перекрашивать нечего: цвета категорий привычные
+   (правило таска 182), а акцент — один на всё приложение.
+
+   Поэтому знаку возвращён **его фон**: клетка на подсвеченной строке получает
+   подложку тоном поля панели — ровно тем, на котором знак и читается в
+   обычной строке. Довод честный: если категория видна в неподсвеченной
+   строке, она видна и здесь, какого бы цвета ни была. Клетка от подложки не
+   меняет ни ширины, ни места — у неё добавился только фон. */
+.search__row.is-active .ui-sign {
+  background: var(--panel-bg);
+  border-radius: 4px;
 }
 
 .search__empty,
@@ -32924,16 +32922,37 @@ function uiButton(label, options = {}) {
  * поиск. Своих заводить не надо: ровно на том, что рисовальщиков было три,
  * справочник с окном выбора и разошлись (дефект D31).
  *
- * Мера пары «размер фигуры — длина образца» живёт здесь, а ширину клетки
- * повторяет стиль (`.ui-sign` в `panels.css`) — повтор держит
- * `test/cssMeasures.test.js`.
+ * Мера пары «размер фигуры — длина образца» живёт здесь.
+ *
+ * **Клетка одна на все списки, а мера у каждого своя** (таск 233, долг таска
+ * 228). Записей этого правила было четыре — `.ui-sign`, `.picker__icon`,
+ * `.dict__badge`, `.catalog__icon`, — и все четыре писали одно и то же:
+ * клетка не тянется, знак в ней по центру. Общее — это правило, и живёт оно
+ * одним куском в `panels.css`. Своё — число: 40 в списках, 32 в поиске, 44 в
+ * двух окнах, 48 в справочнике. Делать их одинаковыми нельзя: это разные места
+ * и разный масштаб, а сплющить образец линии до значка фигуры значит перестать
+ * отличать точечную линию от штрихпунктирной.
+ *
+ * Число приезжает в стиль **переменной** (`--ui-sign-width`), той же мерой,
+ * которой нарисован знак: хозяин у него один — JS, и повторять его в стиле
+ * больше негде.
  */
 const UI_SIGN = { size: 20, length: 40 };
 
 /** Та же клетка мельче: строка поиска и свёрнутая карточка метки. */
 const UI_SIGN_SMALL = { size: 16, length: 32 };
-function uiSignCell(icon, { small = false } = {}) {
-  return uiEl("span", { class: small ? "ui-sign ui-sign--small" : "ui-sign" }, icon);
+
+/** Имя переменной с шириной клетки: стиль читает её, ставит — `uiSignCell`. */
+const UI_SIGN_WIDTH = "--ui-sign-width";
+
+/**
+ * Клетка знака. `length` — своя мера места (по умолчанию общая, 40), `cell` —
+ * имя места, если у него есть что-то ещё своё (высота строки справочника).
+ */
+function uiSignCell(icon, { length = UI_SIGN.length, cell = null } = {}) {
+  const span = uiEl("span", { class: cell ? "ui-sign " + cell : "ui-sign" }, icon);
+  span.style.setProperty(UI_SIGN_WIDTH, (Number(length) || UI_SIGN.length) + "px");
+  return span;
 }
 
 // Значки рисуются прямо здесь, своими линиями: внешних картинок и шрифтов в
@@ -48180,9 +48199,8 @@ const PICKER_ICON = { size: 22, length: 44 };
 // начертания (дефект D31 — здесь рисовались точки у всех). Вид спрашивает сам
 // `typeIcon` у `typeKindOf`: у объекта прежнего формата поля `kind` нет.
 function pickerIcon(project, typeId, size = PICKER_ICON.size) {
-  return uiEl("span", { class: "picker__icon" }, [
-    typeIcon(project, typeId, size, PICKER_ICON.length),
-  ]);
+  // Клетка знака — общая (`uiSignCell`, таск 233): своя у окна только мера.
+  return uiSignCell(typeIcon(project, typeId, size, PICKER_ICON.length), { length: PICKER_ICON.length });
 }
 
 // Больше шести колонок в ряд не ставим: седьмая ужимает остальные до каши.
@@ -54623,13 +54641,13 @@ function openTypesShapePicker({ shape, color, allowInherit, inheritShape }) {
 const TYPES_LINE_CELL = { size: 30, length: 140 };
 const TYPES_LINE_BUTTON = { size: 26, length: 56 };
 // Значок в начале строки справочника: у точечного типа фигура, у линейного —
-// образец линии. Ширина у них общая и задана в CSS (`.dict__badge`), а холсту
+// образец линии. Клетка общая (`uiSignCell`, таск 233), а холсту
 // нужны свои числа: сплющить отрезок до ширины фигуры нельзя — точечную линию
 // от штрихпунктирной в 26px не отличить. Поэтому образец рисуется во всю
 // клетку, а фигура садится в клетку той же ширины по центру.
 const TYPES_BADGE = { size: 20, length: 48 };
 // Значок строки окна «Добавить из общей базы»: та же пара мер и та же клетка
-// постоянной ширины (`.catalog__icon`), что в справочнике, — линейный тип базы
+// постоянной ширины (`uiSignCell`), что в справочнике, — линейный тип базы
 // рисуется линией, а не точкой (D31).
 const TYPES_CATALOG_ICON = { size: 20, length: 44 };
 
@@ -55190,9 +55208,9 @@ function openTypesCatalog(project, template) {
           // Знак категории — фигура: вида у категории нет, она задаёт
           // умолчание и точечным типам, и линейным. Клетка та же, что у строк
           // типов, — иначе названия категорий и кодов стоят не в колонку.
-          uiEl("span", { class: "catalog__icon" }, [
-            shapeIcon(group.category.shape, group.category.color, TYPES_CATALOG_ICON.size - 2),
-          ]),
+          uiSignCell(shapeIcon(group.category.shape, group.category.color, TYPES_CATALOG_ICON.size - 2), {
+            length: TYPES_CATALOG_ICON.length,
+          }),
           name,
         ]),
       );
@@ -55218,7 +55236,7 @@ function openTypesCatalog(project, template) {
             // этой строки в объекте ещё нет — её и предлагают добавить. То же
             // расхождение, что и в окне выбора (D31): линейные типы базы
             // рисовались точками, хотя их вид в записи указан.
-            uiEl("span", { class: "catalog__icon" }, [
+            uiSignCell(
               typeSignIcon(
                 typeSignPlan({
                   kind: type.kind,
@@ -55229,7 +55247,8 @@ function openTypesCatalog(project, template) {
                 TYPES_CATALOG_ICON.size,
                 TYPES_CATALOG_ICON.length,
               ),
-            ]),
+              { length: TYPES_CATALOG_ICON.length },
+            ),
             uiEl("span", { class: "catalog__code", text: type.code }),
             uiEl("span", { class: "catalog__name", text: type.name }),
           ]),
@@ -55427,9 +55446,10 @@ function openTypesDictionary(api) {
     // тот же, что в окне выбора типа и на плашке выбранного (D31): здесь было
     // верно, а там нет, и расхождение жило ровно потому, что рисовальщиков
     // было три.
-    const badge = uiEl("span", { class: "dict__badge" }, [
-      typeIcon(project(), type.id, TYPES_BADGE.size, TYPES_BADGE.length),
-    ]);
+    const badge = uiSignCell(typeIcon(project(), type.id, TYPES_BADGE.size, TYPES_BADGE.length), {
+      length: TYPES_BADGE.length,
+      cell: "dict__badge",
+    });
     return uiEl("div", { class: "dict__row" }, [
       badge,
       uiEl("input", {
@@ -55626,9 +55646,10 @@ function openTypesDictionary(api) {
       // Типа в объекте ещё нет — спрашивать `typeKindOf` не о чем, вид берётся
       // у черновика. Рисует знак тот же общий проход, что и строки заведённых
       // типов.
-      return uiEl("span", { class: "dict__badge" }, [
+      return uiSignCell(
         typeSignIcon(typeSignPlan(typesDraftStyle(draft, category())), TYPES_BADGE.size, TYPES_BADGE.length),
-      ]);
+        { length: TYPES_BADGE.length, cell: "dict__badge" },
+      );
     }
 
     function kindNode() {
@@ -57494,7 +57515,9 @@ function mountMarkCard(host, api) {
             on: { click: () => flip(false) },
           },
           [
-            uiSignCell(typeSignIcon(model.sign, UI_SIGN_SMALL.size, UI_SIGN_SMALL.length), { small: true }),
+            uiSignCell(typeSignIcon(model.sign, UI_SIGN_SMALL.size, UI_SIGN_SMALL.length), {
+              length: UI_SIGN_SMALL.length,
+            }),
             uiEl("span", { class: "mark-card__label", text: model.label }),
             uiIcon("chevron"),
           ],
@@ -70624,7 +70647,7 @@ function createVolume({ api, hosts }) {
       sync();
       return;
     }
-    paint();
+    redraw();
   }
 
   /**
@@ -70865,7 +70888,7 @@ function createVolume({ api, hosts }) {
     node.width = Math.round(box.width * ratio);
     node.height = Math.round(box.height * ratio);
     placeStance();
-    paint();
+    redraw();
   }
 
   /**
@@ -70989,7 +71012,7 @@ function createVolume({ api, hosts }) {
     hourTick = setInterval(() => {
       if (closed) return;
       refreshHour();
-      paint();
+      redraw();
     }, every);
   }
 
@@ -71026,7 +71049,7 @@ function createVolume({ api, hosts }) {
     syncHint();
     stanceRecheck();
     walkSchedule();
-    paint();
+    redraw();
   }
 
   /**
@@ -71296,7 +71319,7 @@ function createVolume({ api, hosts }) {
     rebuildOverlay();
     syncCard();
     syncHint();
-    paint();
+    redraw();
   }
 
   // Во что ткнули. Под захватом мыши курсора нет вовсе, и целятся серединой
@@ -71378,7 +71401,7 @@ function createVolume({ api, hosts }) {
     // Низкое место могли убрать с чертежа, пока человек сидел под ним (G234).
     stanceRecheck();
     syncHint();
-    paint();
+    redraw();
   }
 
   /**
@@ -71475,6 +71498,20 @@ function createVolume({ api, hosts }) {
     notify(next.length > 0 ? strings.volume.doorsOpened : strings.volume.doorsClosed, "info");
   }
 
+  /**
+   * **Кадр по событию заказывается, а не рисуется** (дефект D80, таск 233).
+   *
+   * Правило одно на всю поверхность: внутри кадра — `paint()`, из события —
+   * `redraw()`. Событие трогает поверхность не один раз (смена этажа мерит
+   * поле, ставит подписи и сбрасывает выделение — и каждая рука рисовала поле
+   * сама), а кадр у него должен быть один: лишние перерисовки человек не
+   * видит, а время у них настоящее. Заказ сливается сам — пока кадр заказан,
+   * второй заказ ничего не делает.
+   *
+   * Проверять «а не тот же ли это кадр» нигде больше не нужно: заказ **и есть**
+   * проверка, и другого места для неё нет. Единственный, кто рисует напрямую, —
+   * `walkTick`: он сам уже кадр, и заказ из него уехал бы на кадр позже.
+   */
   function redraw() {
     if (frame || closed) return;
     frame = scheduleFrame(() => {
@@ -71836,9 +71873,29 @@ function createVolume({ api, hosts }) {
     walkSchedule();
   }
 
+  /**
+   * Пустить ход. Часы ставятся **здесь**, на пуске: отсюда ход начинают
+   * события — нажатая клавиша, палец на площадке, пропавший пол под ногами.
+   */
   function walkSchedule() {
     if (walking || !moving() || closed) return;
     clock = now();
+    walking = scheduleFrame(walkTick);
+  }
+
+  /**
+   * Заказать следующий тик **изнутри кадра** — и часов не трогать (дефект
+   * D81, таск 233).
+   *
+   * Прежде продолжение шло той же `walkSchedule`, и она переставляла `clock`
+   * на «сейчас» — то есть **после** шага и кадра. Время, ушедшее на сам кадр,
+   * из счёта выпадало, и чем дороже кадр, тем медленнее шли ходьба и падение:
+   * на объекте заказчика полёт с трёх метров вместо 0,81 с (√(2h/g), таск 229)
+   * занимал секунды, и всё это время поле перерисовывалось. Правило простое:
+   * часы ставит пуск, а продолжение их только читает.
+   */
+  function walkAgain() {
+    if (walking || !moving() || closed) return;
     walking = scheduleFrame(walkTick);
   }
 
@@ -71917,7 +71974,7 @@ function createVolume({ api, hosts }) {
       aroundFly(forward, side, scale, basis, speed);
     }
     paint();
-    walkSchedule();
+    walkAgain();
   }
 
   function keyStop(code) {
@@ -71961,7 +72018,7 @@ function createVolume({ api, hosts }) {
     } else {
       aroundTurn(yaw, pitch);
     }
-    paint();
+    redraw();
   }
 
   function onPointerDown(event) {
@@ -72021,7 +72078,7 @@ function createVolume({ api, hosts }) {
           aroundZoom(step.factor);
           const moved = volumeAroundPan(around, viewport(), step.panX, step.panY);
           aroundSlide(moved.dx, moved.dy);
-          paint();
+          redraw();
         }
         return;
       }
@@ -72101,7 +72158,7 @@ function createVolume({ api, hosts }) {
           stanceRecheck();
           syncWhere();
           stairCheck();
-          paint();
+          redraw();
           return;
         }
       }
@@ -72134,7 +72191,7 @@ function createVolume({ api, hosts }) {
           // новое место (G234).
           stanceRecheck();
           syncWhere();
-          paint();
+          redraw();
         }
         return;
       }
@@ -72206,7 +72263,7 @@ function createVolume({ api, hosts }) {
     } else {
       aroundZoom(step.factor);
     }
-    paint();
+    redraw();
   }
 
   // ——— палец: площадка ходьбы, щипок, кнопки на поле (таск 149) ———
@@ -80432,7 +80489,9 @@ function searchRowNode(project, row, active, onPick, onHover) {
   const parts = [
     // Знак — общей лестницей (таск 228, находка 15): у линейного типа образец
     // его начертания, а не точка. Выдачу читают, сверяя её со справочником.
-    uiSignCell(typeIcon(project, row.typeId, UI_SIGN_SMALL.size, UI_SIGN_SMALL.length), { small: true }),
+    uiSignCell(typeIcon(project, row.typeId, UI_SIGN_SMALL.size, UI_SIGN_SMALL.length), {
+      length: UI_SIGN_SMALL.length,
+    }),
     uiEl("span", { class: "search__label", text: row.label }),
     uiEl("span", { class: "search__type", text: row.typeName }),
     uiEl("span", { class: "search__where", text: where }),
