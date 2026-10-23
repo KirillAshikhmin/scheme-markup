@@ -37,7 +37,6 @@ import { createFieldPlate, plateUnseen } from "./plate.js";
 import {
   createVolumeParams,
   createVolumeParamsFields,
-  volumeAirLine,
   volumeParamsArrive,
   volumeParamsClock,
   volumeParamsHome,
@@ -63,7 +62,8 @@ import { lightFadeLive, lightFadeMemo } from "../lightFade.js";
 import { screenPlaceOf, screenPlacePlanRead, screenPlaceSet } from "../screenPlace.js";
 import { clockStampMs, volumeClockStamp, volumeClockText, volumeDateShort, volumeDayDateOf, volumeDayTimes } from "../clockMath.js";
 import { weatherAt } from "../weather.js";
-import { appWeatherRead, appWeatherWatch } from "../appWeather.js";
+import { appWeatherRead, appWeatherSet, appWeatherWatch } from "../appWeather.js";
+import { createVolumeAir, volumeAirPlacement } from "./volumeAir.js";
 import { volumeRainCreate } from "./volumeRain.js";
 import { strings, text } from "../strings.js";
 import {
@@ -156,6 +156,7 @@ import {
   simRunning,
   simStart,
   simClimate,
+  simClimateSet,
   simStop,
   simWatch,
 } from "../simulation.js";
@@ -1673,10 +1674,29 @@ function createVolume({ api, hosts }) {
   // Полоса часов — две строки (правка после сборки сценариев): час и климат
   // того места, где стоит человек, — «выводи эти 3 параметра возле часов на
   // экране по тому месту, где камера 1 лица».
+  //
+  // Строка климата — кнопка (правка после сборки сценариев): «при тапе на
+  // плашке с текущей температурой, влажностью и co2 открывай небольшое окошко
+  // с ползунками этих 3 характеристик». Окошко лежит в той же полосе, над ней
+  // (`volumeAir.js`), и пишет туда же, куда «Климат помещений» в параметрах.
   const clockTime = uiEl("span", { class: "volume__clockTime" });
-  const clockAir = uiEl("span", { class: "volume__clockAir", attrs: { hidden: "hidden" } });
-  const clockNode = uiEl("div", { class: "volume__clock", attrs: { hidden: "hidden" } }, [clockTime, clockAir]);
-  let airSaid = null;
+  const air = createVolumeAir({
+    setRoom: (roomId, patch) => simClimateSet(roomId, patch),
+    setStreet: (patch) => appWeatherSet(patch),
+    // Окошко — над полосой, а где над ней тесно — слева от неё
+    // (`volumeAirPlacement`): пальцем полоса поднята над кнопками, и в
+    // лежачем телефоне места над ней на одну строку.
+    placed: (box) => {
+      if (!stage || typeof stage.getBoundingClientRect !== "function") return;
+      const at = volumeAirPlacement(stage.getBoundingClientRect(), clockNode.getBoundingClientRect(), box.scrollHeight + 2);
+      box.classList.toggle("volume__airBox--side", at.side);
+      const top = at.top === null ? "" : at.top + "px";
+      const most = at.maxHeight === null ? "" : at.maxHeight + "px";
+      if (box.style.top !== top) box.style.top = top;
+      if (box.style.maxHeight !== most) box.style.maxHeight = most;
+    },
+  });
+  const clockNode = uiEl("div", { class: "volume__clock", attrs: { hidden: "hidden" } }, [clockTime, air.line, air.box]);
   // Что на полосе уже написано: с плавными светилами снимок часа считается
   // тридцать раз в секунду, а минута на полосе столько раз не меняется.
   let clockSaid = { value: null, line: null };
@@ -2294,15 +2314,23 @@ function createVolume({ api, hosts }) {
     const found = climate ? volumeRoomAt(scene, person) : null;
     const room = found && found.hasCeiling !== false ? found : null;
     const own = room && room.roomId && climate.rooms ? climate.rooms[room.roomId] : null;
-    const said = own
-      ? volumeAirLine(own.t, own.rh, own.co2)
-      : climate && climate.outdoor && !room
-        ? volumeAirLine(climate.outdoor.tempC, climate.outdoor.humidity, null)
-        : "";
-    if (said === airSaid) return;
-    airSaid = said;
-    clockAir.textContent = said;
-    clockAir.hidden = said === "";
+    // Место для строки и окошка за ней: помещение — со своим именем, улица —
+    // с тем, задана ли её погода руками (окошку нужна дорога назад, к погоде).
+    let place = null;
+    if (own) {
+      const named = findRoom(getState().project, room.roomId);
+      place = { kind: "room", roomId: room.roomId, name: named ? String(named.name || "") : "", t: own.t, rh: own.rh, co2: own.co2 };
+    } else if (climate && climate.outdoor && !room) {
+      const chosen = appWeatherRead();
+      place = {
+        kind: "street",
+        tempC: climate.outdoor.tempC,
+        humidity: climate.outdoor.humidity,
+        manualTemp: chosen.tempC !== null && chosen.tempC !== undefined,
+        manualHumidity: chosen.humidity !== null && chosen.humidity !== undefined,
+      };
+    }
+    air.sync(place);
   }
 
   /**
@@ -4487,6 +4515,14 @@ function createVolume({ api, hosts }) {
 
   function onKeyDown(event) {
     if (!ours()) return;
+    // Окошко климата у часов закрывается Esc и с ползунка под фокусом: окна
+    // объёма Esc при открытом окошке не закрывает.
+    if (event.key === "Escape" && air.isOpen()) {
+      event.preventDefault();
+      event.stopPropagation();
+      air.close(true);
+      return;
+    }
     // Клавиши принадлежат полю ввода, пока в нём фокус: «W» в имени помещения
     // не должно уводить человека на шаг вперёд.
     if (volumeTypingTarget(event.target)) return;
