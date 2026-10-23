@@ -7,15 +7,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { getSetting } from "../src/store.js";
+import { getSetting, setSetting } from "../src/store.js";
 import { volumeClockStamp, volumeDayNumberOf } from "../src/clockMath.js";
 import { appClockNow, appClockPause, appClockSimMs, appClockSpeed, appClockStep } from "../src/appClock.js";
 import {
+  VOLUME_HIDE_CARD_SETTING,
+  VOLUME_SIMULATION_SETTING,
   VOLUME_SPEED_SETTING,
   volumeParamsArrive,
   volumeParamsClock,
   volumeParamsDay,
   volumeParamsFix,
+  volumeParamsFlag,
   volumeParamsRead,
   volumeParamsSpeed,
   volumeParamsWatch,
@@ -86,4 +89,59 @@ test("перевод часов снаружи «Объёма» слышен е�
   stop();
   appClockStep(60_000, nowMs);
   assert.equal(heard, 2);
+});
+
+// ——— «Имитация умного дома» (таск 09 сценариев, G04, история 2.2) ————————————
+//
+// Слова заказчика: «в Объёме по умолчанию включён, но в параметрах Объёма можно
+// отключить». Отметка живёт в настройках браузера рядом с остальными
+// отметками окна параметров, в объект не пишется ничего.
+
+test("2.2: отметка «Имитация умного дома» по умолчанию стоит и помнится в браузере", async () => {
+  assert.equal(VOLUME_SIMULATION_SETTING, "volumeSimulation");
+  assert.equal(volumeParamsRead().simulation, true, "умолчание — имитация включена");
+  let heard = 0;
+  const stop = volumeParamsWatch(() => {
+    heard += 1;
+  });
+  volumeParamsFlag("simulation", false);
+  assert.equal(volumeParamsRead().simulation, false);
+  assert.equal(heard, 1, "снятую отметку не услышал «Объём»");
+  await settled();
+  assert.equal(await getSetting("volumeSimulation"), false, "снятая отметка не записана в настройки браузера");
+  volumeParamsFlag("simulation", true);
+  assert.equal(volumeParamsRead().simulation, true);
+  await settled();
+  assert.equal(await getSetting("volumeSimulation"), true);
+  stop();
+});
+
+test("2.2: снятая отметка поднимается из настроек при открытии страницы, а «готово» ждёт её", async () => {
+  await setSetting("volumeSimulation", false);
+  // Свой экземпляр модуля — та же страница, открытая заново: настройки те же.
+  const fresh = await import("../src/panels/volumeParams.js?t09-fresh");
+  assert.equal(fresh.volumeParamsRead().simulation, true, "до ответа хранилища — умолчание");
+  fresh.volumeParamsLoad();
+  await fresh.volumeParamsReady();
+  assert.equal(fresh.volumeParamsRead().simulation, false, "снятая отметка забыта после перезагрузки");
+  await setSetting("volumeSimulation", true);
+});
+
+// ——— «Не показывать карточку метки» (таск 09 сценариев, G22, история 8.7) ————
+
+test("8.7: отметка «Не показывать карточку метки» по умолчанию снята и помнится в браузере", async () => {
+  assert.equal(VOLUME_HIDE_CARD_SETTING, "volumeHideCard");
+  assert.equal(volumeParamsRead().hideCard, false, "умолчание — карточка видна");
+  volumeParamsFlag("hideCard", true);
+  assert.equal(volumeParamsRead().hideCard, true);
+  await settled();
+  assert.equal(await getSetting("volumeHideCard"), true, "отметка не записана в настройки браузера");
+  // Поставленная отметка поднимается при открытии страницы заново.
+  const fresh = await import("../src/panels/volumeParams.js?t09-card");
+  fresh.volumeParamsLoad();
+  await fresh.volumeParamsReady();
+  assert.equal(fresh.volumeParamsRead().hideCard, true, "поставленная отметка забыта после перезагрузки");
+  volumeParamsFlag("hideCard", false);
+  await settled();
+  assert.equal(await getSetting("volumeHideCard"), false);
 });

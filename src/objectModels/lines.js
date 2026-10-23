@@ -78,7 +78,9 @@ export const MODELS_LINES = {
     acrossShare: 0.85,
     dropShare: 1.1,
     biteShare: 0.3,
-    parts: modelParts(modelCyl("spot", { material: "light" })),
+    // Светильник трека **может светиться** (таск 09 сценариев): включённый
+    // трек в «Объёме» горит светильниками, полоса остаётся полосой.
+    parts: modelParts(modelCyl("spot", { material: "light", lit: true })),
   },
   // Карниз штор: полотнища ткани до пола (G261, «Карниз штор, метку —
   // отрисовывай как шторы на объеме»).

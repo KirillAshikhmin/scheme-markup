@@ -437,6 +437,29 @@ export const VOLUME_LAND_OUT_MM = 3000;
 export const VOLUME_WALL_RGB = [216, 212, 204];
 export const VOLUME_FLOOR_RGB = [170, 142, 110];
 export const VOLUME_CEILING_RGB = [238, 238, 236];
+
+// ——— свет имитации (таск 09 сценариев, G06, история 2.12) ————————————————
+//
+// «Пока не физический свет» — слова заказчика. Света от ламп в сцене нет: ни
+// теней, ни освещённости. Есть две вещи, и обе живут в кадре, а не в сцене:
+//
+//   — **свечение**: тело модели, которое может светиться (`lit`), у включённого
+//     устройства красится цветом свечения по яркости и не темнеет ночью — то же
+//     правило «светится, значит не темнеет», что у окон города;
+//   — **свет комнаты**: грани помещения, где горит свет, ночью сводятся к тону
+//     ночи слабее — пропорционально яркости. Днём тона ночи нет, и сводить
+//     нечего: комната почти не меняется.
+//
+// Цвет свечения лампы — тёплый белый; экран телевизора — холодный.
+export const VOLUME_GLOW_RGB = [255, 240, 196];
+export const VOLUME_SCREEN_RGB = [168, 206, 246];
+/** Доля цвета свечения у самой тусклой лампы: даже 1 % виден. */
+export const VOLUME_GLOW_MIN = 0.35;
+/** Насколько свет комнаты снимает тон ночи при полной яркости. */
+export const VOLUME_ROOM_LIGHT = 0.72;
+/** Тёплый тон, к которому тянется ночь в освещённой комнате, и его доля. */
+export const VOLUME_ROOM_WARM_RGB = [120, 96, 60];
+export const VOLUME_ROOM_WARM = 0.5;
 /**
  * Кромка перекрытия (таск 209, дефект D60). Бетон темнее стены: перекрытие —
  * это то, что **между** этажами, и в кадре оно обязано читаться полосой, а не
@@ -721,6 +744,16 @@ function volumeFace(points, rgb, options = {}) {
     // приписанное поле меняет породу всех граней сцены, и сборка стопки на
     // объекте заказчика дорожала от этого на 2–3 мс.
     floor: null,
+    // **Может светиться** (таск 09 сценариев, G06): тело модели, откуда идёт
+    // свет, — абажур, свечение, экран (`lit` в `objectModels/*`). Горит ли оно,
+    // решает кадр по состоянию дома (`volumeFrame(…, live)`); без имитации
+    // признак не читает никто, и кадр тот же, что до таска.
+    lit: Boolean(options.lit),
+    // **Чья комната** (таск 09 сценариев, история 2.12): ключ помещения
+    // (`volumeRoomKey`) у пола, потолка, стороны стены, смотрящей в комнату, и у
+    // вещей в ней. По нему кадр светлит ночью комнату, где горит свет. Улица,
+    // наружные стороны стен и всё, чему комнату не назвать, — `null`.
+    room: options.room || null,
   };
 }
 
@@ -1022,6 +1055,70 @@ export function volumeSheerPlaces(places) {
  * клавишу в `panels/volume.js`, где уже лежит такое же множество дверей.
  * Переписывать счёт пятна для этого не придётся.
  */
+/**
+ * **Насколько открыта штора**, 0…1 (таск 09 сценариев, история 2.12): 0 —
+ * закрыта, 1 — собрана у края, 0,5 — наполовину.
+ *
+ * Читатель терпимый, и в этом обещание «прежняя память открытых штор читается
+ * как позиция»: список или множество id открытых штор (память показа G352,
+ * `openCurtainIds`) значит «эти открыты на 100 %», а словарь `markId → доля` —
+ * позиция дома. Мусор и отсутствие — закрыта.
+ */
+export function volumeCurtainShare(source, markId) {
+  if (!source || !markId) return 0;
+  if (source instanceof Map) {
+    const share = Number(source.get(markId));
+    return Number.isFinite(share) ? Math.max(0, Math.min(1, share)) : 0;
+  }
+  return volumeCurtainOpen(source, markId) ? 1 : 0;
+}
+
+/**
+ * Какая доля ширины остаётся у открытой шторы: ткань собирается у края, а не
+ * исчезает — 20 % ширины карниза при позиции 100.
+ */
+export const VOLUME_CURTAIN_BUNCH = 0.2;
+
+/** Ткань модели, собранная к своему левому краю на долю `keep` ширины. */
+function volumeCurtainParts(parts, keep) {
+  let edge = Infinity;
+  for (const part of parts) if (part && part.clear && part.x < edge) edge = part.x;
+  return parts.map((part) =>
+    part && part.clear ? { ...part, x: edge + (part.x - edge) * keep, width: part.width * keep } : part,
+  );
+}
+
+/**
+ * Полотнища повтора вдоль пути, собранные к его началу на долю `keep` длины.
+ * Путь — цепочка середин полотнищ от начала пути: на изломе ткань едет по
+ * изломной цепочке, а не срезает угол.
+ */
+function volumeCurtainFrames(frames, keep) {
+  if (frames.length === 0) return frames;
+  // Начало — край первого полотнища: он и остаётся на месте, к нему ткань и
+  // собирается.
+  const first = frames[0];
+  const start = { x: first.at.x - first.u.x * (first.widthMm / 2), y: first.at.y - first.u.y * (first.widthMm / 2) };
+  const chain = [start, ...frames.map((frame) => frame.at)];
+  const along = [0];
+  for (let index = 1; index < chain.length; index += 1) {
+    along.push(along[index - 1] + Math.hypot(chain[index].x - chain[index - 1].x, chain[index].y - chain[index - 1].y));
+  }
+  const pointAt = (distance) => {
+    for (let index = 1; index < chain.length; index += 1) {
+      if (distance > along[index] && index < chain.length - 1) continue;
+      const span = along[index] - along[index - 1];
+      const t = span > 0 ? (distance - along[index - 1]) / span : 0;
+      return {
+        x: chain[index - 1].x + (chain[index].x - chain[index - 1].x) * t,
+        y: chain[index - 1].y + (chain[index].y - chain[index - 1].y) * t,
+      };
+    }
+    return chain[chain.length - 1];
+  };
+  return frames.map((frame, index) => ({ ...frame, at: pointAt(along[index + 1] * keep), widthMm: frame.widthMm * keep }));
+}
+
 export function volumeCurtainOpen(openCurtainIds, markId) {
   if (!openCurtainIds || !markId) return false;
   if (typeof openCurtainIds.has === "function") return openCurtainIds.has(markId);
@@ -1842,6 +1939,8 @@ function volumePrismFaces(corners, bottomMm, topMm, rgb, out, options = {}) {
   // прозрачностью шкафа.
   const clear = options.clear || false;
   const channel = options.channel === undefined ? null : options.channel;
+  // Может ли тело светиться (таск 09 сценариев) — доезжает до каждой грани.
+  const lit = options.lit === true;
   for (let index = 0; index < corners.length; index += 1) {
     const a = corners[index];
     const b = corners[(index + 1) % corners.length];
@@ -1856,6 +1955,7 @@ function volumePrismFaces(corners, bottomMm, topMm, rgb, out, options = {}) {
         doorId,
         clear,
         channel,
+        lit,
       }),
     );
   }
@@ -1863,7 +1963,7 @@ function volumePrismFaces(corners, bottomMm, topMm, rgb, out, options = {}) {
     volumeFace(
       corners.map((point) => volumeAt(point, topMm)),
       rgb,
-      { normal: { x: 0, y: 0, z: 1 }, markId, doorId, clear, channel },
+      { normal: { x: 0, y: 0, z: 1 }, markId, doorId, clear, channel, lit },
     ),
   );
   // Низ лежащей на полу вещи не нужен никому, а низ висящей — нужен: на
@@ -1873,7 +1973,7 @@ function volumePrismFaces(corners, bottomMm, topMm, rgb, out, options = {}) {
       volumeFace(
         corners.map((point) => volumeAt(point, bottomMm)),
         rgb,
-        { normal: { x: 0, y: 0, z: -1 }, markId, doorId, clear, channel },
+        { normal: { x: 0, y: 0, z: -1 }, markId, doorId, clear, channel, lit },
       ),
     );
   }
@@ -2252,6 +2352,10 @@ export function volumeWallFaces(wall, openings, heightMm, out = [], openDoorIds 
       const second = side > 0 ? from : to;
       const firstBottom = side > 0 ? bottomTo : bottomFrom;
       const secondBottom = side > 0 ? bottomFrom : bottomTo;
+      // Чья это сторона (таск 09 сценариев): щуп в полутора сантиметрах от
+      // грани посреди куска — тот же, которым солнце ищет комнату
+      // (`volumeInnerSide`). Наружная сторона — улица, ничья.
+      const room = rooms && rooms.length > 0 ? volumeRoomKeyAt(rooms, at((tile.fromMm + tile.toMm) / 2, (half + VOLUME_SUN_PROBE_MM) * side)) : null;
       out.push(
         volumeFace(
           [
@@ -2261,7 +2365,7 @@ export function volumeWallFaces(wall, openings, heightMm, out = [], openDoorIds 
             volumeAt(first, tile.topMm),
           ],
           VOLUME_WALL_RGB,
-          { normal },
+          { normal, room },
         ),
       );
     }
@@ -4054,6 +4158,15 @@ export function volumeFloorKey(project, schemeId, options, cover, upper, known) 
     coverY: (cover && cover.dy) || 0,
     doors: chosen(mine.doors, options.openDoorIds),
     sheers: chosen(mine.sheers, options.openCurtainIds),
+    // Позиции штор этажа (таск 09 сценариев): сдвинулась штора — этаж
+    // собирается заново. Закрытая и без позиции — одна и та же штора.
+    curtains: options.curtainShares
+      ? (mine.sheers || [])
+          .map((id) => [id, volumeCurtainShare(options.curtainShares, id)])
+          .filter(([, share]) => share > 0)
+          .map(([id, share]) => id + ":" + share)
+          .join(" ")
+      : "",
     hidden: chosen(mine.objects, options.hiddenObjectIds),
   };
 }
@@ -4072,6 +4185,7 @@ export function volumeFloorKeySame(was, now) {
     was.coverY !== now.coverY ||
     was.doors !== now.doors ||
     was.sheers !== now.sheers ||
+    was.curtains !== now.curtains ||
     was.hidden !== now.hidden
   ) {
     return false;
@@ -5035,20 +5149,42 @@ export function volumeMarks(project, schemeId, { marks, rooms } = {}) {
  * Выделение, прицел и `E` по взгляду от модели не зависят: `markId` стоит у
  * **каждой** грани модели, поэтому выделяется вещь целиком, а не одно тело.
  */
-export function volumeMarkFaces(place, out = []) {
+export function volumeMarkFaces(place, out = [], open = 0) {
+  // Штора по позиции (таск 09 сценариев): ткань собирается к краю, карниз
+  // стоит. Закрытая (0) — та же штора, что без позиции, грань в грань.
+  const keep = open > 0 && volumeSheerPlace(place) ? 1 - Math.min(1, open) * (1 - VOLUME_CURTAIN_BUNCH) : 1;
   if (place.model && place.frame) {
-    return volumeModelFaces(place.frame, place.model, place.bodyRgb, out, { markId: place.markId });
+    const model = keep < 1 ? { ...place.model, parts: volumeCurtainParts(place.model.parts || [], keep) } : place.model;
+    return volumeModelFaces(place.frame, model, place.bodyRgb, out, { markId: place.markId });
   }
+  // Метка без модели — коробка или полоса по габариту — **светится вся**, если
+  // повтора у неё нет (таск 09 сценариев): у ленты света свет и есть сама
+  // полоса. У трека светятся его светильники, а не полоса; у шторы — ничего.
+  // Признак «может», а не «горит»: розетка-коробка не засветится, сколько её ни
+  // включай, — свечение кадр даёт только свету и экрану.
+  const lit = !place.repeat;
   for (const prism of place.prisms || []) {
-    volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, place.bodyRgb, out, { markId: place.markId });
+    volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, place.bodyRgb, out, { markId: place.markId, lit });
   }
   // Повтор вдоль пути (таск 177, G275): полоса уже нарисована звеньями, а
   // поверх неё садятся светильники трека. Хозяин у них тот же — сама метка,
   // поэтому щелчок по светильнику выделяет трек, а не ничего.
-  for (const frame of (place.repeat && place.repeat.frames) || []) {
+  const frames = (place.repeat && place.repeat.frames) || [];
+  for (const frame of keep < 1 && volumeSheerParts(place.repeat.parts) ? volumeCurtainFrames(frames, keep) : frames) {
     volumeModelFaces(frame, place.repeat, place.bodyRgb, out, { markId: place.markId });
   }
   return out;
+}
+
+/**
+ * Точка, по которой метка узнаёт своё помещение (таск 09 сценариев): у вещи на
+ * стене — в пяти сантиметрах от лица внутрь комнаты, у остальных — её якорь.
+ */
+export function volumeMarkProbe(place) {
+  if (!place || !place.anchor) return null;
+  const normal = place.mode === VOLUME_MARK_WALL && place.face ? place.face.normal : null;
+  if (!normal) return { x: place.anchor.x, y: place.anchor.y };
+  return { x: place.anchor.x + normal.x * VOLUME_ROOM_PROBE_MM, y: place.anchor.y + normal.y * VOLUME_ROOM_PROBE_MM };
 }
 
 // ——— модели (таск 155, требование G221) ——————————————————————————————————
@@ -5153,9 +5289,8 @@ export function volumeModelPrisms(frame, parts) {
       topMm,
       material: part.material,
       name: part.name,
-      // Признак свечения доезжает до призмы и останавливается здесь: сегодня
-      // он у всех выключен, а день, когда свет начнёт включаться, правит одну
-      // строку ниже — и ни одной из пятидесяти моделей.
+      // «Может светиться» (таск 09 сценариев): доезжает до грани
+      // (`volumeModelFaces`), а горит ли — решает кадр по состоянию дома.
       lit: part.lit,
       // Номер канала клавиши (таск 177): у остальных тел его нет вовсе.
       channel: part.channel === undefined ? null : part.channel,
@@ -5265,13 +5400,16 @@ export function volumeModelFaces(frame, model, rgb, out = [], options = {}) {
     // Номер канала доезжает до грани и останавливается там: что значит «канал
     // выделен», решает окно, а в объект не пишется ничего (G68, таск 177).
     channel: part && part.channel !== undefined ? part.channel : null,
+    // «Может светиться» (таск 09 сценариев): признак тела доезжает до грани.
+    lit: Boolean(part && part.lit),
   });
   for (const part of parts) {
     if (part.kind !== "tube") continue;
     volumeTubeFaces(frame, part, volumeModelRgb(part.material, rgb), out, own(part));
   }
   for (const prism of volumeModelPrisms(frame, parts)) {
-    // Та самая одна строка: `prism.lit` пока всегда `false`.
+    // Та самая одна строка (таск 09 сценариев): `prism.lit` доезжает до грани
+    // через `own(prism)`, а горит ли тело — решает кадр по состоянию дома.
     const fill = volumeModelRgb(prism.material, rgb);
     volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, fill, out, own(prism));
   }
@@ -5849,6 +5987,7 @@ export function volumeScene(project, schemeId, options = {}) {
         // Ярус у пола **телесный** (таск 211): порядок ему считает дерево.
         volumeFace(room.pointsMm.map((point) => volumeAt(point, 0)), VOLUME_FLOOR_RGB, {
           normal: { x: 0, y: 0, z: 1 },
+          room: volumeRoomKey(room),
         }),
       );
       volumeSlabFaces(room.pointsMm, 0, faces);
@@ -5880,7 +6019,7 @@ export function volumeScene(project, schemeId, options = {}) {
         // стоит — у потолка остаётся одна сторона, нижняя: изнутри он тот же
         // до грани, а сверху отбор по нормали его не рисует вовсе, и видно
         // планировку. Ни одной грани при этом не прибавляется и не убавляется.
-        { normal: { x: 0, y: 0, z: -1 }, both: options.roofOff !== true },
+        { normal: { x: 0, y: 0, z: -1 }, both: options.roofOff !== true, room: volumeRoomKey(room) },
       ),
     );
   }
@@ -6040,7 +6179,10 @@ export function volumeScene(project, schemeId, options = {}) {
     // этого не пострадал — он спрашивается по расстоянию до габарита
     // (`volumeStairNear`), а не по упору в него, и теперь срабатывает ещё
     // вернее: встать можно прямо на лестницу.
+    const objectFrom = faces.length;
     volumeObjectFaces(project, schemeId, object, schemeHeight.mm, faces);
+    // Вещь в комнате — её (таск 09 сценариев): включённый свет светлит и диван.
+    if (rooms.length > 0 && faces.length > objectFrom) volumeTagRoom(faces, objectFrom, rooms, volumeMiddleOf(faces[objectFrom].p));
     for (const prism of volumeObjectPrisms(project, schemeId, object, schemeHeight.mm)) {
       if (!volumePrismBlocks(prism)) continue;
       const solid = volumePrismSolid(prism);
@@ -6057,7 +6199,13 @@ export function volumeScene(project, schemeId, options = {}) {
   const marks = volumeMarks(project, schemeId, { marks: options.marks, rooms });
   const markImages = options.markImages !== false;
   for (const place of marks.placed) {
-    volumeMarkFaces(place, faces);
+    const markFrom = faces.length;
+    // Позиция шторы (таск 09 сценариев) — только когда её дали: без имитации
+    // доводов позиции нет, и штора та же, что до таска.
+    volumeMarkFaces(place, faces, options.curtainShares ? volumeCurtainShare(options.curtainShares, place.markId) : 0);
+    // Метка в комнате — её (таск 09 сценариев). Щуп — от лица вещи внутрь: у
+    // метки на стене лицо лежит на кромке контура.
+    if (rooms.length > 0) volumeTagRoom(faces, markFrom, rooms, volumeMarkProbe(place));
     if (markImages || !place.model) volumeMarkViewLines(place, faces);
   }
   // `wallCount` — настоящее число стен чертежа, а не длина `solids`: препятствий
@@ -6792,6 +6940,43 @@ export function volumeRoomAt(scene, at) {
   return null;
 }
 
+/**
+ * **Ключ помещения** для света имитации (таск 09 сценариев): помещение объекта
+ * (`roomId` контура), а у контура без помещения — сам контур. Помещение из
+ * двух контуров (Г-образная гостиная) — одно: свет в нём светлит оба.
+ */
+export function volumeRoomKey(room) {
+  if (!room) return null;
+  return room.roomId || room.outlineId || null;
+}
+
+/** Ключ помещения, в котором лежит точка плана, или `null` — улица. */
+export function volumeRoomKeyAt(rooms, at) {
+  if (!at) return null;
+  for (const room of rooms || []) {
+    if (volumePointInside(at, room.pointsMm)) return volumeRoomKey(room);
+  }
+  return null;
+}
+
+// Насколько отступить от грани внутрь помещения, спрашивая, чьё оно: метка на
+// стене и сторона стены лежат ровно на кромке контура, и точка на кромке
+// отвечала бы жребием.
+const VOLUME_ROOM_PROBE_MM = 50;
+
+/**
+ * Приписать грани `faces[from…]` помещению, в котором стоит вещь: ключ
+ * помещения точки `at` (таск 09 сценариев). Линиям помещение не нужно — у них
+ * свой цвет.
+ */
+function volumeTagRoom(faces, from, rooms, at) {
+  const key = volumeRoomKeyAt(rooms, at);
+  if (!key) return;
+  for (let index = from; index < faces.length; index += 1) {
+    if (!faces[index].line) faces[index].room = key;
+  }
+}
+
 // ——— камера ——————————————————————————————————————————————————————————————
 
 /**
@@ -7190,8 +7375,13 @@ function volumeMiddleOf(points) {
  *
  * Невидимые грани отбрасываются по направлению нормали; двусторонние (полотно
  * двери, рама окна) нормаль поворачивают навстречу.
+ *
+ * `live` — **состояние дома** (таск 09 сценариев, история 2.12): `{glow:
+ * Map<markId, {level, rgb}>, rooms: Map<ключ помещения, 0…1>}` — что светится
+ * и где горит свет (`volumeLiveLight`). Без него кадр тот же, что до имитации,
+ * вызов в вызов: ветка не делает ни одного лишнего счёта.
  */
-export function volumeFrame(scene, camera, box, extra = null, tint = null) {
+export function volumeFrame(scene, camera, box, extra = null, tint = null, live = null) {
   const basis = volumeBasis(camera);
   const focal = volumeFocal(box);
   const halfWidth = box.width / 2;
@@ -7205,6 +7395,9 @@ export function volumeFrame(scene, camera, box, extra = null, tint = null) {
   // сцены одной схемы этажей нет вовсе — там и спрашивать нечего.
   const ownFloor = scene.ownFloor;
   const stacked = ownFloor !== undefined && ownFloor !== null;
+  // Тон освещённой комнаты считается **раз на комнату и кадр**, а не на грань:
+  // граней в комнате сотни, а тон у них один.
+  const lit = live ? { glow: live.glow || null, rooms: live.rooms || null, tints: new Map() } : null;
   const take = (face, order) =>
     volumeFacePolygons(
       face,
@@ -7218,6 +7411,7 @@ export function volumeFrame(scene, camera, box, extra = null, tint = null) {
       order,
       tint,
       !stacked || volumeFaceMine(face, ownFloor),
+      lit,
     );
   // Половина — чтобы линия встала **между** гранями, а не спорила с одной из них.
   const rankOf = (face) => volumeOrderRank(tree, camera.at, volumeMiddleOf(face.p)) - 0.5;
@@ -7313,7 +7507,7 @@ function volumeOutlineOrder(polygons) {
  * `order` — место в очереди: ранг из дерева у яруса тел, `null` у всех
  * остальных, и тогда порядок внутри яруса решает дальность, как прежде.
  */
-function volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, box, out, order = null, tint = null, mine = true) {
+function volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, box, out, order = null, tint = null, mine = true, live = null) {
   if (face.line) {
     const line = volumeLinePolygon(face, camera, basis, focal, halfWidth, halfHeight, box, mine);
     if (line) {
@@ -7359,7 +7553,9 @@ function volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, b
     depth: middle,
     order: order === null ? -middle : order,
     layer: face.layer,
-    fill: volumeFill(face.rgb, face.flat ? 1 : volumeShade(normal), face.alpha === undefined ? 1 : face.alpha, tint),
+    fill: live
+      ? volumeLiveFill(face, normal, tint, live)
+      : volumeFill(face.rgb, face.flat ? 1 : volumeShade(normal), face.alpha === undefined ? 1 : face.alpha, tint),
     // Многоугольник просвечивает (таск 169): взгляд смотрит сквозь него
     // дальше — если за ним есть кому отвечать (таск 189, см. `volumeSightAt`).
     // Рисование об этом не спрашивает — прозрачность уже в цвете.
@@ -7374,6 +7570,95 @@ function volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, b
     channel: mine && face.channel !== undefined ? face.channel : null,
   });
   return out;
+}
+
+/**
+ * **Свет дома для кадра** (таск 09 сценариев, история 2.12): `{glow, rooms}`
+ * для `volumeFrame(…, live)` — или `null`, если не горит ничего.
+ *
+ * `live` — состояние дома по меткам: `Map<markId, {on, level, kind, roomId}>`
+ * (`simLiveOf` и вид знака `simLiveKindOf`, одно правило со «Схемой»).
+ * Светится включённый свет — по яркости — и экран включённого телевизора.
+ * Комнату светлит только свет: лампы помещения складываются, но светлее
+ * полной комната не бывает. Помещение лампы — её помещение в объекте, а у
+ * метки без него — контур, в котором она висит.
+ */
+export function volumeLiveLight(scene, live) {
+  if (!live || live.size === 0) return null;
+  const glow = new Map();
+  const rooms = new Map();
+  for (const [markId, item] of live) {
+    if (!item || item.on !== true) continue;
+    if (item.kind === "tv") {
+      glow.set(markId, { level: 1, rgb: VOLUME_SCREEN_RGB });
+      continue;
+    }
+    if (item.kind !== "light") continue;
+    const level = volumeShare01(item.level);
+    glow.set(markId, { level, rgb: VOLUME_GLOW_RGB });
+    const key = item.roomId || volumeRoomKeyAt(scene && scene.rooms, volumeMarkProbe(scene ? volumeMarkPlace(scene, markId) : null));
+    if (key) rooms.set(key, Math.min(1, (rooms.get(key) || 0) + level));
+  }
+  if (glow.size === 0 && rooms.size === 0) return null;
+  return { glow, rooms };
+}
+
+/**
+ * Цвет грани при запущенном доме (таск 09 сценариев, история 2.12).
+ *
+ * Тело, которое может светиться, у включённого устройства берёт цвет
+ * свечения (`volumeGlowFill`) — без тона часа и без светлоты лампы сцены:
+ * светится, значит не темнеет. Грань помещения, где горит свет, сводится к
+ * ночи слабее (`volumeRoomTint`). Остальное — как без имитации.
+ */
+function volumeLiveFill(face, normal, tint, live) {
+  const alpha = face.alpha === undefined ? 1 : face.alpha;
+  if (face.lit && face.markId && live.glow) {
+    const glow = live.glow.get(face.markId);
+    if (glow) return volumeGlowFill(face.rgb, glow, alpha);
+  }
+  const shade = face.flat ? 1 : volumeShade(normal);
+  if (face.room && live.rooms) {
+    let own = live.tints ? live.tints.get(face.room) : undefined;
+    if (own === undefined) {
+      const level = live.rooms.get(face.room);
+      own = level > 0 ? volumeRoomTint(tint, level) : null;
+      if (live.tints) live.tints.set(face.room, own);
+    }
+    if (own) return volumeFill(face.rgb, shade, alpha, own);
+  }
+  return volumeFill(face.rgb, shade, alpha, tint);
+}
+
+function volumeShare01(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(0, Math.min(1, number)) : 0;
+}
+
+/**
+ * Цвет светящегося тела: материал, сведённый к цвету свечения по яркости.
+ * Даже самая тусклая лампа светится заметно (`VOLUME_GLOW_MIN`).
+ */
+export function volumeGlowFill(rgb, glow, alpha = 1) {
+  const level = volumeShare01(glow && glow.level);
+  const to = (glow && glow.rgb) || VOLUME_GLOW_RGB;
+  const share = VOLUME_GLOW_MIN + (1 - VOLUME_GLOW_MIN) * level;
+  return volumeFill(volumeMix(rgb, to, share), 1, alpha, null);
+}
+
+/**
+ * Тон ночи в комнате, где горит свет: доля ночи меньше пропорционально
+ * яркости, а сама ночь теплее — к цвету лампы. Днём доли ночи нет, и комната
+ * остаётся какой была.
+ */
+export function volumeRoomTint(tint, level) {
+  const share = tint ? volumeShare01(tint.share) : 0;
+  if (!(share > 0)) return tint;
+  const light = volumeShare01(level);
+  return {
+    rgb: volumeMix(tint.rgb || VOLUME_NIGHT_RGB, VOLUME_ROOM_WARM_RGB, VOLUME_ROOM_WARM * light),
+    share: share * (1 - VOLUME_ROOM_LIGHT * light),
+  };
 }
 
 /**

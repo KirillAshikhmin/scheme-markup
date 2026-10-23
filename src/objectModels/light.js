@@ -15,6 +15,13 @@
 // День, когда люстру понадобится отличить от точечного **телом**, лечится
 // своей формой знака у люстры (она же поможет плану) — тем же путём, которым
 // лечится их неразличимость на плане, а не вторым ключом у модели.
+//
+// ——— что светится (таск 09 сценариев, G06) ———
+//
+// `lit: true` стоит у тел, **откуда идёт свет**: абажур и ярус лампы, подвесы
+// люстры, свечение ночника и зеркала, рассеиватель ленты. Признак значит «может
+// светиться»: горит тело или нет и насколько ярко — решает состояние дома в
+// кадре «Объёма», а не модель. Подставка, чашка, корпус и стекло не светятся.
 import { modelBox, modelCyl, modelParts, modelTube } from "./kit.js";
 
 export const MODELS_LIGHT = {
@@ -33,8 +40,8 @@ export const MODELS_LIGHT = {
   // Цена — шесть граней: двадцать было, двадцать шесть стало. Это та же цена,
   // что у любой вещи с третьим телом, и предел в тридцать она не трогает.
   lamp: modelParts(
-    modelCyl("shade", { z: 0, height: 0.52, material: "light" }),
-    modelCyl("tier", { x: -0.28, width: 0.56, y: -0.28, depth: 0.56, z: 0.52, height: 0.22, material: "light" }),
+    modelCyl("shade", { z: 0, height: 0.52, material: "light", lit: true }),
+    modelCyl("tier", { x: -0.28, width: 0.56, y: -0.28, depth: 0.56, z: 0.52, height: 0.22, material: "light", lit: true }),
     modelBox("rod", { x: -0.05, width: 0.1, y: -0.05, depth: 0.1, z: 0.74, height: 0.26, material: "metal" }),
   ),
   // Подсветка зеркала — **круглое зеркало со светящимся контуром** (таск 177,
@@ -56,7 +63,7 @@ export const MODELS_LIGHT = {
   // она и идёт.
   mirror: modelParts(
     modelTube("glass", { axis: "y", round: true, x: -0.44, width: 0.88, y: -0.5, depth: 0.3, z: 0.06, height: 0.88, material: "glass" }),
-    modelTube("glow", { axis: "y", round: true, y: -0.2, depth: 0.7, material: "light" }),
+    modelTube("glow", { axis: "y", round: true, y: -0.2, depth: 0.7, material: "light", lit: true }),
   ),
   // ——— люстра (таск 216, G323) ———
   //
@@ -82,19 +89,19 @@ export const MODELS_LIGHT = {
   // читается «много». Пятый стоил бы шестого тела.
   chandelier: modelParts(
     modelBox("canopy", { x: -0.2, width: 0.4, y: -0.2, depth: 0.4, z: 0.9, height: 0.1, material: "metal" }),
-    modelBox("dropLong", { x: -0.42, width: 0.12, y: -0.1, depth: 0.2, z: 0, height: 0.9, material: "light" }),
-    modelBox("dropMid", { x: -0.12, width: 0.12, y: -0.32, depth: 0.2, z: 0.18, height: 0.72, material: "light" }),
-    modelBox("dropShort", { x: 0.1, width: 0.12, y: 0.06, depth: 0.2, z: 0.36, height: 0.54, material: "light" }),
-    modelBox("dropTop", { x: 0.3, width: 0.12, y: -0.14, depth: 0.2, z: 0.54, height: 0.36, material: "light" }),
+    modelBox("dropLong", { x: -0.42, width: 0.12, y: -0.1, depth: 0.2, z: 0, height: 0.9, material: "light", lit: true }),
+    modelBox("dropMid", { x: -0.12, width: 0.12, y: -0.32, depth: 0.2, z: 0.18, height: 0.72, material: "light", lit: true }),
+    modelBox("dropShort", { x: 0.1, width: 0.12, y: 0.06, depth: 0.2, z: 0.36, height: 0.54, material: "light", lit: true }),
+    modelBox("dropTop", { x: 0.3, width: 0.12, y: -0.14, depth: 0.2, z: 0.54, height: 0.36, material: "light", lit: true }),
   ),
   // Ночник: корпус у плинтуса и светящаяся щель внизу.
   nightLight: modelParts(
-    modelBox("glow", { x: -0.34, width: 0.68, y: -0.5, depth: 0.35, z: 0.08, height: 0.26, material: "light" }),
+    modelBox("glow", { x: -0.34, width: 0.68, y: -0.5, depth: 0.35, z: 0.08, height: 0.26, material: "light", lit: true }),
     modelBox("case", { x: -0.42, width: 0.84, y: -0.15, depth: 0.65, z: 0.08, height: 0.7 }),
   ),
   // Лента вертикальная: профиль и рассеиватель во всю высоту.
   stripVertical: modelParts(
-    modelBox("diffuser", { x: -0.34, width: 0.68, y: -0.5, depth: 0.3, material: "light" }),
+    modelBox("diffuser", { x: -0.34, width: 0.68, y: -0.5, depth: 0.3, material: "light", lit: true }),
     modelBox("profile", { y: -0.2, depth: 0.7 }),
   ),
 };

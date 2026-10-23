@@ -42,6 +42,7 @@ import {
   volumeParamsHome,
   volumeParamsLine,
   volumeParamsRead,
+  volumeParamsReady,
   volumeParamsWatch,
 } from "./volumeParams.js";
 import { exportDownload, exportFileName, viewPng } from "../exporter.js";
@@ -50,12 +51,13 @@ import { gesturePinchOf, gesturePinchStep, gestureWheel } from "../gestures.js";
 import {
   SCHEME_LIFT_KEY,
   WALL_HEIGHT_FALLBACK_MM,
+  findMark,
   findRoom,
   findScheme,
   schemeFloorOf,
   schemeObjectsOnScheme,
 } from "../model.js";
-import { drawDrawing, drawingUnitBridge, visibleMarks } from "../render.js";
+import { drawDrawing, drawingUnitBridge, simLiveKindOf, visibleMarks } from "../render.js";
 import { screenPlaceOf, screenPlacePlanRead, screenPlaceSet } from "../screenPlace.js";
 import { volumeClockStamp, volumeClockText, volumeDateShort, volumeDayDateOf, volumeDayTimes } from "../clockMath.js";
 import { strings, text } from "../strings.js";
@@ -70,6 +72,7 @@ import {
   VOLUME_MARKER_RGB,
   VOLUME_PITCH_MAX_DEG,
   VOLUME_RUN_MM_S,
+  VOLUME_SHEER_SHARE,
   VOLUME_START_PITCH_DEG,
   VOLUME_WALK_MM_S,
   VOLUME_TIGHT_MM,
@@ -95,6 +98,7 @@ import {
   volumeFloors,
   volumeFrame,
   volumeLinkLines,
+  volumeLiveLight,
   volumeMarkAnchor,
   volumeMarkPlace,
   volumeMarkerFaces,
@@ -129,6 +133,23 @@ import {
   volumeStep,
 } from "../volume.js";
 import { markCardModel, markCardParts } from "./markCard.js";
+import { deviceCardView, deviceClickPlan, deviceKeyPresser } from "./deviceCard.js";
+import { openSimCommands } from "./simBar.js";
+import { homeAccessories, markAccessory } from "../sim/home.js";
+import {
+  SIM_STATE_SETTING,
+  simAct,
+  simDoor,
+  simLive,
+  simPress,
+  simPresence,
+  simProjectKey,
+  simRunning,
+  simStart,
+  simStop,
+  simWatch,
+} from "../simulation.js";
+import { getSetting } from "../store.js";
 import { uiButton, uiDialogDepth, uiEl, uiFieldTarget, uiIcon, uiIconButton, uiSpaceTarget } from "./ui.js";
 
 // ——— подсказка плашкой (G218) ————————————————————————————————————————————
@@ -768,6 +789,9 @@ export function volumeHintText(state) {
   if (state.keys) parts.push(strings.volume.channelHint);
   // Про прицел — там же, где он показан: пальцем его нет, в обзоре нет.
   if (state.aim) parts.push(strings.volume.aimHint);
+  // Дом идёт (таск 09 сценариев): то, что делают E, щелчок и «Действие» с
+  // устройствами. Пальцем — про кнопку «Действие», мышью — про E и щелчок.
+  if (state.home) parts.push(state.touching ? strings.volume.homeTouchHint : strings.volume.homeHint);
   parts.push(volumeDoorLine(state.doors, state.open, state.aimedDoor, state.touching));
   parts.push(volumeSheerLine(state.sheers, state.openSheers || new Set(), state.aimedSheer, state.touching));
   // Про этажи — последней: лестница под рукой есть далеко не всегда, а когда
@@ -929,6 +953,150 @@ export function volumeNotes(scene) {
  * где стоял, с теми же открытыми дверями и на том же этаже — в объект при этом
  * по-прежнему не попадает ничего (G68).
  */
+// ——— имитация умного дома (таск 09 сценариев) ————————————————————————————
+//
+// Слова заказчика: «А так же есть 3д визуализация (Объем), где есть наглядное
+// представление этих объектов» и «в Объёме по умолчанию включён, но в
+// параметрах Объёма можно отключить. Да, давай пока не физический свет».
+//
+// Дом в «Объёме» — **тот же дом**, что в «Схеме»: одна имитация на сеанс
+// (`simulation.js`), одно правило «что рисовать» (`simLiveOf`), один щелчок и
+// одна карточка (`panels/deviceCard.js`). Своего здесь — только то, что есть у
+// «Объёма» и нет у плана: свечение тел и свет комнаты (`volumeLiveLight`),
+// шторы по позиции, ходьба, которая будит датчики, и двери, которые двигают
+// датчик открытия. В объект не пишется ничего (G68): живое состояние —
+// зеркало имитации и память браузера.
+//
+// Ниже — чистые правила; провода — внутри `createVolume`.
+
+const volumeSimMeta = new WeakMap(); // project → Map<markId, {kind, roomId}>
+
+/**
+ * Состояние дома для кадра: `Map<markId, {on, level, alert, open, pressedAt,
+ * kind, roomId}>` — `simLive` объекта, к которому приписан вид знака
+ * (`simLiveKindOf`, тот же, что у «Схемы») и помещение метки.
+ */
+export function volumeSimLive(project, live) {
+  const out = new Map();
+  if (!project || !live) return out;
+  let meta = volumeSimMeta.get(project);
+  if (!meta) {
+    meta = new Map();
+    for (const accessory of homeAccessories(project)) {
+      const mark = findMark(project, accessory.markId);
+      meta.set(accessory.markId, { kind: simLiveKindOf(accessory), roomId: (mark && mark.roomId) || null });
+    }
+    volumeSimMeta.set(project, meta);
+  }
+  for (const [markId, item] of live) {
+    const own = meta.get(markId);
+    if (own) out.set(markId, { ...item, kind: own.kind, roomId: own.roomId });
+  }
+  return out;
+}
+
+/**
+ * Позиции штор сцены по состоянию дома: `Map<markId, 0…1>` — только у штор,
+ * которые в доме и есть шторы (`WindowCovering`). Штора без аксессуара позиции
+ * не получает и открывается своей памятью, как до имитации.
+ */
+export function volumeSimCurtains(scene, live) {
+  const out = new Map();
+  if (!scene || !live) return out;
+  for (const id of scene.sheers || []) {
+    const item = live.get(id);
+    if (item && item.kind === "curtain") out.set(id, Math.max(0, Math.min(1, Number(item.open) || 0)));
+  }
+  return out;
+}
+
+/**
+ * Где человек — для датчиков движения и присутствия (история 2.8): помещение
+ * объекта, в чьём контуре он стоит, списком; на улице и в контуре без
+ * помещения — пустой список.
+ */
+export function volumeSimRooms(scene, at) {
+  if (!scene || !at) return [];
+  const room = volumeRoomAt(scene, at);
+  return room && room.roomId ? [room.roomId] : [];
+}
+
+/**
+ * Что делают `E` и щелчок по метке при запущенном доме (истории 2.5–2.7):
+ *   `{kind: "press", index}` — привязанная клавиша: одиночное сразу;
+ *   `{kind: "hold", index}` — отвязанная клавиша или отдельная кнопка: нажатие
+ *     распознаётся (`deviceKeyPresser`) — одиночное, двойное, долгое;
+ *   `{kind: "toggle"}` — свет, штора, телевизор, розетка;
+ *   `{kind: "sensor", service}` — датчик срабатывает;
+ *   `{kind: "none"}` — щёлкать нечем (или мимо клавиши многоклавишного).
+ * `channel` — клавиша под рукой (`volumeChannelAt`), `null` — мимо клавиш.
+ */
+export function volumeSimAction(accessory, channel) {
+  const plan = deviceClickPlan(accessory);
+  let key = null;
+  if (plan.kind === "key") key = plan.key;
+  else if (plan.kind === "keys") key = plan.keys.find((item) => item.channel === channel) || null;
+  if (key) return { kind: key.detect ? "hold" : "press", index: key.index };
+  if (plan.kind === "sensor") return { kind: "sensor", service: plan.service };
+  if (plan.kind === "toggle") return { kind: "toggle" };
+  return { kind: "none" };
+}
+
+/** Зазор между карточкой метки и кнопками поля, и меньшие её мерки (G21). */
+export const VOLUME_CARD_GAP = 10;
+export const VOLUME_CARD_MIN_WIDTH = 240;
+export const VOLUME_CARD_MIN_HEIGHT = 96;
+
+/**
+ * **Где встать карточке метки, когда на поле сенсорная оснастка** (таск 09
+ * сценариев, G21, история 8.6). Слова заказчика: «при выделении метки её
+ * плашка заползает под кнопки управления, как-то не хорошо».
+ *
+ * `box` — поле, `controls` — прямоугольники кнопок в точках поля (столбик
+ * стойки с «Действием», площадка ходьбы), `top` — где кончается верхний ряд
+ * угловых кнопок. Ответ — отступы карточки от краёв поля `{left, right,
+ * bottom, maxHeight}`, или `null`, если оснастки нет и карточка стоит, как
+ * стояла.
+ *
+ * Правило одно на обе ориентации: карточка встаёт **между** столбиками внизу,
+ * если там хватает ширины (лёжа), а иначе — **над** ними во всю ширину
+ * (стоя). Высота — что осталось до верхнего ряда; длинная карточка листается
+ * своим телом.
+ */
+export function volumeCardPlace(box, controls, top = 0) {
+  const list = (controls || []).filter((rect) => rect && rect.right > rect.left && rect.bottom > rect.top);
+  if (!box || list.length === 0) return null;
+  const gap = VOLUME_CARD_GAP;
+  const middle = box.width / 2;
+  let leftEdge = gap;
+  let rightEdge = gap;
+  for (const rect of list) {
+    if ((rect.left + rect.right) / 2 < middle) leftEdge = Math.max(leftEdge, rect.right + gap);
+    else rightEdge = Math.max(rightEdge, box.width - rect.left + gap);
+  }
+  const between = box.width - leftEdge - rightEdge;
+  const roof = Math.max(0, Number(top) || 0) + gap;
+  if (between >= VOLUME_CARD_MIN_WIDTH) {
+    const maxHeight = Math.max(VOLUME_CARD_MIN_HEIGHT, box.height - gap - roof);
+    return { left: leftEdge, right: rightEdge, bottom: gap, maxHeight };
+  }
+  const highest = Math.min(...list.map((rect) => rect.top));
+  const bottom = box.height - highest + gap;
+  const maxHeight = Math.max(VOLUME_CARD_MIN_HEIGHT, box.height - bottom - roof);
+  return { left: gap, right: gap, bottom, maxHeight };
+}
+
+/**
+ * Какие шторы открыть в доме по прежней памяти показа (история 2.14: «прежняя
+ * память открытых дверей и штор читается»): дом здесь ещё не запускали
+ * (`known` — в памяти браузера нет его записи), а штора в памяти открыта и в
+ * доме она штора. Дом, который себя помнит, старше памяти показа.
+ */
+export function volumeSimSeed(sheers, memory, curtains, known) {
+  if (known || !memory) return [];
+  return (sheers || []).filter((id) => memory.has(id) && curtains.has(id));
+}
+
 function createVolume({ api, hosts }) {
   const { getState, setState, notify, subscribe } = api;
   const project = getState().project;
@@ -964,6 +1132,51 @@ function createVolume({ api, hosts }) {
   // памяти (просеянное) или что открытого нет вовсе.
   let openRev = 1;
   let openSaid = 0;
+  // ——— имитация умного дома (таск 09 сценариев) ———
+  //
+  // Всё здесь — сеанс поверхности: в объект не пишется ничего (G68). Дом один
+  // на страницу (`simulation.js`), «Объём» только запускает его по отметке,
+  // показывает и трогает руками.
+  //
+  // `homeHere` — дом запустил «Объём»: он же и остановит его, уходя, — иначе
+  // «Схема» после прогулки оказалась бы в режиме имитации без единого нажатия
+  // «Запустить». Дом, запущенный в «Схеме», «Объём» не останавливает.
+  let homeHere = false;
+  // Окно параметров ответило из хранилища, и известно, помнит ли себя дом:
+  // снятая отметка не запускает дом даже на миг.
+  let homeReady = false;
+  let homeKnown = true;
+  let homeSeeded = false;
+  // Был ли дом включён для поля при прошлой сверке: по переходу поле встаёт
+  // в дом (двери, датчики, человек) или выходит из него.
+  let homeWas = false;
+  // Свет дома для кадра (`volumeLiveLight`) и позиции штор, по которым
+  // собрана сцена. Позиции меняются шагами по 10 % хода — сцена пересобирается
+  // только на сдвиг шторы, свет идёт в кадр без пересборки.
+  let homeLight = null;
+  let homeShares = new Map();
+  // Поле погасло, а дом жил: свет и шторы сверяются на возвращении.
+  let homeStale = false;
+  // Что сказано дому о человеке: строка помещений или `null` — не говорили.
+  let homePlace = null;
+  // Нажатие клавиши, начатое E или кнопкой «Действие» (отпускание — там же),
+  // и начатое мышью или пальцем на поле (отпускание — щелчком).
+  let homeHeld = null;
+  let homeGesture = null;
+  const homePressers = new Map();
+  // Карточка устройства в карточке метки — та же, что в «Схеме».
+  let homeCard = null;
+  // Что было в окне параметров: отметки дома и карточки сверяются по переходу,
+  // а не на каждый перевод часов.
+  let homeParams = { simulation: null, hideCard: null };
+  // Открытые шторы, поднятые из памяти показа, — до того как дом их тронул.
+  const homeMemory = new Set();
+  // Подписка на зеркало дома; снимается вместе с поверхностью.
+  let stopHome = null;
+  /** Дом идёт и «Объём» его показывает: отметка стоит, дом запущен. */
+  // `closed` здесь не спрашивается: он объявлен ниже, а первая сборка сцены
+  // зовёт это правило раньше; разобранная поверхность не спрашивает его вовсе.
+  const homeOn = () => volumeParamsRead().simulation === true && simRunning();
   // «Скрыть все объекты» — та же отметка, только разом: сцена собирается без
   // единой вещи чертежа. Отдельного выключателя у сцены нет нарочно — иначе
   // ответов на «что показано» стало бы два.
@@ -976,6 +1189,9 @@ function createVolume({ api, hosts }) {
     marks: sceneMarks(state, id),
     openDoorIds: openDoors,
     openCurtainIds: openCurtains,
+    // Шторы по позиции дома (таск 09 сценариев) — только при запущенной
+    // имитации: без неё доводов позиции нет, и штора та же, что до таска.
+    ...(homeOn() ? { curtainShares: homeShares } : {}),
     // «Снять крышу» (таск 212, G319): отметка окна параметров. Доезжает до
     // **каждого** этажа стопки — крыша снимается у всех, а не только у
     // верхнего; разбор у самой грани в `volumeScene`.
@@ -1026,6 +1242,7 @@ function createVolume({ api, hosts }) {
   if (savedOpen && savedOpen.open) {
     for (const id of savedOpen.open.doors) openDoors.add(id);
     for (const id of savedOpen.open.sheers) openCurtains.add(id);
+    for (const id of savedOpen.open.sheers) homeMemory.add(id);
   }
 
   scene = sceneOf(getState());
@@ -1231,11 +1448,24 @@ function createVolume({ api, hosts }) {
     label: strings.volume.crouch,
     title: strings.volume.crouchHint,
   });
+  // «Действие» пальцем (таск 09 сценариев, G20): «добавь кнопку действия
+  // (которая аналогично E на клавиатуре)». Своего правила у неё нет — она зовёт
+  // ровно то, что E: дверь и штора под прицелом, при запущенном доме —
+  // устройство и клавиша, и у отвязанной клавиши удержание кнопки — то же
+  // удержание E (одиночное, двойное, долгое по одному распознавателю).
+  // Значка «рука» в наборе нет, и на кнопке буква той клавиши, которую она
+  // повторяет; слово — в подсказке и в `aria-label`.
+  const actionButton = uiButton(strings.volume.actionShort, {
+    class: "ui-btn volume__stanceBtn volume__actionBtn",
+    title: strings.volume.actionHint,
+    attrs: { "aria-label": strings.volume.action },
+  });
   // Столбик стойки слева внизу. Положение — у столбика, а не у кнопок: отступ
-  // от низа поля один на обе (`placeStance`).
+  // от низа поля один на все (`placeStance`).
   const stanceBox = uiEl("div", { class: "volume__stance", attrs: { hidden: "hidden" } }, [
     jumpButton,
     crouchButton,
+    actionButton,
   ]);
   // Смена вида кнопкой прямо на поле (таск 165, G244), значком под кнопкой
   // полного экрана (таск 166, G245).
@@ -1428,6 +1658,12 @@ function createVolume({ api, hosts }) {
     attrs: { hidden: "hidden" },
     on: { click: () => toggleAllDoors() },
   });
+  const commandButton = uiButton(strings.sim.bar.command, {
+    class: "ui-btn",
+    title: strings.sim.bar.commandHint,
+    on: { click: () => openSimCommands(api) },
+  });
+  const commandRow = uiEl("div", { class: "volume__tools", attrs: { hidden: "hidden" } }, [commandButton]);
   const where = uiEl("p", { class: "volume__where" });
   const meta = uiEl("p", { class: "volume__meta" });
   const missing = uiEl("p", { class: "volume__missing" });
@@ -1473,6 +1709,9 @@ function createVolume({ api, hosts }) {
       // «Вся схема», снимок и все двери разом: не вид, а действия над ним —
       // своей строкой под переключателем вида.
       uiEl("div", { class: "volume__tools" }, [fitButton, shotButton, doorsButton]),
+      // «Выполнить команду» (G17, история 2.19) — то же окно, что в «Схеме»:
+      // список команд сценариев и поле «своя команда». Видна, пока дом идёт.
+      commandRow,
       uiEl("div", { class: "volume__tools" }, [
         uiEl("span", { class: "volume__toolsLabel", text: strings.volume.floorLabel }),
         floorLine,
@@ -1787,6 +2026,9 @@ function createVolume({ api, hosts }) {
     // в обзоре нечему: кнопки стойки стоят там же, где стоят всегда, но ниже.
     const minimap = view === "person" && volumeParamsRead().minimap;
     stanceBox.style.bottom = volumeFieldBottom(viewport(), scene.boundsMm, minimap) + "px";
+    // Карточка метки уступает столбику и площадке (G21): их место только что
+    // сменилось — сменилось и её.
+    placeCard();
   }
 
   // ——— час суток: один снимок на секунду ———
@@ -1899,6 +2141,17 @@ function createVolume({ api, hosts }) {
 
   /** Правку в окне параметров поле принимает одним путём: час заново и кадр. */
   function paramsChanged() {
+    // Отметки дома и карточки (таск 09 сценариев) сверяются по переходу: часы
+    // переводят часто, а пересобирать карточку-пульт на каждый перевод нельзя
+    // — под пальцем ползунок.
+    const chosen = volumeParamsRead();
+    if (chosen.simulation !== homeParams.simulation || chosen.hideCard !== homeParams.hideCard) {
+      const home = chosen.simulation !== homeParams.simulation;
+      homeParams = { simulation: chosen.simulation, hideCard: chosen.hideCard };
+      if (home) homeEnsure();
+      syncCard();
+      syncHint();
+    }
     // «Все этажи» (таск 202) — единственная отметка окна, которая меняет саму
     // **сцену**, а не её показ: этажи приходят гранями, деревом порядка, тенью
     // и пятнами, и собрать их можно только заново. Сверяется это с тем, что в
@@ -1983,7 +2236,9 @@ function createVolume({ api, hosts }) {
     // поверх неё правилом яруса, а не дальностью середин — дефект D49. Тем же
     // путём и теми же `extra` идут солнечные пятна от проёмов (таск 196), ярус
     // у них `VOLUME_LAYER_SUN` — выше полов, ниже тел.
-    shown = volumeFrame(scene, spot, box, [...shadow, ...spots, ...overlay, ...marker], at.tint);
+    // Свет дома (таск 09 сценариев): свечение тел и свет комнаты — доводом
+    // кадра, без пересборки сцены. Дом не идёт — довода нет, и кадр тот же.
+    shown = volumeFrame(scene, spot, box, [...shadow, ...spots, ...overlay, ...marker], at.tint, homeLight);
     volumeDraw(ctx, shown);
     // Второй проход фона: вещи, которые ближе кромки плиты, дом закрыть не
     // может — они перед ним (таск 199, разбор у `volumeDrawBackdrop`). Внутри
@@ -2112,14 +2367,17 @@ function createVolume({ api, hosts }) {
     return volumeModelKeys(place && place.model);
   }
 
-  function pickChannel(found) {
+  function pickChannel(found, quiet = false) {
     const was = channelPick;
     const same = was && found && was.markId === found.markId && was.channel === found.channel;
     channelPick = found || null;
     // Кадр пересобирается здесь, а не состоянием: щелчок по второй клавише той
     // же метки выделения не меняет, и подписка молчала бы.
     if (!same) syncSelection();
-    if (!found || same) return;
+    // При запущенном доме щелчок по клавише — нажатие (таск 09 сценариев), и
+    // слово про связи канала на каждое нажатие было бы шумом: клавиша выбрана
+    // рамкой, а что она сделала, видно в доме и в журнале.
+    if (!found || same || quiet) return;
     // Сказать словом один раз: стрелок на кадре стало меньше, и без слова это
     // читается как пропавшие связи. Пустой канал — тоже новость: клавиша есть,
     // а нагрузки на ней нет.
@@ -2179,10 +2437,22 @@ function createVolume({ api, hosts }) {
     const selected = selectedIds();
     // Карточка про одну метку — то же правило, что у карточки на плане:
     // у выделенных пачкой общих полей нет.
-    const model = selected.length === 1 ? markCardModel(state.project, selected[0]) : null;
+    //
+    // «Не показывать карточку метки» (таск 09 сценариев, G22) убирает её из
+    // поля: выделение остаётся — рамкой на самой вещи и строкой в списке.
+    const model =
+      selected.length === 1 && volumeParamsRead().hideCard !== true ? markCardModel(state.project, selected[0]) : null;
+    if (homeCard) homeCard.dispose();
+    homeCard = null;
     card.hidden = !model;
     if (!model) return;
-    card.replaceChildren(...markCardParts(model, { headButton: cardClose }));
+    // Запущенный дом: под полями метки — пульт её устройства, тот же, что в
+    // «Схеме» (`deviceCardView`, таск 08): клавиши с тремя нажатиями, ползунки,
+    // значения.
+    if (homeOn() && !model.comment) homeCard = deviceCardView(state.project, model.id);
+    card.classList.toggle("mark-card--sim", Boolean(homeCard));
+    card.replaceChildren(...markCardParts(model, { headButton: cardClose, ...(homeCard ? { extra: homeCard.node } : {}) }));
+    placeCard();
   }
 
   /**
@@ -2230,6 +2500,12 @@ function createVolume({ api, hosts }) {
   // на дверь должен тоже её открывать»), а не только показывает, о какой двери
   // речь. Разбор — в `onPointerUp`.
 
+  /** Середина поля — туда целится кнопка «Действие». */
+  function fieldMiddle() {
+    const box = viewport();
+    return { x: box.width / 2, y: box.height / 2 };
+  }
+
   /** Куда смотрит рука — одно правило на E, на клик и на сам прицел (`volumeAimAt`). */
   function aimPoint() {
     return volumeAimAt(viewport(), { locked, pointer, view });
@@ -2249,7 +2525,9 @@ function createVolume({ api, hosts }) {
    * прицела под пальцем — там целятся касанием, и клавиши E нет вовсе (таск 149).
    */
   function syncAimNode() {
-    const at = scene.empty || view !== "person" || touching ? null : aimPoint();
+    // Пальцем прицел стоит посреди поля (таск 09 сценариев, G20): туда целится
+    // кнопка «Действие», и человек должен видеть, на что она подействует.
+    const at = scene.empty || view !== "person" ? null : touching ? fieldMiddle() : aimPoint();
     aimNode.hidden = at === null;
     stage.classList.toggle("volume__stage--aim", at !== null);
     if (!at) return;
@@ -2314,9 +2592,12 @@ function createVolume({ api, hosts }) {
    * другого, и дальше решает тот, кто спрашивал: E говорит об этом словом, а
    * щелчок по полю значит своё (см. `onPointerUp`).
    */
-  function actOnChoice(choice, at) {
+  function actOnChoice(choice, at, how = "click") {
     if (choice.kind === "mark") {
       select(choice.id);
+      // Запущенный дом (таск 09 сценариев): вещь не только выделяется, а
+      // работает — как щелчок по метке в «Схеме».
+      if (homeOn()) return homeAct(choice.id, at, how);
       // **Штора открывается там же, где выделяется** (G332): у метки с тюлевым
       // телом есть своё дело, и `E` делает его — тем же правилом, которым
       // щелчок по клавише выключателя выбирает канал. Выделение при этом
@@ -2337,11 +2618,16 @@ function createVolume({ api, hosts }) {
     return false;
   }
 
-  /** E действует на то, на что смотришь (G207, G214). */
-  function actOnAim() {
-    const at = aimPoint();
-    const choice = aimChoiceAt(at, aimedDoor || heldDoor);
-    if (!actOnChoice(choice, at)) notify(strings.volume.aimless, "info");
+  /**
+   * E действует на то, на что смотришь (G207, G214). `how` — `"key"` у E и
+   * кнопки «Действие» (нажатие клавиши выключателя держится до отпускания),
+   * `at` — куда целится рука: кнопка «Действие» целится серединой поля.
+   */
+  function actOnAim(how = "click", given = null) {
+    const at = given || aimPoint();
+    const door = given ? (scene.empty ? null : volumeDoorAt(shown, given.x, given.y)) : aimedDoor || heldDoor;
+    const choice = aimChoiceAt(at, door);
+    if (!actOnChoice(choice, at, how)) notify(strings.volume.aimless, "info");
   }
 
   /** Открыть или задвинуть штору. `false` — эта метка не штора. */
@@ -2362,6 +2648,9 @@ function createVolume({ api, hosts }) {
     openRev += 1;
     heldDoor = doorId;
     rebuildScene();
+    // Датчик открытия ходит вместе с дверью (история 2.9): связь дверь — датчик
+    // считает дом (`markDoorOf`), «Объём» только говорит, что дверь сделала.
+    if (homeOn()) simDoor(doorId, openDoors.has(doorId));
     return true;
   }
 
@@ -2372,11 +2661,250 @@ function createVolume({ api, hosts }) {
       return;
     }
     const next = volumeDoorsAfterAll(doors, openDoors);
+    const was = new Set(openDoors);
     openDoors.clear();
     for (const id of next) openDoors.add(id);
     openRev += 1;
     rebuildScene();
+    if (homeOn()) for (const id of doors) if (was.has(id) !== openDoors.has(id)) simDoor(id, openDoors.has(id));
     notify(next.length > 0 ? strings.volume.doorsOpened : strings.volume.doorsClosed, "info");
+  }
+
+  // ——— имитация умного дома: руки и провода (таск 09 сценариев) ———————————
+
+  /** Распознаватель нажатий одной клавиши: один на клавишу, пока жива поверхность. */
+  function homePresser(markId, index) {
+    const key = markId + "|" + index;
+    if (!homePressers.has(key)) {
+      homePressers.set(
+        key,
+        deviceKeyPresser({
+          fire: (press) => simPress(markId, index, press),
+          now: () => Date.now(),
+          later: (fn, ms) => setTimeout(fn, ms),
+          clear: (id) => clearTimeout(id),
+        }),
+      );
+    }
+    return homePressers.get(key);
+  }
+
+  /**
+   * Что делает рука с меткой при запущенном доме (истории 2.5–2.7, 2.10):
+   * правило — `volumeSimAction`, одно со «Схемой». `how`: `"key"` — E или
+   * «Действие» (у отвязанной клавиши нажатие держится до отпускания),
+   * `"click"` — щелчок мышью или касание (нажатие уже начато на `pointerdown`).
+   */
+  function homeAct(markId, at, how) {
+    const found = channelAt(at);
+    const mine = found && found.markId === markId ? found : null;
+    pickChannel(mine, true);
+    const action = volumeSimAction(markAccessory(getState().project, markId), mine ? mine.channel : null);
+    if (action.kind === "hold") {
+      const presser = homePresser(markId, action.index);
+      if (how === "key") {
+        homeRelease(true);
+        homeHeld = presser;
+        presser.down();
+      } else if (!homeGesture || homeGesture.presser !== presser) {
+        // Щелчок без начатого нажатия (захват мыши, касание мимо) — одиночное.
+        presser.down();
+        presser.up();
+      }
+      return true;
+    }
+    if (action.kind === "press") simPress(markId, action.index, "single");
+    else if (action.kind === "sensor") simAct({ kind: "sensor", markId, service: action.service });
+    else if (action.kind === "toggle") simAct({ kind: "toggle", markId });
+    // Штора без аксессуара открывается, как до имитации, — своей памятью.
+    else toggleCurtain(markId);
+    return true;
+  }
+
+  /** Отпустили E или «Действие»: нажатие клавиши кончилось (или брошено). */
+  function homeRelease(abort = false) {
+    if (!homeHeld) return;
+    const held = homeHeld;
+    homeHeld = null;
+    if (abort) held.abort();
+    else held.up();
+  }
+
+  /**
+   * Нажатие начинается **на опускании** мыши или пальца (история 2.6): долгое
+   * приходит, пока держат, двойное — по второму щелчку. Начинает его только
+   * отвязанная клавиша; остальное делает щелчок на отпускании.
+   */
+  function homeGestureStart(event) {
+    homeGesture = null;
+    if (!homeOn() || scene.empty) return;
+    const at = atEvent(event);
+    const choice = aimChoiceAt(at, volumeDoorAt(shown, at.x, at.y));
+    if (choice.kind !== "mark") return;
+    const found = channelAt(at);
+    const mine = found && found.markId === choice.id ? found : null;
+    const action = volumeSimAction(markAccessory(getState().project, choice.id), mine ? mine.channel : null);
+    if (action.kind !== "hold") return;
+    const presser = homePresser(choice.id, action.index);
+    presser.down();
+    homeGesture = { presser };
+  }
+
+  function homeGestureEnd(moved) {
+    if (!homeGesture) return;
+    if (moved) homeGesture.presser.abort();
+    else homeGesture.presser.up();
+  }
+
+  /** Где человек — датчикам движения и присутствия (история 2.8). */
+  function homePresence() {
+    if (!homeOn() || closed || scene.empty || screenMode() !== "volume") return;
+    const rooms = volumeSimRooms(scene, person);
+    const said = rooms.join(" ");
+    if (said === homePlace) return;
+    homePlace = said;
+    simPresence(rooms);
+  }
+
+  /** Человек ушёл из дома — с поля или из имитации: датчикам его больше не видно. */
+  function homePresenceGone() {
+    if (homePlace && simRunning()) simPresence([]);
+    homePlace = null;
+  }
+
+  /**
+   * Свет и шторы по зеркалу дома. Свет идёт в кадр, шторы — в сцену, и
+   * пересобирается она только на сдвиг шторы. Память открытых штор идёт за
+   * домом: выключили имитацию — шторы там, где их оставил дом.
+   */
+  function homeRefresh() {
+    if (closed || !homeOn()) return;
+    if (screenMode() !== "volume") {
+      homeStale = true;
+      return;
+    }
+    homeStale = false;
+    const state = getState();
+    const live = volumeSimLive(state.project, simLive(state.project));
+    homeLight = volumeLiveLight(scene, live);
+    const shares = volumeSimCurtains(scene, live);
+    for (const [id, share] of shares) {
+      const open = share >= VOLUME_SHEER_SHARE;
+      if (open === openCurtains.has(id)) continue;
+      if (open) openCurtains.add(id);
+      else openCurtains.delete(id);
+      openRev += 1;
+    }
+    // Штора без аксессуара — по своей памяти: открыта — значит собрана.
+    for (const id of scene.sheers || []) if (!shares.has(id) && openCurtains.has(id)) shares.set(id, 1);
+    const same = shares.size === homeShares.size && [...shares].every(([id, share]) => homeShares.get(id) === share);
+    if (same) {
+      redraw();
+      return;
+    }
+    homeShares = shares;
+    rebuildScene();
+  }
+
+  /** Поле встало в дом: двери говорят датчикам, человек — помещению. */
+  function homeArrive() {
+    homePlace = null;
+    if (!scene.empty) for (const id of scene.doors || []) simDoor(id, openDoors.has(id));
+    // Прежняя память открытых штор (история 2.14) — один раз и только дому,
+    // который здесь ещё не запускали: его собственная память старше.
+    if (!homeSeeded && !homeKnown) {
+      homeSeeded = true;
+      const state = getState();
+      const curtains = new Set();
+      for (const id of scene.sheers || []) {
+        const accessory = markAccessory(state.project, id);
+        if (accessory && accessory.services.some((service) => service.type === "WindowCovering")) curtains.add(id);
+      }
+      for (const id of volumeSimSeed(scene.sheers, homeMemory, curtains, homeKnown)) {
+        const service = markAccessory(state.project, id).services.find((item) => item.type === "WindowCovering");
+        simAct({ kind: "set", markId: id, service: service.index, char: "CurrentPosition", value: 100 });
+        simAct({ kind: "set", markId: id, service: service.index, char: "TargetPosition", value: 100 });
+      }
+    }
+    homeSeeded = true;
+    homePresence();
+  }
+
+  /** Поле вышло из дома: свечения нет, шторы — своей памятью, как до имитации. */
+  function homeLeave() {
+    homeRelease(true);
+    if (homeGesture) homeGesture.presser.abort();
+    homeGesture = null;
+    homePresenceGone();
+    homeLight = null;
+    if (homeShares.size > 0) {
+      homeShares = new Map();
+      rebuildScene();
+    } else redraw();
+  }
+
+  /** Сверка поля с домом: переход «вошли / вышли» и свет со шторами. */
+  function homeSync() {
+    if (closed) return;
+    const on = homeOn();
+    if (on !== homeWas) {
+      homeWas = on;
+      if (on) homeArrive();
+      else homeLeave();
+      commandRow.hidden = !on;
+      syncCard();
+      syncHint();
+    }
+    homeRefresh();
+  }
+
+  /**
+   * Запустить или остановить дом по отметке и режиму (история 2.2): отметка
+   * стоит и «Объём» на экране — дом идёт; ушли из режима или сняли отметку —
+   * дом, запущенный здесь, останавливается.
+   */
+  function homeEnsure() {
+    if (closed || !homeReady) return;
+    const want = volumeParamsRead().simulation === true && screenMode() === "volume";
+    if (want && !simRunning()) {
+      if (simStart()) homeHere = true;
+    } else if (!want && homeHere) {
+      homeHere = false;
+      homePresenceGone();
+      if (simRunning()) simStop();
+    }
+    homeSync();
+  }
+
+  /**
+   * **Карточка метки не заползает под кнопки поля** (G21, история 8.6): при
+   * сенсорной оснастке ей отводит место `volumeCardPlace` по живым
+   * прямоугольникам кнопок; без оснастки — стоит, как стояла.
+   */
+  function placeCard() {
+    if (card.hidden) return;
+    const box = viewport();
+    const origin = stage.getBoundingClientRect ? stage.getBoundingClientRect() : { left: 0, top: 0 };
+    const rectOf = (element) => {
+      if (!element || element.hidden || !element.getBoundingClientRect) return null;
+      const rect = element.getBoundingClientRect();
+      return { left: rect.left - origin.left, right: rect.right - origin.left, top: rect.top - origin.top, bottom: rect.bottom - origin.top };
+    };
+    // Без сенсорной оснастки карточка стоит, как стояла, — и у лестницы тоже:
+    // «Этаж» посреди низа ей не мешал никогда (она прижата влево).
+    const touch = [rectOf(stanceBox), rectOf(padNode)].filter(Boolean);
+    const controls = touch.length > 0 ? [...touch, rectOf(stairButton)].filter(Boolean) : [];
+    // Сверху — угловые кнопки и развёрнутые плашки подсказки и сводки: плашка
+    // лежит слоем выше карточки и закрыла бы её голову с кнопкой «закрыть».
+    const corners = [rectOf(viewButton), rectOf(paramsButton.node), rectOf(hintPlate.node), rectOf(summaryPlate.node)].filter(Boolean);
+    const top = corners.reduce((most, rect) => Math.max(most, rect.bottom), 0);
+    const place = volumeCardPlace(box, controls, top);
+    card.style.left = place ? place.left + "px" : "";
+    card.style.right = place ? place.right + "px" : "";
+    card.style.bottom = place ? place.bottom + "px" : "";
+    card.style.width = place ? "auto" : "";
+    card.style.maxHeight = place ? place.maxHeight + "px" : "";
+    card.style.margin = place ? "0" : "";
   }
 
   /**
@@ -2712,6 +3240,34 @@ function createVolume({ api, hosts }) {
     riseStop();
   }
 
+  // ——— «Действие» пальцем (таск 09 сценариев, G20) ———
+  //
+  // Нажали — то же, что нажатие E, отпустили — то же, что его отпускание:
+  // у отвязанной клавиши между ними и решается одиночное, двойное или долгое.
+  // Целится кнопка серединой поля — там стоит прицел.
+  let actionFinger = null;
+
+  function actionPress(event) {
+    if (actionFinger !== null) return;
+    event.preventDefault();
+    actionFinger = event.pointerId;
+    if (actionButton.setPointerCapture) {
+      try {
+        actionButton.setPointerCapture(event.pointerId);
+      } catch (error) {
+        // захват указателя кнопке не дали — отпускание поймаем окном
+      }
+    }
+    actOnAim(homeOn() ? "key" : "click", fieldMiddle());
+  }
+
+  function actionRelease(event) {
+    if (actionFinger === null) return;
+    if (event && event.pointerId !== undefined && event.pointerId !== actionFinger) return;
+    actionFinger = null;
+    homeRelease(Boolean(event && event.type === "pointercancel"));
+  }
+
   function crouchPress(event) {
     if (crouchFinger !== null) return;
     event.preventDefault();
@@ -2926,6 +3482,8 @@ function createVolume({ api, hosts }) {
       if (touches.size > 2) return;
     }
     look = { x: event.clientX, y: event.clientY, moved: false };
+    // Отвязанная клавиша под рукой — нажатие начинается сейчас (таск 09).
+    homeGestureStart(event);
   }
 
   function onPointerMove(event) {
@@ -2994,7 +3552,14 @@ function createVolume({ api, hosts }) {
     // сюда, и присед обязан сняться здесь же: палец свой она узнает сама.
     crouchRelease(event);
     riseRelease(event);
-    if (closed || !started || started.moved) return;
+    actionRelease(event);
+    // Нажатие клавиши, начатое на опускании, кончается здесь; повёл взглядом —
+    // это был поворот головы, а не нажатие (таск 09 сценариев).
+    if (started) homeGestureEnd(started.moved);
+    if (closed || !started || started.moved) {
+      homeGesture = null;
+      return;
+    }
     // ——— щелчок равноценен E (G235) ———
     //
     // Слова заказчика: «клик на дверь должен тоже её открывать. Клик
@@ -3053,7 +3618,9 @@ function createVolume({ api, hosts }) {
       }
       // Захват мыши после попадания не просится: человек целился в розетку или
       // в дверь, а не в поле.
-      if (actOnChoice(choice, at)) return;
+      const acted = actOnChoice(choice, at, "click");
+      homeGesture = null;
+      if (acted) return;
       // Мимо — снимает выделение, как тап по пустому месту плана.
       select(null);
       pickChannel(null);
@@ -3634,6 +4201,12 @@ function createVolume({ api, hosts }) {
     // E действует на то, на что смотришь (G207, G214).
     if (event.code === VOLUME_DOOR_KEY) {
       event.preventDefault();
+      // При запущенном доме E — клавиша, которую держат (таск 09 сценариев):
+      // автоповтор ничего не нажимает, отпускание — в `onKeyUp`.
+      if (homeOn()) {
+        if (!event.repeat) actOnAim("key");
+        return;
+      }
       actOnAim();
       return;
     }
@@ -3650,6 +4223,12 @@ function createVolume({ api, hosts }) {
   }
 
   function onKeyUp(event) {
+    // Отпустили E — нажатие клавиши выключателя кончилось (таск 09 сценариев).
+    // `ours()` не спрашивается: отпустить можно и в другом режиме.
+    if (event.code === VOLUME_DOOR_KEY) {
+      homeRelease();
+      return;
+    }
     // Отпустили Alt — мышь возвращается виду (G211). Если захвата и не было,
     // просить его по отпусканию Alt нельзя: человек не звал его вовсе.
     if (volumeAltKey(event)) {
@@ -3685,6 +4264,8 @@ function createVolume({ api, hosts }) {
 
   function onBlur() {
     keyStop(null);
+    // Ушли с окна, держа E или «Действие», — нажатие брошено: отпускания не будет.
+    homeRelease(true);
     // Ушли с окна с зажатым Control — его отпускание до нас не дойдёт, и
     // стоять в приседе до следующего нажатия человек не просил.
     crouchStop();
@@ -3749,6 +4330,8 @@ function createVolume({ api, hosts }) {
 
   function syncWhere() {
     where.textContent = scene.empty || view !== "person" ? "" : volumeWhere(getState().project, scene, person);
+    // Человек ходит — датчики его помещения видят его (история 2.8).
+    homePresence();
   }
 
   /**
@@ -3811,7 +4394,9 @@ function createVolume({ api, hosts }) {
       view,
       touching,
       locked,
-      aim: !aimNode.hidden,
+      // Пальцем прицел стоит ради «Действия», а не идёт за курсором: строка
+      // про курсор ему ни к чему (таск 09 сценариев).
+      aim: !aimNode.hidden && !touching,
       doors: scene.doors,
       open: openDoors,
       aimedDoor: aimedDoor || heldDoor,
@@ -3825,6 +4410,8 @@ function createVolume({ api, hosts }) {
       // Отметка таска 192: подсказка обязана говорить то, что делают руки
       // сейчас, а не то, что они делали до галки.
       ghost: ghosting(),
+      // Дом идёт (таск 09 сценариев): E и щелчок управляют устройствами.
+      home: homeOn(),
     });
     // Подсказка в полном экране не уходит, а **складывается в свой знак**
     // (таск 166, G246). Она единственная из спрятанного говорит про руки:
@@ -3864,6 +4451,7 @@ function createVolume({ api, hosts }) {
     if (stanceBox.hidden) {
       crouchRelease(null);
       riseRelease(null);
+      actionRelease(null);
     }
     else placeStance();
     // Кнопка вида — не сенсорная оснастка, а вторая ячейка угла поля (таск 166,
@@ -3897,12 +4485,24 @@ function createVolume({ api, hosts }) {
     syncStair();
     syncSelection();
     syncParamsHome();
+    // «Выполнить команду» — пока дом идёт; карточка — по оснастке поля, которая
+    // только что могла появиться или уйти (таск 09 сценариев, G21).
+    commandRow.hidden = !homeOn();
+    placeCard();
   }
 
   // ——— жизнь поверхности ———
 
   function destroy() {
     if (closed) return;
+    // Дом, запущенный «Объёмом», уходит вместе с ним (таск 09 сценариев).
+    homeRelease(true);
+    if (homeCard) homeCard.dispose();
+    homeCard = null;
+    if (stopHome) stopHome();
+    stopHome = null;
+    if (homeHere && simRunning()) simStop();
+    homeHere = false;
     closed = true;
     volumeSurface = null;
     hosts.stage.replaceChildren();
@@ -4000,6 +4600,10 @@ function createVolume({ api, hosts }) {
           refreshHour();
           syncClock();
           sync();
+          // Вошли — дом запускается по отметке (история 2.2), свет и шторы,
+          // которые жили без поля, сверяются.
+          homeStale = true;
+          homeEnsure();
           if (typeof stage.focus === "function") stage.focus({ preventScroll: true });
         }
         // Режим сменили на другой. Место схеме и чертежу объём здесь больше не
@@ -4010,6 +4614,11 @@ function createVolume({ api, hosts }) {
         if ("screen" in changed && state.screen !== "volume") {
           // Поле погасло — таймеру часа идти незачем.
           syncClock();
+          // Человек ушёл из «Объёма» — датчики его больше не видят, а дом,
+          // запущенный здесь, останавливается (таск 09 сценариев).
+          homeRelease(true);
+          homePresenceGone();
+          homeEnsure();
         }
         // Выделили метку в списке или на плане — рамка и карточка поднимаются
         // здесь: выделение одно на оба вида. То же и с показом связей.
@@ -4032,6 +4641,9 @@ function createVolume({ api, hosts }) {
         // новые координаты доехали бы до неба только со следующим ходом часов.
         refreshHour();
         sync();
+        // Объект сменили или поправили: дом перестроен (`simSync`), а другой
+        // объект останавливает прежний — «Объём» запускает свой по отметке.
+        if ("project" in changed) homeEnsure();
       })
     : null;
 
@@ -4048,6 +4660,10 @@ function createVolume({ api, hosts }) {
   // Захват потеряли (палец уехал за край, браузер отдал указатель другому) —
   // это то же отпускание: иначе человек остался бы сидеть без кнопки.
   crouchButton.addEventListener("lostpointercapture", crouchRelease);
+  actionButton.addEventListener("pointerdown", actionPress);
+  actionButton.addEventListener("pointerup", actionRelease);
+  actionButton.addEventListener("pointercancel", actionRelease);
+  actionButton.addEventListener("lostpointercapture", actionRelease);
   window.addEventListener("pointermove", onPointerMove);
   window.addEventListener("pointerup", onPointerUp);
   window.addEventListener("pointercancel", onPointerUp);
@@ -4083,6 +4699,41 @@ function createVolume({ api, hosts }) {
   resize();
   if (!scene.empty && !looked) fit();
   if (typeof stage.focus === "function") stage.focus({ preventScroll: true });
+
+  // ——— дом (таск 09 сценариев) ———
+  //
+  // Зеркало дома слушается всю жизнь поверхности: запуск и остановка — сверка
+  // «вошли / вышли», изменения — свет и шторы. Запускается дом, когда окно
+  // параметров ответило (снятая отметка не запускает его даже на миг) и стало
+  // известно, помнит ли себя этот дом: прежняя память открытых штор нужна
+  // только дому, которого здесь ещё не было. Спрашивается это **до** запуска —
+  // запущенный дом сам запишет себя в память.
+  let homeRunning = simRunning();
+  stopHome = simWatch((payload) => {
+    if (closed) return;
+    if (payload.running !== homeRunning) {
+      homeRunning = payload.running;
+      homeSync();
+      return;
+    }
+    if (payload.changes.length > 0 || homeStale) homeRefresh();
+  });
+  const projectKey = simProjectKey(getState().project);
+  Promise.all([
+    volumeParamsReady(),
+    Promise.resolve()
+      .then(() => getSetting(SIM_STATE_SETTING))
+      .then((all) => {
+        homeKnown = Boolean(all && typeof all === "object" && projectKey && all[projectKey]);
+      })
+      .catch(() => {}),
+  ]).then(() => {
+    if (closed) return;
+    homeReady = true;
+    homeParams = { simulation: volumeParamsRead().simulation, hideCard: volumeParamsRead().hideCard };
+    homeEnsure();
+    syncCard();
+  });
   return { destroy };
 }
 

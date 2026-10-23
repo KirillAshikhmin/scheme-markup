@@ -35,8 +35,11 @@ export const MODELS_THINGS = {
   // Телевизор: тёмный экран почти во всю площадь лица, корпус за ним и
   // кронштейн в стену. Экран **тёмный** — этим он и отличается от картины, у
   // которой полотно светлое в широкой раме.
+  //
+  // Экран **может светиться** (таск 09 сценариев, G06): включённый телевизор в
+  // «Объёме» загорается экраном. Выключенный — тот же тёмный, что был.
   tv: modelParts(
-    modelBox("screen", { x: -0.47, width: 0.94, y: -0.5, depth: 0.1, z: 0.04, height: 0.92, material: "dark" }),
+    modelBox("screen", { x: -0.47, width: 0.94, y: -0.5, depth: 0.1, z: 0.04, height: 0.92, material: "dark", lit: true }),
     modelBox("case", { x: -0.46, width: 0.92, y: -0.4, depth: 0.3, z: 0.06, height: 0.88 }),
     modelBox("bracket", { x: -0.1, width: 0.2, y: -0.1, depth: 0.6, z: 0.3, height: 0.4, material: "metal" }),
   ),

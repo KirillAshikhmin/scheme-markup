@@ -355,6 +355,8 @@ test("у четырёх вещей таска 204 своё тело, и экра
       assert.ok(part.x >= -0.5 && part.x + part.width <= 0.5, key + "/" + part.name + ": тело шире габарита");
       assert.ok(part.y >= -0.5 && part.y + part.depth <= 0.5, key + "/" + part.name + ": тело глубже габарита");
       assert.ok(part.z >= 0 && part.z + part.height <= 1, key + "/" + part.name + ": тело выше габарита");
+      // Вещи таска 204 не светятся никогда: «может светиться» — только у
+      // светильников и экрана телевизора (таск 09 сценариев).
       assert.equal(part.lit, false, key + "/" + part.name + ": свечение включено");
     }
   }
@@ -462,7 +464,51 @@ test("клавишная модель держится предела на лю�
   assert.equal(objectModelChannels(null, 3), null);
 });
 
-test("у каждого тела есть имя, материал из набора и выключенное свечение", () => {
+// ——— «может светиться» (таск 09 сценариев, G06, история 2.12) ———————————————
+//
+// До таска 09 `lit` был выключен у всех тел — «задел под интерактив», и этот
+// тест держал замок. Таск 09 его снимает **осознанно**: смысл признака теперь
+// «может светиться», а горит тело или нет — решает состояние дома в кадре
+// (`volumeFrame(…, live)`), не модель. Светиться могут абажур и ярус лампы,
+// подвесы люстры, свечение ночника и зеркала, рассеиватель вертикальной ленты и
+// экран телевизора; у трека — его светильники. Больше ни одно тело: розетка,
+// выключатель и шкаф не светятся, сколько их ни включай.
+const LIT_PARTS = [
+  "lamp.shade",
+  "lamp.tier",
+  "chandelier.dropLong",
+  "chandelier.dropMid",
+  "chandelier.dropShort",
+  "chandelier.dropTop",
+  "nightLight.glow",
+  "mirror.glow",
+  "stripVertical.diffuser",
+  "tv.screen",
+];
+const LIT_LINE_PARTS = ["ТР.spot"];
+
+test("светиться может ровно то, что светится в доме: абажур, свечение, экран ТВ", () => {
+  const lit = [];
+  for (const key of objectModelKeys()) {
+    for (const part of bodies(key)) {
+      assert.equal(typeof part.lit, "boolean", key + "." + part.name + ": признак свечения не да/нет");
+      if (part.lit) lit.push(key + "." + part.name);
+    }
+  }
+  assert.deepEqual(lit.sort(), [...LIT_PARTS].sort());
+  // Подставка лампы, чашка люстры, корпус ночника, стекло зеркала, корпус и
+  // кронштейн телевизора — не светятся: светится только то, откуда идёт свет.
+  for (const [key, name] of [["lamp", "rod"], ["chandelier", "canopy"], ["nightLight", "case"], ["mirror", "glass"], ["tv", "case"], ["tv", "bracket"]]) {
+    assert.equal(bodies(key).find((part) => part.name === name).lit, false, key + "." + name);
+  }
+  const linesLit = [];
+  for (const code of objectLineModelCodes()) {
+    for (const part of objectLineModel(code).parts) if (part.lit) linesLit.push(code + "." + part.name);
+  }
+  assert.deepEqual(linesLit, LIT_LINE_PARTS, "у штор полотнища не светятся, у трека светятся светильники");
+});
+
+test("у каждого тела есть имя и материал из набора", () => {
   for (const key of objectModelKeys()) {
     const names = new Set();
     for (const part of bodies(key)) {
@@ -470,9 +516,6 @@ test("у каждого тела есть имя, материал из набо
       assert.ok(!names.has(part.name), key + ": два тела с именем " + part.name);
       names.add(part.name);
       assert.ok(MODEL_MATERIALS.includes(part.material), key + "." + part.name + ": материал " + part.material);
-      // Слова заказчика: заложить, но не делать. Включённого свечения в сборке
-      // нет ни одного, и этот тест — тот самый замок.
-      assert.equal(part.lit, false, key + "." + part.name + ": свечение включено");
       // Видов тела три: коробка, стоячий цилиндр и лежачий (таск 177). У
       // лежачего обязательна ось — без неё непонятно, где у него круг.
       assert.ok(["box", "cyl", "tube"].includes(part.kind), key + "." + part.name + ": вид тела " + part.kind);
@@ -1186,7 +1229,7 @@ test("элемент повтора держится того же предел�
     );
     for (const part of repeat.parts) {
       assert.ok(part.name && /^[a-zA-Z][a-zA-Z0-9]*$/.test(part.name), code + ": имя тела «" + part.name + "»");
-      assert.equal(part.lit, false, code + ": свечение включено");
+      assert.equal(part.lit, LIT_LINE_PARTS.includes(code + "." + part.name), code + "." + part.name + ": свечение");
       assert.ok(MODEL_MATERIALS.includes(part.material), code + ": материал " + part.material);
     }
   }

@@ -120,6 +120,21 @@ export const VOLUME_FLOORS_SETTING = "volumeFloorsAll";
 export const VOLUME_ROOF_SETTING = "volumeRoofOff";
 export const VOLUME_SMOOTH_SETTING = "volumeSmoothSky";
 export const VOLUME_GHOST_SETTING = "volumeThroughWalls";
+// ——— «Имитация умного дома» (таск 09 сценариев, G04, история 2.2) ————————————
+//
+// Слова заказчика: «в Объёме по умолчанию включён, но в параметрах Объёма можно
+// отключить». Отметка **положительная**, умолчание взведённое — читается тем же
+// правилом, что миникарта и крыша: `saved !== false` значит «не трогали». С ней
+// вход в «Объём» запускает дом; без неё «Объём» ведёт себя как до имитации.
+// Живёт в настройках браузера: это выбор показа, а не свойство дома (G68).
+export const VOLUME_SIMULATION_SETTING = "volumeSimulation";
+// ——— «Не показывать карточку метки» (таск 09 сценариев, G22, история 8.7) ———
+//
+// Слова заказчика: «А ещё в настройках добавь параметр — не показывать эту
+// панель в 3д виде». Отметка **отрицательная**: умолчание снято, карточка
+// видна; читается правилом отметок таска 192 (`saved !== true` — не ставили).
+// Действует только в «Объёме»: у «Схемы» и «Чертежа» карточка своя.
+export const VOLUME_HIDE_CARD_SETTING = "volumeHideCard";
 
 /**
  * Выбор человека. Живёт в области модуля, а не в поверхности объёма: поверхность
@@ -138,6 +153,10 @@ const params = {
   roofOff: true,
   smooth: false,
   ghost: false,
+  // Имитация умного дома (G04): умолчание — включена.
+  simulation: true,
+  // Карточка выделенной метки в «Объёме» (G22): умолчание — видна.
+  hideCard: false,
 };
 
 // Настройки читаются асинхронно, как у плашек и слоёв: поле стартует с
@@ -145,6 +164,10 @@ const params = {
 // говорит об этом через `volumeParamsWatch`.
 const watchers = new Set();
 let loaded = false;
+// Ответ хранилища на все отметки разом (`volumeParamsReady`): «Объём» ждёт его,
+// прежде чем запускать дом, — иначе снятая отметка запускала бы дом на миг до
+// того, как хранилище ответит.
+let ready = null;
 
 function tell() {
   for (const watcher of watchers) watcher();
@@ -159,27 +182,32 @@ export function volumeParamsWatch(watcher) {
 export function volumeParamsLoad() {
   if (loaded) return;
   loaded = true;
-  Promise.resolve(getSetting(VOLUME_BACKDROP_SETTING))
+  const waits = [];
+  const backdrop = Promise.resolve(getSetting(VOLUME_BACKDROP_SETTING))
     .then((saved) => {
       if (!VOLUME_BACKDROP_KINDS.includes(saved) || saved === params.kind) return;
       params.kind = saved;
       tell();
     })
     .catch(() => {});
+  waits.push(backdrop);
   // Отметки **положительные** и умолчание у них взведённое: карта и снятая
   // крыша появляются сами, а снятая галка — это просьба их убрать. Правило одно
   // на обе: `saved !== false` значит «не трогали, умолчание в силе».
   for (const [key, name] of [
     [VOLUME_MINIMAP_SETTING, "minimap"],
     [VOLUME_ROOF_SETTING, "roofOff"],
+    [VOLUME_SIMULATION_SETTING, "simulation"],
   ]) {
-    Promise.resolve(getSetting(key))
-      .then((saved) => {
-        if (saved !== false) return;
-        params[name] = false;
-        tell();
-      })
-      .catch(() => {});
+    waits.push(
+      Promise.resolve(getSetting(key))
+        .then((saved) => {
+          if (saved !== false) return;
+          params[name] = false;
+          tell();
+        })
+        .catch(() => {}),
+    );
   }
   // Ускорение поднимают часы приложения, а «Объём» слышит каждый их перевод —
   // и свой, и сделанный шагом в «Схеме»: поле перерисовывает час тем же путём,
@@ -192,15 +220,28 @@ export function volumeParamsLoad() {
     [VOLUME_FLOORS_SETTING, "floorsAll"],
     [VOLUME_SMOOTH_SETTING, "smooth"],
     [VOLUME_GHOST_SETTING, "ghost"],
+    [VOLUME_HIDE_CARD_SETTING, "hideCard"],
   ]) {
-    Promise.resolve(getSetting(key))
-      .then((saved) => {
-        if (saved !== true) return;
-        params[name] = true;
-        tell();
-      })
-      .catch(() => {});
+    waits.push(
+      Promise.resolve(getSetting(key))
+        .then((saved) => {
+          if (saved !== true) return;
+          params[name] = true;
+          tell();
+        })
+        .catch(() => {}),
+    );
   }
+  ready = Promise.all(waits).then(() => undefined);
+}
+
+/**
+ * Хранилище ответило на все отметки (таск 09 сценариев). Обещание не падает:
+ * недоступное хранилище — это умолчания, а не ошибка.
+ */
+export function volumeParamsReady() {
+  volumeParamsLoad();
+  return ready || Promise.resolve();
 }
 
 /** Что выбрано сейчас. Снимок: менять только через двери ниже. */
@@ -214,6 +255,8 @@ export function volumeParamsRead() {
     clock: appClockRead().clock,
     smooth: params.smooth,
     ghost: params.ghost,
+    simulation: params.simulation,
+    hideCard: params.hideCard,
   };
 }
 
@@ -259,7 +302,8 @@ export function volumeParamsMinimap(shown) {
  *
  * `smooth` — «Плавные светила» (фон в 30 кадров в секунду вместо раза в
  * секунду), `ghost` — «Проходить сквозь стены», `floorsAll` — «Все этажи»
- * (таск 202). Дверь одна на все, потому что устроены они одинаково до буквы:
+ * (таск 202), `simulation` — «Имитация умного дома» и `hideCard` — «Не
+ * показывать карточку метки» (таск 09 сценариев). Дверь одна на все, потому что устроены они одинаково до буквы:
  * прочесть, записать, сказать полю. Три близнеца-функции разошлись бы на
  * первой же правке.
  */
@@ -269,6 +313,8 @@ export function volumeParamsFlag(name, on) {
     roofOff: VOLUME_ROOF_SETTING,
     smooth: VOLUME_SMOOTH_SETTING,
     ghost: VOLUME_GHOST_SETTING,
+    simulation: VOLUME_SIMULATION_SETTING,
+    hideCard: VOLUME_HIDE_CARD_SETTING,
   };
   const key = keys[name];
   if (!key) return;
@@ -515,6 +561,17 @@ export function createVolumeParamsFields(options) {
       // этаж показывать.
       checkRow(strings.volume.roofOff, chosen.roofOff, strings.volume.roofOffHint, (on) =>
         volumeParamsFlag("roofOff", on),
+      ),
+      // Имитация умного дома (таск 09 сценариев, G04) — тоже «что показывать»:
+      // живой дом или тот, что был до имитации. Своей группы у неё нет — групп
+      // пять, и шестая подпись ради одной галки заняла бы строку колонки.
+      checkRow(strings.volume.simulation, chosen.simulation, strings.volume.simulationHint, (on) =>
+        volumeParamsFlag("simulation", on),
+      ),
+      // Карточка выделенной метки (таск 09 сценариев, G22) — тоже «что
+      // показывать»: отметка убирает её из поля «Объёма», и только оттуда.
+      checkRow(strings.volume.hideCard, chosen.hideCard, strings.volume.hideCardHint, (on) =>
+        volumeParamsFlag("hideCard", on),
       ),
       uiEl("p", { class: "tools__label", text: strings.volume.backdrop }),
       uiEl(
