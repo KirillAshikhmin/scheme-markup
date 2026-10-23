@@ -53,13 +53,16 @@ const KEY = ["StatelessProgrammableSwitch", ["ProgrammableSwitchEvent", "Service
 const LIGHT = { kind: "light", services: [["Lightbulb", ["On", "Brightness"]]] };
 // Выключатель (G11): «Выключатель» на каждый канал, затем кнопка на каждый.
 const SWITCH = { kind: "switchRelay", services: [["Switch", ["On"]], KEY], perChannel: true };
-const OUTLET = { kind: "outlet", services: [["Outlet", ["On"]]] };
+// Обязательные хаба (`sh_types.json`, правка после сборки сценариев) встают за
+// прежними: «используется» у розетки, единицы у термостата, четыре у ТВ, тип у
+// крана.
+const OUTLET = { kind: "outlet", services: [["Outlet", ["On", "OutletInUse"]]] };
 const FAN = { kind: "fan", services: [["Fan", ["Active", "RotationSpeed"]]] };
 // Бризер (правка после сборки сценариев): «у бризера должен быть выключатель
 // подогрева» — вентилятор приточки и «Выключатель» подогрева.
 const BREEZER = { kind: "breezer", services: [["Fan", ["Active", "RotationSpeed"]], ["Switch", ["On"]]] };
 const RELAY = { kind: "relay", services: [["Switch", ["On"]]] };
-const TV = { kind: "tv", services: [["Television", ["Active"]]] };
+const TV = { kind: "tv", services: [["Television", ["Active", "ActiveIdentifier", "ConfiguredName", "RemoteKey", "SleepDiscoveryMode"]]] };
 const NONE = null;
 
 const PROFILE_BY_CODE = {
@@ -98,8 +101,14 @@ const PROFILE_BY_CODE = {
       ["CarbonDioxideSensor", ["CarbonDioxideLevel", "CarbonDioxideDetected"]],
     ],
   },
-  ТМ: { kind: "thermostat", services: [["Thermostat", ["CurrentTemperature", "TargetTemperature", "CurrentHeatingCoolingState", "TargetHeatingCoolingState"]]] },
-  ТП: { kind: "warmFloor", services: [["Thermostat", ["CurrentTemperature", "TargetTemperature", "CurrentHeatingCoolingState", "TargetHeatingCoolingState"]]] },
+  ТМ: {
+    kind: "thermostat",
+    services: [["Thermostat", ["CurrentTemperature", "TargetTemperature", "CurrentHeatingCoolingState", "TargetHeatingCoolingState", "TemperatureDisplayUnits"]]],
+  },
+  ТП: {
+    kind: "warmFloor",
+    services: [["Thermostat", ["CurrentTemperature", "TargetTemperature", "CurrentHeatingCoolingState", "TargetHeatingCoolingState", "TemperatureDisplayUnits"]]],
+  },
   НЕ: { kind: "xmasTree", services: [["Lightbulb", ["On"]], ["Lightbulb", ["On"]]] },
   ОВ: RELAY, СУШ: RELAY, РП: RELAY, ПОС: RELAY, ДЭП: RELAY,
   УК: { kind: "speaker", services: [["Speaker", ["Mute", "Volume"]]] },
@@ -111,7 +120,7 @@ const PROFILE_BY_CODE = {
   ДД: { kind: "motion", services: [["MotionSensor", ["MotionDetected"]]] },
   ДО: { kind: "contact", services: [["ContactSensor", ["ContactSensorState"]]] },
   ДПр: { kind: "leak", services: [["LeakSensor", ["LeakDetected"]]] },
-  КВ: { kind: "valve", services: [["Valve", ["Active", "InUse"]]] },
+  КВ: { kind: "valve", services: [["Valve", ["Active", "InUse", "ValveType"]]] },
   Щ: NONE, ЩС: NONE, W: NONE, ПУ: NONE, ВП: NONE, ВР: NONE, КН: NONE,
 };
 

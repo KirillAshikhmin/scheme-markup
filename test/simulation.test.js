@@ -13,7 +13,7 @@ import { Worker } from "node:worker_threads";
 
 import { workerBundle } from "../build.js";
 import { clockMsStamp, clockSimMs, volumeClockFixed } from "../src/clockMath.js";
-import { addLogicBinding, addScenario, createProject, deleteMark } from "../src/model.js";
+import { addLogicBinding, addMark, addScenario, createProject, deleteMark, setMarkControls } from "../src/model.js";
 import { createSimBridge } from "../src/sim/bridge.js";
 import { markAccessory } from "../src/sim/home.js";
 import { simWorkerMain } from "../src/sim/worker.js";
@@ -281,6 +281,40 @@ test("щелчок по выключателю → свет: зеркало, ж�
   assert.equal(sim.running(), false);
   await settle();
   assert.ok(sim.journal().some((entry) => entry.code === "stopped"));
+});
+
+test("группа ламп — один аксессуар: клавиша на вторую лампу зажигает все три, щелчок по третьей гасит", async () => {
+  // Правка после сборки сценариев: «аксессуар пусть задаётся у первой… а
+  // распространяется на все метки в группе».
+  const box = simHouse();
+  const type = box.project.markTypes.find((item) => item.code === "С");
+  const added = addMark(box.project, {
+    schemeId: box.schemeId,
+    typeId: type.id,
+    points: [
+      { x: 0.3, y: 0.3 },
+      { x: 0.35, y: 0.3 },
+      { x: 0.4, y: 0.3 },
+    ],
+  });
+  const lamps = added.marks.map((mark) => mark.id);
+  box.project = setMarkControls(added.project, box.marks["В1"], [{ id: lamps[1], channel: null }]).project;
+  const { sim } = session();
+  sim.sync(box.project);
+  sim.start();
+  await settle();
+  // В1: сервис 0 — «Выключатель», 1 — кнопка (G11); нажатие кнопки
+  // переключает «Выключатель», за ним — подопечные.
+  sim.press(box.marks["В1"], 1, "single");
+  await settle();
+  const live = sim.live(box.project);
+  for (const lamp of lamps) assert.equal(live.get(lamp) && live.get(lamp).on, true, "лампа группы не горит");
+  assert.equal(sim.value(lamps[2], 0, "On"), true, "ведомая спрашивает не общий аксессуар");
+  // Щелчок по третьей лампе — переключается общий аксессуар.
+  sim.act({ kind: "toggle", markId: lamps[2], service: 0 });
+  await settle();
+  for (const lamp of lamps) assert.equal(sim.live(box.project).get(lamp).on, false, "группа не погасла целиком");
+  sim.stop();
 });
 
 test("журнал хранит 2000 последних строк, старые уходят", async () => {

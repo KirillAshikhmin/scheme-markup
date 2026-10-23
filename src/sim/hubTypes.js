@@ -105,6 +105,9 @@ export const HUB_SERVICE_TYPES = HUB_TYPE_FREEZE({
   "C_TemperatureControl": HUB_TYPE_FREEZE({ required: ["TargetTemperature"], optional: ["Name"] }),
 });
 
+/** Системные сервисы хаба: к метке их не добавляют (`system` в `sh_types.json`). */
+export const HUB_SYSTEM_SERVICES = HUB_TYPE_FREEZE(["GenericService","AccessoryInformation","FilterMaintenance","HAPProtocolInformation","LockManagement","ServiceLabel","Siri","TargetControl","TargetControlManagement","CloudRelay","TransferTransportManagement","WiFiRouter","PowerManagement","WiFiTransport","WiFiSatellite","Diagnostics","ThreadTransport","AccessControl","C_AccessoryExtInfo"]);
+
 /**
  * Типы характеристик (263): `{[type]: {format, min, max, step, maxLen, unit,
  * perms, values}}`.

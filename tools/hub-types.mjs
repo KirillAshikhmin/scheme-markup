@@ -7,14 +7,27 @@
 // `scheme_image/`. Имена перечислений берутся из `spruthub.js` (там все 94
 // типа сервисов и 263 характеристики, в порядке хаба), метаданные — из
 // `sh_types.json`: формат, диапазон, шаг, длина строки, единица, доступ и
-// допустимые значения. Остальное (идентификаторы HAP, русские подписи) в
-// страницу не берётся. Повторный запуск на тех же файлах даёт тот же текст.
+// допустимые значения. Идентификаторы HAP в страницу не берутся.
+//
+// Вторая выжимка — **русские подписи** сервисов, характеристик и значений
+// (правка после сборки сценариев: «вот тут все типы сервисов перечислены, с их
+// характеристиками… Перенеси эту структуру»). Видимые строки живут только в
+// `src/strings.js`, поэтому подписи пишутся туда, в собранный блок между
+// `// <hub-labels>` и `// </hub-labels>`; всё остальное в словаре — руками, и
+// подписи, написанные руками, главнее собранных. Системные сервисы хаба
+// (`system` в `sh_types.json`: сведения об аксессуаре, транспорт, Siri) в
+// подписи не идут — к метке их не добавляют.
+//
+// Повторный запуск на тех же файлах даёт тот же текст.
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT = join(HERE, "..", "src", "sim", "hubTypes.js");
+const STRINGS = join(HERE, "..", "src", "strings.js");
+const LABELS_FROM = "// <hub-labels>";
+const LABELS_TO = "// </hub-labels>";
 const SOURCE = join(HERE, "..", "..", "..", "Sprut.Hub_Tools", "ScenarioTemplate");
 
 function enumNames(declarations, name) {
@@ -99,6 +112,13 @@ export function hubTypesSource(shTypesText, declarationsText) {
   }
   lines.push("});");
   lines.push("");
+  lines.push("/** Системные сервисы хаба: к метке их не добавляют (`system` в `sh_types.json`). */");
+  lines.push(
+    "export const HUB_SYSTEM_SERVICES = HUB_TYPE_FREEZE(" +
+      JSON.stringify(serviceNames.filter((name) => byService.get(name) && byService.get(name).system === true)) +
+      ");",
+  );
+  lines.push("");
   lines.push("/**");
   lines.push(" * Типы характеристик (263): `{[type]: {format, min, max, step, maxLen, unit,");
   lines.push(" * perms, values}}`.");
@@ -134,11 +154,67 @@ export function hubTypesSource(shTypesText, declarationsText) {
   return lines.join("\n");
 }
 
+/**
+ * Подписи несистемных сервисов, их характеристик и значений:
+ * `{services: {type: name}, chars: {type: name}, values: {char: {key: name}}}`.
+ * Подпись характеристики — первая встреченная, как и её описание.
+ */
+export function hubLabels(shTypesText) {
+  const data = JSON.parse(shTypesText);
+  const services = data.service.types.types.filter((service) => service && service.type && service.system !== true);
+  const labels = { services: {}, chars: {}, values: {} };
+  const name = (value) => String(value == null ? "" : value).trim();
+  for (const service of services) {
+    if (name(service.name)) labels.services[service.type] = name(service.name);
+    for (const char of [...(service.required || []), ...(service.optional || [])]) {
+      if (!char || !char.type || Object.prototype.hasOwnProperty.call(labels.chars, char.type)) continue;
+      if (name(char.name)) labels.chars[char.type] = name(char.name);
+      const values = {};
+      for (const item of Array.isArray(char.validValues) ? char.validValues : []) {
+        if (item && item.key && name(item.name)) values[String(item.key)] = name(item.name);
+      }
+      if (Object.keys(values).length > 0) labels.values[char.type] = values;
+    }
+  }
+  return labels;
+}
+
+/** Собранный блок подписей для `strings.js` — строки между метками. */
+export function hubLabelsBlock(labels) {
+  const lines = [LABELS_FROM, "const SIM_HUB_LABELS = {"];
+  for (const group of ["services", "chars"]) {
+    lines.push("  " + group + ": {");
+    for (const [key, value] of Object.entries(labels[group]).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+      lines.push("    " + JSON.stringify(key) + ": " + JSON.stringify(value) + ",");
+    }
+    lines.push("  },");
+  }
+  lines.push("  values: {");
+  for (const [char, values] of Object.entries(labels.values).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+    lines.push("    " + JSON.stringify(char) + ": " + JSON.stringify(values) + ",");
+  }
+  lines.push("  },");
+  lines.push("};");
+  lines.push(LABELS_TO);
+  return lines.join("\n");
+}
+
+/** `strings.js` с подменённым собранным блоком; блока нет — ошибка, а не дописка. */
+export function stringsWithLabels(stringsText, block) {
+  const from = stringsText.indexOf(LABELS_FROM);
+  const to = stringsText.indexOf(LABELS_TO);
+  if (from < 0 || to < from) throw new Error("hub-types: в strings.js нет блока " + LABELS_FROM + " … " + LABELS_TO);
+  return stringsText.slice(0, from) + block + stringsText.slice(to + LABELS_TO.length);
+}
+
 function main() {
   const from = resolve(process.argv[2] || SOURCE);
-  const text = hubTypesSource(readFileSync(join(from, "sh_types.json"), "utf8"), readFileSync(join(from, "spruthub.js"), "utf8"));
+  const shTypes = readFileSync(join(from, "sh_types.json"), "utf8");
+  const text = hubTypesSource(shTypes, readFileSync(join(from, "spruthub.js"), "utf8"));
   writeFileSync(OUT, text);
   process.stdout.write("hub-types: " + OUT + "\n");
+  writeFileSync(STRINGS, stringsWithLabels(readFileSync(STRINGS, "utf8"), hubLabelsBlock(hubLabels(shTypes))));
+  process.stdout.write("hub-types: " + STRINGS + " (подписи)\n");
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) main();

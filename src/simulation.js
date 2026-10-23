@@ -40,7 +40,7 @@
 // `scenarioHung` (`{name, label, where}`), `hungUnknown` (`{count}`).
 import { appClockJump, appClockNow, appClockSimMs, appClockStep, appClockWatch } from "./appClock.js";
 import { appWeatherRead, appWeatherWatch } from "./appWeather.js";
-import { findMark, findType, markControlsByChannel, roomAtPoint, roomsInOrder, scenariosInOrder } from "./model.js";
+import { deviceFollowers, findMark, findType, markControlsByChannel, roomAtPoint, roomsInOrder, scenariosInOrder } from "./model.js";
 import { getSetting, setSetting } from "./store.js";
 import { text } from "./strings.js";
 import { SIM_BRIDGE_REPLAY, createSimBridge } from "./sim/bridge.js";
@@ -753,13 +753,19 @@ export function createSimulation(options = {}) {
     return true;
   }
 
+  // Ведомая метка группы — аксессуар ведущей (правка после сборки
+  // сценариев): щелчок, клавиша и вопрос о значении уходят ведущей.
+  const leadOf = (markId) => (project && typeof markId === "string" ? deviceFollowers(project).get(markId) || markId : markId);
+
   function act(action) {
     if (closed || !project || !action || typeof action !== "object") return false;
-    post({ type: "act", action });
+    const markId = leadOf(action.markId);
+    post({ type: "act", action: markId === action.markId ? action : { ...action, markId } });
     return running;
   }
 
-  function value(markId, service, char) {
+  function value(given, service, char) {
+    const markId = leadOf(given);
     const own = mirror.get(markId);
     const valueKey = simValueKey(service, char);
     if (simOwn(own, valueKey)) return own[valueKey];
@@ -782,6 +788,10 @@ export function createSimulation(options = {}) {
     for (const [markId, accessory] of source) {
       const values = mirror.get(markId) || {};
       map.set(markId, simLiveOf(accessory, pressed.has(markId) ? { ...values, pressedAt: pressed.get(markId) } : values));
+    }
+    // Состояние ведущей — на всех метках группы: вся группа ламп горит разом.
+    for (const [follower, leader] of deviceFollowers(of || project)) {
+      if (map.has(leader)) map.set(follower, map.get(leader));
     }
     liveCache = { source, revision, map };
     return map;

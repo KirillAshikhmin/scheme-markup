@@ -9,7 +9,11 @@
   PNG схемы, лист ГОСТ, развёртки листами и кадр объёма — через свой сервер и
   свой Chrome. `node tools/scheme.mjs --help` рассказывает остальное;
   `schemeData.mjs` — данные, `schemeSheets.mjs` с `schemeSheets.html` — мост.
-* **`hub-types.mjs`** — выжимка словаря Sprut.Hub в `src/sim/hubTypes.js`.
+* **`hub-types.mjs`** — выжимка словаря Sprut.Hub в `src/sim/hubTypes.js` и
+  русские подписи его сервисов, характеристик и значений — собранным блоком
+  `// <hub-labels>` в `src/strings.js`. Из этого словаря собирается и каталог
+  имитации (`src/sim/catalog.js`): после обновления `sh_types.json` —
+  `node tools/hub-types.mjs`, затем `npm test`.
 * **`draw-glyphs.py`** и `gost-type-a-source.ttf` — чертёжный шрифт, разбор ниже.
 
 ## Доработка чертёжного шрифта

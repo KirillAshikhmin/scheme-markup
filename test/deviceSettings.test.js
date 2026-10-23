@@ -118,9 +118,20 @@ test("состав окна: галки только у необязательн
   let model = deviceWindowModel(base, 1);
   assert.equal(model.services.length, 1);
   assert.equal(model.services[0].removable, false, "сервис вида не убирается");
-  assert.deepEqual(model.services[0].optional, []);
-  // Батарея и освещённость — спутники датчика движения: стоят в списке первыми.
-  assert.deepEqual(model.addable.slice(0, 2).map((item) => item.type), ["LightSensor", "BatteryService"]);
+  // Необязательные датчика движения — те, что у него в хабе (`sh_types.json`):
+  // имя, состояние, неисправность, вскрытие, батарея, уровень движения.
+  assert.deepEqual(model.services[0].optional.map((item) => [item.char, item.on]), [
+    ["Name", false],
+    ["StatusActive", false],
+    ["StatusFault", false],
+    ["StatusTampered", false],
+    ["StatusLowBattery", false],
+    ["C_CurrentMotionLevel", false],
+  ]);
+  // «Добавить сервис» — по имени (правка после сборки сценариев).
+  const labels = model.addable.map((item) => item.label);
+  assert.deepEqual(labels, [...labels].sort((first, second) => first.localeCompare(second, "ru")), "список не по алфавиту");
+  assert.ok(model.addable.some((item) => item.type === "LightSensor") && model.addable.some((item) => item.type === "SecuritySystem"));
   assert.ok(!model.addable.some((item) => item.type === "MotionSensor"), "уже стоящий сервис не предлагается");
   assert.equal(model.addable.find((item) => item.type === "BatteryService").aux, true, "батарея помечена служебной");
 

@@ -25,6 +25,7 @@ import {
   markAxisSeat,
   markControls,
   markControlledBy,
+  markDeviceLeader,
   markDeviceOwn,
   markDeviceProfile,
   markControlsByChannel,
@@ -959,15 +960,22 @@ function mountMarksPanel(host, api) {
   async function editDevice(markId) {
     const state = getState();
     if (!state.project || !findMark(state.project, markId)) return;
-    const editable = layoutAllows("editMarks", state.layout);
     const mark = findMark(state.project, markId);
+    // Ведомая метка группы (правка после сборки сценариев): аксессуар у неё
+    // ведущей — окно его показывает, а правят его у ведущей.
+    const leader = markDeviceLeader(state.project, markId);
+    const editable = layoutAllows("editMarks", state.layout) && !leader;
+    const leaderSaid = leader ? text("deviceWindow.follower", { label: labelOf(state.project, leader) }) : null;
     const answer = await openDeviceWindow({
       title: deviceWindowTitle(state.project, { markId }),
-      hint: strings.deviceWindow.markHint,
+      // У ведомой о группе говорит строка «только смотрят» — второй раз то же
+      // самое подсказкой не повторяется.
+      hint: leaderSaid ? null : strings.deviceWindow.markHint,
       profile: markDeviceProfile(state.project, markId),
       channels: typeChannels(state.project, mark.typeId),
-      aid: deviceMarkAid(state.project, markId),
+      aid: deviceMarkAid(state.project, leader || markId),
       readOnly: !editable,
+      readOnlyNote: leaderSaid,
       own: markDeviceOwn(state.project, markId),
       resetable: true,
     });
@@ -1224,7 +1232,11 @@ function mountMarksPanel(host, api) {
       ? uiEl("div", { class: "mark-row__deviceRow" }, [
           uiButton(strings.deviceWindow.open + ": " + view.fields.device.summary, {
             class: "ui-btn ui-btn--wide mark-row__device" + (view.fields.device.own ? " is-set" : ""),
-            title: view.fields.device.own ? strings.deviceWindow.ownTitle : strings.deviceWindow.markHint,
+            title: view.fields.device.leader
+              ? text("deviceWindow.follower", { label: labelOf(state.project, view.fields.device.leader) })
+              : view.fields.device.own
+                ? strings.deviceWindow.ownTitle
+                : strings.deviceWindow.markHint,
             on: { click: () => editDevice(mark.id) },
           }),
           view.fields.device.own

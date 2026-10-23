@@ -12,6 +12,7 @@
 // следом номера получают его характеристики — как в ScenarioSimulator
 // (`IdAllocator`, база 13). Они меняются только вместе с профилем.
 import {
+  deviceFollowers,
   findMark,
   findOpening,
   labelOf,
@@ -182,6 +183,10 @@ function deviceAccessory(project, mark, aid) {
  * клавиши — сам номер).
  */
 export function markAccessory(project, markId) {
+  // Ведомая метка группы — аксессуар ведущей (правка после сборки сценариев):
+  // щелчок по любой лампе группы переключает её общий аксессуар.
+  const leader = project ? deviceFollowers(project).get(markId) : null;
+  if (leader) return markAccessory(project, leader);
   const cache = deviceHomeCache(project);
   if (cache.accessories.has(markId)) return cache.accessories.get(markId);
   const mark = project ? findMark(project, markId) : null;
@@ -210,9 +215,11 @@ export function deviceKeyIndex(accessory, channel = 1) {
 export function homeAccessories(project) {
   if (!project || !Array.isArray(project.marks)) return [];
   const aids = deviceHomeCache(project).aids();
+  const followers = deviceFollowers(project);
   const out = [];
   for (const mark of project.marks) {
-    if (markIsComment(mark)) continue;
+    // Ведомая метка группы своего аксессуара не имеет: сценарию — одна.
+    if (markIsComment(mark) || followers.has(mark.id)) continue;
     const accessory = deviceAccessory(project, mark, aids.get(mark.id) || deviceAid(mark.id));
     if (accessory) out.push(accessory);
   }
@@ -268,24 +275,64 @@ export function markDoorOf(project, markId) {
  */
 export function buildHomeSpec(project) {
   const accessories = homeAccessories(project);
+  const followers = deviceFollowers(project);
+  const lead = (markId) => followers.get(markId) || markId;
   const links = [];
   const doors = [];
   for (const accessory of accessories) {
     if (accessory.services.some((service) => service.type === "StatelessProgrammableSwitch")) {
-      for (const group of markControlsByChannel(project, accessory.markId)) {
-        links.push({ markId: accessory.markId, channel: group.channel, targets: group.marks.map((mark) => mark.id) });
+      // Связи ведущей — вместе со связями её ведомых, а подопечные — ведущие
+      // своих групп: клавиша, которая управляет второй лампой группы,
+      // управляет её общим аксессуаром.
+      const members = [accessory.markId, ...[...followers].filter(([, leader]) => leader === accessory.markId).map(([id]) => id)];
+      const byChannel = new Map();
+      for (const member of members) {
+        for (const group of markControlsByChannel(project, member)) {
+          if (!byChannel.has(group.channel)) byChannel.set(group.channel, []);
+          const list = byChannel.get(group.channel);
+          for (const mark of group.marks) if (!list.includes(lead(mark.id))) list.push(lead(mark.id));
+        }
       }
+      for (const [channel, targets] of byChannel) links.push({ markId: accessory.markId, channel, targets });
     }
     if (accessory.services.some((service) => service.type === "ContactSensor")) {
       const openingId = markDoorOf(project, accessory.markId);
       if (openingId) doors.push({ markId: accessory.markId, openingId });
     }
   }
+  // Сценарий и привязка, названные ведомой меткой, достаются ведущей: так
+  // сценарий, собранный до того, как метки сгруппировали, не теряет устройства.
   return {
     accessories,
     links,
     doors,
-    scenarios: structuredClone(scenariosInOrder(project)),
-    logicBindings: structuredClone(logicBindingsOf(project)),
+    scenarios: homeLeadMarks(structuredClone(scenariosInOrder(project)), followers),
+    logicBindings: homeLeadMarks(structuredClone(logicBindingsOf(project)), followers),
   };
+}
+
+/**
+ * Сценарий так, как его увидит дом: ссылки на ведомые метки групп — ведущим.
+ * Копия, если подменять есть что, иначе тот же объект. Нужна проверке
+ * сценария в редакторе — иначе она назвала бы пропавшим устройство, на
+ * котором дом его исполнит.
+ */
+export function homeLeadScenario(project, scenario) {
+  const followers = deviceFollowers(project);
+  if (followers.size === 0 || !scenario || typeof scenario !== "object") return scenario;
+  return homeLeadMarks(structuredClone(scenario), followers);
+}
+
+/** Поля `markId` в копии сценариев и привязок: ведомая метка → ведущая (на месте). */
+function homeLeadMarks(value, followers) {
+  if (followers.size === 0 || !value || typeof value !== "object") return value;
+  if (Array.isArray(value)) {
+    for (const item of value) homeLeadMarks(item, followers);
+    return value;
+  }
+  for (const [key, item] of Object.entries(value)) {
+    if (key === "markId" && typeof item === "string" && followers.has(item)) value[key] = followers.get(item);
+    else if (item && typeof item === "object") homeLeadMarks(item, followers);
+  }
+  return value;
 }

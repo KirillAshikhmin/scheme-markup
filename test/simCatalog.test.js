@@ -22,6 +22,7 @@ import {
   simServiceMeta,
 } from "../src/sim/catalog.js";
 import { strings } from "../src/strings.js";
+import { HUB_SERVICE_TYPES, HUB_SYSTEM_SERVICES } from "../src/sim/hubTypes.js";
 
 // ——— таблица §7, строка за строкой ———————————————————————————————————————
 
@@ -57,7 +58,10 @@ const TABLE = [
   {
     row: "Розетка",
     kind: "outlet",
-    services: [["Outlet", ["On"]]],
+    // «Используется» хаб требует у розетки (`sh_types.json`): правка после
+    // сборки сценариев — «Перенеси эту структуру». Так и у термостата
+    // (единицы), телевизора и крана ниже.
+    services: [["Outlet", ["On", "OutletInUse"]]],
     extras: ["C_WattMeter", "C_VoltMeter", "C_AmpereMeter", "C_KiloWattHourMeter"],
   },
   { row: "Датчик движения", kind: "motion", services: [["MotionSensor", ["MotionDetected"]]], extras: ["LightSensor", "BatteryService"] },
@@ -87,7 +91,12 @@ const TABLE = [
   {
     row: "Термостат",
     kind: "thermostat",
-    services: [["Thermostat", ["CurrentTemperature", "TargetTemperature", "CurrentHeatingCoolingState", "TargetHeatingCoolingState"]]],
+    services: [
+      [
+        "Thermostat",
+        ["CurrentTemperature", "TargetTemperature", "CurrentHeatingCoolingState", "TargetHeatingCoolingState", "TemperatureDisplayUnits"],
+      ],
+    ],
     extras: ["BatteryService"],
   },
   {
@@ -117,12 +126,18 @@ const TABLE = [
   {
     row: "Телевизор",
     kind: "tv",
-    services: [["Television", ["Active"]]],
+    services: [["Television", ["Active", "ActiveIdentifier", "ConfiguredName", "RemoteKey", "SleepDiscoveryMode"]]],
     extras: ["Speaker"],
-    optional: { Television: ["ActiveIdentifier", "RemoteKey", "ConfiguredName"], Speaker: ["Volume"] },
+    optional: { Television: ["Brightness", "PictureMode"], Speaker: ["Volume"] },
   },
   { row: "Замок", kind: "lock", services: [["LockMechanism", ["LockCurrentState", "LockTargetState"]]], extras: ["BatteryService"] },
-  { row: "Кран / клапан воды", kind: "valve", services: [["Valve", ["Active", "InUse"]]], extras: ["BatteryService"], optional: { Valve: ["ValveType"] } },
+  {
+    row: "Кран / клапан воды",
+    kind: "valve",
+    services: [["Valve", ["Active", "InUse", "ValveType"]]],
+    extras: ["BatteryService"],
+    optional: { Valve: ["SetDuration", "RemainingDuration"] },
+  },
   { row: "Звонок", kind: "doorbell", services: [["Doorbell", ["ProgrammableSwitchEvent"]]] },
   { row: "Виртуальный переключатель", kind: "virtualSwitch", services: [["Switch", ["On"]]] },
 ];
@@ -205,12 +220,51 @@ test("каждая строка таблицы §7 — вид словаря с 
   }
 });
 
-test("охраны и газа в словаре нет, а виды не повторяются", () => {
+test("весь словарь хаба: несистемные сервисы есть все, системных нет, виды не повторяются", () => {
+  // Сперва охраны и газа в словаре не было (спецификация, история 1.2). Слова
+  // заказчика после сборки: «вот тут все типы сервисов перечислены, с их
+  // характеристиками… Перенеси эту структуру» — теперь в словаре все
+  // несистемные сервисы `sh_types.json`, охрана и газ тоже. Видов устройств
+  // для них по-прежнему нет: сервис добавляют к метке окном «Аксессуар».
   const keys = DEVICE_KINDS.map((kind) => kind.key);
   assert.equal(new Set(keys).size, keys.length, "ключ вида повторяется");
-  assert.equal(SIM_SERVICES.SecuritySystem, undefined);
-  assert.equal(SIM_SERVICES.C_GasSensor, undefined);
+  for (const [type, hub] of Object.entries(HUB_SERVICE_TYPES)) {
+    if (HUB_SYSTEM_SERVICES.includes(type)) {
+      assert.equal(SIM_SERVICES[type], undefined, "системный сервис " + type + " в словаре");
+      continue;
+    }
+    const meta = SIM_SERVICES[type];
+    assert.ok(meta, "нет сервиса хаба " + type);
+    // Структура хаба целиком: обязательные — обязательны, необязательные —
+    // предлагаются, и каждая характеристика у сервиса одна.
+    for (const char of hub.required) assert.ok(meta.required.includes(char), type + ": " + char + " не обязательна");
+    for (const char of hub.optional) assert.ok([...meta.required, ...meta.optional].includes(char), type + " не умеет " + char);
+    const all = [...meta.required, ...meta.optional];
+    assert.equal(new Set(all).size, all.length, type + ": характеристика повторяется");
+  }
+  assert.ok(SIM_SERVICES.SecuritySystem && SIM_SERVICES.C_GasSensor);
+  assert.equal(SIM_SERVICES.AccessoryInformation, undefined);
   assert.ok(!keys.includes("none"), "«без устройства» — не вид словаря, а его отсутствие");
+});
+
+test("наши сервисы держат адреса: прежние характеристики на прежних местах, новые обязательные — за ними", () => {
+  // Порядок характеристик — это адреса `cid` в размеченных объектах (G68).
+  assert.deepEqual(SIM_SERVICES.Thermostat.required, [
+    "CurrentTemperature",
+    "TargetTemperature",
+    "CurrentHeatingCoolingState",
+    "TargetHeatingCoolingState",
+    "TemperatureDisplayUnits",
+  ]);
+  assert.deepEqual(SIM_SERVICES.Lightbulb.optional.slice(0, 5), ["Brightness", "ColorTemperature", "Hue", "Saturation", "C_ColorMode"]);
+  assert.deepEqual(SIM_SERVICES.Outlet.required, ["On", "OutletInUse"]);
+  // Свои диапазоны имитации главнее хаба: термометр не до тысячи градусов.
+  assert.equal(SIM_CHARS.CurrentTemperature.min, -40);
+  assert.equal(SIM_CHARS.C_CurrentAtmosphericPressure.unit, "mmhg");
+  // Характеристика хаба: формат, единица и значения переведены.
+  assert.equal(SIM_CHARS.TemperatureDisplayUnits.format, "enum");
+  assert.equal(SIM_CHARS.TemperatureDisplayUnits.initial, "CELSIUS");
+  assert.equal(SIM_CHARS.C_Distance.unit, "meter");
 });
 
 test("характеристики §3.2 и §7 — с форматом, диапазоном и перечислением именами Sprut", () => {
@@ -252,7 +306,10 @@ test("у звонка одно нажатие — одиночное, у кла�
 test("словарь замкнут: каждая характеристика сервиса есть, и каждая используется", () => {
   const used = new Set();
   for (const [type, service] of Object.entries(SIM_SERVICES)) {
-    assert.ok(Array.isArray(service.required) && service.required.length > 0, type + " без обязательных");
+    // Обязательных нет только у тех, у кого их нет и в хабе (ретранслятор,
+    // опции, приёмопередатчик).
+    assert.ok(Array.isArray(service.required), type + " без списка обязательных");
+    if (service.required.length === 0) assert.equal(HUB_SERVICE_TYPES[type].required.length, 0, type + " без обязательных");
     for (const char of [...service.required, ...service.optional]) {
       assert.ok(SIM_CHARS[char], type + " ссылается на неизвестную характеристику " + char);
       used.add(char);

@@ -4485,7 +4485,59 @@ export function deviceExpand(profile, channels) {
 export function markDeviceProfile(project, markId) {
   const mark = findMark(project, markId);
   if (!mark || markIsComment(mark)) return null;
+  // Ведомая метка группы — аксессуар ведущей (правка после сборки
+  // сценариев); `leader` говорит окну, у кого его править.
+  const leader = markDeviceLeader(project, markId);
+  if (leader) {
+    const shared = markDeviceProfile(project, leader);
+    return shared ? { ...shared, own: false, leader } : null;
+  }
   return markProfileFrom(typeDeviceOf(project, mark.typeId), markDeviceRecord(mark.device));
+}
+
+// ——— общий аксессуар группы (правка после сборки сценариев) ——————————————
+//
+// Слова заказчика: «Если в группе несколько светильников или других меток, то
+// аксессуар пусть задаётся у первой, а у других нельзя менять — берётся от
+// первой, что бы и сценарию на одну делать, а распространяется на все метки в
+// группе».
+//
+// **Ведущая** — первая в группе (`group.markIds`, порядок постановки) метка
+// **того же типа**: в одной рамке бывают розетка и выключатель, и делить им
+// один аксессуар нельзя — у каждого типа группы ведущая своя. Ведомая своего
+// аксессуара не имеет: в доме имитации её нет (`sim/home.js`), сценарий,
+// связь и щелчок по ней достаются ведущей, а состояние ведущей видно на всех
+// метках группы.
+//
+// **Своя настройка ведомой не стирается** (G68): она лежит в объекте как
+// лежала и вернётся, если метку вынуть из группы. Пока метка ведомая, запись
+// просто не читается.
+
+const DEVICE_LEADER_CACHE = new WeakMap();
+
+/** Ведущие меток объекта: `Map<ведомая, ведущая>`; метки вне групп и ведущие в ней не стоят. */
+export function deviceFollowers(project) {
+  if (!project || typeof project !== "object") return new Map();
+  const held = DEVICE_LEADER_CACHE.get(project);
+  if (held) return held;
+  const out = new Map();
+  const marks = new Map((Array.isArray(project.marks) ? project.marks : []).map((mark) => [mark.id, mark]));
+  for (const group of Array.isArray(project.groups) ? project.groups : []) {
+    const leaders = new Map();
+    for (const id of Array.isArray(group.markIds) ? group.markIds : []) {
+      const mark = marks.get(id);
+      if (!mark || mark.groupId !== group.id || markIsComment(mark)) continue;
+      if (!leaders.has(mark.typeId)) leaders.set(mark.typeId, id);
+      else out.set(id, leaders.get(mark.typeId));
+    }
+  }
+  DEVICE_LEADER_CACHE.set(project, out);
+  return out;
+}
+
+/** Ведущая метка группы для этой (`null` — метка ведёт сама или вне группы). */
+export function markDeviceLeader(project, markId) {
+  return deviceFollowers(project).get(markId) || null;
 }
 
 // Профиль метки из профиля типа `base` и своей записи `own` (приведённой
@@ -4520,7 +4572,8 @@ export function markDeviceOf(project, markId) {
 /** Есть ли у метки своя настройка устройства (дверь датчика не в счёт). */
 export function markDeviceOwn(project, markId) {
   const mark = findMark(project, markId);
-  return Boolean(mark) && markDeviceRecordOwn(markDeviceRecord(mark.device));
+  if (!mark || markDeviceLeader(project, markId)) return false;
+  return markDeviceRecordOwn(markDeviceRecord(mark.device));
 }
 
 function markDeviceValue(project, key, value) {
@@ -4551,6 +4604,12 @@ function markDeviceValue(project, key, value) {
 export function setMarkDevice(project, markId, patch) {
   const mark = requireMark(project, markId);
   if (markIsComment(mark)) throw modelError("commentNoDevice");
+  // Аксессуар ведомой — аксессуар ведущей: правят его там (правка после
+  // сборки сценариев). Дверь датчика — место метки, а не аксессуар, и она
+  // правится у каждой.
+  const leader = markDeviceLeader(project, markId);
+  const onlyDoor = deviceObject(patch) && Object.keys(patch).every((key) => key === "doorId");
+  if (leader && !onlyDoor) throw modelError("deviceGroupFollower", { label: labelOf(project, leader) });
   const current = deviceObject(mark.device) ? mark.device : null;
   const next = current ? { ...current } : {};
   if (patch === undefined) {

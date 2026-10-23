@@ -18,7 +18,7 @@
 import { findMark, findScenario, labelOf } from "./model.js";
 import { blocksPrepare, blocksRepeatAllowed } from "./sim/blocks.js";
 import { simCharMeta } from "./sim/catalog.js";
-import { homeAccessories } from "./sim/home.js";
+import { homeAccessories, homeLeadScenario } from "./sim/home.js";
 import { strings, text } from "./strings.js";
 
 // ——— идентификаторы и новые блоки ————————————————————————————————————
@@ -756,8 +756,11 @@ function issueTriggers(scenario) {
  * нет. Сценарии на JS блочных проблем не имеют. `accessories` — готовый
  * `homeAccessories(project)`: список из многих сценариев собирает его один раз.
  */
-export function scenarioIssues(project, scenario, accessories = null) {
-  if (!treeObject(scenario) || scenario.kind !== "block") return [];
+export function scenarioIssues(project, given, accessories = null) {
+  if (!treeObject(given) || given.kind !== "block") return [];
+  // Ведомая метка группы — устройство ведущей: проверка видит сценарий так же,
+  // как дом (`homeLeadScenario`).
+  const scenario = homeLeadScenario(project, given);
   const issues = blocksPrepare(scenario, { accessories: accessories || homeAccessories(project) }).issues.map((item) => ({ blockId: item.blockId, code: item.code }));
   const triggers = issueTriggers(scenario);
   treeRoot(scenario, (block) => {

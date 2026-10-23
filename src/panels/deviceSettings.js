@@ -39,6 +39,7 @@ import {
   findMark,
   findType,
   labelOf,
+  markDeviceLeader,
   markDeviceOwn,
   markDeviceProfile,
   markIsComment,
@@ -254,10 +255,12 @@ export function deviceMarkField(project, markId) {
   const mark = findMark(project, markId);
   if (!mark) return { summary: strings.deviceWindow.none, own: false };
   const profile = markDeviceProfile(project, markId);
-  return {
-    summary: deviceSummary(profile, typeChannels(project, mark.typeId)),
-    own: markDeviceOwn(project, markId),
-  };
+  const summary = deviceSummary(profile, typeChannels(project, mark.typeId));
+  // Ведомая метка группы (правка после сборки сценариев): аксессуар — ведущей,
+  // и сводка говорит чей.
+  const leader = markDeviceLeader(project, markId);
+  if (!leader) return { summary, own: markDeviceOwn(project, markId) };
+  return { summary: text("deviceWindow.followerSummary", { summary, label: labelOf(project, leader) }), own: false, leader };
 }
 
 /** Сводка профиля типа для кнопки справочника. */
@@ -352,19 +355,21 @@ export function deviceWindowModel(draft, channels = 1, { aid = null } = {}) {
     };
   });
   const present = new Set(draft.services.map((service) => service.type));
-  const kind = deviceKind(draft.kind);
-  const extras = new Set(kind ? kind.extras : []);
+  // «Добавить сервис» — **по имени** (правка после сборки сценариев: «при
+  // добавлении сервиса в окне упорядочивай их по имени»). Сервисов в словаре
+  // теперь весь хаб, семь десятков, и искать нужный глазами можно только по
+  // алфавиту; спутники вида первыми больше не ставятся.
   const addable =
     draft.kind === DEVICE_KIND_NONE
       ? []
       : Object.keys(SIM_SERVICES)
           .filter((type) => !present.has(type))
-          .sort((first, second) => Number(extras.has(second)) - Number(extras.has(first)))
           .map((type) => ({
             type,
             label: strings.sim.services[type] || type,
             aux: Boolean(SIM_SERVICES[type].aux),
-          }));
+          }))
+          .sort((first, second) => first.label.localeCompare(second.label, "ru"));
   const keyed = draft.services.some((service) => service.type === DEVICE_KEY_TYPE && service.perChannel);
   const keys = keyed
     ? Array.from({ length: channels }, (unused, at) => ({
@@ -404,7 +409,17 @@ export function deviceWindowModel(draft, channels = 1, { aid = null } = {}) {
  * Отвечает `{draft}` — применить; `{reset: true}` — вернуть как у типа; `null`
  * — закрыли или ничего не изменили. Сохраняет ответ вызывающий.
  */
-export function openDeviceWindow({ title, hint, profile, channels = 1, aid = null, readOnly = false, own = false, resetable = false }) {
+export function openDeviceWindow({
+  title,
+  hint,
+  profile,
+  channels = 1,
+  aid = null,
+  readOnly = false,
+  readOnlyNote = null,
+  own = false,
+  resetable = false,
+}) {
   return new Promise((resolve) => {
     const initial = deviceDraftOf(profile);
     let draft = initial;
@@ -569,7 +584,7 @@ export function openDeviceWindow({ title, hint, profile, channels = 1, aid = nul
       body.replaceChildren(
         ...[
           hint ? uiEl("p", { class: "modal__hint", text: hint }) : null,
-          readOnly ? uiEl("p", { class: "device__viewOnly", text: strings.deviceWindow.viewOnly }) : null,
+          readOnly ? uiEl("p", { class: "device__viewOnly", text: readOnlyNote || strings.deviceWindow.viewOnly }) : null,
           aidLine(model),
           kindSection(model),
           uiEl("div", { class: "device__group" }, [

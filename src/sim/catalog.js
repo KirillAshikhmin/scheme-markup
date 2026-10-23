@@ -19,9 +19,23 @@
 // числовой код стоит рядом справочно — его отдаёт API хаба скриптам.
 // Русские подписи — в `strings.sim` (сервисы, характеристики, значения, виды).
 //
-// Модуль ничего не импортирует: его читают и страница, и бандл движка в
-// Worker, и модель — а модель сама импортирует его, так что обратная ссылка
+// Модуль импортирует только словарь хаба `hubTypes.js` — лист без импортов,
+// собранный из `sh_types.json`: каталог читают и страница, и бандл движка в
+// Worker, и модель — а модель сама импортирует его, так что ссылка на неё
 // дала бы циклический импорт.
+//
+// **Весь словарь хаба** (правка после сборки сценариев). Слова заказчика: «вот
+// тут все типы сервисов перечислены, с их характеристиками (некоторые
+// опциональные, у них их можно добавлять и удалять. Но не более 1
+// характеристики каждого типа у сервиса). Перенеси эту структуру». Сервисы и
+// характеристики, описанные ниже руками, — наши: их диапазоны подобраны под
+// имитацию, а порядок характеристик — это адреса `cid` в уже размеченных
+// объектах. Всё остальное берётся из словаря хаба как есть (`SIM_SERVICES`,
+// `SIM_CHARS` собираются из двух частей). У нашего сервиса обязательные
+// характеристики хаба, которых у нас не было, встают **после** наших: адреса
+// прежних характеристик не меняются. Системные сервисы хаба (сведения об
+// аксессуаре, транспорт, Siri) к метке не добавляют — их в словаре нет.
+import { HUB_CHAR_TYPES, HUB_SERVICE_TYPES, HUB_SYSTEM_SERVICES } from "./hubTypes.js";
 
 const RWE = Object.freeze(["read", "write", "event"]);
 const RE = Object.freeze(["read", "event"]);
@@ -48,12 +62,8 @@ function simChar(format, options = {}) {
   });
 }
 
-/**
- * Характеристики: `{format, min, max, step, unit, values, perms, initial}`.
- * `format` — `bool | int | float | enum | event | string`; у перечисления и
- * события `values` — `[{key, code}]`; `unit` — ключ подписи `strings.sim.units`.
- */
-export const SIM_CHARS = Object.freeze({
+/** Наши характеристики: диапазоны подобраны под имитацию (шапка файла). */
+const SIM_CHARS_OWN = Object.freeze({
   // — свет и реле —
   On: simChar("bool", { initial: false }),
   Brightness: simChar("int", { min: 0, max: 100, step: 1, unit: "percent", initial: 100 }),
@@ -99,7 +109,9 @@ export const SIM_CHARS = Object.freeze({
   CurrentTemperature: simChar("float", { min: -40, max: 80, step: 0.1, unit: "celsius", perms: RE, initial: 22 }),
   CurrentRelativeHumidity: simChar("float", { min: 0, max: 100, step: 1, unit: "percent", perms: RE, initial: 45 }),
   CurrentAmbientLightLevel: simChar("float", { min: 0.0001, max: 100000, step: 0.0001, unit: "lux", perms: RE, initial: 300 }),
-  C_CurrentAtmosphericPressure: simChar("float", { min: 300, max: 1100, step: 0.1, unit: "hpa", perms: RE, initial: 1013 }),
+  // Давление — в мм рт. ст., как у хаба: сценарий из Sprut.Hub сравнивает
+  // именно их. Диапазон — погода на равнине, а не «0…2000» хаба.
+  C_CurrentAtmosphericPressure: simChar("float", { min: 600, max: 820, step: 0.1, unit: "mmhg", perms: RE, initial: 760 }),
   CarbonDioxideLevel: simChar("float", { min: 0, max: 5000, step: 1, unit: "ppm", perms: RE, initial: 450 }),
   CarbonDioxideDetected: simChar("enum", {
     values: [["CO2_LEVELS_NORMAL", 0], ["CO2_LEVELS_ABNORMAL", 1]],
@@ -192,6 +204,68 @@ export const SIM_CHARS = Object.freeze({
   C_KiloWattHour: simChar("float", { min: 0, max: 1000000, step: 0.01, unit: "kwh", perms: RE, initial: 0 }),
 });
 
+/** Единицы хаба → ключ подписи `strings.sim.units`. */
+const SIM_HUB_UNITS = Object.freeze({
+  "%": "percent",
+  "°": "degree",
+  "°C": "celsius",
+  lux: "lux",
+  s: "second",
+  m: "meter",
+  "dB/m": "dbm",
+  mmHg: "mmhg",
+  dB: "decibel",
+  V: "volt",
+  A: "ampere",
+  W: "watt",
+  VA: "voltAmpere",
+  kWh: "kwh",
+  kVAh: "kvah",
+  UVI: "uvi",
+  "m³": "cubicMeter",
+  var: "var",
+  kVArh: "kvarh",
+  Hz: "hertz",
+  GCal: "gcal",
+  "mg/m³": "mgm3",
+});
+
+/**
+ * Характеристика из словаря хаба: формат хаба переводится в наш (целое с
+ * допустимыми значениями — перечисление), единица — в ключ подписи, начальное
+ * значение — «нет»: ложь, первое значение, ноль в диапазоне, пустая строка.
+ * Описания нет (формат хаба неизвестен) — `null`.
+ */
+function simHubChar(type) {
+  const hub = Object.prototype.hasOwnProperty.call(HUB_CHAR_TYPES, type) ? HUB_CHAR_TYPES[type] : null;
+  if (!hub || !hub.format) return null;
+  const values = hub.values ? hub.values.map((item) => [item.key, item.code]) : null;
+  const format = values
+    ? "enum"
+    : { Boolean: "bool", Integer: "int", Long: "int", Double: "float", String: "string" }[hub.format] || null;
+  if (!format) return null;
+  // У перечисления диапазон — это его коды, и держит его список значений.
+  const options = {
+    min: values ? null : hub.min,
+    max: values ? null : hub.max,
+    step: values ? null : hub.step,
+    unit: hub.unit ? SIM_HUB_UNITS[hub.unit] || null : null,
+    values,
+    perms: hub.perms.length > 0 ? hub.perms : RWE,
+  };
+  let initial = null;
+  if (format === "bool") initial = false;
+  else if (format === "enum") initial = values[0][0];
+  else if (format === "string") initial = "";
+  else initial = Math.max(hub.min ?? 0, Math.min(hub.max ?? 0, 0));
+  return simChar(format, { ...options, initial });
+}
+
+/** Служебный ли сервис хаба: батарея и счётчики (история 1.10). */
+function simHubAux(type) {
+  return type === "BatteryService" || /^C_.*Meter$/.test(type);
+}
+
 function simService(required, optional = [], options = {}) {
   return Object.freeze({
     required: Object.freeze(required),
@@ -205,11 +279,8 @@ function simService(required, optional = [], options = {}) {
   });
 }
 
-/**
- * Сервисы: `{required: [char], optional: [char], aux, limits}`. Порядок
- * характеристик здесь — порядок их адресов `cid` в аксессуаре.
- */
-export const SIM_SERVICES = Object.freeze({
+/** Наши сервисы: порядок характеристик — адреса `cid` размеченных объектов. */
+const SIM_SERVICES_OWN = Object.freeze({
   Lightbulb: simService(["On"], ["Brightness", "ColorTemperature", "Hue", "Saturation", "C_ColorMode"]),
   Switch: simService(["On"]),
   Outlet: simService(["On"], ["OutletInUse"]),
@@ -248,6 +319,53 @@ export const SIM_SERVICES = Object.freeze({
 });
 
 /**
+ * Характеристики: `{format, min, max, step, unit, values, perms, initial}`.
+ * `format` — `bool | int | float | enum | event | string`; у перечисления и
+ * события `values` — `[{key, code}]`; `unit` — ключ подписи `strings.sim.units`.
+ * Наши (`SIM_CHARS_OWN`) главнее описаний хаба.
+ */
+export const SIM_CHARS = (() => {
+  const all = {};
+  for (const [type, service] of Object.entries(HUB_SERVICE_TYPES)) {
+    if (HUB_SYSTEM_SERVICES.includes(type)) continue;
+    for (const char of [...service.required, ...service.optional]) {
+      if (Object.prototype.hasOwnProperty.call(all, char) || Object.prototype.hasOwnProperty.call(SIM_CHARS_OWN, char)) continue;
+      const meta = simHubChar(char);
+      if (meta) all[char] = meta;
+    }
+  }
+  return Object.freeze({ ...all, ...SIM_CHARS_OWN });
+})();
+
+/**
+ * Сервисы: `{required: [char], optional: [char], aux, limits}` — все
+ * несистемные сервисы хаба. У нашего сервиса (`SIM_SERVICES_OWN`) порядок
+ * наш, а обязательные хаба, которых у нас не было, идут за нашими
+ * обязательными; необязательные хаба — за нашими необязательными. Порядок
+ * характеристик здесь — порядок их адресов `cid` в аксессуаре. Каждая
+ * характеристика в сервисе — одна: повторов список не держит.
+ */
+export const SIM_SERVICES = (() => {
+  const all = {};
+  const known = (char) => Object.prototype.hasOwnProperty.call(SIM_CHARS, char);
+  for (const [type, hub] of Object.entries(HUB_SERVICE_TYPES)) {
+    if (HUB_SYSTEM_SERVICES.includes(type)) continue;
+    const own = Object.prototype.hasOwnProperty.call(SIM_SERVICES_OWN, type) ? SIM_SERVICES_OWN[type] : null;
+    const required = [...(own ? own.required : [])];
+    for (const char of hub.required) if (known(char) && !required.includes(char)) required.push(char);
+    const optional = (own ? own.optional : []).filter((char) => !required.includes(char));
+    for (const char of hub.optional) if (known(char) && !required.includes(char) && !optional.includes(char)) optional.push(char);
+    all[type] = simService(required, optional, {
+      aux: own ? own.aux : simHubAux(type),
+      limits: own ? own.limits : {},
+    });
+  }
+  // Наш сервис, которого хаб не знает (такого сейчас нет), остаётся нашим.
+  for (const [type, own] of Object.entries(SIM_SERVICES_OWN)) if (!all[type]) all[type] = own;
+  return Object.freeze(all);
+})();
+
+/**
  * Параметры поведения «как настоящее» (история 1.17): время сброса датчика
  * движения, время хода шторы. Секунды имитации, целые.
  */
@@ -259,9 +377,16 @@ export const DEVICE_PARAMS = Object.freeze({
 function simKind(key, services, options = {}) {
   return Object.freeze({
     key,
+    // Состав — через словарь (`simServiceChars`): обязательные сервиса есть у
+    // вида всегда, даже те, что хаб сделал обязательными после того, как вид
+    // был записан (единицы у термостата, четыре у телевизора).
     services: Object.freeze(
       services.map(([type, chars, perChannel]) =>
-        Object.freeze({ type, chars: Object.freeze(chars), ...(perChannel ? { perChannel: true } : {}) }),
+        Object.freeze({
+          type,
+          chars: Object.freeze(simServiceChars(type, chars) || chars),
+          ...(perChannel ? { perChannel: true } : {}),
+        }),
       ),
     ),
     params: Object.freeze(options.params || {}),

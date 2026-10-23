@@ -24,6 +24,7 @@ import {
   addLogicBinding,
   addScenario,
   deleteLogicBinding,
+  deviceFollowers,
   findLogicBinding,
   findScenario,
   logicBindingsOf,
@@ -261,7 +262,9 @@ export function scenarioScriptFaultText(fault, scope = "list") {
  * `read(bindingId, scenarioId)` отдаёт `{form, fault}` или `null`; по
  * умолчанию — формы имитации сеанса.
  */
-export function scenarioScriptLogicOf(project, markId, read = simOptionForms) {
+export function scenarioScriptLogicOf(project, given, read = simOptionForms) {
+  // Ведомая метка группы — аксессуар ведущей: и привязки её.
+  const markId = project ? deviceFollowers(project).get(given) || given : given;
   const accessory = project ? homeAccessories(project).find((item) => item.markId === markId) : null;
   if (!accessory) return null;
   const logic = scenariosInOrder(project).filter((scenario) => scenario.kind === "logic");
