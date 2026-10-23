@@ -34,20 +34,33 @@ function simShare(value, max = 100) {
 }
 
 /**
- * Живое состояние устройства: `{on, level, alert, open, pressedAt}`.
+ * Живое состояние устройства: `{on, level, alert, open, pressedAt, keys, flow, locked}`.
  *   on    — устройство включено (свет, реле, розетка, вентиляция, ТВ, кран…);
  *   level — 0…1: яркость включённого света, скорость вентилятора, громкость;
  *   alert — датчик сработал (движение, присутствие, открыто, протечка, дым, CO2);
  *   open  — 0…1: положение шторы, датчик открытия и замок — 1, когда открыты;
- *   pressedAt — время имитации последнего нажатия клавиши или `null`.
+ *   pressedAt — время имитации последнего нажатия клавиши или `null`;
+ *   keys  — реле клавиш по каналам `{канал: включено}` (G11) или `null`, если
+ *           у устройства нет «Выключателя» с номером канала;
+ *   flow  — что устройство выдувает или звучит: `{kind, level}`, `kind` —
+ *           `"air"` (вентиляция, бризер), `"cool"` и `"heat"` (кондиционер по
+ *           режиму), `"sound"` (колонка); `null` — ничего;
+ *   locked — замок заперт.
+ *
+ * Три последних поля — правка после сборки сценариев: «Вентиляция не видно
+ * когда работает, розетка тоже, и выключатель… придумай как визуально отличать
+ * работающие от отключенных устройств». Их читает «Объём» (`volumeLiveSigns`).
  */
 export function simLiveOf(accessory, values) {
-  const live = { on: false, level: 0, alert: false, open: 0, pressedAt: null };
+  const live = { on: false, level: 0, alert: false, open: 0, pressedAt: null, keys: null, flow: null, locked: false };
   if (!accessory || !Array.isArray(accessory.services)) return live;
   const read = simLiveReader(values);
   const lit = (level) => {
     live.on = true;
     live.level = Math.max(live.level, level);
+  };
+  const blow = (kind, level) => {
+    if (!live.flow || live.flow.level < level) live.flow = { kind, level };
   };
   for (const service of accessory.services) {
     switch (service.type) {
@@ -58,16 +71,30 @@ export function simLiveOf(accessory, values) {
         }
         break;
       case "Switch":
-      case "Outlet":
-        if (read(service, "On")) lit(1);
+      case "Outlet": {
+        const on = Boolean(read(service, "On"));
+        if (on) lit(1);
+        if (service.type === "Switch" && Number.isInteger(service.channel)) {
+          if (!live.keys) live.keys = {};
+          live.keys[service.channel] = on;
+        }
         break;
+      }
       case "Fan":
         if (read(service, "Active") === "ACTIVE") {
           const speed = read(service, "RotationSpeed");
-          lit(speed === undefined ? 1 : simShare(speed));
+          const level = speed === undefined ? 1 : simShare(speed);
+          lit(level);
+          blow("air", level);
         }
         break;
       case "HeaterCooler":
+        if (read(service, "Active") === "ACTIVE") {
+          lit(1);
+          const mode = read(service, "TargetHeaterCoolerState");
+          blow(mode === "HEAT" ? "heat" : mode === "COOL" ? "cool" : "air", 1);
+        }
+        break;
       case "Television":
       case "Valve":
         if (read(service, "Active") === "ACTIVE") lit(1);
@@ -78,7 +105,9 @@ export function simLiveOf(accessory, values) {
       case "Speaker":
         if (read(service, "Mute") === false) {
           const volume = read(service, "Volume");
-          lit(volume === undefined ? 1 : simShare(volume));
+          const level = volume === undefined ? 1 : simShare(volume);
+          lit(level);
+          blow("sound", level);
         }
         break;
       case "WindowCovering":
@@ -92,6 +121,7 @@ export function simLiveOf(accessory, values) {
         break;
       case "LockMechanism":
         if (read(service, "LockCurrentState") === "UNSECURED") live.open = 1;
+        else if (read(service, "LockCurrentState") === "SECURED") live.locked = true;
         break;
       case "MotionSensor":
         if (read(service, "MotionDetected")) live.alert = true;

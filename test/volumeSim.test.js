@@ -31,6 +31,10 @@ import {
   VOLUME_EYE_MM,
   VOLUME_FLOOR_RGB,
   VOLUME_GLOW_RGB,
+  VOLUME_LED_ALERT_RGB,
+  VOLUME_LED_KEY_RGB,
+  VOLUME_LED_OFF_RGB,
+  VOLUME_LED_ON_RGB,
   VOLUME_SCREEN_RGB,
   VOLUME_WALL_RGB,
   volumeCurtainShare,
@@ -38,6 +42,7 @@ import {
   volumeFloorKey,
   volumeFloorKeySame,
   volumeLiveLight,
+  volumeLiveSigns,
   volumeFrame,
   volumeMood,
   volumeScene,
@@ -566,4 +571,72 @@ test("2.6, 8.5: подсказка говорит, что делают руки 
   const touch = volumeHintText({ ...base, home: true, touching: true });
   assert.ok(touch.includes(strings.volume.homeTouchHint), "пальцем не сказано про кнопку «Действие»");
   assert.ok(!touch.includes(strings.volume.homeHint));
+});
+
+// ——— видно, что работает (правка после сборки сценариев) ————————————————————
+//
+// «На выключателях можно диодик на кнопке канала снизу разместить, на розетке
+// сверху справа светодиод активности и т.д. придумай как визуально отличать
+// работающие от отключенных устройств», «На вентиляции должны быть потоки
+// воздуха».
+
+test("признаки работы: диод под каждой клавишей по её реле, розетка, датчик, поток бризера", () => {
+  const box = simStand();
+  put(box, "socket", "Р", [{ x: 1850, y: 300 }]);
+  put(box, "breezer", "Б", [{ x: -1000, y: -1350 }]);
+  const scene = volumeScene(box.project, box.schemeId, { roofOff: true });
+  const ledsOf = (signs, id) => signs.filter((face) => !face.line && face.markId === id);
+  // Дом выключен: у клавиш и розетки диоды тёмные, у датчика и бризера — ничего.
+  const dark = volumeSimLive(box.project, liveOf(box, {}));
+  const quiet = volumeLiveSigns(scene, dark);
+  const doubleOff = ledsOf(quiet, box.marks.double);
+  assert.equal(doubleOff.length, 2, "у ВВ не два диода");
+  for (const led of doubleOff) assert.deepEqual(led.rgb, VOLUME_LED_OFF_RGB);
+  assert.deepEqual(ledsOf(quiet, box.marks.socket).map((led) => led.rgb), [VOLUME_LED_OFF_RGB]);
+  assert.equal(ledsOf(quiet, box.marks.motion).length, 0, "у спокойного датчика горит диод");
+  assert.equal(quiet.filter((face) => face.line).length, 0, "выключенный бризер дует");
+  // Вторая клавиша ВВ включена: горит её диод, и только он.
+  const double = markAccessory(box.project, box.marks.double);
+  const second = double.services.find((service) => service.type === "Switch" && service.channel === 2).index;
+  const breezer = markAccessory(box.project, box.marks.breezer);
+  const fan = breezer.services.find((service) => service.type === "Fan").index;
+  const live = volumeSimLive(
+    box.project,
+    liveOf(box, {
+      [box.marks.double]: { [second + ".On"]: true },
+      [box.marks.socket]: { "0.On": true },
+      [box.marks.motion]: { "0.MotionDetected": true },
+      [box.marks.breezer]: { [fan + ".Active"]: "ACTIVE", [fan + ".RotationSpeed"]: 100 },
+    }),
+  );
+  const signs = volumeLiveSigns(scene, live);
+  const keys = ledsOf(signs, box.marks.double);
+  assert.deepEqual(keys.map((led) => led.rgb).sort(), [VOLUME_LED_KEY_RGB, VOLUME_LED_OFF_RGB].sort());
+  assert.equal(keys.filter((led) => led.led).length, 1, "горит не один диод");
+  // Диод клавиши — внизу клавиши: ниже середины лица.
+  const place = scene.marks.find((item) => item.markId === box.marks.double);
+  for (const led of keys) {
+    const z = led.p.reduce((sum, point) => sum + point.z, 0) / led.p.length;
+    assert.ok(z < place.face.origin.z, "диод клавиши не внизу");
+  }
+  assert.deepEqual(ledsOf(signs, box.marks.socket).map((led) => led.rgb), [VOLUME_LED_ON_RGB]);
+  assert.deepEqual(ledsOf(signs, box.marks.motion).map((led) => led.rgb), [VOLUME_LED_ALERT_RGB]);
+  // Бризер: струи со стрелкой уходят от лица в комнату.
+  const flows = signs.filter((face) => face.line);
+  assert.equal(flows.length, 3, "у бризера не три струи");
+  const breezerPlace = scene.marks.find((item) => item.markId === box.marks.breezer);
+  for (const flow of flows) {
+    assert.equal(flow.arrow, true);
+    const end = flow.p[flow.p.length - 1];
+    const out = (end.x - breezerPlace.face.origin.x) * breezerPlace.face.normal.x + (end.y - breezerPlace.face.origin.y) * breezerPlace.face.normal.y;
+    assert.ok(out > 500, "струя не ушла от лица: " + out);
+  }
+  // Свет, экран и штора своё показывают сами — признаков у них нет.
+  for (const key of ["lamp", "tv", "curtain"]) assert.equal(ledsOf(signs, box.marks[key]).length, 0, key);
+  // Горящий диод светится своим цветом и ночью: в кадре он без тона часа.
+  const camera = { at: { x: 0, y: 0, z: 1600 }, yaw: 0, pitch: 0 };
+  const lit = keys.find((led) => led.led);
+  const frame = volumeFrame(scene, camera, { width: 800, height: 500 }, [lit], { rgb: [18, 26, 54], share: 0.8 }, null);
+  const shown = frame.find((polygon) => polygon.pick === box.marks.double && polygon.fill === "rgb(" + VOLUME_LED_KEY_RGB.join(",") + ")");
+  assert.ok(shown, "горящий диод ночью потемнел");
 });

@@ -99,6 +99,7 @@ import {
   volumeFrame,
   volumeLinkLines,
   volumeLiveLight,
+  volumeLiveSigns,
   volumeMarkAnchor,
   volumeMarkPlace,
   volumeMarkerFaces,
@@ -2304,7 +2305,7 @@ function createVolume({ api, hosts }) {
     // Свет дома (таск 09 сценариев): свечение тел и свет комнаты — доводом
     // кадра, без пересборки сцены. Дом не идёт — довода нет, и кадр тот же.
     const lights = homeLights();
-    shown = volumeFrame(scene, spot, box, [...shadow, ...spots, ...overlay, ...marker], at.tint, lights.light);
+    shown = volumeFrame(scene, spot, box, [...shadow, ...spots, ...overlay, ...marker, ...lights.signs], at.tint, lights.light);
     volumeDraw(ctx, shown);
     // Второй проход фона: вещи, которые ближе кромки плиты, дом закрыть не
     // может — они перед ним (таск 199, разбор у `volumeDrawBackdrop`). Внутри
@@ -2321,12 +2322,14 @@ function createVolume({ api, hosts }) {
   /**
    * Свет дома на этот кадр: плавный (`lightFadeLive`) и — по отметке
    * «Физический свет» — пятнами (`volumeLiveLight`). `busy` — свет ещё в пути.
+   * `signs` — признаки работы остальных вещей: диоды и потоки
+   * (`volumeLiveSigns`, правка после сборки сценариев).
    */
   function homeLights() {
-    if (!homeTarget) return { light: null, busy: false };
+    if (!homeTarget) return { light: null, busy: false, signs: [] };
     const faded = lightFadeLive(homeTarget, homeFade, now());
     const physical = volumeParamsRead().physical !== false;
-    return { light: volumeLiveLight(scene, faded.live, { physical }), busy: faded.busy };
+    return { light: volumeLiveLight(scene, faded.live, { physical }), busy: faded.busy, signs: volumeLiveSigns(scene, homeTarget) };
   }
 
   // ——— миникарта (G212) ———

@@ -245,7 +245,7 @@ test("живое состояние светильника, датчиков, ш
   put(box, "tv", "ТВ", { x: 0.5, y: 0.1 });
   put(box, "switch", "ВВ", { x: 0.6, y: 0.1 });
   const of = (name) => markAccessory(box.project, box.marks[name]);
-  const dark = { on: false, level: 0, alert: false, open: 0, pressedAt: null };
+  const dark = { on: false, level: 0, alert: false, open: 0, pressedAt: null, keys: null, flow: null, locked: false };
 
   assert.deepEqual(simLiveOf(of("lamp"), {}), dark, "дом со старта не тёмный");
   assert.deepEqual(simLiveOf(of("lamp"), { [simValueKey(0, "On")]: true, "0.Brightness": 40 }), { ...dark, on: true, level: 0.4 });
@@ -259,6 +259,26 @@ test("живое состояние светильника, датчиков, ш
   assert.deepEqual(simLiveOf(of("tv"), { "0.Active": 0 }), dark);
   // Значение вне диапазона зажимается, а не ломает картинку.
   assert.equal(simLiveOf(of("lamp"), { "0.On": true, "0.Brightness": 400 }).level, 1);
-  assert.deepEqual(simLiveOf(of("switch"), { pressedAt: 1234 }), { ...dark, pressedAt: 1234 });
+  // Клавиши — по каналам (правка после сборки сценариев): у ВВ реле двух клавиш
+  // по отдельности, по ним «Объём» зажигает диод под каждой.
+  assert.deepEqual(simLiveOf(of("switch"), { pressedAt: 1234 }), { ...dark, pressedAt: 1234, keys: { 1: false, 2: false } });
+  assert.deepEqual(simLiveOf(of("switch"), { "1.On": true }).keys, { 1: false, 2: true });
   assert.deepEqual(simLiveOf(null, {}), dark);
+});
+
+test("живое состояние: что дует, что звучит, что заперто (правка после сборки сценариев)", () => {
+  const box = house();
+  put(box, "breezer", "Б", { x: 0.1, y: 0.2 });
+  put(box, "ac", "К", { x: 0.2, y: 0.2 });
+  put(box, "speaker", "УК", { x: 0.3, y: 0.2 });
+  const of = (name) => markAccessory(box.project, box.marks[name]);
+  assert.equal(simLiveOf(of("breezer"), {}).flow, null, "выключенный бризер дует");
+  const fan = simLiveOf(of("breezer"), { "0.Active": "ACTIVE", "0.RotationSpeed": 50 });
+  assert.deepEqual(fan.flow, { kind: "air", level: 0.5 });
+  assert.deepEqual(simLiveOf(of("ac"), { "0.Active": "ACTIVE", "0.TargetHeaterCoolerState": "COOL" }).flow, { kind: "cool", level: 1 });
+  assert.deepEqual(simLiveOf(of("ac"), { "0.Active": "ACTIVE", "0.TargetHeaterCoolerState": "HEAT" }).flow, { kind: "heat", level: 1 });
+  assert.equal(simLiveOf(of("ac"), { "0.Active": "INACTIVE" }).flow, null);
+  const speaker = of("speaker");
+  const index = speaker.services.find((service) => service.type === "Speaker").index;
+  assert.equal(simLiveOf(speaker, { [index + ".Mute"]: false }).flow.kind, "sound");
 });

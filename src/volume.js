@@ -7618,7 +7618,9 @@ function volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, b
     layer: face.layer,
     fill: live
       ? volumeLiveFill(face, normal, tint, live)
-      : volumeFill(face.rgb, face.flat ? 1 : volumeShade(normal), face.alpha === undefined ? 1 : face.alpha, tint),
+      : face.led
+        ? volumeFill(face.rgb, 1, 1, null)
+        : volumeFill(face.rgb, face.flat ? 1 : volumeShade(normal), face.alpha === undefined ? 1 : face.alpha, tint),
     // Многоугольник просвечивает (таск 169): взгляд смотрит сквозь него
     // дальше — если за ним есть кому отвечать (таск 189, см. `volumeSightAt`).
     // Рисование об этом не спрашивает — прозрачность уже в цвете.
@@ -8153,6 +8155,7 @@ function volumeLiveFill(face, normal, tint, live) {
   const alpha = face.alpha === undefined ? 1 : face.alpha;
   const shade = face.flat ? 1 : volumeShade(normal);
   if (face.decal !== undefined) return volumeFill(face.rgb, shade, face.decal, live.full);
+  if (face.led) return volumeFill(face.rgb, 1, 1, null);
   if (face.lit && face.markId && live.glow) {
     const glow = live.glow.get(face.markId);
     if (glow) return volumeGlowFill(face.rgb, glow, alpha, tint, shade);
@@ -8209,6 +8212,185 @@ export function volumeRoomTint(tint, level) {
     rgb: volumeMix(tint.rgb || VOLUME_NIGHT_RGB, VOLUME_ROOM_WARM_RGB, VOLUME_ROOM_WARM * light),
     share: share * (1 - VOLUME_ROOM_LIGHT * light),
   };
+}
+
+// ——— видно, что работает (правка после сборки сценариев) ————————————————————
+//
+// Слова заказчика: «Вентиляция не видно когда работает, розетка тоже, и
+// выключатель. и наверняка почти всё так, кроме света. На вентиляции должны
+// быть потоки воздуха как пример, и на всех так. На выключателях можно диодик
+// на кнопке канала снизу разместить, на розетке сверху справа светодиод
+// активности и т.д. придумай как визуально отличать работающие от отключенных
+// устройств».
+//
+// Свет светится, телевизор горит экраном, штора едет — у остальных признака не
+// было вовсе. Признаков два, и оба — грани кадра, а не сцены: состояние дома
+// меняется без пересборки (`volumeFrame(…, extra)`).
+//
+//   — **диод** — кружок на лице вещи. У выключателя — под каждой клавишей, по
+//     её реле: горит — нагрузка канала включена, тёмный — выключена. У розетки —
+//     справа сверху, тоже горит или тёмный. У остального — справа сверху, только
+//     пока есть что сказать: зелёный — включено, оранжевый — греет, голубой —
+//     охлаждает или кран открыт, красный — датчик сработал или замок заперт;
+//   — **поток** — линии со стрелкой от лица вещи: воздух вентиляции и бризера,
+//     холодный и тёплый воздух кондиционера (он стекает вниз), дуги звука у
+//     колонки. Длина — по скорости и громкости.
+//
+// Светится и то и другое своим цветом, без тона часа: ночью диод в тёмной
+// комнате виден, как виден настоящий.
+
+/** Цвета диодов. */
+export const VOLUME_LED_ON_RGB = [70, 230, 120];
+export const VOLUME_LED_KEY_RGB = [110, 205, 255];
+export const VOLUME_LED_OFF_RGB = [58, 62, 70];
+export const VOLUME_LED_ALERT_RGB = [255, 72, 60];
+export const VOLUME_LED_HEAT_RGB = [255, 150, 50];
+export const VOLUME_LED_COOL_RGB = [100, 190, 255];
+/** Цвета потоков. */
+const VOLUME_FLOW_COLOR = {
+  air: "rgba(200, 228, 255, 0.9)",
+  cool: "rgba(120, 200, 255, 0.95)",
+  heat: "rgba(255, 165, 85, 0.95)",
+  sound: "rgba(236, 236, 255, 0.85)",
+};
+/**
+ * Радиус диода — крупнее настоящего: в два-три миллиметра его не видно уже с
+ * двух шагов, а признак нужен, чтобы видеть с порога комнаты.
+ */
+function volumeLedRadius(face) {
+  return Math.max(5, Math.min(12, 0.09 * Math.min(face.widthMm, face.heightMm)));
+}
+
+/** Насколько диод поднят над лицом: перед ним, а не в нём. */
+const VOLUME_LED_LIFT_MM = 1.5;
+const VOLUME_LED_SIDES = 8;
+
+/**
+ * Признаки работы для кадра: диоды и потоки вещей сцены по состоянию дома —
+ * `live` как у `volumeLiveLight` (`simLiveOf` с видом знака). Свет, экран и
+ * штора своё уже показывают и признаков не получают.
+ */
+export function volumeLiveSigns(scene, live, out = []) {
+  if (!scene || !live || live.size === 0) return out;
+  for (const place of scene.marks || []) {
+    if (!place || !place.face || !place.markId) continue;
+    const item = live.get(place.markId);
+    if (!item || item.kind === "light" || item.kind === "tv" || item.kind === "curtain") continue;
+    volumeSignLeds(place, item, out);
+    if (item.flow) volumeSignFlow(place, item.flow, out);
+  }
+  return out;
+}
+
+/** Диод в точке лица `(fx, fy)` — доли ширины и высоты от середины, `fy` вниз. */
+function volumeLed(place, fx, fy, rgb, glowing, out) {
+  const face = place.face;
+  const radius = volumeLedRadius(face);
+  const centre = {
+    x: face.origin.x + face.u.x * fx * face.widthMm - face.v.x * fy * face.heightMm,
+    y: face.origin.y + face.u.y * fx * face.widthMm - face.v.y * fy * face.heightMm,
+    z: face.origin.z + face.u.z * fx * face.widthMm - face.v.z * fy * face.heightMm,
+  };
+  const points = [];
+  for (let side = 0; side < VOLUME_LED_SIDES; side += 1) {
+    const angle = (side / VOLUME_LED_SIDES) * Math.PI * 2;
+    const a = Math.cos(angle) * radius;
+    const b = Math.sin(angle) * radius;
+    points.push({
+      x: centre.x + face.u.x * a + face.v.x * b + face.normal.x * VOLUME_LED_LIFT_MM,
+      y: centre.y + face.u.y * a + face.v.y * b + face.normal.y * VOLUME_LED_LIFT_MM,
+      z: centre.z + face.u.z * a + face.v.z * b + face.normal.z * VOLUME_LED_LIFT_MM,
+    });
+  }
+  // Обход — против часовой, если смотреть с лица: нормаль грани смотрит туда
+  // же, куда лицо, и отбор по нормали показывает диод спереди.
+  const normal = { x: face.normal.x, y: face.normal.y, z: face.normal.z };
+  const led = volumeFace(points, rgb, { normal, flat: glowing, markId: place.markId });
+  // Горящий диод светится своим цветом (`volumeLiveFill`), тёмный — обычная
+  // грань в тоне часа и комнаты.
+  if (glowing) led.led = true;
+  out.push(led);
+  return radius;
+}
+
+function volumeSignLeds(place, item, out) {
+  const face = place.face;
+  const margin = (mm) => mm / Math.max(1, face.heightMm);
+  const marginX = (mm) => mm / Math.max(1, face.widthMm);
+  const radius = volumeLedRadius(face);
+  // Выключатель: диод под каждой клавишей — по реле её канала.
+  const keys = place.model ? (place.model.parts || []).filter((part) => Number.isInteger(part.channel)) : [];
+  if (item.keys && keys.length > 0) {
+    for (const key of keys) {
+      const on = item.keys[key.channel] === true;
+      const fx = key.x + key.width / 2;
+      const fy = 0.5 - key.z - margin(radius + 5);
+      volumeLed(place, fx, fy, on ? VOLUME_LED_KEY_RGB : VOLUME_LED_OFF_RGB, on, out);
+    }
+    return;
+  }
+  const corner = (rgb, glowing) =>
+    volumeLed(place, 0.5 - marginX(radius + 7), -0.5 + margin(radius + 7), rgb, glowing, out);
+  if (item.kind === "outlet" || item.keys) {
+    corner(item.on ? VOLUME_LED_ON_RGB : VOLUME_LED_OFF_RGB, item.on);
+    return;
+  }
+  if (item.alert || item.locked) {
+    corner(VOLUME_LED_ALERT_RGB, true);
+    return;
+  }
+  if (!item.on) return;
+  const flow = item.flow ? item.flow.kind : null;
+  corner(flow === "heat" ? VOLUME_LED_HEAT_RGB : flow === "cool" ? VOLUME_LED_COOL_RGB : VOLUME_LED_ON_RGB, true);
+}
+
+/**
+ * Поток от лица вещи. Воздух — три волнистые струи по нормали лица со стрелкой
+ * на конце; кондиционер — четыре струи от нижнего края, стекающие вниз; звук —
+ * три дуги перед лицом.
+ */
+function volumeSignFlow(place, flow, out) {
+  const face = place.face;
+  const n = face.normal;
+  const u = face.u;
+  const v = face.v;
+  const level = Math.max(0.2, Math.min(1, Number(flow.level) || 0));
+  const color = VOLUME_FLOW_COLOR[flow.kind] || VOLUME_FLOW_COLOR.air;
+  const at = (fx, fy) => ({
+    x: face.origin.x + u.x * fx * face.widthMm - v.x * fy * face.heightMm,
+    y: face.origin.y + u.y * fx * face.widthMm - v.y * fy * face.heightMm,
+    z: face.origin.z + u.z * fx * face.widthMm - v.z * fy * face.heightMm,
+  });
+  const move = (point, by) => ({ x: point.x + by.x, y: point.y + by.y, z: point.z + by.z });
+  const scale = (vector, k) => ({ x: vector.x * k, y: vector.y * k, z: vector.z * k });
+  if (flow.kind === "sound") {
+    const centre = at(0, 0);
+    for (let ring = 1; ring <= 3; ring += 1) {
+      const radius = (60 + 55 * ring) * (0.6 + 0.4 * level);
+      const points = [];
+      for (let step = 0; step <= 8; step += 1) {
+        const angle = (-0.6 + (1.2 * step) / 8) * 1;
+        points.push(move(centre, move(scale(n, Math.cos(angle) * radius), scale(u, Math.sin(angle) * radius))));
+      }
+      out.push(volumeLine(points, color, { width: 1.6 }));
+    }
+    return;
+  }
+  const length = 300 + 600 * level;
+  const down = { x: 0, y: 0, z: -1 };
+  const falls = flow.kind === "cool" || flow.kind === "heat";
+  const starts = falls ? [-0.36, -0.12, 0.12, 0.36].map((fx) => at(fx, 0.45)) : [-0.25, 0, 0.25].map((fx) => at(fx, 0));
+  starts.forEach((start, index) => {
+    const points = [];
+    for (let step = 0; step <= 10; step += 1) {
+      const s = step / 10;
+      let point = move(start, scale(n, 8 + s * length));
+      if (falls) point = move(point, scale(down, s * s * length * 0.7));
+      else point = move(point, scale(v, Math.sin(s * Math.PI * 3 + index * 1.7) * 22));
+      points.push(point);
+    }
+    out.push(volumeLine(points, color, { width: 1.6, arrow: true }));
+  });
 }
 
 /**
