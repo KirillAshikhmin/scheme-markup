@@ -189,3 +189,28 @@ test("бризер — тот же «Бризер», у которого в со
   const model = deviceWindowModel({ ...profile, decoupled: [], params: { ...profile.params } });
   assert.deepEqual(model.services.map((service) => service.label), [strings.sim.services.Fan, "Подогрев"]);
 });
+
+test("«Прозрачные объекты»: по умолчанию вещи чертежа просвечивают, снята — плотные", async () => {
+  const { addSchemeObject, objectCatalogKeys } = await import("../src/model.js").then(async (model) => ({
+    ...model,
+    ...(await import("../src/objectCatalog.js")),
+  }));
+  const box = stand();
+  const key = objectCatalogKeys().includes("sofa") ? "sofa" : objectCatalogKeys()[0];
+  const project = addSchemeObject(box.project, {
+    schemeId: box.schemeId,
+    catalogKey: key,
+    shape: "rect",
+    atMm: { x: 1000, y: -1000 },
+    widthMm: 1800,
+    depthMm: 900,
+  }).project;
+  const objectFaces = (scene) => scene.faces.filter((face) => face.rgb && face.clear === true);
+  const clear = volumeScene(project, box.schemeId, { roofOff: true });
+  assert.ok(objectFaces(clear).length > 0 && objectFaces(clear).every((face) => face.alpha < 1), "по умолчанию вещь не просвечивает");
+  assert.equal(clear.objectsClear, true);
+  const solid = volumeScene(project, box.schemeId, { roofOff: true, objectsClear: false });
+  assert.equal(objectFaces(solid).length, 0, "снятая отметка — а вещь просвечивает");
+  assert.equal(solid.objectsClear, false);
+  assert.equal(solid.faces.length, clear.faces.length, "плотная вещь — не та же вещь");
+});

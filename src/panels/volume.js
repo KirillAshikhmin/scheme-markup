@@ -1258,6 +1258,8 @@ function createVolume({ api, hosts }) {
     // «Подсвечивать метки» (таск 14 сценариев, G15): контур изображения поверх
     // модели метки. Отметка раздела «Интерфейс», умолчание — снята.
     markImages: state.marksHighlight === true,
+    // «Прозрачные объекты» (правка после сборки сценариев): умолчание — да.
+    objectsClear: volumeParamsRead().objectsClear !== false,
   });
   /**
    * Какие этажи показывает окно (таск 202): стопка или одна открытая схема.
@@ -2316,7 +2318,10 @@ function createVolume({ api, hosts }) {
     // доезжала до кадра.
     const roofed = (scene.faces || []).some((face) => face.rgb === VOLUME_CEILING_RGB && face.both === true);
     const ceilings = (scene.faces || []).some((face) => face.rgb === VOLUME_CEILING_RGB && face.n.z < 0);
-    if (stacking(state) !== Boolean(scene.stackMm) || (ceilings && roofOff === roofed)) {
+    // «Прозрачные объекты» (правка после сборки сценариев) — тоже сама сцена:
+    // прозрачность у граней, и пересобрать их можно только заново.
+    const clearChanged = !scene.empty && scene.objectsClear !== undefined && scene.objectsClear !== (volumeParamsRead().objectsClear !== false);
+    if (stacking(state) !== Boolean(scene.stackMm) || (ceilings && roofOff === roofed) || clearChanged) {
       setScene(state);
       rebuildOverlay();
       stanceRecheck();

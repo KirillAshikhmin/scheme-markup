@@ -3478,12 +3478,16 @@ export function volumeObjectFrame(project, schemeId, object, fallbackHeightMm) {
  * чертёж, ни выгрузки о ней не знают. Сквозь прозрачный шкаф по-прежнему не
  * пройти.
  */
-export function volumeObjectFaces(project, schemeId, object, fallbackHeightMm, out = []) {
+export function volumeObjectFaces(project, schemeId, object, fallbackHeightMm, out = [], clear = true) {
+  // Отметка «Прозрачные объекты» (правка после сборки сценариев): «если
+  // выключить, то становятся не прозрачными. По умолчанию вкл.» Снята — вещь
+  // плотная, как стена; тюль шторы — тело метки, его отметка не трогает.
+  const own = clear !== false;
   const model = volumeObjectModel(project, object);
   const frame = model ? volumeObjectFrame(project, schemeId, object, fallbackHeightMm) : null;
-  if (frame) return volumeModelFaces(frame, model, VOLUME_OBJECT_RGB, out, { clear: true });
+  if (frame) return volumeModelFaces(frame, model, VOLUME_OBJECT_RGB, out, { clear: own });
   for (const prism of volumeObjectPrisms(project, schemeId, object, fallbackHeightMm)) {
-    volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, VOLUME_OBJECT_RGB, out, { clear: true });
+    volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, VOLUME_OBJECT_RGB, out, { clear: own });
   }
   return out;
 }
@@ -4395,6 +4399,9 @@ export function volumeFloorKey(project, schemeId, options, cover, upper, known) 
     // `volumeScene`. Переключили — этаж собирается заново, иначе готовый этаж
     // стопки остался бы с картинкой, которую убрали.
     markImages: options.markImages !== false,
+    // «Прозрачные объекты» (правка после сборки сценариев): переключили — этаж
+    // собирается заново, как у контура меток.
+    objectsClear: options.objectsClear !== false,
     upper: upper === true,
     capMm: cover && cover.capMm !== undefined ? cover.capMm : null,
     coverX: (cover && cover.dx) || 0,
@@ -4422,6 +4429,7 @@ export function volumeFloorKeySame(was, now) {
     was.schemeId !== now.schemeId ||
     was.roofOff !== now.roofOff ||
     was.markImages !== now.markImages ||
+    was.objectsClear !== now.objectsClear ||
     was.upper !== now.upper ||
     was.capMm !== now.capMm ||
     was.coverX !== now.coverX ||
@@ -6459,7 +6467,7 @@ export function volumeScene(project, schemeId, options = {}) {
     // (`volumeStairNear`), а не по упору в него, и теперь срабатывает ещё
     // вернее: встать можно прямо на лестницу.
     const objectFrom = faces.length;
-    volumeObjectFaces(project, schemeId, object, schemeHeight.mm, faces);
+    volumeObjectFaces(project, schemeId, object, schemeHeight.mm, faces, options.objectsClear !== false);
     // Вещь в комнате — её (таск 09 сценариев): включённый свет светлит и диван.
     if (rooms.length > 0 && faces.length > objectFrom) volumeTagRoom(faces, objectFrom, rooms, volumeMiddleOf(faces[objectFrom].p));
     for (const prism of volumeObjectPrisms(project, schemeId, object, schemeHeight.mm)) {
@@ -6494,6 +6502,9 @@ export function volumeScene(project, schemeId, options = {}) {
     empty: false,
     notes,
     faces,
+    // Прозрачны ли вещи чертежа (отметка «Прозрачные объекты»): поле сверяет
+    // по нему, пора ли пересобрать сцену.
+    objectsClear: options.objectsClear !== false,
     // Дерево порядка строится здесь, один раз на сцену: кадру остаётся обход.
     //
     // `options.order === false` — сцену собирают **этажом стопки** (таск 202):

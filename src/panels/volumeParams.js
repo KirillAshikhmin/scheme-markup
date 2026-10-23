@@ -152,6 +152,11 @@ export const VOLUME_PHYSICAL_SETTING = "volumePhysicalLight";
 // Отметка **отрицательная**: умолчание — оси как были.
 export const VOLUME_PADS_SETTING = "volumePadsCrossed";
 
+// «Прозрачные объекты» (правка после сборки сценариев): «это как сейчас, если
+// выключить, то становятся не прозрачными. По умолчанию вкл.» Отметка
+// **положительная**: снятой её делает только записанное `false`.
+export const VOLUME_OBJECTS_CLEAR_SETTING = "volumeObjectsClear";
+
 /**
  * Выбор человека. Живёт в области модуля, а не в поверхности объёма: поверхность
  * пересобирается (сменили схему, закрыли объект), а выбор — нет.
@@ -177,6 +182,8 @@ const params = {
   physical: true,
   // Вертикали джойстиков наоборот (правка после сборки сценариев): умолчание — нет.
   padsCrossed: false,
+  // Вещи чертежа просвечивают (правка после сборки сценариев): умолчание — да.
+  objectsClear: true,
 };
 
 // Настройки читаются асинхронно, как у плашек и слоёв: поле стартует с
@@ -219,6 +226,7 @@ export function volumeParamsLoad() {
     [VOLUME_ROOF_SETTING, "roofOff"],
     [VOLUME_SIMULATION_SETTING, "simulation"],
     [VOLUME_PHYSICAL_SETTING, "physical"],
+    [VOLUME_OBJECTS_CLEAR_SETTING, "objectsClear"],
   ]) {
     waits.push(
       Promise.resolve(getSetting(key))
@@ -281,6 +289,7 @@ export function volumeParamsRead() {
     hideCard: params.hideCard,
     physical: params.physical,
     padsCrossed: params.padsCrossed,
+    objectsClear: params.objectsClear,
   };
 }
 
@@ -342,6 +351,7 @@ export function volumeParamsFlag(name, on) {
     hideCard: VOLUME_HIDE_CARD_SETTING,
     physical: VOLUME_PHYSICAL_SETTING,
     padsCrossed: VOLUME_PADS_SETTING,
+    objectsClear: VOLUME_OBJECTS_CLEAR_SETTING,
   };
   const key = keys[name];
   if (!key) return;
@@ -602,6 +612,11 @@ export function createVolumeParamsFields(options) {
       // окна.
       checkRow(strings.volume.physicalLight, chosen.physical, strings.volume.physicalLightHint, (on) =>
         volumeParamsFlag("physical", on),
+      ),
+      // Прозрачные объекты (правка после сборки сценариев) — «что показывать»:
+      // вещи чертежа сквозные или плотные.
+      checkRow(strings.volume.objectsClear, chosen.objectsClear, strings.volume.objectsClearHint, (on) =>
+        volumeParamsFlag("objectsClear", on),
       ),
       // Карточка выделенной метки (таск 09 сценариев, G22) — тоже «что
       // показывать»: отметка убирает её из поля «Объёма», и только оттуда.
