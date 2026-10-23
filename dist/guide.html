@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Разметка электроточек — памятка</title>
+<meta name="description" content="Что умеет разметка электроточек на плане квартиры, как достать из объекта данные одной командой и какие правила держать при правках." />
+<!-- Цвет шапки браузера — тот же, что у приложения рядом. -->
+<meta name="theme-color" content="#0d1117" />
+<!-- Значок берётся файлом, который сборка кладёт рядом (`icon.svg`): рисунок у
+     приложения и у памятки один, и второй его копии здесь нет. -->
+<link rel="icon" type="image/svg+xml" href="icon.svg" />
+<!-- Манифест памятке не нужен нарочно: устанавливается приложением страница
+     разметки, а не рассказ о ней. -->
+<style>
+  /* Шрифты — системные, как и в приложении: ни одного файла с чужого хоста,
+     страница открывается с диска и без сети. Список семейств повторяет
+     `--font-ui` приложения сознательно — общих стилей у двух самодостаточных
+     страниц нет, а выглядеть они должны одинаково. */
+  :root {
+    --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+    --paper: #f4f5f1;
+    --surface: #ffffff;
+    --ink: #1c2128;
+    --ink-soft: #5c6670;
+    --rule: #d8dbd3;
+    --rule-soft: #e7e9e3;
+    --accent: #1f6feb;
+    --zero: #d1242f;
+    --ochre: #a8762f;
+    --violet: #6639ba;
+    --code-bg: #f0f1ec;
+    --code-ink: #24292f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #0f1318;
+      --surface: #161b22;
+      --ink: #e4e8ec;
+      --ink-soft: #8b949e;
+      --rule: #2a313a;
+      --rule-soft: #21272e;
+      --accent: #58a6ff;
+      --zero: #ff7b72;
+      --ochre: #d4a257;
+      --violet: #a371f7;
+      --code-bg: #11161c;
+      --code-ink: #c9d1d9;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #0f1318;
+    --surface: #161b22;
+    --ink: #e4e8ec;
+    --ink-soft: #8b949e;
+    --rule: #2a313a;
+    --rule-soft: #21272e;
+    --accent: #58a6ff;
+    --zero: #ff7b72;
+    --ochre: #d4a257;
+    --violet: #a371f7;
+    --code-bg: #11161c;
+    --code-ink: #c9d1d9;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font: 15px/1.62 var(--font-ui);
+    -webkit-text-size-adjust: 100%;
+  }
+  .wrap {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 48px 20px 72px;
+  }
+
+  h1, h2, h3 { margin: 0; text-wrap: balance; }
+  h1 { font-size: clamp(30px, 6vw, 44px); font-weight: 700; letter-spacing: -0.01em; line-height: 1.1; }
+  h2 { font-size: clamp(21px, 3.6vw, 26px); font-weight: 600; }
+  h3 { font-size: 16px; font-weight: 600; }
+  p { margin: 0; }
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+
+  /* Шапка: размерная линия, как на чертеже. */
+  header { display: flex; flex-direction: column; gap: 14px; }
+  .dim {
+    display: flex; align-items: center; gap: 10px;
+    font: 11px/1.4 var(--font-mono);
+    letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  .dim::before, .dim::after { content: ""; height: 1px; background: var(--rule); flex: 1; }
+  .dim::before { max-width: 28px; }
+  .lede { font-size: 17px; color: var(--ink-soft); max-width: 62ch; }
+  .lede strong { color: var(--ink); font-weight: 600; }
+
+  .links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+  .links a {
+    font: 12.5px/1.4 var(--font-mono);
+    text-decoration: none; color: var(--ink);
+    border: 1px solid var(--rule); border-radius: 3px;
+    padding: 7px 11px; background: var(--surface);
+  }
+  .links a:hover { border-color: var(--accent); color: var(--accent); }
+  .links a.go { border-color: var(--accent); color: var(--accent); }
+
+  section { margin-top: 52px; }
+  .sechead {
+    display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+    border-bottom: 1px solid var(--rule); padding-bottom: 8px; margin-bottom: 22px;
+  }
+  .sechead .tick { font: 11px/1.4 var(--font-mono); color: var(--ink-soft); letter-spacing: 0.06em; }
+
+  .stack { display: grid; gap: 18px; }
+  /* Режимов четыре: на широком экране они встают 2×2, а не 3+1 сиротой —
+     столбец не уже 300 точек, иначе текст режима рвётся в лапшу. */
+  .modes { display: grid; gap: 18px 24px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+  .mode { border-left: 2px solid var(--rule); padding-left: 14px; }
+  .mode h3 { margin-bottom: 4px; }
+  .mode p { font-size: 14px; color: var(--ink-soft); }
+  .mode--plan { border-left-color: var(--accent); }
+  .mode--draw { border-left-color: var(--ochre); }
+  .mode--vol { border-left-color: var(--violet); }
+  .mode--out { border-left-color: var(--zero); }
+
+  /* Граница инструмента: что достаётся без браузера, а что только в нём. */
+  .split { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--rule); border-radius: 3px; overflow: hidden; }
+  .split > div { padding: 18px; background: var(--surface); }
+  .split > div + div { border-left: 1px solid var(--rule); }
+  .split h3 { margin-bottom: 8px; }
+  .split p { font-size: 13.5px; color: var(--ink-soft); }
+  .split ul { margin: 10px 0 0; padding-left: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 5px; }
+  .split li {
+    font: 12px/1.5 var(--font-mono);
+    background: var(--code-bg); color: var(--code-ink);
+    padding: 2px 7px; border-radius: 2px;
+  }
+  @media (max-width: 560px) {
+    .split { grid-template-columns: 1fr; }
+    .split > div + div { border-left: 0; border-top: 1px solid var(--rule); }
+  }
+
+  pre {
+    margin: 0; background: var(--code-bg); color: var(--code-ink);
+    border: 1px solid var(--rule-soft); border-radius: 3px;
+    padding: 14px 16px; overflow-x: auto;
+    font: 13px/1.75 var(--font-mono);
+  }
+  pre .c { color: var(--ink-soft); }
+  code {
+    font-family: var(--font-mono); font-size: 0.92em;
+    background: var(--code-bg); color: var(--code-ink);
+    padding: 1px 5px; border-radius: 2px;
+  }
+
+  .tablewrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: left; padding: 9px 12px 9px 0; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
+  th {
+    font: 600 12px/1.4 var(--font-ui);
+    letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-soft);
+  }
+  td:first-child { white-space: nowrap; font: 12.5px/1.6 var(--font-mono); }
+
+  .rules { display: grid; gap: 12px; }
+  .rule-item { display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: start; }
+  .rule-item .mark {
+    font: 11px/1.5 var(--font-mono);
+    color: var(--zero); border: 1px solid currentColor;
+    border-radius: 2px; padding: 1px 5px; margin-top: 3px; white-space: nowrap;
+  }
+  .rule-item p { font-size: 14px; }
+  .rule-item strong { font-weight: 600; }
+
+  .note {
+    border-left: 2px solid var(--ochre); padding: 2px 0 2px 14px;
+    font-size: 14px; color: var(--ink-soft);
+  }
+  .note strong { color: var(--ink); font-weight: 600; }
+
+  footer {
+    margin-top: 56px; padding-top: 16px; border-top: 1px solid var(--rule);
+    font-size: 13px; color: var(--ink-soft);
+    display: flex; flex-wrap: wrap; gap: 6px 16px;
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+<header>
+  <div class="dim">инструмент проектировщика · умный дом</div>
+  <h1>Разметка электроточек</h1>
+  <p class="lede">Одна страница в браузере: метки на плане квартиры, чертёж в миллиметрах, развёртки стен, дом в объёме и выгрузки по ГОСТ. <strong>Ни сервера, ни установки, ни интернета</strong> — объект живёт в браузере и переносится одним файлом.</p>
+  <div class="links">
+    <a class="go" href="./">Открыть сервис</a>
+    <a href="https://github.com/KirillAshikhmin/scheme-markup">Репозиторий</a>
+    <a href="https://github.com/KirillAshikhmin/scheme-markup/blob/main/AGENTS.md">Та же памятка в репозитории</a>
+  </div>
+</header>
+
+<section>
+  <div class="sechead"><h2>Что в нём делают</h2><span class="tick">четыре режима</span></div>
+  <div class="modes">
+    <div class="mode mode--plan">
+      <h3>Схема</h3>
+      <p>План с метками: свет, выключатели, розетки, климат, сеть, датчики. Справочник типов со знаками и цветами, группы, связи «что чем управляется» с номерами каналов, фильтры и поиск, автонумерация, помещения контурами, линейные метки — ленты, треки, карнизы.</p>
+    </div>
+    <div class="mode mode--draw">
+      <h3>Чертёж</h3>
+      <p>Стены в миллиметрах, проёмы из встроенного каталога на 17 видов (двери, окна, арка, проём, ворота), вещи из каталога на 59 предметов, развёртки стен участками между углами, точка привязки схем и наложение чужого чертежа для подгонки.</p>
+    </div>
+    <div class="mode mode--vol">
+      <h3>Объём</h3>
+      <p>Дом в трёх измерениях: ходьба от первого лица и свободная камера, двери и шторы открываются, этажи стопкой, двусветные пространства, настоящая астрономия солнца и луны с пятнами света в комнатах, фон с городом и природой.</p>
+    </div>
+    <div class="mode mode--out">
+      <h3>Выгрузки</h3>
+      <p>PNG схемы с легендой, лист по ГОСТ с рамкой и основной надписью, таблицы меток в CSV (с BOM и точкой с запятой — для Excel), печать, zip всех схем объекта.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sechead"><h2>Как достать данные</h2><span class="tick">одна команда</span></div>
+  <div class="stack">
+    <p>Не пишите свой разбор zip и свой скрипт браузера — всё это уже есть. Граница проходит не там, где кажется: <strong>всё, что в объекте записано или посчитано, достаётся без браузера</strong>, теми же модулями, которыми объект читает страница. Браузер нужен только тому, что рисуется.</p>
+
+<pre>node tools/scheme.mjs &lt;команда&gt; &lt;объект.zip&gt; [ключи]
+node tools/scheme.mjs --help</pre>
+
+    <div class="split">
+      <div>
+        <h3>Без браузера</h3>
+        <p>Доли секунды, никаких вкладок. Сюда попадают и развёртки — словами: что стоит на стене и на каком месте.</p>
+        <ul>
+          <li>info</li><li>marks</li><li>types</li><li>rooms</li>
+          <li>drawing</li><li>walls</li><li>links</li><li>equipment</li><li>summary</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Через браузер</h3>
+        <p>Поднимает свой сервер и свой Chrome, рисует и закрывает за собой всё, что открыл.</p>
+        <ul>
+          <li>plan-png</li><li>gost-png</li><li>elevation-png</li><li>volume-png</li>
+        </ul>
+      </div>
+    </div>
+
+<pre><span class="c"># сведения об объекте и его схемах</span>
+node tools/scheme.mjs info "объект.zip" --format md
+
+<span class="c"># таблица меток в CSV — та же, что выгружает страница</span>
+node tools/scheme.mjs marks "объект.zip" --format csv --out метки.csv
+
+<span class="c"># что стоит на стене АБ и на каком месте</span>
+node tools/scheme.mjs walls "объект.zip" --wall АБ
+
+<span class="c"># кадр объёма со снятой крышей</span>
+node tools/scheme.mjs volume-png "объект.zip" --no-roof --out ./</pre>
+
+    <p>Вид вывода — <code>--format json|csv|md|tsv</code>, файл или папка — <code>--out</code>. Остальные ключи (схема, помещение, стена, разбивка таблицы, формат листа, камера и час объёма) перечисляет <code>--help</code>.</p>
+
+    <p class="note"><strong>Для техдокументации</strong> — <code>summary --format md</code>: пять готовых таблиц, которые вставляются в документ как есть.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sechead"><h2>Что отдаёт сводка</h2><span class="tick">summary --format md</span></div>
+  <div class="tablewrap">
+    <table>
+      <thead>
+        <tr><th>Таблица</th><th>Колонки</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>По помещениям</td><td>помещение, площадь м², периметр м, высота стен мм, меток</td></tr>
+        <tr><td>По типам</td><td>категория, тип, меток</td></tr>
+        <tr><td>По этажам</td><td>схема, этаж, помещений, меток, стен, проёмов, вещей</td></tr>
+        <tr><td>Линейные метки</td><td>код, тип, меток, всего метров</td></tr>
+        <tr><td>Оборудование</td><td>производитель, оборудование, штук</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note" style="margin-top:18px;"><strong>Инструмент ничего не считает сам.</strong> Площади, длины, габариты, подписи и состав таблиц берутся у модели страницы — иначе документ и экран разошлись бы в числах. Своё в нём ровно одно: перевод площади помещения в квадратные метры, потому что такой двери у страницы нет. И без калибровки плана она пустая: выдуманных метров наружу не выходит.</p>
+</section>
+
+<section>
+  <div class="sechead"><h2>Что знать, прежде чем править</h2><span class="tick">правила сборки</span></div>
+  <div class="rules">
+    <div class="rule-item">
+      <span class="mark">G68</span>
+      <p><strong>Готовые объекты не ломаются.</strong> Любая правка формата требует миграции и теста на старом файле. Догадку показывают, а не применяют.</p>
+    </div>
+    <div class="rule-item">
+      <span class="mark">каталог</span>
+      <p><strong>Вещи и проёмы расширяются только сборкой</strong> — это встроенные каталоги. Справочник типов меток, наоборот, расширяет человек.</p>
+    </div>
+    <div class="rule-item">
+      <span class="mark">стек</span>
+      <p><strong>Ванильный JS, ноль зависимостей.</strong> Сборка склеивает исходники в один скрипт внутри страницы — библиотек не завозить. Node ≥ 22, <code>npm test</code> и <code>npm run build</code>.</p>
+    </div>
+    <div class="rule-item">
+      <span class="mark">слова</span>
+      <p><strong>Строки интерфейса живут в словаре</strong>, не в компонентах. Язык интерфейса, документов и коммитов — русский; отраслевые термины сохраняются как есть.</p>
+    </div>
+    <div class="rule-item">
+      <span class="mark">CSS</span>
+      <p><strong>Зелёный прогон не подтверждает правку стилей:</strong> тесты ищут в собранном тексте строки, структуру они не разбирают. Трогали стили — откройте страницу глазами.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sechead"><h2>Где что лежит</h2><span class="tick">карта</span></div>
+  <div class="tablewrap">
+    <table>
+      <tbody>
+        <tr><td>src/</td><td>страница: правила объекта, геометрия и рисование, план, объём, колонки и окна, выгрузки, весь текст</td></tr>
+        <tr><td>tools/</td><td>оснастка: <code>scheme.mjs</code> и мост к браузеру</td></tr>
+        <tr><td>test/</td><td>прогон; чистые швы покрыты, DOM и холст — нарочно нет</td></tr>
+        <tr><td>web/</td><td>файлы веб-версии рядом со страницей: служебный скрипт офлайна и эта памятка</td></tr>
+        <tr><td>dist/</td><td>то, что публикуется: собранная страница, шрифт, файлы веб-версии и памятка</td></tr>
+        <tr><td>AGENTS.md</td><td>та же памятка рядом с кодом — для агента, который видит проект впервые</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<footer>
+  <span>Инструмент интегратора умного дома</span>
+  <span>·</span>
+  <span>Страница работает офлайн, данные не покидают браузер</span>
+</footer>
+
+</div>
+
+</body>
+</html>

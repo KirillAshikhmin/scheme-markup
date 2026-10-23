@@ -31,12 +31,24 @@ const ASSET_URLS = new Set(ASSETS.map((name) => new URL(name, self.location.href
 const PAGE_URLS = new Set(
   [PAGE, "./index.html"].map((name) => new URL(name, self.location.href).href),
 );
+// Памятка (таск 236) — вторая страница той же сборки, и соседним чужим адресом
+// она не является: у неё есть своё тело, которое не стыдно держать в офлайн-копии.
+// Ключ у неё **свой** — свой адрес: под ключ приложения её тело класть нельзя
+// (D46), а отдать без сети схему вместо памятки по разосланной людям ссылке
+// значило бы соврать адресом. В установку её не кладём нарочно: офлайн-копия
+// приложения — про работу на объекте, а памятка попадает в кэш, когда её
+// открыли при сети.
+const GUIDE_URL = new URL("./guide.html", self.location.href).href;
 
-function isPageUrl(url) {
+function bareUrl(url) {
   const bare = new URL(url);
   bare.search = "";
   bare.hash = "";
-  return PAGE_URLS.has(bare.href);
+  return bare.href;
+}
+
+function isPageUrl(url) {
+  return PAGE_URLS.has(bareUrl(url));
 }
 
 self.addEventListener("install", (event) => {
@@ -124,6 +136,11 @@ self.addEventListener("fetch", (event) => {
   // Запрос за страницей или за её файлом. Ни выгрузка, ни картинки планов через
   // сеть не ходят, перехватывать больше нечего.
   if (request.mode === "navigate") {
+    // Памятка — по своему адресу и под своим ключом.
+    if (bareUrl(request.url) === GUIDE_URL) {
+      event.respondWith(freshOrCached(event, request, GUIDE_URL, GUIDE_URL));
+      return;
+    }
     // Искать в кэше — всегда по ключу страницы (`./`), на любой адрес с
     // параметрами. Класть — только если это и есть наша страница.
     event.respondWith(freshOrCached(event, request, PAGE, isPageUrl(request.url) ? PAGE : null));
