@@ -3349,16 +3349,18 @@ test("ночь узнаётся тоном, но всё остаётся раз�
   // горизонте читалась бы выключателем.
   assert.equal(volumeNightShare(14), 0, "в полдень цвет как написан");
   assert.equal(volumeNightShare(6), 0);
-  assert.ok(volumeNightShare(0) > 0.1 && volumeNightShare(0) < 0.25, "на закате сумерки: " + volumeNightShare(0));
+  assert.ok(volumeNightShare(0) > 0.1 && volumeNightShare(0) < 0.3, "на закате сумерки: " + volumeNightShare(0));
   assert.equal(volumeNightShare(-8), VOLUME_NIGHT_SHARE, "глубже потолка ночь не темнеет");
   assert.equal(volumeNightShare(-30), VOLUME_NIGHT_SHARE);
   // И главное: ночная стена остаётся стеной, а не чернотой. Слова заказчика —
   // «что бы было понятно что ночь, но различимо всё».
   const night = { rgb: VOLUME_NIGHT_RGB, share: VOLUME_NIGHT_SHARE };
   const wall = volumeTintRgb(VOLUME_WALL_RGB, night);
-  assert.ok(Math.min(...wall) > 110, "ночная стена ушла в черноту: " + wall.join(","));
+  // С правки «сделай ночь темнее процентов на 40» ночь темнее, но стена всё
+  // ещё стена.
+  assert.ok(Math.min(...wall) > 85, "ночная стена ушла в черноту: " + wall.join(","));
   const floor = volumeTintRgb(VOLUME_FLOOR_RGB, night);
-  assert.ok(Math.min(...floor) > 70, "ночной пол ушёл в черноту: " + floor.join(","));
+  assert.ok(Math.min(...floor) > 60, "ночной пол ушёл в черноту: " + floor.join(","));
   // Метка остаётся заметно синее стены: цвет метки ночью не сереет.
   const marker = volumeTintRgb(VOLUME_MARKER_RGB, night);
   assert.ok(marker[2] - marker[0] > 40, "метка потеряла цвет: " + marker.join(","));

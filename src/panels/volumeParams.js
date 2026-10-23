@@ -144,6 +144,11 @@ export const VOLUME_HIDE_CARD_SETTING = "volumeHideCard";
 // `saved !== false` значит «не трогали». Снята — свет комнатой, как до правки.
 export const VOLUME_PHYSICAL_SETTING = "volumePhysicalLight";
 
+// Вертикали джойстиков наоборот (правка после сборки сценариев): «Поменяй
+// местами вертикальные оси между левым и правым… Но это сделай опцией».
+// Отметка **отрицательная**: умолчание — оси как были.
+export const VOLUME_PADS_SETTING = "volumePadsCrossed";
+
 /**
  * Выбор человека. Живёт в области модуля, а не в поверхности объёма: поверхность
  * пересобирается (сменили схему, закрыли объект), а выбор — нет.
@@ -167,6 +172,8 @@ const params = {
   hideCard: false,
   // Физический свет ламп (правка после сборки сценариев): умолчание — включён.
   physical: true,
+  // Вертикали джойстиков наоборот (правка после сборки сценариев): умолчание — нет.
+  padsCrossed: false,
 };
 
 // Настройки читаются асинхронно, как у плашек и слоёв: поле стартует с
@@ -232,6 +239,7 @@ export function volumeParamsLoad() {
     [VOLUME_SMOOTH_SETTING, "smooth"],
     [VOLUME_GHOST_SETTING, "ghost"],
     [VOLUME_HIDE_CARD_SETTING, "hideCard"],
+    [VOLUME_PADS_SETTING, "padsCrossed"],
   ]) {
     waits.push(
       Promise.resolve(getSetting(key))
@@ -269,6 +277,7 @@ export function volumeParamsRead() {
     simulation: params.simulation,
     hideCard: params.hideCard,
     physical: params.physical,
+    padsCrossed: params.padsCrossed,
   };
 }
 
@@ -329,6 +338,7 @@ export function volumeParamsFlag(name, on) {
     simulation: VOLUME_SIMULATION_SETTING,
     hideCard: VOLUME_HIDE_CARD_SETTING,
     physical: VOLUME_PHYSICAL_SETTING,
+    padsCrossed: VOLUME_PADS_SETTING,
   };
   const key = keys[name];
   if (!key) return;
@@ -583,8 +593,8 @@ export function createVolumeParamsFields(options) {
         volumeParamsFlag("simulation", on),
       ),
       // Физический свет (правка после сборки сценариев) — рядом с имитацией:
-      // без запущенного дома ламп не включает никто, и отметка про то, как
-      // светит дом.
+      // отметка про то, как светит дом, — лампы и, с правки «солнце и луна»,
+      // окна.
       checkRow(strings.volume.physicalLight, chosen.physical, strings.volume.physicalLightHint, (on) =>
         volumeParamsFlag("physical", on),
       ),
@@ -659,6 +669,10 @@ export function createVolumeParamsFields(options) {
       uiEl("p", { class: "tools__label", text: strings.volume.walking }),
       checkRow(strings.volume.ghost, chosen.ghost, strings.volume.ghostHint, (on) =>
         volumeParamsFlag("ghost", on),
+      ),
+      // Вертикали джойстиков наоборот — тоже про руки, и только пальцем.
+      checkRow(strings.volume.padsCrossed, chosen.padsCrossed, strings.volume.padsCrossedHint, (on) =>
+        volumeParamsFlag("padsCrossed", on),
       ),
     );
     line();

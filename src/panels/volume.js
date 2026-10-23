@@ -114,6 +114,7 @@ import {
   volumeStackScene,
   volumeShadowFaces,
   volumeSunSpotFaces,
+  volumeMoonSpotFaces,
   volumeSiteOf,
   volumeDrawn,
   volumeFallTo,
@@ -669,6 +670,34 @@ export function volumeLookVector(dx, dy, radius) {
 }
 
 /**
+ * Что делают два джойстика: `{forward, side, yaw, pitch}`. `right` и `left` —
+ * их пальцы (`{move, look}` — оба отклика, `volumePadVector` и
+ * `volumeLookVector`) или `null`.
+ *
+ * Обычно правый ходит (вверх — вперёд, вбок — шаг вбок), левый вертит головой
+ * (вбок — поворот, вверх — наклон). `crossed` — отметка «Вертикали джойстиков
+ * наоборот» (правка после сборки сценариев): «Поменяй местами вертикальные оси
+ * между левым и правым. Левый верх вниз — движение вперёд назад, а влево вправо
+ * поворот камеры, а справа вверх вниз наклон камеры, а влево вправо движение в
+ * сторону. Но это сделай опцией». Меняются только вертикали; отклик у каждой
+ * оси свой, как был: ход — прямой, взгляд — квадратный.
+ */
+export function volumePadsAxes(right, left, crossed = false) {
+  const out = { forward: 0, side: 0, yaw: 0, pitch: 0 };
+  if (right) {
+    out.side = right.move.side;
+    if (crossed) out.pitch = right.look.pitch;
+    else out.forward = right.move.forward;
+  }
+  if (left) {
+    out.yaw = left.look.yaw;
+    if (crossed) out.forward = left.move.forward;
+    else out.pitch = left.look.pitch;
+  }
+  return out;
+}
+
+/**
  * Похоже ли, что сюда зашли пальцем. Это только **первая** догадка, по которой
  * площадка видна сразу: настоящий ответ даёт первое касание (`pointerType`), и
  * мышь площадки не увидит никогда.
@@ -809,7 +838,7 @@ export function volumeHintText(state) {
     parts.push(strings.volume.hintAroundFly);
   }
   // Пальцем про захват мыши говорить нечего: мыши нет (таск 149).
-  if (state.touching) parts.push(strings.volume.hintTouch);
+  if (state.touching) parts.push(state.padsCrossed ? strings.volume.hintTouchCrossed : strings.volume.hintTouch);
   else parts.push(state.locked ? strings.volume.hintLocked : strings.volume.hintGrab);
   parts.push(strings.volume.pickHint);
   // Про клавиши каналов — только когда они под рукой: у одноклавишного
@@ -1298,6 +1327,9 @@ function createVolume({ api, hosts }) {
   // Солнечные пятна от проёмов в этот час (таск 196) — там же, где тень, и по
   // той же причине: час меняется раз в секунду, а кадров в секунде шестьдесят.
   let spots = [];
+  // Пятна луны (правка после сборки сценариев) — тем же путём; только при
+  // физическом свете.
+  let moonSpots = [];
   let view = "around";
   let closed = false;
   let frame = 0;
@@ -1321,9 +1353,9 @@ function createVolume({ api, hosts }) {
   // Зашли пальцем (таск 149). Догадка по виду указателя — сразу, точный ответ —
   // по первому касанию: мышь площадку ходьбы не увидит никогда.
   let touching = volumeTouchLikely();
-  // Палец на площадке ходьбы: `{id, forward, side}`.
+  // Палец на правом джойстике (ходьбы) и на левом (взгляда): `{id, move,
+  // look}` — оба отклика; какая ось что делает, решает `volumePadsAxes`.
   let pad = null;
-  // Палец на джойстике взгляда: `{id, yaw, pitch}` (`volumeLookVector`).
   let lookPad = null;
   // Где на поле есть место миникарте при сенсорной оснастке — `{top, bottom}`
   // или `null` (`volumeMinimapBox`). Меряется вместе с местом кнопок.
@@ -2109,6 +2141,8 @@ function createVolume({ api, hosts }) {
     const at = hour ? hour.shadow : null;
     shadow = volumeShadowFaces(scene.shadowBoxes, at);
     spots = volumeSunSpotFaces(scene.sunSpots, at);
+    moonSpots =
+      hour && volumeParamsRead().physical !== false ? volumeMoonSpotFaces(scene.sunSpots, hour.moonLight, scene.rooms) : [];
   }
 
   /**
@@ -2240,6 +2274,7 @@ function createVolume({ api, hosts }) {
     refreshHour();
     syncClock();
     placeStance();
+    syncPadTitles();
     // Отметка «Проходить сквозь стены» меняет не только картинку: подсказка
     // говорит про другое, а снятые стены поднимают того, кому не давали встать.
     syncHint();
@@ -2304,8 +2339,8 @@ function createVolume({ api, hosts }) {
     // у них `VOLUME_LAYER_SUN` — выше полов, ниже тел.
     // Свет дома (таск 09 сценариев): свечение тел и свет комнаты — доводом
     // кадра, без пересборки сцены. Дом не идёт — довода нет, и кадр тот же.
-    const lights = homeLights();
-    shown = volumeFrame(scene, spot, box, [...shadow, ...spots, ...overlay, ...marker, ...lights.signs], at.tint, lights.light);
+    const lights = homeLights(at);
+    shown = volumeFrame(scene, spot, box, [...shadow, ...spots, ...moonSpots, ...overlay, ...marker, ...lights.signs], at.tint, lights.light);
     volumeDraw(ctx, shown);
     // Второй проход фона: вещи, которые ближе кромки плиты, дом закрыть не
     // может — они перед ним (таск 199, разбор у `volumeDrawBackdrop`). Внутри
@@ -2324,12 +2359,21 @@ function createVolume({ api, hosts }) {
    * «Физический свет» — пятнами (`volumeLiveLight`). `busy` — свет ещё в пути.
    * `signs` — признаки работы остальных вещей: диоды и потоки
    * (`volumeLiveSigns`, правка после сборки сценариев).
+   *
+   * При физическом свете в нём и **небо** — тон часа `at.tint` (правка «Для
+   * солнца и Луны тоже примени физический свет»): комнату светят её окна, и
+   * это есть и без запущенного дома.
    */
-  function homeLights() {
-    if (!homeTarget) return { light: null, busy: false, signs: [] };
-    const faded = lightFadeLive(homeTarget, homeFade, now());
+  function homeLights(at) {
     const physical = volumeParamsRead().physical !== false;
-    return { light: volumeLiveLight(scene, faded.live, { physical }), busy: faded.busy, signs: volumeLiveSigns(scene, homeTarget) };
+    const sky = physical ? { tint: at.tint } : {};
+    if (!homeTarget) return { light: physical ? volumeLiveLight(scene, null, { physical, ...sky }) : null, busy: false, signs: [] };
+    const faded = lightFadeLive(homeTarget, homeFade, now());
+    return {
+      light: volumeLiveLight(scene, faded.live, { physical, ...sky }),
+      busy: faded.busy,
+      signs: volumeLiveSigns(scene, homeTarget),
+    };
   }
 
   // ——— миникарта (G212) ———
@@ -3468,18 +3512,20 @@ function createVolume({ api, hosts }) {
     }
     // Площадка ходьбы (таск 149) складывается с клавишами, а не спорит с ними:
     // в одном окне бывают и мышь с клавиатурой, и палец.
-    if (pad) {
-      forward += pad.forward;
-      side += pad.side;
-    }
     // Джойстик взгляда вертит голову, пока его держат: скорость — от того,
     // насколько увели палец (`volumeLookVector`), поворот — тем же счётом, что
-    // у мыши (`lookTurn`).
-    if (lookPad) {
-      lookTurn(
-        lookPad.yaw * VOLUME_LOOK_PAD_YAW_DEG_S * (Math.PI / 180) * step,
-        lookPad.pitch * VOLUME_LOOK_PAD_PITCH_DEG_S * (Math.PI / 180) * step,
-      );
+    // у мыши (`lookTurn`). Какая ось что делает, решает `volumePadsAxes`: у
+    // отметки «Вертикали джойстиков наоборот» вертикали меняются местами.
+    if (pad || lookPad) {
+      const axes = volumePadsAxes(pad, lookPad, volumeParamsRead().padsCrossed === true);
+      forward += axes.forward;
+      side += axes.side;
+      if (axes.yaw !== 0 || axes.pitch !== 0) {
+        lookTurn(
+          axes.yaw * VOLUME_LOOK_PAD_YAW_DEG_S * (Math.PI / 180) * step,
+          axes.pitch * VOLUME_LOOK_PAD_PITCH_DEG_S * (Math.PI / 180) * step,
+        );
+      }
     }
     // ——— скорость (таск 207, G311) ———
     //
@@ -3854,6 +3900,13 @@ function createVolume({ api, hosts }) {
     sync();
   }
 
+  /** Подписи джойстиков — по тому, что они делают: вертикали бывают переставлены. */
+  function syncPadTitles() {
+    const crossed = volumeParamsRead().padsCrossed === true;
+    padNode.title = crossed ? strings.volume.padCrossedLabel : strings.volume.padLabel;
+    lookNode.title = crossed ? strings.volume.lookPadCrossedLabel : strings.volume.lookPadLabel;
+  }
+
   /**
    * Где палец на площадке — `{dx, dy, radius}` от её середины, — и кружок
    * за ним. Одна мерка на обе площадки: ходьбы и взгляда.
@@ -3872,9 +3925,10 @@ function createVolume({ api, hosts }) {
     return { dx, dy, radius };
   }
 
-  function padAt(event) {
-    const at = knobAt(padNode, padKnob, event);
-    return volumePadVector(at.dx, at.dy, at.radius);
+  /** Оба отклика пальца на джойстике: ход и взгляд — что из них брать, решает `volumePadsAxes`. */
+  function stickAt(area, knob, event) {
+    const at = knobAt(area, knob, event);
+    return { move: volumePadVector(at.dx, at.dy, at.radius), look: volumeLookVector(at.dx, at.dy, at.radius) };
   }
 
   function padStart(event) {
@@ -3888,8 +3942,7 @@ function createVolume({ api, hosts }) {
         // захват указателя площадкой не дали — обойдёмся событиями окна
       }
     }
-    const move = padAt(event);
-    pad = { id: event.pointerId, forward: move.forward, side: move.side };
+    pad = { id: event.pointerId, ...stickAt(padNode, padKnob, event) };
     padNode.classList.add("is-on");
     walkSchedule();
   }
@@ -3897,8 +3950,7 @@ function createVolume({ api, hosts }) {
   function padMove(event) {
     if (!pad || event.pointerId !== pad.id) return;
     event.preventDefault();
-    const move = padAt(event);
-    pad = { id: pad.id, forward: move.forward, side: move.side };
+    pad = { id: pad.id, ...stickAt(padNode, padKnob, event) };
     walkSchedule();
   }
 
@@ -3916,11 +3968,6 @@ function createVolume({ api, hosts }) {
   // уведён от середины; снят — встала. Ходьба и взгляд — разные пальцы, и
   // каждый узнаёт свой по `pointerId`.
 
-  function lookAt(event) {
-    const at = knobAt(lookNode, lookKnob, event);
-    return volumeLookVector(at.dx, at.dy, at.radius);
-  }
-
   function lookStart(event) {
     if (lookPad || closed) return;
     setTouch(true);
@@ -3932,8 +3979,7 @@ function createVolume({ api, hosts }) {
         // захват указателя джойстиком не дали — обойдёмся событиями окна
       }
     }
-    const turn = lookAt(event);
-    lookPad = { id: event.pointerId, yaw: turn.yaw, pitch: turn.pitch };
+    lookPad = { id: event.pointerId, ...stickAt(lookNode, lookKnob, event) };
     lookNode.classList.add("is-on");
     walkSchedule();
   }
@@ -3941,8 +3987,7 @@ function createVolume({ api, hosts }) {
   function lookMove(event) {
     if (!lookPad || event.pointerId !== lookPad.id) return;
     event.preventDefault();
-    const turn = lookAt(event);
-    lookPad = { id: lookPad.id, yaw: turn.yaw, pitch: turn.pitch };
+    lookPad = { id: lookPad.id, ...stickAt(lookNode, lookKnob, event) };
     walkSchedule();
   }
 
@@ -4591,6 +4636,8 @@ function createVolume({ api, hosts }) {
       ghost: ghosting(),
       // Дом идёт (таск 09 сценариев): E и щелчок управляют устройствами.
       home: homeOn(),
+      // Джойстики с переставленными вертикалями говорят про себя иначе.
+      padsCrossed: volumeParamsRead().padsCrossed === true,
     });
     // Подсказка в полном экране не уходит, а **складывается в свой знак**
     // (таск 166, G246). Она единственная из спрятанного говорит про руки:

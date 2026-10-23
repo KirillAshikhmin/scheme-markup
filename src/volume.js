@@ -465,12 +465,23 @@ export const VOLUME_GLOW_MIN = 0.35;
  * Насколько свет комнаты снимает тон ночи при полной яркости. С правки после
  * сборки сценариев «полная» — это не одна лампа, а сумма многих
  * (`volumeRoomShare`), и предел поднят: комната, где горит всё, светлее, чем
- * прежде светила одна лампа.
+ * прежде светила одна лампа. Вторая правка («свет от светильников сделай ярче,
+ * днём сейчас их вообще не видно, ночью сейчас дают приглушённый свет, а должны
+ * освещать»; «не только днём, но и ночью, всегда») подняла его ещё раз.
  */
-export const VOLUME_ROOM_LIGHT = 0.85;
+export const VOLUME_ROOM_LIGHT = 0.95;
 /** Тёплый тон, к которому тянется ночь в освещённой комнате, и его доля. */
 export const VOLUME_ROOM_WARM_RGB = [120, 96, 60];
 export const VOLUME_ROOM_WARM = 0.5;
+/**
+ * Свет лампы — тёплый белый — и доля, на которую горящая лампа тянет к нему
+ * комнату **сверх** дневной светлоты: без неё днём лампы не видно вовсе — тона
+ * ночи, который она снимает, днём нет.
+ */
+export const VOLUME_LAMP_LIGHT_RGB = [255, 224, 176];
+export const VOLUME_LAMP_LIGHT_SHARE = 0.14;
+/** Насколько пятно лампы поднимает светлоту грани к единице: под лампой светлее, чем днём. */
+export const VOLUME_LAMP_LIFT = 0.55;
 /**
  * Кромка перекрытия (таск 209, дефект D60). Бетон темнее стены: перекрытие —
  * это то, что **между** этажами, и в кадре оно обязано читаться полосой, а не
@@ -1590,7 +1601,7 @@ function vectorsAlong(u, e) {
  * наоборот: уехавшая за контур часть пятна не выбрасывается, а поднимается по
  * той стене, на которую свет и попадает. Разбор — у `volumeSunBeam`.
  */
-export function volumeSunSpotFaces(spots, shadow, out = []) {
+export function volumeSunSpotFaces(spots, shadow, out = [], moon = null) {
   const fade = shadow ? Math.max(0, Math.min(1, Number(shadow.fade))) : 0;
   if (!spots || spots.length === 0 || !(fade > 0)) return out;
   const rise = Number(shadow.rise);
@@ -1637,6 +1648,8 @@ export function volumeSunSpotFaces(spots, shadow, out = []) {
         // вошло, и рисоваться раньше перекрытия этажа выше — иначе оно легло бы
         // светлым пятном на крышу.
         baseMm: Number(spot.baseMm) || 0,
+        // Пятно луны (`volumeMoonSpotFaces`): своя сила и комната грани.
+        moon,
       },
       // Вход первого шага — сама плоскость проёма: дальше луча считать от неё.
       { t0: 0, t1: 0 },
@@ -1764,7 +1777,7 @@ const VOLUME_SUN_MIN_MM2 = 50;
  */
 function volumeSunBeam(faceMm, room, ctx, entry, steps, out) {
   if (!faceMm || faceMm.length < 3 || !room || !room.pointsMm) return out;
-  const { origin, u, dir, reach, fade, baseMm } = ctx;
+  const { origin, u, dir, reach, fade, baseMm, moon } = ctx;
   const points = room.pointsMm;
   // ——— пол: та же обрезка контуром, что с таска 196 ———
   const floor = volumeClipPolygon(
@@ -1781,10 +1794,12 @@ function volumeSunBeam(faceMm, room, ctx, entry, steps, out) {
       // после него, закрасил бы его целиком. Место в очереди пятну считает то
       // же дерево (`volumeOrderRank`): грань пятна коплоскостна полу, и обход
       // ставит её сразу за ним, а тело, стоящее на этом полу, — после неё.
-      volumeFace(floor.map((point) => volumeAt(point, baseMm)), volumeSunSpotRgb(fade), {
-        normal: { x: 0, y: 0, z: 1 },
-        flat: true,
-      }),
+      moon
+        ? volumeMoonFace(floor.map((point) => volumeAt(point, baseMm)), VOLUME_FLOOR_RGB, { x: 0, y: 0, z: 1 }, room, moon)
+        : volumeFace(floor.map((point) => volumeAt(point, baseMm)), volumeSunSpotRgb(fade), {
+            normal: { x: 0, y: 0, z: 1 },
+            flat: true,
+          }),
     );
   }
   if (!room.edges) return out;
@@ -1905,7 +1920,11 @@ function volumeSunBeam(faceMm, room, ctx, entry, steps, out) {
     for (const tile of one.wall.tiles) {
       const patch = volumeSunFaceClip(beam, tile, faceAt);
       if (patch.length < 3 || volumeSunArea(patch) < VOLUME_SUN_MIN_MM2) continue;
-      out.push(volumeFace(patch.map(spotAt), rgb, { normal: inside, flat: true }));
+      out.push(
+        moon
+          ? volumeMoonFace(patch.map(spotAt), VOLUME_WALL_RGB, inside, room, moon)
+          : volumeFace(patch.map(spotAt), rgb, { normal: inside, flat: true }),
+      );
     }
     if (steps <= 0) continue;
     // Второй шаг: что попало в проём, идёт дальше тем же пучком.
@@ -1917,6 +1936,57 @@ function volumeSunBeam(faceMm, room, ctx, entry, steps, out) {
     }
   }
   return out;
+}
+
+// ——— пятно луны (правка после сборки сценариев) ————————————————————————————
+//
+// Слова заказчика: «От луны должно быть тоже освещение, но слабое, и чем
+// полнее луна, тем сильнее, ну и белым светом». До правки луна пятен не давала
+// («света у неё для этого нет»); при физическом свете даёт — тем же пучком, что
+// солнце (`volumeSunBeam`), только краска другая: не пол, поднятый до светлоты
+// единицы, а та же грань в тоне своей комнаты, с которой луна снимает часть тьмы
+// и тянет её к белому (`volumeMoonTint`). Так пятно луны на полу комнаты, где
+// горит свет, почти не видно — как и в жизни.
+
+/** Сила пятна полной луны в зените: доля тьмы, которую она снимает. */
+export const VOLUME_MOON_SPOT = 0.6;
+/** Белый свет луны и доля, на которую пятно тянет к нему грань. */
+export const VOLUME_MOON_LIGHT_RGB = [226, 230, 238];
+const VOLUME_MOON_GLOW = 0.08;
+
+/** Грань пятна луны: сама поверхность, её комната и сила луны. */
+function volumeMoonFace(points, rgb, normal, room, moon) {
+  const face = volumeFace(points, rgb, { normal, room: moon.keyOf ? moon.keyOf(room) : null });
+  face.moon = moon.strength;
+  return face;
+}
+
+/**
+ * Грани пятен луны в этот час. `moonLight` — `{az, rise, fade}` из снимка часа
+ * (`volumeMood`): `fade` — освещённая доля диска на то, насколько луна видна и
+ * высоко ли стоит. Новолуние пятен не даёт, полнолуние — самые яркие.
+ * `rooms` — помещения сцены: по ним пятно узнаёт свою комнату.
+ */
+export function volumeMoonSpotFaces(spots, moonLight, rooms, out = []) {
+  const strength = moonLight ? volumeShare01(moonLight.fade) * VOLUME_MOON_SPOT : 0;
+  if (!(strength > 0.01)) return out;
+  const byPoints = new Map();
+  for (const room of rooms || []) if (room && room.pointsMm) byPoints.set(room.pointsMm, volumeRoomKey(room));
+  const keyOf = (room) => (room && byPoints.get(room.pointsMm)) || null;
+  return volumeSunSpotFaces(spots, { az: moonLight.az, rise: moonLight.rise, fade: 1 }, out, { strength, keyOf });
+}
+
+/**
+ * Тон грани под луной: тьма меньше на силу луны, и к белому — чуть-чуть.
+ * Смесь двух целей — одна цель с суммой долей, как у лампы (`volumeRoomTint`).
+ */
+export function volumeMoonTint(tint, strength) {
+  const share = tint ? volumeShare01(tint.share) : 0;
+  const moon = volumeShare01(strength);
+  if (!(moon > 0)) return tint;
+  const dark = share * (1 - moon);
+  const glow = VOLUME_MOON_GLOW * moon;
+  return { rgb: volumeMix((tint && tint.rgb) || VOLUME_NIGHT_RGB, VOLUME_MOON_LIGHT_RGB, glow / (dark + glow)), share: dark + glow };
 }
 
 /** Выпуклая оболочка (обход Эндрю). Точек мало — восемь на стену. */
@@ -2434,7 +2504,9 @@ function volumeTagSides(wall, opening, faces, from, rooms) {
   const a = volumeRoomKeyAt(rooms, probe(1));
   const b = volumeRoomKeyAt(rooms, probe(-1));
   if (!a && !b) return;
-  const sides = { a: a || b, b: b || a, key: (a || "") + "|" + (b || "") };
+  // `out` — с одной стороны улица (правка «солнце и луна»): откос окна светлеет
+  // и по небу.
+  const sides = { a: a || b, b: b || a, key: (a || "") + "|" + (b || ""), out: !a || !b };
   for (let index = from; index < faces.length; index += 1) {
     if (!faces[index].line && !faces[index].room) faces[index].sides = sides;
   }
@@ -7436,19 +7508,26 @@ export function volumeFrame(scene, camera, box, extra = null, tint = null, live 
   const stacked = ownFloor !== undefined && ownFloor !== null;
   // Тон освещённой комнаты считается **раз на комнату и кадр**, а не на грань:
   // граней в комнате сотни, а тон у них один. `full` — тон полной лампы: им
-  // красятся кольца пятен (правка после сборки сценариев).
+  // красятся кольца пятен (правка после сборки сценариев); при свете неба он
+  // считается от самой тёмной комнаты — лампа светит одинаково днём и ночью.
+  // `sky` — тон улицы: им красятся кольца окон.
+  const day = live && live.day ? live.day : null;
   const lit = live
     ? {
         glow: live.glow || null,
         rooms: live.rooms || null,
+        day,
         physical: live.physical === true,
         tints: new Map(),
-        full: volumeRoomTint(tint, 1),
+        full: volumeRoomTint(day ? volumeIndoorTint(tint, 0) : tint, 1),
+        sky: tint || VOLUME_NOON_TINT,
       }
     : null;
-  // Пятна ламп — только ночью и в сумерках: днём тона ночи нет, и кольцо
-  // легло бы на грань её же цветом — работа без картинки.
-  const decals = live && live.decals && tint && tint.share > VOLUME_LAMP_DUSK ? live.decals : null;
+  // Пятна ламп без света неба — только ночью и в сумерках: днём тона ночи нет,
+  // и комната вся светла. Со светом неба днём темно в комнате без окон, и пятна
+  // рисуются всегда.
+  const decals = live && live.decals && (day || (tint && tint.share > VOLUME_LAMP_DUSK)) ? live.decals : null;
+  const skyDecals = live && live.skyDecals ? live.skyDecals : null;
   const take = (face, order) =>
     volumeFacePolygons(
       face,
@@ -7478,7 +7557,17 @@ export function volumeFrame(scene, camera, box, extra = null, tint = null, live 
         const strength = live.lamps ? live.lamps.get(ring.markId) : 0;
         const alpha = ring.alpha * (strength || 0);
         if (!(alpha > VOLUME_LAMP_INVISIBLE)) continue;
-        take({ p: ring.p, n: face.n, rgb: face.rgb, layer: face.layer, flat: face.flat, decal: alpha }, rank);
+        take({ p: ring.p, n: face.n, rgb: face.rgb, layer: face.layer, flat: face.flat, decal: alpha, lamp: true }, rank);
+      }
+    }
+    // Кольца окон — тем же правилом; сила окна — доля неба на штору.
+    const panes = skyDecals ? skyDecals.get(face) : null;
+    if (panes) {
+      for (const ring of panes) {
+        const strength = live.windows ? live.windows.get(ring.markId) : 0;
+        const alpha = ring.alpha * (strength || 0);
+        if (!(alpha > VOLUME_LAMP_INVISIBLE)) continue;
+        take({ p: ring.p, n: face.n, rgb: face.rgb, layer: face.layer, flat: face.flat, decal: alpha, lamp: false }, rank);
       }
     }
     rank += 1;
@@ -7662,14 +7751,22 @@ function volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, b
  * и потолке (`decals`, `volumeLampDecals`); соседняя комната за открытым
  * проёмом получает долю отражённого (`VOLUME_LAMP_SPILL`) и клин пятна сквозь
  * проём; откосы и полотна проёмов светлеют по более светлой стороне.
+ *
+ * `options.tint` — **тон часа** (`volumeMood().tint`): с ним физический свет
+ * светит и небом (правка «Для солнца и Луны тоже примени физический свет»).
+ * Тогда ответ есть и у дома, где не горит ничего, и даже без имитации: комнату
+ * светят её окна (`day`, `volumeDayLevels`), у окна светлее (`skyDecals`,
+ * `volumeWindowDecals`), а сила окна — доля неба на штору (`windows`). Без тона
+ * — как до правки: небо комнаты светит ровно, тем же тоном, что улицу.
  */
 export function volumeLiveLight(scene, live, options = {}) {
-  if (!live || live.size === 0) return null;
   const physical = options.physical === true;
+  const sky = physical && options.tint !== undefined;
+  if ((!live || live.size === 0) && !sky) return null;
   const glow = new Map();
   const lamps = new Map();
   const sums = new Map();
-  for (const [markId, item] of live) {
+  for (const [markId, item] of live || []) {
     if (!item || item.on !== true) continue;
     const fade = lightFadeOf(item);
     if (item.kind === "tv") {
@@ -7685,18 +7782,26 @@ export function volumeLiveLight(scene, live, options = {}) {
     const key = item.roomId || volumeRoomKeyAt(scene && scene.rooms, volumeMarkProbe(place));
     if (key) sums.set(key, (sums.get(key) || 0) + volumeLampPower(place) * strength);
   }
-  if (glow.size === 0) return null;
+  if (glow.size === 0 && !sky) return null;
   const areas = volumeRoomAreas(scene);
   const rooms = new Map();
   for (const [key, sum] of sums) rooms.set(key, volumeRoomShare(sum * (physical ? VOLUME_LAMP_BOUNCE : 1), areas.get(key)));
   if (physical) volumeLampSpill(scene, rooms);
-  return {
+  const out = {
     glow,
     rooms,
     physical,
     lamps,
-    decals: physical ? volumeLampDecals(scene, live) : null,
+    decals: physical && live && lamps.size > 0 ? volumeLampDecals(scene, live) : null,
   };
+  if (sky) {
+    const share = volumeSkyShare(options.tint);
+    out.day = volumeDayLevels(scene, share);
+    out.windows = new Map();
+    for (const window of volumeSkyWindows(scene).list) out.windows.set(window.id, share * window.pass);
+    out.skyDecals = share > VOLUME_LAMP_INVISIBLE ? volumeWindowDecals(scene) : null;
+  }
+  return out;
 }
 
 // ——— свет ламп: сила, комната, пятна (правка после сборки сценариев) ————————
@@ -7718,18 +7823,19 @@ export function volumeLiveLight(scene, live, options = {}) {
 // Днём ночного тона нет — нет и света от ламп: пятна не рисуются вовсе.
 
 /** Сила лампы — от и до: самая слабая подсветка и люстра. */
-export const VOLUME_LAMP_POWER_MIN = 0.15;
+export const VOLUME_LAMP_POWER_MIN = 0.06;
 export const VOLUME_LAMP_POWER_MAX = 1.6;
 /**
  * Площадь, которую лампа силы 1 на полной яркости светит **на долю 1 − 1/e**
- * (`volumeRoomShare`): обычный светильник в гостиной 16 м² даёт чуть больше
- * трети, три — три четверти.
+ * (`volumeRoomShare`): обычный светильник в гостиной 16 м² даёт больше двух
+ * третей, два — девять десятых. Было 8 м², и заказчик сказал: «ночью сейчас
+ * дают приглушённый свет, а должны освещать».
  */
-export const VOLUME_LAMP_AREA_MM2 = 8e6;
+export const VOLUME_LAMP_AREA_MM2 = 20e6;
 /** Комната без своей площади (контур не обведён) — средняя комната. */
 const VOLUME_LAMP_ROOM_MM2 = 15e6;
 /** Доля света комнаты, которая при физическом свете остаётся отражённой. */
-export const VOLUME_LAMP_BOUNCE = 0.45;
+export const VOLUME_LAMP_BOUNCE = 0.6;
 /** Доля отражённого света, которую открытый дверной проём отдаёт соседке. */
 export const VOLUME_LAMP_SPILL = 0.3;
 /** Площадь проёма, при которой соседке отдаётся вся эта доля, — дверь 900 × 2100. */
@@ -7927,6 +8033,175 @@ function volumeLampSpill(scene, rooms) {
   }
 }
 
+// ——— свет неба: окна, солнце и луна (правка после сборки сценариев) ————————
+//
+// Слова заказчика: «Для солнца и Луны тоже примени физический свет» и «От луны
+// должно быть тоже освещение, но слабое, и чем полнее луна, тем сильнее, ну и
+// белым светом».
+//
+// Без физического света небо светит дом ровно: тон часа один у улицы и у
+// каждой комнаты. С ним комнату светят **её окна**:
+//
+//   — **свет комнаты** — доля неба (`volumeSkyShare`: 1 днём, 0 ночью, у луны —
+//     её доля, см. `volumeMood`) на то, сколько у комнаты окон против пола
+//     (`volumeWindowShare`), и на долю, что расходится ровно
+//     (`VOLUME_DAY_BOUNCE`). Комната без окон днём темна, как ночью; открытый
+//     проём отдаёт соседке долю её света (`volumeLampSpill`);
+//   — **пятно окна** — кольца у окна на полу, стенах и потолке, тем же приёмом,
+//     что пятно лампы (`volumeLampPool`): у окна светлее, в глубине темнее, а
+//     сквозь открытую дверь свет ложится клином в соседнюю комнату;
+//   — **солнце** по-прежнему кладёт свои пятна (`volumeSunSpotFaces`), а
+//     **луна** с правки — свои (`volumeMoonSpotFaces`).
+//
+// Окно — проём своего этажа, у которого с одной стороны комната, а с другой
+// улица (`scene.sunSpots`, те же стороны, шторы и двери, что у солнца). Глухая
+// закрытая дверь света не пропускает, задёрнутая штора — часть
+// (`VOLUME_SHEER_PASS`).
+
+/** Цвет тьмы в комнате днём: серый, а не синий — синева у ночи от неба. */
+export const VOLUME_INDOOR_RGB = [30, 29, 34];
+/** Окна против пола: `1 − e^(−k · окна / пол)`. По норме окно — восьмая пола, и это 0,85. */
+const VOLUME_WINDOW_GAIN = 15;
+/** Доля света окон, которая расходится по комнате ровно; остальное — пятно у окна. */
+export const VOLUME_DAY_BOUNCE = 0.85;
+/** Сколько света пропускает задёрнутая штора: тюль, а не стена. */
+export const VOLUME_SHEER_PASS = 0.35;
+/** Вынос точки света окна в комнату: свет берётся не из стекла, а из воздуха перед ним. */
+const VOLUME_WINDOW_OUT_MM = 500;
+/** Сила окна на квадратный метр проёма — мера пятна та же, что у лампы. */
+const VOLUME_WINDOW_POWER_M2 = 0.25;
+/** Насколько пятно окна поднимает светлоту грани к единице: у окна светлее, чем в глубине. */
+export const VOLUME_WINDOW_LIFT = 0.3;
+
+/** Полдень: тон без тьмы — им окно светит, когда часа не дали. */
+const VOLUME_NOON_TINT = Object.freeze({ share: 0 });
+
+/** Доля неба: 1 — день, 0 — ночь. Тон часа — тот же, которым темнеет улица. */
+export function volumeSkyShare(tint) {
+  const share = tint ? volumeShare01(tint.share) : 0;
+  return 1 - Math.min(1, share / VOLUME_NIGHT_SHARE);
+}
+
+/**
+ * Тон комнаты, которую светит небо: тьма — та же, что ночью
+ * (`VOLUME_NIGHT_SHARE`), без света `level` — она вся; цвет её днём серый,
+ * к ночи — синий цвет ночи.
+ */
+export function volumeIndoorTint(tint, level) {
+  const outside = tint ? volumeShare01(tint.share) : 0;
+  const night = Math.min(1, outside / VOLUME_NIGHT_SHARE);
+  return {
+    rgb: volumeMix(VOLUME_INDOOR_RGB, (tint && tint.rgb) || VOLUME_NIGHT_RGB, night),
+    share: Math.max(outside, VOLUME_NIGHT_SHARE) * (1 - volumeShare01(level)),
+  };
+}
+
+/** Сколько света дают окна комнате: `1 − e^(−k · окна / пол)`. */
+export function volumeWindowShare(windowMm2, floorMm2) {
+  const floor = Math.max(2e6, Number(floorMm2) > 0 ? Number(floorMm2) : VOLUME_LAMP_ROOM_MM2);
+  return 1 - Math.exp(-(VOLUME_WINDOW_GAIN * Math.max(0, Number(windowMm2) || 0)) / floor);
+}
+
+const volumeWindowMemo = new WeakMap();
+
+/**
+ * Окна сцены — раз на сцену: `{list: [{id, key, areaMm2, pass, source}], byRoom:
+ * Map<ключ комнаты, площадь окон с поправкой на шторы>}`. `source` — точка
+ * света окна для пятна (`volumeLampPool`): посреди проёма, вынесенная в
+ * комнату, светит в комнату и вниз.
+ */
+function volumeSkyWindows(scene) {
+  const held = scene ? volumeWindowMemo.get(scene) : null;
+  if (held) return held;
+  const byPoints = new Map();
+  for (const room of (scene && scene.rooms) || []) byPoints.set(room.pointsMm, volumeRoomKey(room));
+  const list = [];
+  const byRoom = new Map();
+  ((scene && scene.sunSpots) || []).forEach((spot, index) => {
+    if (spot.shut) return;
+    // С одной стороны комната, с другой улица; комната — своего этажа.
+    if (Boolean(spot.left) === Boolean(spot.right)) return;
+    const key = spot.left ? byPoints.get(spot.left.pointsMm) : byPoints.get(spot.right.pointsMm);
+    if (!key) return;
+    const sign = spot.left ? 1 : -1;
+    const areaMm2 = (spot.toMm - spot.fromMm) * (spot.topMm - spot.bottomMm);
+    if (!(areaMm2 > 0)) return;
+    const pass = spot.sheerMarkId ? VOLUME_SHEER_PASS : 1;
+    const along = (spot.fromMm + spot.toMm) / 2;
+    const out = spot.halfMm + VOLUME_WINDOW_OUT_MM;
+    const inward = { x: spot.n.x * sign, y: spot.n.y * sign };
+    list.push({
+      id: "sky:" + index,
+      key,
+      areaMm2,
+      pass,
+      source: {
+        at: {
+          x: spot.aMm.x + spot.u.x * along + inward.x * out,
+          y: spot.aMm.y + spot.u.y * along + inward.y * out,
+          z: (Number(spot.baseMm) || 0) + (spot.bottomMm + spot.topMm) / 2,
+        },
+        power: Math.max(0.2, Math.min(VOLUME_LAMP_POWER_MAX, (areaMm2 / 1e6) * VOLUME_WINDOW_POWER_M2)),
+        dir: volumeNormalize({ x: inward.x, y: inward.y, z: -0.6 }),
+        wall: null,
+        beam: 1.1,
+        sky: true,
+      },
+    });
+    byRoom.set(key, (byRoom.get(key) || 0) + areaMm2 * pass);
+  });
+  const windows = { list, byRoom };
+  if (scene) volumeWindowMemo.set(scene, windows);
+  return windows;
+}
+
+const volumeDayMemo = new WeakMap();
+
+/**
+ * Свет неба по комнатам: `Map<ключ, 0…1>` — у каждой комнаты своего этажа,
+ * без окон ноль. Считается на долю неба и помнится, пока она та же.
+ */
+export function volumeDayLevels(scene, sky) {
+  const held = scene ? volumeDayMemo.get(scene) : null;
+  if (held && held.sky === sky) return held.day;
+  const areas = volumeRoomAreas(scene);
+  const day = new Map();
+  for (const key of areas.keys()) day.set(key, 0);
+  if (sky > 0) {
+    for (const [key, area] of volumeSkyWindows(scene).byRoom) {
+      day.set(key, volumeWindowShare(area, areas.get(key)) * sky * VOLUME_DAY_BOUNCE);
+    }
+    volumeLampSpill(scene, day);
+  }
+  if (scene) volumeDayMemo.set(scene, { sky, day });
+  return day;
+}
+
+const volumeWindowDecalMemo = new WeakMap();
+
+/** Пятна окон сцены — как пятна ламп (`volumeLampDecals`), раз на сцену. */
+export function volumeWindowDecals(scene) {
+  if (!scene || !scene.order) return null;
+  const held = volumeWindowDecalMemo.get(scene);
+  if (held) return held;
+  const decals = new Map();
+  const byRoom = volumeDecalHosts(scene);
+  const ways = volumeLampOpenings(scene).filter((way) => !way.shut);
+  for (const window of volumeSkyWindows(scene).list) volumeSourcePools(decals, byRoom, ways, window.key, window.id, window.source);
+  volumeWindowDecalMemo.set(scene, decals);
+  return decals;
+}
+
+/**
+ * Тон для кадра: тот из двух, при котором грань светлее. Сравнивается не доля
+ * тьмы, а цвет: у лампы днём доля растёт — это свет, а не тьма.
+ */
+function volumeBrighterTint(one, two) {
+  const grey = [200, 200, 200];
+  const sum = (tint) => volumeTintRgb(grey, tint).reduce((total, value) => total + value, 0);
+  return sum(two) > sum(one) ? two : one;
+}
+
 // ——— пятна ламп ———
 
 /**
@@ -7937,9 +8212,9 @@ function volumeLampSpill(scene, rooms) {
  */
 export const VOLUME_LAMP_RINGS = Object.freeze([0.05, 0.13, 0.25, 0.41, 0.6, 0.82]);
 /** Самое яркое место пятна: даже под лампой стена остаётся стеной. */
-const VOLUME_LAMP_PEAK = 0.85;
-/** Сила пятна: доля на мм² — середина пятна плафона на полу под ним около половины. */
-const VOLUME_LAMP_GAIN = 4e6;
+const VOLUME_LAMP_PEAK = 0.9;
+/** Сила пятна: доля на мм² — пол под плафоном светится в полную силу пятна. */
+const VOLUME_LAMP_GAIN = 9e6;
 /** Размытие точки света: лампа не точка, и пятно у самой стены не сходится в иглу. */
 const VOLUME_LAMP_SOFT_MM = 300;
 /** Дальше этого пятно не растёт: весь пол квартиры одной лампой не светится. */
@@ -7980,6 +8255,25 @@ export function volumeLampDecals(scene, live) {
 
 function volumeLampDecalsBuild(scene, ids, live) {
   const decals = new Map();
+  const byRoom = volumeDecalHosts(scene);
+  const ways = volumeLampOpenings(scene).filter((way) => !way.shut);
+  for (const markId of ids) {
+    const place = volumeMarkPlace(scene, markId);
+    if (!place) continue;
+    const item = live.get(markId);
+    const key = (item && item.roomId) || volumeRoomKeyAt(scene.rooms, volumeMarkProbe(place));
+    if (!key) continue;
+    for (const source of volumeLampSources(place)) volumeSourcePools(decals, byRoom, ways, key, markId, source);
+  }
+  return decals;
+}
+
+const volumeHostMemo = new WeakMap();
+
+/** На чём лежат пятна: куски пола, стен и потолка дерева порядка по комнатам — раз на сцену. */
+function volumeDecalHosts(scene) {
+  const held = volumeHostMemo.get(scene);
+  if (held) return held;
   const byRoom = new Map();
   for (const face of volumeOrderAll(scene.order, [])) {
     if (!face.room || face.line) continue;
@@ -7988,27 +8282,22 @@ function volumeLampDecalsBuild(scene, ids, live) {
     if (!list) byRoom.set(face.room, (list = []));
     list.push(face);
   }
-  const ways = volumeLampOpenings(scene).filter((way) => !way.shut);
-  for (const markId of ids) {
-    const place = volumeMarkPlace(scene, markId);
-    if (!place) continue;
-    const item = live.get(markId);
-    const key = (item && item.roomId) || volumeRoomKeyAt(scene.rooms, volumeMarkProbe(place));
-    if (!key) continue;
-    for (const source of volumeLampSources(place)) {
-      for (const host of byRoom.get(key) || []) volumeLampPool(decals, host, markId, source, null);
-      for (const way of ways) {
-        const into = way.left === key ? way.right : way.right === key ? way.left : null;
-        if (!into) continue;
-        // Ближняя к лампе сторона проёма и дальняя: пучок срезают обе, как
-        // срезают его косяки.
-        const near = way.left === key ? way.plus : way.minus;
-        const far = way.left === key ? way.minus : way.plus;
-        for (const host of byRoom.get(into) || []) volumeLampPool(decals, host, markId, source, { near, far });
-      }
-    }
+  volumeHostMemo.set(scene, byRoom);
+  return byRoom;
+}
+
+/** Пятно одного источника: на кусках своей комнаты и клином сквозь открытые проёмы. */
+function volumeSourcePools(decals, byRoom, ways, key, id, source) {
+  for (const host of byRoom.get(key) || []) volumeLampPool(decals, host, id, source, null);
+  for (const way of ways) {
+    const into = way.left === key ? way.right : way.right === key ? way.left : null;
+    if (!into) continue;
+    // Ближняя к источнику сторона проёма и дальняя: пучок срезают обе, как
+    // срезают его косяки.
+    const near = way.left === key ? way.plus : way.minus;
+    const far = way.left === key ? way.minus : way.plus;
+    for (const host of byRoom.get(into) || []) volumeLampPool(decals, host, id, source, { near, far });
   }
-  return decals;
 }
 
 /** Все грани дерева порядка — куски, как они лежат в узлах. */
@@ -8029,6 +8318,9 @@ function volumeLampFacing(n, source, distanceMm) {
   if (source.wall && n.x * source.wall.x + n.y * source.wall.y > 0.9 && distanceMm < 300) return 1;
   if (!source.dir) return 0.6;
   const k = -(n.x * source.dir.x + n.y * source.dir.y + n.z * source.dir.z);
+  // Окно светит туда, куда смотрит, и почти не светит себе за спину: своя
+  // стена окна и потолок над ним — самые тёмные в комнате.
+  if (source.sky) return ((k + 1) / 2) ** 2;
   return 0.15 + (0.85 * (k + 1)) / 2;
 }
 
@@ -8154,25 +8446,48 @@ function volumeLampBeam(edge, L, n, o) {
 function volumeLiveFill(face, normal, tint, live) {
   const alpha = face.alpha === undefined ? 1 : face.alpha;
   const shade = face.flat ? 1 : volumeShade(normal);
-  if (face.decal !== undefined) return volumeFill(face.rgb, shade, face.decal, live.full);
+  if (face.decal !== undefined) {
+    // Под лампой и у окна грань светлее, чем просто без тьмы: светлота
+    // поднимается к единице (`VOLUME_LAMP_LIFT`, `VOLUME_WINDOW_LIFT`).
+    const lift = face.lamp === false ? VOLUME_WINDOW_LIFT : VOLUME_LAMP_LIFT;
+    return volumeFill(face.rgb, shade + (1 - shade) * lift, face.decal, face.lamp === false ? live.sky : live.full);
+  }
   if (face.led) return volumeFill(face.rgb, 1, 1, null);
   if (face.lit && face.markId && live.glow) {
     const glow = live.glow.get(face.markId);
     if (glow) return volumeGlowFill(face.rgb, glow, alpha, tint, shade);
   }
-  if (live.rooms) {
-    const key = face.room || (live.physical && face.sides ? face.sides.key : null);
-    if (key) {
-      let own = live.tints ? live.tints.get(key) : undefined;
-      if (own === undefined) {
-        const level = face.room ? live.rooms.get(key) : Math.max(live.rooms.get(face.sides.a) || 0, live.rooms.get(face.sides.b) || 0);
-        own = level > 0 ? volumeRoomTint(tint, level) : null;
-        if (live.tints) live.tints.set(key, own);
-      }
-      if (own) return volumeFill(face.rgb, shade, alpha, own);
-    }
-  }
-  return volumeFill(face.rgb, shade, alpha, tint);
+  const own = volumeLiveTint(face, tint, live);
+  return volumeFill(face.rgb, shade, alpha, face.moon ? volumeMoonTint(own, face.moon) : own);
+}
+
+/**
+ * Тон грани в доме: у грани комнаты — тон её комнаты, у откоса и полотна при
+ * физическом свете — более светлой из сторон (и улицы, если она с одной
+ * стороны), у остального — тон часа. Считается раз на комнату и кадр.
+ */
+function volumeLiveTint(face, tint, live) {
+  if (!live.rooms && !live.day) return tint;
+  if (face.room) return volumeRoomTintOf(face.room, tint, live);
+  if (!live.physical || !face.sides) return tint;
+  const sides = face.sides;
+  const held = live.tints ? live.tints.get(sides.key) : undefined;
+  if (held !== undefined) return held;
+  let own = volumeBrighterTint(volumeRoomTintOf(sides.a, tint, live), volumeRoomTintOf(sides.b, tint, live));
+  if (sides.out) own = volumeBrighterTint(own, tint);
+  if (live.tints) live.tints.set(sides.key, own);
+  return own;
+}
+
+/** Тон комнаты: свет неба (если он есть) и сверху — лампы. */
+function volumeRoomTintOf(key, tint, live) {
+  const held = live.tints ? live.tints.get(key) : undefined;
+  if (held !== undefined) return held;
+  const base = live.day && live.day.has(key) ? volumeIndoorTint(tint, live.day.get(key)) : tint;
+  const level = live.rooms ? live.rooms.get(key) || 0 : 0;
+  const own = level > 0 ? volumeRoomTint(base, level) : base;
+  if (live.tints) live.tints.set(key, own);
+  return own;
 }
 
 function volumeShare01(value) {
@@ -8206,12 +8521,16 @@ export function volumeGlowFill(rgb, glow, alpha = 1, tint = null, shade = 1) {
  */
 export function volumeRoomTint(tint, level) {
   const share = tint ? volumeShare01(tint.share) : 0;
-  if (!(share > 0)) return tint;
   const light = volumeShare01(level);
-  return {
-    rgb: volumeMix(tint.rgb || VOLUME_NIGHT_RGB, VOLUME_ROOM_WARM_RGB, VOLUME_ROOM_WARM * light),
-    share: share * (1 - VOLUME_ROOM_LIGHT * light),
-  };
+  if (!(light > 0)) return tint;
+  // Две доли в одном тоне: тьма, которая осталась, и свет лампы поверх
+  // дневной светлоты (`VOLUME_LAMP_LIGHT_SHARE`). Смесь двух целей — одна цель
+  // с суммой долей: `материал·(1 − a − b) + тьма·a + свет·b`.
+  const dark = share * (1 - VOLUME_ROOM_LIGHT * light);
+  const glow = VOLUME_LAMP_LIGHT_SHARE * light;
+  const night = volumeMix((tint && tint.rgb) || VOLUME_NIGHT_RGB, VOLUME_ROOM_WARM_RGB, VOLUME_ROOM_WARM * light);
+  const sum = dark + glow;
+  return { rgb: volumeMix(night, VOLUME_LAMP_LIGHT_RGB, glow / sum), share: sum };
 }
 
 // ——— видно, что работает (правка после сборки сценариев) ————————————————————
@@ -10086,11 +10405,12 @@ function volumeDrawTree(ctx, aim, tree, palette) {
 // а свет в окнах заказчик назвал прямо. Цена у доли в цвете нулевая: три
 // умножения на грань в том же счёте, где уже считается светлота лампы.
 //
-// Потолок доли — `VOLUME_NIGHT_SHARE` = 0,45, и это ответ на «ночь не сильно
-// тёмная»: стена 216·212·204 ночью становится 127·128·136 — тёмно-серой, но
-// различимой, а метки, их контуры и рамка выделения не темнеют вовсе (контур и
-// стрелка — линии, а линии часом не красятся). То есть ночь узнаётся небом и
-// тоном, а не потерей зрения.
+// Потолок доли — `VOLUME_NIGHT_SHARE`. Было 0,45 — ответ на «ночь не сильно
+// тёмная»; после сборки сценариев заказчик сказал: «сделай ночь темнее
+// процентов на 40», и доля стала 0,63. Стена 216·212·204 ночью становится
+// 91·95·110 — тёмной, но различимой, а метки, их контуры и рамка выделения не
+// темнеют вовсе (контур и стрелка — линии, а линии часом не красятся). Ночь
+// узнаётся небом и тоном, а светят её лампы и луна.
 //
 // ——— раз в секунду, а при стоячем времени — никогда ———————————————————
 //
@@ -10130,7 +10450,15 @@ export function volumeMoodMs(smooth) {
 }
 /** Тон ночи и его потолок: куда и насколько тянется цвет к полуночи. */
 export const VOLUME_NIGHT_RGB = [18, 26, 54];
-export const VOLUME_NIGHT_SHARE = 0.45;
+export const VOLUME_NIGHT_SHARE = 0.63;
+/**
+ * Ночь под полной луной (правка после сборки сценариев): «с полной луной можно
+ * на 20% темнее текущего уровня» — то есть прежних 0,45 · 1,2. Между ней и
+ * безлунной ночью доля идёт по фазе и высоте луны (`volumeMood`), и тянется
+ * ночь под луной не к синему, а к серому — луна светит белым.
+ */
+export const VOLUME_MOON_NIGHT_SHARE = 0.54;
+export const VOLUME_MOON_NIGHT_RGB = [40, 42, 50];
 /**
  * Угловой размер месяца. Мельче солнца, но обоим он **нарисованный, а не
  * настоящий**: у настоящих светил радиус 0,26°, и в кадре с полем зрения 90°
@@ -10519,8 +10847,8 @@ export function volumeMoonShape(radius, edge, tiltDeg = 0, steps = VOLUME_MOON_S
  *
  * Начинает темнеть не на закате, а когда солнце уже низко (6°): в жизни
  * золотой час темнее полудня, и ступенька ровно на горизонте читалась бы
- * выключателем. Потолок — `VOLUME_NIGHT_SHARE`, и это ответ на «ночь не
- * сильно тёмная».
+ * выключателем. Потолок — `VOLUME_NIGHT_SHARE`: «сделай ночь темнее
+ * процентов на 40».
  */
 export function volumeNightShare(height) {
   return VOLUME_NIGHT_SHARE * volumeShare(Number(height) || 0, 6, -8);
@@ -10593,7 +10921,6 @@ export function volumeMood(options = {}) {
   const sun = volumeSunAt(minutes, times, topDeg);
   const place = volumeMoonAt(minutes, times, topDeg);
   const share = volumeNightShare(sun.height);
-  const tint = { rgb: VOLUME_NIGHT_RGB, share };
   const sky = volumeSkyColors(sun.height);
   // Месяц виден не всегда, когда он над горизонтом: настоящая луна половину
   // месяца стоит в дневном небе и там не читается вовсе. Поэтому у него своя
@@ -10604,6 +10931,24 @@ export function volumeMood(options = {}) {
     tiltDeg: volumeMoonTiltDeg(sun, place),
     glow: volumeShare(sun.height, 3, -4),
   };
+  // Свет луны (правка после сборки сценариев): «слабое, и чем полнее луна, тем
+  // сильнее, ну и белым светом» и «с полной луной можно на 20% темнее текущего
+  // уровня. Динамически от фазы менять». Доля — освещённая часть диска на то,
+  // видна ли луна и высоко ли стоит. Ею ночь снаружи светлее и белее — под
+  // полной луной тьма `VOLUME_MOON_NIGHT_SHARE` вместо `VOLUME_NIGHT_SHARE`, — а
+  // при физическом свете луна ещё и кладёт пятна в окна (`volumeMoonSpotFaces`).
+  const moonLight = {
+    az: moon.az,
+    rise: moon.rise,
+    fade: moon.up ? volumeShare01(moon.lit) * moon.glow * volumeShare(moon.height, 1, 7) : 0,
+  };
+  const tint =
+    moonLight.fade > 0
+      ? {
+          rgb: volumeMix(VOLUME_NIGHT_RGB, VOLUME_MOON_NIGHT_RGB, moonLight.fade),
+          share: share * (1 - (1 - VOLUME_MOON_NIGHT_SHARE / VOLUME_NIGHT_SHARE) * moonLight.fade),
+        }
+      : { rgb: VOLUME_NIGHT_RGB, share };
   return {
     minutes,
     times,
@@ -10612,6 +10957,7 @@ export function volumeMood(options = {}) {
     phase: volumeDayPhase(minutes, times),
     sun,
     moon,
+    moonLight,
     tint,
     sky: { top: "rgb(" + sky.top.join(",") + ")", low: "rgb(" + sky.low.join(",") + ")" },
     sunColors: volumeSunColors(sun.height),

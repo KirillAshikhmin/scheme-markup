@@ -35,6 +35,7 @@ import {
   VOLUME_LED_KEY_RGB,
   VOLUME_LED_OFF_RGB,
   VOLUME_LED_ON_RGB,
+  VOLUME_NIGHT_RGB,
   VOLUME_SCREEN_RGB,
   VOLUME_WALL_RGB,
   volumeCurtainShare,
@@ -220,7 +221,11 @@ test("7.6: без имитации кадр «Объёма» — вызов в �
     roofOff: true,
     markImages: false,
   });
-  const prints = STAND_CAMERAS.map((camera) => print(frameLog(scene, camera, NIGHT.tint)));
+  // Отпечатки сняты при прежней ночи — доле 0,45 без луны; ночь с тех пор
+  // темнее («сделай ночь темнее процентов на 40») и светлеет от луны, а кадр
+  // без имитации обязан остаться прежним при прежнем тоне.
+  const before = { rgb: VOLUME_NIGHT_RGB, share: 0.45 };
+  const prints = STAND_CAMERAS.map((camera) => print(frameLog(scene, camera, before)));
   assert.deepEqual(prints, BEFORE_T09);
 });
 
@@ -321,7 +326,7 @@ test("2.12: экран включённого телевизора загора�
   assert.ok(b > r, "экран светится тёплым, а не своим холодным цветом: " + changed[0].fill);
 });
 
-test("2.12: комната с включённым светом ночью светлее по яркости, днём почти не меняется", () => {
+test("2.12: комната с включённым светом ночью светлее по яркости, днём — чуть теплее и светлее", () => {
   const stand = simStand();
   const scene = volumeScene(stand.project, stand.schemeId, { roofOff: true });
   const roomAt = (level, tint) => standFrame(stand, scene, tint, { glow: new Map(), rooms: new Map([[stand.roomId, level]]) });
@@ -337,14 +342,20 @@ test("2.12: комната с включённым светом ночью св�
   }
   const sum = (frame) => changed.reduce((total, index) => total + lightOf(frame[index].fill), 0);
   assert.ok(sum(half) > sum(night) && sum(half) < sum(lit), "свет не пропорционален яркости");
-  // Днём — почти без изменений: ни одна грань не светлеет больше чем на 3 %.
+  // Днём лампу тоже видно — слова заказчика: «днём сейчас их вообще не видно»:
+  // грани комнаты светлеют, но не темнеют и не уходят в белое — не больше чем
+  // на 15 %.
   const noon = standFrame(stand, scene, DAY.tint);
   const noonLit = roomAt(1, DAY.tint);
+  let brighter = 0;
   noonLit.forEach((polygon, index) => {
     if (!polygon.fill) return;
     const before = lightOf(noon[index].fill);
-    assert.ok(Math.abs(lightOf(polygon.fill) - before) <= before * 0.03 + 1, "днём свет комнаты заметен: " + polygon.fill + " против " + noon[index].fill);
+    const after = lightOf(polygon.fill);
+    if (after > before) brighter += 1;
+    assert.ok(after >= before - 1 && after <= before * 1.15 + 1, "днём свет комнаты не тот: " + polygon.fill + " против " + noon[index].fill);
   });
+  assert.ok(brighter >= 10, "днём горящую лампу не видно: " + brighter);
   // Улица и чужое не светлеют: наружные стороны стен и земля — как были.
   const outside = night.map((polygon, index) => index).filter((index) => !changed.includes(index));
   assert.ok(outside.length > 0, "посветлело всё подряд, включая улицу");
@@ -454,7 +465,9 @@ test("2.12: что светится и где горит свет — по со�
   // Свет комнаты — от светильников, не от телевизора: комната светлеет по
   // яркости лампы.
   const one = light.rooms.get(stand.roomId);
-  assert.ok(one > 0 && one < 0.4, "одна лампа на 40 % залила комнату: " + one);
+  // С правки «свет от светильников сделай ярче» одна лампа на 40 % светит
+  // комнату наполовину — но не целиком.
+  assert.ok(one > 0 && one < 0.6, "одна лампа на 40 % залила комнату: " + one);
   // «Чем больше света включено, тем ярче в комнате» (правка после сборки
   // сценариев): яркость лампы и вторая лампа добавляют, а светлее полной
   // комната не бывает.
