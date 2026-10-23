@@ -66,6 +66,7 @@ import {
   openingLeavesOf,
   openingMotionOf,
   openingWalkThrough,
+  MARK_CURTAIN_SIDES,
   openingsInWall,
   outlinesInOrder,
   planFractionToMm,
@@ -1118,13 +1119,73 @@ export function volumeCurtainShare(source, markId) {
  */
 export const VOLUME_CURTAIN_BUNCH = 0.2;
 
-/** Ткань модели, собранная к своему левому краю на долю `keep` ширины. */
-function volumeCurtainParts(parts, keep) {
-  let edge = Infinity;
-  for (const part of parts) if (part && part.clear && part.x < edge) edge = part.x;
-  return parts.map((part) =>
-    part && part.clear ? { ...part, x: edge + (part.x - edge) * keep, width: part.width * keep } : part,
-  );
+/**
+ * Ткань модели, собранная на долю `keep` ширины: к началу оси (`gather`
+ * `"min"` — как до правки), к её концу (`"max"`) или к обоим краям (`"both"`:
+ * полотнище, лежащее через середину, делится надвое).
+ */
+function volumeCurtainParts(parts, keep, gather = "min") {
+  let low = Infinity;
+  let high = -Infinity;
+  for (const part of parts) {
+    if (!part || !part.clear) continue;
+    low = Math.min(low, part.x);
+    high = Math.max(high, part.x + part.width);
+  }
+  if (gather === "max") {
+    return parts.map((part) => (part && part.clear ? { ...part, x: high - (high - part.x) * keep, width: part.width * keep } : part));
+  }
+  if (gather === "both") {
+    const middle = (low + high) / 2;
+    const out = [];
+    for (const part of parts) {
+      if (!part || !part.clear) {
+        out.push(part);
+        continue;
+      }
+      const leftEnd = Math.min(part.x + part.width, middle);
+      const rightStart = Math.max(part.x, middle);
+      if (leftEnd > part.x) out.push({ ...part, x: low + (part.x - low) * keep, width: (leftEnd - part.x) * keep });
+      if (part.x + part.width > rightStart) {
+        out.push({ ...part, name: part.name + "Right", x: high - (high - rightStart) * keep, width: (part.x + part.width - rightStart) * keep });
+      }
+    }
+    return out;
+  }
+  return parts.map((part) => (part && part.clear ? { ...part, x: low + (part.x - low) * keep, width: part.width * keep } : part));
+}
+
+/**
+ * К какому краю собирается ткань (правка после сборки сценариев, «Сторона
+ * открывания»): `"min"` — к началу оси `u`, `"max"` — к концу, `"both"` — к
+ * обоим. Без своей стороны — к началу, как до правки. Сторона — глазами из
+ * комнаты: правая рука смотрящего на стену — `(n.y, −n.x)` (`markCurtainLegacySide`).
+ */
+export function volumeCurtainGather(place, u) {
+  const side = place ? place.curtainSide : null;
+  if (!side) return "min";
+  if (side === "center") return "both";
+  const normal = place.face && place.face.normal;
+  const rightIsMax = normal && u ? u.x * normal.y + u.y * -normal.x > 0 : true;
+  return (side === "right") === rightIsMax ? "max" : "min";
+}
+
+/** Полотнища вдоль пути, собранные к его концу, — то же, что к началу, только путь развёрнут. */
+function volumeCurtainFramesTo(frames, keep, gather) {
+  if (gather === "max") {
+    const back = frames
+      .slice()
+      .reverse()
+      .map((frame) => ({ ...frame, u: { x: -frame.u.x, y: -frame.u.y } }));
+    return volumeCurtainFrames(back, keep)
+      .reverse()
+      .map((frame, index) => ({ ...frame, u: frames[index].u }));
+  }
+  if (gather === "both" && frames.length > 1) {
+    const half = Math.ceil(frames.length / 2);
+    return [...volumeCurtainFrames(frames.slice(0, half), keep), ...volumeCurtainFramesTo(frames.slice(half), keep, "max")];
+  }
+  return volumeCurtainFrames(frames, keep);
 }
 
 /**
@@ -5095,6 +5156,9 @@ export function volumeMarkPlacement(project, mark, rooms = []) {
     bodyRgb: volumeTint(rgb),
     kind: line ? "line" : "point",
     view,
+    // Сторона открывания шторы (правка после сборки сценариев): своя у метки
+    // или `null` — как до правки (`volumeCurtainGather`).
+    curtainSide: MARK_CURTAIN_SIDES.includes(mark.curtainSide) ? mark.curtainSide : null,
     // Хоть одна сторона габарита — догадка сборки, а не чертёж: окно обязано
     // сказать об этом словом (`volumeMarks().spare`). Откуда именно взята
     // каждая сторона, здесь не хранится: это правило `markBoxMm`, и
@@ -5336,7 +5400,8 @@ export function volumeMarkFaces(place, out = [], open = 0) {
   // стоит. Закрытая (0) — та же штора, что без позиции, грань в грань.
   const keep = open > 0 && volumeSheerPlace(place) ? 1 - Math.min(1, open) * (1 - VOLUME_CURTAIN_BUNCH) : 1;
   if (place.model && place.frame) {
-    const model = keep < 1 ? { ...place.model, parts: volumeCurtainParts(place.model.parts || [], keep) } : place.model;
+    const gather = volumeCurtainGather(place, place.frame.u);
+    const model = keep < 1 ? { ...place.model, parts: volumeCurtainParts(place.model.parts || [], keep, gather) } : place.model;
     return volumeModelFaces(place.frame, model, place.bodyRgb, out, { markId: place.markId });
   }
   // Метка без модели — коробка или полоса по габариту — **светится вся**, если
@@ -5352,7 +5417,8 @@ export function volumeMarkFaces(place, out = [], open = 0) {
   // поверх неё садятся светильники трека. Хозяин у них тот же — сама метка,
   // поэтому щелчок по светильнику выделяет трек, а не ничего.
   const frames = (place.repeat && place.repeat.frames) || [];
-  for (const frame of keep < 1 && volumeSheerParts(place.repeat.parts) ? volumeCurtainFrames(frames, keep) : frames) {
+  const gather = frames.length > 0 ? volumeCurtainGather(place, frames[0].u) : "min";
+  for (const frame of keep < 1 && volumeSheerParts(place.repeat.parts) ? volumeCurtainFramesTo(frames, keep, gather) : frames) {
     volumeModelFaces(frame, place.repeat, place.bodyRgb, out, { markId: place.markId });
   }
   return out;

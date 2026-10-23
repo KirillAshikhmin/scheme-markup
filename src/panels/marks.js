@@ -8,6 +8,7 @@ import { layoutAllows, PANEL_IDS, registerPanel, reportAppError } from "../app.j
 import { getSetting, setSetting } from "../store.js";
 import { strings, text } from "../strings.js";
 import {
+  MARK_CURTAIN_SIDES,
   MARK_DIMENSION_FIELDS,
   MARK_NUMBER_MAX,
   channelLabel,
@@ -27,7 +28,9 @@ import {
   markDeviceOwn,
   markDeviceProfile,
   markControlsByChannel,
+  markCurtainSide,
   markDimensions,
+  markIsCurtain,
   markLengthMeters,
   markRoomManual,
   markWall,
@@ -40,6 +43,7 @@ import {
   roomsInOrder,
   schemesInOrder,
   setMarkControls,
+  setMarkCurtainSide,
   setMarkDevice,
   setMarkDimensions,
   setMarkFreeNumber,
@@ -552,6 +556,9 @@ export function marksRowModel(project, row, options = {}) {
     // Аксессуар метки (таск 03 сценариев): сводка и пометка «своя настройка».
     // Считается из модели на каждый спрос — второй правды о метке здесь нет.
     device: deviceMarkField(project, mark.id),
+    // Сторона открывания шторы (правка после сборки сценариев): у шторы — её
+    // сторона (своя или та, куда она открывалась до правки), у остальных `null`.
+    curtain: markIsCurtain(project, mark.id) ? markCurtainSide(project, mark.id) : null,
     // Длина линейной метки по плану — в метрах, и только когда у схемы есть
     // калибровка масштаба. Пусто значит «посчитать неоткуда»: без масштаба
     // строка остаётся ровно такой, какой была до этой задачи. Размер изделия
@@ -1002,6 +1009,37 @@ function mountMarksPanel(host, api) {
     setRoom(markId, name);
   }
 
+  /**
+   * «Сторона открывания» шторы (правка после сборки сценариев): «Вправо, влево
+   * или от центра в стороны» — списком, как помещение.
+   */
+  function curtainField(state, mark, side) {
+    const select = uiEl(
+      "select",
+      {
+        class: "ui-select marks__curtain",
+        title: strings.marks.curtainSideHint,
+        attrs: { "aria-label": strings.marks.curtainSide },
+      },
+      MARK_CURTAIN_SIDES.map((value) =>
+        uiEl("option", { value, text: strings.marks.curtainSide + ": " + strings.marks.curtainSides[value].toLowerCase() }),
+      ),
+    );
+    select.value = side;
+    if (!layoutAllows("editMarks", state.layout)) select.disabled = true;
+    select.addEventListener("change", () => {
+      const now = getState();
+      if (!now.project) return;
+      try {
+        const next = setMarkCurtainSide(now.project, mark.id, select.value);
+        if (next.project !== now.project) canvasCommit(now.project, next.project, strings.history.markCurtainSide);
+      } catch (error) {
+        fail(error);
+      }
+    });
+    return select;
+  }
+
   function roomField(state, mark) {
     const manual = markRoomManual(mark);
     const select = uiEl("select", {
@@ -1210,6 +1248,7 @@ function mountMarksPanel(host, api) {
       [
         head,
         view.fields ? roomField(state, mark) : null,
+        view.fields && view.fields.curtain ? curtainField(state, mark, view.fields.curtain) : null,
         // «Расположение» и «Комментарий» — каждое на своей строке.
         //
         // Это отмена прежнего решения, и обе просьбы тут от одного человека.

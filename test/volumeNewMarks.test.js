@@ -129,3 +129,48 @@ test("тёплый пол: на полу, свой термостат; грее�
   const idle = liveOf(box, "floor", { "0.TargetHeatingCoolingState": "HEAT", "0.CurrentHeatingCoolingState": "OFF" });
   assert.equal(idle.heat, false);
 });
+
+// ——— сторона открывания шторы ——————————————————————————————————————————————
+
+test("штора: сторона открывания — своя или та, что была; ткань собирается к ней", async () => {
+  const { markCurtainSide, markIsCurtain, setMarkCurtainSide, updateMark } = await import("../src/model.js");
+  const { volumeCurtainGather, volumeMarkFaces } = await import("../src/volume.js");
+  const box = stand();
+  let project = box.project;
+  const type = project.markTypes.find((item) => item.code === "КШ");
+  const fr = (point) => planMmToFraction(project, box.schemeId, point);
+  const added = addMark(project, { schemeId: box.schemeId, typeId: type.id, kind: "point", points: [fr({ x: 0, y: -1950 })] });
+  project = applyMarkWalls(added.project, box.schemeId).project;
+  const id = added.marks[0].id;
+  assert.equal(markIsCurtain(project, id), true, "карниз штор не штора");
+  assert.equal(markIsCurtain(project, box.marks.sensor), false);
+  // Своей стороны нет — штора открывается, как до правки, и сторона названа.
+  const legacy = markCurtainSide(project, id);
+  assert.ok(["left", "right"].includes(legacy));
+  const sceneOf = (source) => volumeScene(source, box.schemeId, { roofOff: true });
+  const xs = (source) => {
+    const place = volumeMarkPlace(sceneOf(source), id);
+    const cloth = volumeMarkFaces(place, [], 1).filter((face) => face.clear);
+    const along = (point) => (point.x - place.frame.at.x) * place.frame.u.x + (point.y - place.frame.at.y) * place.frame.u.y;
+    const values = cloth.flatMap((face) => face.p.map(along));
+    return { min: Math.min(...values), max: Math.max(...values), place };
+  };
+  const before = xs(project);
+  assert.equal(volumeCurtainGather(before.place, before.place.frame.u), "min", "без стороны ткань не к началу оси");
+  // Та же сторона, названная руками, — та же картинка.
+  const same = setMarkCurtainSide(project, id, legacy).project;
+  assert.deepEqual(xs(same).min, before.min);
+  // Другая сторона — ткань у другого края.
+  const other = setMarkCurtainSide(project, id, legacy === "left" ? "right" : "left").project;
+  const flipped = xs(other);
+  assert.ok(flipped.max > before.max + 100, "другая сторона не увела ткань к другому краю");
+  // От центра — ткань у обоих краёв.
+  const both = xs(setMarkCurtainSide(project, id, "center").project);
+  assert.ok(both.min <= before.min + 1 && both.max >= flipped.max - 1, "от центра — не к обоим краям");
+  // Чужое значение модель не пишет; `null` возвращает «как было».
+  assert.throws(() => setMarkCurtainSide(project, id, "up"));
+  assert.equal(markCurtainSide(setMarkCurtainSide(other, id, null).project, id), legacy);
+  // Старая метка без поля открывается как была (G68): поля не дописано.
+  assert.equal(Object.prototype.hasOwnProperty.call(project.marks.find((mark) => mark.id === id), "curtainSide"), false);
+  void updateMark;
+});

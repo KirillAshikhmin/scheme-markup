@@ -3127,6 +3127,7 @@ const MARK_PATCH_FIELDS = [
   "location",
   "original",
   "pointer",
+  "curtainSide",
   ...MARK_DIMENSION_FIELDS,
 ];
 
@@ -3161,6 +3162,11 @@ export function updateMark(project, markId, patch) {
     const current = project.marks.find((mark) => mark.id === markId);
     if (!markIsComment(current)) throw modelError("pointerOnlyComment");
     if (changes.pointer !== true && changes.pointer !== false) throw modelError("pointerUnknown");
+  }
+  // Сторона открывания шторы (правка после сборки сценариев) — из списка или
+  // `null`: «как открывалась до правки» (`markCurtainSide`).
+  if (Object.prototype.hasOwnProperty.call(changes, "curtainSide")) {
+    if (changes.curtainSide !== null && !MARK_CURTAIN_SIDES.includes(changes.curtainSide)) throw modelError("curtainSideUnknown");
   }
   // Размеры приводятся к числу или к `null` здесь — второго места, где они
   // попадают в метку, нет: `setMarkDimensions` идёт через эту же функцию.
@@ -7020,6 +7026,68 @@ export function markWall(mark) {
     // у метки прежней разметки поля нет вовсе.
     toMm: typeof mark.wallToMm === "number" ? mark.wallToMm : null,
   };
+}
+
+// ——— сторона открывания шторы (правка после сборки сценариев) ——————————————
+//
+// Слова заказчика: «как у дверей есть опция Стеклянная, так и у штор добавить
+// опцию Сторона открывания. Вправо, влево или от центра в стороны». Стороны —
+// **глазами из комнаты**, лицом к шторе: так их называет человек у окна, а не
+// чертёж, у которого стена бывает начерчена в любую сторону.
+//
+// Поле у метки необязательное (`mark.curtainSide`). Нет его — штора
+// открывается, как открывалась до правки: ткань собирается к началу стены (у
+// линии — к началу пути). Какая это сторона глазами из комнаты, выводит
+// `markCurtainLegacySide`, и окно показывает её выбранной: старый объект
+// выглядит как был (G68), а человек видит, куда штора открывается сейчас.
+
+/** Стороны открывания шторы: влево, вправо, от центра в стороны. */
+export const MARK_CURTAIN_SIDES = Object.freeze(["left", "right", "center"]);
+
+/** Штора ли метка: изображение карниза штор или аксессуар-штора. */
+export function markIsCurtain(project, markId) {
+  const mark = findMark(project, markId);
+  if (!mark || markIsComment(mark)) return false;
+  if (typeObjectView(findType(project, mark.typeId)) === "curtainRail") return true;
+  const profile = markDeviceOf(project, markId);
+  return Boolean(profile && profile.services.some((service) => service.type === "WindowCovering"));
+}
+
+/** Куда открывается штора: своя сторона или та, куда она открывалась до правки. */
+export function markCurtainSide(project, markId) {
+  const mark = findMark(project, markId);
+  if (!mark) return null;
+  if (MARK_CURTAIN_SIDES.includes(mark.curtainSide)) return mark.curtainSide;
+  return markCurtainLegacySide(project, mark);
+}
+
+/**
+ * Сторона, к которой ткань собиралась до правки, глазами из комнаты: к началу
+ * оси стены (у линии — пути). Смотрящий стоит лицом к стене, его правая рука в
+ * осях плана (`y` вниз) — `(n.y, −n.x)`, где `n` — нормаль в комнату. Без
+ * стены — «влево».
+ */
+export function markCurtainLegacySide(project, mark) {
+  const binding = markWall(mark);
+  const wall = binding ? findWall(project, binding.wallId) : null;
+  const vectors = wall ? wallVectors(wall) : null;
+  const side = wall && vectors ? markWallSideOn(project, mark, wall.id) : null;
+  if (!vectors || !side) return "left";
+  const sign = side === "left" ? 1 : -1;
+  const normal = { x: vectors.n.x * sign, y: vectors.n.y * sign };
+  let u = vectors.u;
+  if (mark.kind === "line" && Array.isArray(mark.points) && mark.points.length >= 2) {
+    const from = planFractionToMm(project, mark.schemeId, mark.points[0]);
+    const to = planFractionToMm(project, mark.schemeId, mark.points[mark.points.length - 1]);
+    const length = from && to ? Math.hypot(to.x - from.x, to.y - from.y) : 0;
+    if (length > 0) u = { x: (to.x - from.x) / length, y: (to.y - from.y) / length };
+  }
+  return u.x * normal.y + u.y * -normal.x > 0 ? "left" : "right";
+}
+
+/** Задать сторону открывания: `"left" | "right" | "center"`, `null` — как до правки. */
+export function setMarkCurtainSide(project, markId, side) {
+  return updateMark(project, markId, { curtainSide: side === null || side === undefined ? null : side });
 }
 
 /**
