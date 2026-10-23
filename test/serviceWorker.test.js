@@ -360,3 +360,26 @@ test("новая сборка — новое имя кэша, старое уй�
   assert.notEqual(name(one), name(two));
   assert.match(name(one), /^scheme-markup-[0-9a-f]{12}$/);
 });
+
+// Памятка (таск 236) — вторая страница той же папки, и соседней чужой она не
+// является: её адрес рассылают людям, и без сети по нему должна открываться
+// памятка, а не схема. Ключ у неё свой — иначе её тело легло бы на место
+// офлайн-копии приложения (D46), а это ровно та поломка, из-за которой тут и
+// завёлся разбор адресов.
+test("памятка — своя страница: свой ключ в кэше и свой ответ без сети", async () => {
+  const GUIDE_URL = ORIGIN + "guide.html";
+  const GUIDE_HTML = "<html>памятка</html>";
+  const env = await startWorker({
+    respond: (url) => (url.split("?")[0] === GUIDE_URL ? new Response(GUIDE_HTML, { status: 200 }) : pageResponse()),
+  });
+  const warm = sendFetch(env, navigation(GUIDE_URL));
+  assert.equal(await (await warm.answer).text(), GUIDE_HTML);
+  await Promise.all(warm.waits);
+  assert.deepEqual(putsOf(env), [GUIDE_URL], "ключ памятки — её собственный адрес, а не ключ приложения");
+
+  const offline = await startWorker({ respond: () => Promise.reject(new TypeError("Failed to fetch")) });
+  offline.stores.set(env.cacheName, env.stores.get(env.cacheName));
+  // Адрес с хвостом рассылки — та же памятка.
+  const { answer } = sendFetch(offline, navigation(GUIDE_URL + "?from=telegram"));
+  assert.equal(await (await answer).text(), GUIDE_HTML, "без сети по ссылке на памятку открывается памятка");
+});
