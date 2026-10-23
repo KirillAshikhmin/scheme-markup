@@ -27,16 +27,18 @@ import {
   deviceFollowers,
   findLogicBinding,
   findScenario,
+  labelOf,
   logicBindingsOf,
   scenariosInOrder,
   updateLogicBinding,
   updateScenario,
 } from "../model.js";
-import { homeAccessories } from "../sim/home.js";
+import { deviceAids, homeAccessories } from "../sim/home.js";
 import { hubCompatWarnings, hubFits, hubScriptCompile, hubScriptInfoName, hubScriptRead } from "../sim/hubApi.js";
 import { simOptionForms, simScenarios, simWatch } from "../simulation.js";
 import { strings, text } from "../strings.js";
-import { uiButton, uiCheckRow, uiEl, uiModal } from "./ui.js";
+import { uiButton, uiCheckRow, uiEl, uiIconButton, uiModal } from "./ui.js";
+import { openPlanPicker } from "./planPicker.js";
 
 /** Отступ по Tab: два пробела. */
 export const SCENARIO_SCRIPT_INDENT = "  ";
@@ -338,6 +340,41 @@ export function scenarioScriptSetOption(project, bindingId, key, value) {
   return next === project ? null : { project: next, label: strings.history.logicBindingOptions };
 }
 
+/**
+ * Опции привязки разом — одним шагом истории (правка после сборки сценариев:
+ * «Опции» открывают окно, как при добавлении, и правка уходит по «Сохранить»).
+ */
+export function scenarioScriptSetOptions(project, bindingId, patch) {
+  const binding = findLogicBinding(project, bindingId);
+  if (!binding || !patch || typeof patch !== "object" || Object.keys(patch).length === 0) return null;
+  const options = { ...(binding.options || {}), ...patch };
+  const next = updateLogicBinding(project, bindingId, { options }).project;
+  return next === project ? null : { project: next, label: strings.history.logicBindingOptions };
+}
+
+/**
+ * Метки за значениями списка формы (правка после сборки сценариев): сценарий
+ * хаба собирает список устройств из адресов — аксессуар `aid`, сервис
+ * `aid.sid`, характеристика `aid.sid.cid` (`getUUID`), — и `aid` однозначно
+ * называет метку объекта. `Map<markId, [{index, label}]>` — у каких меток в
+ * списке есть варианты и какие (номер строки списка и её подпись); у поля, в
+ * котором устройств нет, — пустая.
+ */
+export function scenarioScriptFieldMarks(project, field) {
+  const out = new Map();
+  if (!project || !field || field.formType !== "list" || !Array.isArray(field.values)) return out;
+  const byAid = new Map();
+  for (const [markId, aid] of deviceAids(project)) byAid.set(String(aid), markId);
+  field.values.forEach((item, index) => {
+    const match = /^(\d+)(?:\.\d+){0,2}$/.exec(String(item && item.value !== null && item.value !== undefined ? item.value : ""));
+    const markId = match ? byAid.get(match[1]) : null;
+    if (!markId) return;
+    if (!out.has(markId)) out.set(markId, []);
+    out.get(markId).push({ index, label: item.label });
+  });
+  return out;
+}
+
 /** «Активна» привязки. */
 export function scenarioScriptSetActive(project, bindingId, on) {
   if (!findLogicBinding(project, bindingId)) return null;
@@ -396,6 +433,7 @@ export function scenarioScriptFields(fields, { readOnly = false, onChange = () =
     }
     const bad = uiEl("span", { class: "scr-field__bad" });
     bad.hidden = true;
+    let mapButton = null;
     const send = (raw, input) => {
       const checked = scenarioScriptFieldValue(field, raw);
       if (checked.error !== undefined) {
@@ -419,6 +457,42 @@ export function scenarioScriptFields(fields, { readOnly = false, onChange = () =
       const at = values.findIndex((item) => String(item.value) === String(field.value));
       input.value = String(at >= 0 ? at : 0);
       input.addEventListener("change", () => send(input.value, input));
+      // Список устройств — и на схеме (правка после сборки сценариев): «рядом
+      // с полем добавь кнопку, которая тоже откроет эту карту — схему в окне,
+      // но только с теми метками, которые можно выбрать».
+      const marks = readOnly ? new Map() : scenarioScriptFieldMarks(getState().project, field);
+      if (marks.size > 0) {
+        const select = input;
+        const choose = (index) => {
+          select.value = String(index);
+          send(select.value, select);
+        };
+        const current = [...marks].find(([, list]) => list.some((item) => String(item.index) === select.value));
+        mapButton = uiIconButton("planPick", {
+          class: "ui-btn scr-field__map",
+          title: strings.planPicker.fieldOpen,
+          attrs: { "aria-label": strings.planPicker.fieldOpen },
+          on: {
+            click: (event) => {
+              event.preventDefault();
+              openPlanPicker(
+                { getState },
+                {
+                  title: text("planPicker.fieldTitle", { label: field.label }),
+                  hint: strings.planPicker.fieldHint,
+                  markIds: new Set(marks.keys()),
+                  selected: current ? [current[0]] : [],
+                  onPick: (markId) => {
+                    const list = marks.get(markId) || [];
+                    if (list.length === 1) choose(list[0].index);
+                    else if (list.length > 1) scenarioScriptChooseWindow(markId, list, choose);
+                  },
+                },
+              );
+            },
+          },
+        });
+      }
     } else if (field.type === "Boolean") {
       input = uiEl("input", { type: "checkbox", attrs: { "aria-label": field.label } });
       input.checked = field.value === true;
@@ -450,7 +524,7 @@ export function scenarioScriptFields(fields, { readOnly = false, onChange = () =
     const unit = field.unit ? uiEl("span", { class: "scr-field__unit", text: field.unit }) : null;
     const label = uiEl("label", { class: "scr-field" + (field.type === "Boolean" && field.formType !== "list" ? " is-check" : ""), title: field.hint || "" }, [
       uiEl("span", { class: "scr-field__label", text: field.label }),
-      input,
+      mapButton ? uiEl("span", { class: "scr-field__pick" }, [input, mapButton]) : input,
       ...(unit ? [unit] : []),
       bad,
     ]);
@@ -460,6 +534,70 @@ export function scenarioScriptFields(fields, { readOnly = false, onChange = () =
 }
 
 // ——— экранная половина: раздел «Логика» ————————————————————————————————
+
+/** У метки в списке поля несколько вариантов (сервисы одного аксессуара): какой. */
+function scenarioScriptChooseWindow(markId, list, choose) {
+  const label = labelOf(getState().project, markId);
+  let modal;
+  modal = uiModal({
+    title: text("planPicker.fieldChoose", { label }),
+    body: uiEl(
+      "div",
+      { class: "scr-choose" },
+      list.map((item) =>
+        uiButton(item.label, {
+          class: "ui-btn ui-btn--wide",
+          on: {
+            click: () => {
+              modal.close();
+              choose(item.index);
+            },
+          },
+        }),
+      ),
+    ),
+    actions: [uiButton(strings.sim.card.logic.addCancel, { on: { click: () => modal.close() } })],
+  });
+}
+
+/**
+ * Окно опций привязки (правка после сборки сценариев): «после того как
+ * настроил логику, то что бы у устройства в списке по нажатию Опции не
+ * разворачивался список, а открывалось окно параметров логики, как и при
+ * добавлении». Поля те же, что в окне привязки; правка копится и уходит одним
+ * шагом по «Сохранить». Без права правки окно только показывает.
+ */
+function scenarioScriptOptionsWindow(binding, editable) {
+  const draft = {};
+  const body = [];
+  body.push(uiEl("p", { class: "scr-add__desc", text: text("sim.card.logic.service", { name: binding.serviceName }) }));
+  body.push(
+    uiEl("div", { class: "scr-add__fields" }, [
+      scenarioScriptFields(binding.fields, { readOnly: !editable, onChange: (key, value) => (draft[key] = value) }),
+    ]),
+  );
+  let modal;
+  const actions = [uiButton(editable ? strings.sim.card.logic.addCancel : strings.dialog.close, { on: { click: () => modal.close() } })];
+  if (editable) {
+    actions.push(
+      uiButton(strings.sim.card.logic.optionsSave, {
+        class: "ui-btn ui-btn--primary",
+        on: {
+          click: () => {
+            modal.close();
+            scenarioScriptApply(scenarioScriptSetOptions(getState().project, binding.id, draft));
+          },
+        },
+      }),
+    );
+  }
+  modal = uiModal({
+    title: text("sim.card.logic.optionsTitle", { name: binding.name }),
+    body: uiEl("div", { class: "scr-add" }, body),
+    actions,
+  });
+  return modal;
+}
 
 function scenarioScriptAddWindow(project, markId, entry) {
   const draft = {};
@@ -505,7 +643,6 @@ function scenarioScriptAddWindow(project, markId, entry) {
  */
 export function scenarioScriptLogicView(markId) {
   const node = uiEl("section", { class: "scr-logic" });
-  const opened = new Set();
   let timer = null;
 
   function render() {
@@ -546,17 +683,15 @@ export function scenarioScriptLogicView(markId) {
       parts.push(uiEl("div", { class: "scr-bind__tools" }, tools));
       if (binding.fields === null) parts.push(uiEl("p", { class: "scr-logic__empty", text: strings.sim.card.logic.noForm }));
       else if (binding.fields.length > 0) {
-        // Опции настоящего сценария — десятки полей: свёрнуты, пока человек не раскроет.
-        const details = uiEl("details", { class: "scr-bind__options" }, [
-          uiEl("summary", { text: strings.sim.card.logic.options }),
-          scenarioScriptFields(binding.fields, {
-            readOnly: !editable,
-            onChange: (key, value) => scenarioScriptApply(scenarioScriptSetOption(getState().project, binding.id, key, value)),
+        // Опции — окном, как при добавлении (правка после сборки сценариев):
+        // десятки полей настоящего сценария в узкой карточке читались плохо.
+        parts.push(
+          uiButton(strings.sim.card.logic.options, {
+            class: "ui-btn scr-bind__options",
+            title: strings.sim.card.logic.optionsHint,
+            on: { click: () => scenarioScriptOptionsWindow(binding, editable) },
           }),
-        ]);
-        details.open = opened.has(binding.id);
-        details.addEventListener("toggle", () => (details.open ? opened.add(binding.id) : opened.delete(binding.id)));
-        parts.push(details);
+        );
       }
       node.append(uiEl("div", { class: "scr-bind" + (binding.active && !fault ? "" : " is-off") + (fault ? " is-fault" : ""), attrs: { "data-binding": binding.id } }, parts));
     }

@@ -282,6 +282,73 @@
   max-width: min(92vw, 720px);
 }
 
+/* Схема в окне (правка после сборки сценариев): окно почти на весь экран, план
+   занимает всё, что осталось под строкой инструментов. */
+.modal--plan {
+  width: min(96vw, 1400px);
+  height: min(90vh, 1000px);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modal--plan .modal__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.plan-picker {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.plan-picker__hint {
+  margin: 0;
+}
+
+.plan-picker__tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.plan-picker__floors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.plan-picker__floor.is-on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.plan-picker__gap {
+  flex: 1;
+}
+
+.plan-picker__stage {
+  position: relative;
+  flex: 1;
+  min-height: 200px;
+  border: 1px solid var(--canvas-line);
+  border-radius: 6px;
+  background: var(--canvas-bg);
+  overflow: hidden;
+}
+
+.plan-picker__canvas {
+  display: block;
+  touch-action: none;
+  cursor: grab;
+}
+
 .modal__title {
   margin: 0 0 10px;
   font-size: 15px;

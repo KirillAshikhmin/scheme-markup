@@ -28,6 +28,7 @@ import {
   findScenario,
   findType,
   labelOf,
+  logicBindingsOf,
   moveScenario,
   roomsInOrder,
   scenariosInOrder,
@@ -50,13 +51,14 @@ import {
   scenarioToTemplate,
 } from "../scenarioTree.js";
 import { DEVICE_KINDS } from "../sim/catalog.js";
-import { homeAccessories } from "../sim/home.js";
+import { homeAccessories, markAccessory } from "../sim/home.js";
 import { simRunning, simScenarioActive, simScenarioRun, simWatch } from "../simulation.js";
 import { getSetting, setSetting } from "../store.js";
 import { strings, text } from "../strings.js";
-import { deviceCardView } from "./deviceCard.js";
+import { deviceCardView, deviceLiveKinds } from "./deviceCard.js";
 import { deviceDraftKind, deviceTypeRecord } from "./deviceSettings.js";
 import { createMiniPlan, miniPlanSchemeFor, miniPlanSchemes } from "./miniPlan.js";
+import { openPlanPicker } from "./planPicker.js";
 import {
   scenarioScriptCommitter,
   scenarioScriptDownload,
@@ -249,9 +251,20 @@ export function scenariosDeviceGroups(project, query = "") {
   const groups = new Map();
   for (const room of roomsInOrder(project)) groups.set(room.id, { roomId: room.id, name: room.name, devices: [] });
   const loose = { roomId: null, name: strings.scenarios.side.noRoom, devices: [] };
+  // Устройства с включённой логикой — первой группой (правка после сборки
+  // сценариев: «устройства с активированной логикой пусть справа в списке
+  // меток помещаются наверху»). Логика держит устройство постоянно, и к нему
+  // возвращаются чаще, чем к прочим; в своём помещении оно второй раз не
+  // показывается.
+  const logic = { roomId: SCENARIOS_LOGIC_GROUP, name: strings.scenarios.side.withLogic, devices: [] };
+  const withLogic = new Set(
+    logicBindingsOf(project)
+      .filter((binding) => binding.active !== false && findScenario(project, binding.scenarioId))
+      .map((binding) => binding.markId),
+  );
   for (const accessory of homeAccessories(project)) {
     const type = findType(project, accessory.typeId);
-    const group = (accessory.roomId && groups.get(accessory.roomId)) || loose;
+    const group = withLogic.has(accessory.markId) ? logic : (accessory.roomId && groups.get(accessory.roomId)) || loose;
     const device = {
       markId: accessory.markId,
       label: accessory.label,
@@ -264,8 +277,11 @@ export function scenariosDeviceGroups(project, query = "") {
     }
     group.devices.push(device);
   }
-  return [...groups.values(), loose].filter((group) => group.devices.length > 0);
+  return [logic, ...groups.values(), loose].filter((group) => group.devices.length > 0);
 }
+
+/** Ключ первой группы списка устройств — с включённой логикой; помещения такого id нет. */
+export const SCENARIOS_LOGIC_GROUP = "logic";
 
 /** Сервисы выбранного устройства строками: «Лампа: Включено, Яркость» (без служебных). */
 export function scenariosDeviceLines(project, markId) {
@@ -1141,6 +1157,26 @@ function mountScenariosScreen(host, api) {
     if (built) return;
     built = true;
     miniPlan = createMiniPlan(planHost, api, { pick });
+    // Схема в окне (правка после сборки сценариев): мини-план тесен, и в окне
+    // по нему двигаются и приближают, как по «Схеме». Щелчок по метке — тот же
+    // выбор устройства.
+    planHost.append(
+      uiIconButton("fullscreen", {
+        class: "ui-btn ui-btn--icon mini-plan__open",
+        title: strings.planPicker.open,
+        attrs: { "aria-label": strings.planPicker.open },
+        on: {
+          click: () =>
+            openPlanPicker(api, {
+              hint: strings.planPicker.hint,
+              pickable: (markId) => Boolean(markAccessory(state().project, markId)),
+              liveKinds: deviceLiveKinds,
+              selected: state().selectedMarkIds,
+              onPick: pick,
+            }),
+        },
+      }),
+    );
     scenariosLoadTemplates();
   }
 

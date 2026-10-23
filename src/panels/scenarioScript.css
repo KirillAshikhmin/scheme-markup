@@ -267,8 +267,33 @@
   font-size: 12px;
 }
 
-.scr-bind__options > summary {
-  cursor: pointer;
+/* «Опции» привязки — кнопка, открывающая окно (правка после сборки сценариев). */
+.scr-bind__options {
+  align-self: flex-start;
   font-size: 12px;
-  color: #57606a;
+}
+
+/* Список устройств в поле опций и кнопка «Выбрать на схеме» рядом с ним
+   (правка после сборки сценариев). */
+.scr-field__pick {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.scr-field__pick .scr-field__input {
+  flex: 1;
+  min-width: 0;
+}
+
+.scr-field__map {
+  flex: none;
+}
+
+/* Окно «какой из вариантов метки» — кнопки столбиком. */
+.scr-choose {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }

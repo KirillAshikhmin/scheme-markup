@@ -2529,6 +2529,9 @@ export function drawMarkLinks(ctx, links, scheme, view, options = {}) {
 // Фильтр панели меток: скрытая метка не рисуется и по ней не кликается.
 function markVisible(project, mark, filter) {
   if (!filter) return true;
+  // Только эти метки (правка после сборки сценариев): схема в окне выбора
+  // устройства показывает те, что можно выбрать, и ничего лишнего.
+  if (filter.markIds instanceof Set && !filter.markIds.has(mark.id)) return false;
   // Комментарий прячется своей галочкой, а не галочками справочника (G173):
   // встроенного типа нет ни в `typeIds`, ни в `categoryIds`, и без этой ветки
   // плашки исчезали бы с плана от любого сужения по типу — например стоило
