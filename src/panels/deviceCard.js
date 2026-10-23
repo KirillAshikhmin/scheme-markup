@@ -17,8 +17,9 @@
 //     `#canvas-card` через `markCardParts(…, {extra})`.
 //
 // Состояние дома — зеркало `simulation.js`; здесь ничего не пишется в объект.
+import { simLiveKindOf } from "../render.js";
 import { simAct, simPress, simRunning, simValue, simWatch } from "../simulation.js";
-import { markAccessory } from "../sim/home.js";
+import { homeAccessories, markAccessory } from "../sim/home.js";
 import { pressDetector } from "../sim/presses.js";
 import { strings, text } from "../strings.js";
 import { scenarioScriptLogicOf, scenarioScriptLogicView } from "./scenarioScript.js";
@@ -179,6 +180,67 @@ export function deviceKeyPresser({ fire, now, later, clear }) {
     /** Ждать больше нечего — распознаватель свободен. */
     idle: () => timer === null && detector.nextDue() === null,
   };
+}
+
+// ——— общее «Схеме», мини-плану и «Объёму» (ревью ветки, F1) ——————————————
+
+/**
+ * Реестр распознавателей нажатий: один `deviceKeyPresser` на клавишу
+ * `"markId|index"`. `io` — `{fire(markId, index, press), now, later, clear}`.
+ * Ответ — `{of(markId, index) -> presser}`.
+ */
+export function devicePressers(io) {
+  const pressers = new Map();
+  return {
+    of(markId, index) {
+      const key = markId + "|" + index;
+      if (!pressers.has(key)) {
+        pressers.set(
+          key,
+          deviceKeyPresser({ fire: (press) => io.fire(markId, index, press), now: io.now, later: io.later, clear: io.clear }),
+        );
+      }
+      return pressers.get(key);
+    },
+  };
+}
+
+function devicePressNow() {
+  const clock = typeof performance === "object" && performance !== null ? performance : null;
+  return clock && typeof clock.now === "function" ? clock.now() : Date.now();
+}
+
+const DEVICE_PRESSERS = devicePressers({
+  fire: (markId, index, press) => simPress(markId, index, press),
+  now: devicePressNow,
+  later: (fn, ms) => setTimeout(fn, ms),
+  clear: (id) => clearTimeout(id),
+});
+
+/**
+ * Распознаватель нажатий клавиши сеанса — один на клавишу для «Схемы»,
+ * мини-плана и «Объёма»: нажатие, начатое мышью на плане, доводит палец или E
+ * в другом виде той же клавиши.
+ */
+export function devicePresserOf(markId, index) {
+  return DEVICE_PRESSERS.of(markId, index);
+}
+
+const DEVICE_LIVE_KINDS = new WeakMap();
+
+/**
+ * Вид знака состояния и помещение каждой метки-устройства объекта:
+ * `Map<markId, {kind, roomId}>` (`simLiveKindOf`). Кэш по ссылке на объект —
+ * один ответ «Схеме», мини-плану и «Объёму».
+ */
+export function deviceLiveKinds(project) {
+  if (!project || typeof project !== "object") return new Map();
+  let kinds = DEVICE_LIVE_KINDS.get(project);
+  if (!kinds) {
+    kinds = new Map(homeAccessories(project).map((accessory) => [accessory.markId, { kind: simLiveKindOf(accessory), roomId: accessory.roomId || null }]));
+    DEVICE_LIVE_KINDS.set(project, kinds);
+  }
+  return kinds;
 }
 
 // ——— карточка: модель ————————————————————————————————————————————————

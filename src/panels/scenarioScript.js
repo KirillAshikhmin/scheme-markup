@@ -32,7 +32,7 @@ import {
   updateScenario,
 } from "../model.js";
 import { homeAccessories } from "../sim/home.js";
-import { hubCompatWarnings, hubFits, hubScriptCompile, hubScriptInfo, hubScriptRead } from "../sim/hubApi.js";
+import { hubCompatWarnings, hubFits, hubScriptCompile, hubScriptInfoName, hubScriptRead } from "../sim/hubApi.js";
 import { simOptionForms, simScenarios, simWatch } from "../simulation.js";
 import { strings, text } from "../strings.js";
 import { uiButton, uiCheckRow, uiEl, uiModal } from "./ui.js";
@@ -44,16 +44,17 @@ export const SCENARIO_SCRIPT_CHECK_MS = 250;
 
 // ——— чистая половина: разбор, правка, скачивание ———————————————————————
 
-/** Имя сценария: из заготовки хаба, затем `info.name`, затем имя файла, затем «Сценарий JS». */
+/**
+ * Имя сценария: из заготовки хаба, затем `info.name`, затем имя файла, затем
+ * «Сценарий JS». Код сценария в странице **не исполняется** (ревью ветки, F1):
+ * `info.name` берётся разбором текста (`hubScriptInfoName`), а формы опций
+ * приходят из потока имитации.
+ */
 function scenarioScriptName(read) {
   if (read.template && read.template.name) return read.template.name;
-  if (read.kind === "logic" && !read.syntax) {
-    try {
-      const probe = hubScriptInfo(read.source, { accessories: [], scenarios: [], logicBindings: [], rooms: [] });
-      if (probe.info && typeof probe.info.name === "string" && probe.info.name.trim()) return probe.info.name.trim();
-    } catch {
-      // имя не вышло — берём из файла
-    }
+  if (read.kind === "logic") {
+    const name = hubScriptInfoName(read.source);
+    if (name) return name;
   }
   return read.name || strings.scenarios.script.untitled;
 }
@@ -100,6 +101,19 @@ export function scenarioScriptAdd(project, read) {
     syntax: read.syntax || null,
     warnings: read.warnings || [],
   };
+}
+
+/**
+ * Изменён ли текст в окне кода (ревью ветки, F1): набранное `value` отличается
+ * от текста сценария в объекте. Без права правки менять нечего — `false`;
+ * сценарий удалили, пока окно открыто, — изменён всякий непустой текст.
+ */
+export function scenarioScriptDirty(project, scenarioId, value, editable = true) {
+  if (!editable) return false;
+  const typed = typeof value === "string" ? value : "";
+  const scenario = project ? findScenario(project, scenarioId) : null;
+  if (!scenario) return typed !== "";
+  return typed !== (typeof scenario.source === "string" ? scenario.source : "");
 }
 
 /** Новый текст логического или глобального сценария; тот же текст — `null`. */
@@ -726,6 +740,38 @@ export function scenarioScriptEdit(ctx, scenarioId) {
     if (result) return ctx.commit(result);
     return true;
   };
+  // Escape и «Закрыть» набранное молча не выбрасывают: изменённый текст —
+  // вопрос «Сохранить изменения?», нетронутый — окно просто закрывается.
+  let asking = false;
+  const leave = () => {
+    if (asking) return;
+    if (!scenarioScriptDirty(getState().project, scenarioId, area.value, editable)) {
+      modal.close();
+      return;
+    }
+    asking = true;
+    let question = null;
+    const answer = (how) => {
+      question.close();
+      asking = false;
+      if (how === "save" && !save()) return;
+      if (how === "save" || how === "discard") modal.close();
+      else area.focus();
+    };
+    question = uiModal({
+      title: strings.scenarios.script.unsavedTitle,
+      body: uiEl("p", { class: "modal__text", text: text("scenarios.script.unsavedMessage", { name: scenario.name }) }),
+      actions: [
+        uiButton(strings.scenarios.script.unsavedStay, { on: { click: () => answer("stay") } }),
+        uiButton(strings.scenarios.script.unsavedDiscard, { class: "ui-btn ui-btn--danger", on: { click: () => answer("discard") } }),
+        uiButton(strings.scenarios.script.unsavedSave, { class: "ui-btn ui-btn--primary", on: { click: () => answer("save") } }),
+      ],
+      onCancel: () => {
+        asking = false;
+        area.focus();
+      },
+    });
+  };
   const modal = uiModal({
     title: text("scenarios.script.editTitle", { name: scenario.name }),
     body: uiEl("div", { class: "scr-code" }, [
@@ -739,7 +785,7 @@ export function scenarioScriptEdit(ctx, scenarioId) {
         title: strings.scenarios.script.editDownloadHint,
         on: { click: () => scenarioScriptDownload({ ...scenario, source: area.value }) },
       }),
-      uiButton(strings.scenarios.script.close, { on: { click: () => modal.close() } }),
+      uiButton(strings.scenarios.script.close, { on: { click: () => leave() } }),
       ...(editable
         ? [
             uiButton(strings.scenarios.script.editSave, {
@@ -753,8 +799,18 @@ export function scenarioScriptEdit(ctx, scenarioId) {
           ]
         : []),
     ],
+    // Escape окна решает само окно (`leave`): общий обработчик закрыл бы его молча.
+    dismissable: false,
   });
   modal.card.classList.add("scr-modal");
+  modal.card.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || event.defaultPrevented) return;
+    // Дальше общему обработчику окон это нажатие не идёт: он закрыл бы
+    // только что открытый вопрос тем же Escape.
+    event.preventDefault();
+    event.stopPropagation();
+    leave();
+  });
   area.focus();
   return modal;
 }

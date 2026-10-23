@@ -51,13 +51,12 @@ import { gesturePinchOf, gesturePinchStep, gestureWheel } from "../gestures.js";
 import {
   SCHEME_LIFT_KEY,
   WALL_HEIGHT_FALLBACK_MM,
-  findMark,
   findRoom,
   findScheme,
   schemeFloorOf,
   schemeObjectsOnScheme,
 } from "../model.js";
-import { drawDrawing, drawingUnitBridge, simLiveKindOf, visibleMarks } from "../render.js";
+import { drawDrawing, drawingUnitBridge, visibleMarks } from "../render.js";
 import { screenPlaceOf, screenPlacePlanRead, screenPlaceSet } from "../screenPlace.js";
 import { volumeClockStamp, volumeClockText, volumeDateShort, volumeDayDateOf, volumeDayTimes } from "../clockMath.js";
 import { strings, text } from "../strings.js";
@@ -133,9 +132,9 @@ import {
   volumeStep,
 } from "../volume.js";
 import { markCardModel, markCardParts } from "./markCard.js";
-import { deviceCardView, deviceClickPlan, deviceKeyPresser } from "./deviceCard.js";
+import { deviceCardView, deviceClickPlan, deviceLiveKinds, devicePresserOf } from "./deviceCard.js";
 import { openSimCommands } from "./simBar.js";
-import { homeAccessories, markAccessory } from "../sim/home.js";
+import { markAccessory } from "../sim/home.js";
 import {
   SIM_STATE_SETTING,
   simAct,
@@ -969,25 +968,15 @@ export function volumeNotes(scene) {
 //
 // Ниже — чистые правила; провода — внутри `createVolume`.
 
-const volumeSimMeta = new WeakMap(); // project → Map<markId, {kind, roomId}>
-
 /**
  * Состояние дома для кадра: `Map<markId, {on, level, alert, open, pressedAt,
- * kind, roomId}>` — `simLive` объекта, к которому приписан вид знака
- * (`simLiveKindOf`, тот же, что у «Схемы») и помещение метки.
+ * kind, roomId}>` — `simLive` объекта, к которому приписан вид знака и
+ * помещение метки (`deviceLiveKinds` — один на «Схему», мини-план и «Объём»).
  */
 export function volumeSimLive(project, live) {
   const out = new Map();
   if (!project || !live) return out;
-  let meta = volumeSimMeta.get(project);
-  if (!meta) {
-    meta = new Map();
-    for (const accessory of homeAccessories(project)) {
-      const mark = findMark(project, accessory.markId);
-      meta.set(accessory.markId, { kind: simLiveKindOf(accessory), roomId: (mark && mark.roomId) || null });
-    }
-    volumeSimMeta.set(project, meta);
-  }
+  const meta = deviceLiveKinds(project);
   for (const [markId, item] of live) {
     const own = meta.get(markId);
     if (own) out.set(markId, { ...item, kind: own.kind, roomId: own.roomId });
@@ -1025,7 +1014,7 @@ export function volumeSimRooms(scene, at) {
  * Что делают `E` и щелчок по метке при запущенном доме (истории 2.5–2.7):
  *   `{kind: "press", index}` — привязанная клавиша: одиночное сразу;
  *   `{kind: "hold", index}` — отвязанная клавиша или отдельная кнопка: нажатие
- *     распознаётся (`deviceKeyPresser`) — одиночное, двойное, долгое;
+ *     распознаётся (`devicePresserOf`) — одиночное, двойное, долгое;
  *   `{kind: "toggle"}` — свет, штора, телевизор, розетка;
  *   `{kind: "sensor", service}` — датчик срабатывает;
  *   `{kind: "none"}` — щёлкать нечем (или мимо клавиши многоклавишного).
@@ -1163,7 +1152,6 @@ function createVolume({ api, hosts }) {
   // и начатое мышью или пальцем на поле (отпускание — щелчком).
   let homeHeld = null;
   let homeGesture = null;
-  const homePressers = new Map();
   // Карточка устройства в карточке метки — та же, что в «Схеме».
   let homeCard = null;
   // Что было в окне параметров: отметки дома и карточки сверяются по переходу,
@@ -2672,23 +2660,6 @@ function createVolume({ api, hosts }) {
 
   // ——— имитация умного дома: руки и провода (таск 09 сценариев) ———————————
 
-  /** Распознаватель нажатий одной клавиши: один на клавишу, пока жива поверхность. */
-  function homePresser(markId, index) {
-    const key = markId + "|" + index;
-    if (!homePressers.has(key)) {
-      homePressers.set(
-        key,
-        deviceKeyPresser({
-          fire: (press) => simPress(markId, index, press),
-          now: () => Date.now(),
-          later: (fn, ms) => setTimeout(fn, ms),
-          clear: (id) => clearTimeout(id),
-        }),
-      );
-    }
-    return homePressers.get(key);
-  }
-
   /**
    * Что делает рука с меткой при запущенном доме (истории 2.5–2.7, 2.10):
    * правило — `volumeSimAction`, одно со «Схемой». `how`: `"key"` — E или
@@ -2701,7 +2672,7 @@ function createVolume({ api, hosts }) {
     pickChannel(mine, true);
     const action = volumeSimAction(markAccessory(getState().project, markId), mine ? mine.channel : null);
     if (action.kind === "hold") {
-      const presser = homePresser(markId, action.index);
+      const presser = devicePresserOf(markId, action.index);
       if (how === "key") {
         homeRelease(true);
         homeHeld = presser;
@@ -2745,7 +2716,7 @@ function createVolume({ api, hosts }) {
     const mine = found && found.markId === choice.id ? found : null;
     const action = volumeSimAction(markAccessory(getState().project, choice.id), mine ? mine.channel : null);
     if (action.kind !== "hold") return;
-    const presser = homePresser(choice.id, action.index);
+    const presser = devicePresserOf(choice.id, action.index);
     presser.down();
     homeGesture = { presser };
   }

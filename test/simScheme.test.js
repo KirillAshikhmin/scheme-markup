@@ -30,7 +30,16 @@ import {
   canvasSimLocked,
   canvasTapAction,
 } from "../src/canvas.js";
-import { SIM_LIVE_ALERT_COLOR, SIM_LIVE_KINDS, drawScheme, simLiveKindOf } from "../src/render.js";
+import {
+  SIM_LIVE_ALERT_COLOR,
+  SIM_LIVE_FLASH_MS,
+  SIM_LIVE_KINDS,
+  SIM_LIVE_PULSE_MS,
+  drawScheme,
+  simLiveFrame,
+  simLiveKindOf,
+  simLiveMemo,
+} from "../src/render.js";
 import { markAccessory } from "../src/sim/home.js";
 import { strings } from "../src/strings.js";
 import {
@@ -331,4 +340,58 @@ test("правка закрыта и раздел меток говорит по
   assert.ok(app.includes('classList.toggle("is-sim-scheme"'));
   assert.ok(app.includes("strings.sim.bar.editLocked"));
   assert.ok(read("src/panels/sim.css").includes("#app.is-sim-scheme #panel-tools"));
+});
+
+// ——— один хозяин на три поверхности (ревью ветки, F1) ————————————————————
+
+test("кадр пульса и вспышки — один на «Схему» и мини-план: вид знака, фаза пульса, угасание вспышки", () => {
+  const box = simHouse();
+  const kinds = new Map([
+    [box.marks.С1, { kind: "light", roomId: null }],
+    [box.marks.ДД1, { kind: "other", roomId: null }],
+  ]);
+  const source = new Map([
+    [box.marks.С1, { on: true, level: 1, alert: false, open: 0, pressedAt: null }],
+    [box.marks.ДД1, { on: false, level: 0, alert: true, open: 0, pressedAt: null }],
+    [box.marks.В1, { on: false, level: 0, alert: false, open: 0, pressedAt: 5000 }],
+  ]);
+  const memo = simLiveMemo();
+  const first = simLiveFrame(source, kinds, memo, 10_000);
+  assert.equal(first.live.get(box.marks.С1).kind, "light");
+  assert.equal(first.live.get(box.marks.В1).kind, "other", "метка без вида — «прочее»");
+  assert.equal(first.animate, true);
+  assert.equal(first.fx.pulse, (10_000 % SIM_LIVE_PULSE_MS) / SIM_LIVE_PULSE_MS);
+  assert.ok(first.fx.flash.get(box.marks.В1) > 0.99, "вспышка только началась");
+  // Полвспышки — угасла наполовину; после неё — вспышки нет.
+  const half = simLiveFrame(source, kinds, memo, 10_000 + SIM_LIVE_FLASH_MS / 2);
+  assert.ok(Math.abs(half.fx.flash.get(box.marks.В1) - 0.5) < 0.01);
+  assert.equal(half.live, first.live, "зеркало не менялось — кадр не пересобран");
+  const late = simLiveFrame(source, kinds, memo, 10_000 + SIM_LIVE_FLASH_MS + 1);
+  assert.equal(late.fx.flash.has(box.marks.В1), false);
+  // Спокойный дом — кадр больше не нужен.
+  const calm = simLiveFrame(new Map([[box.marks.С1, { on: true, level: 1, alert: false, open: 0, pressedAt: null }]]), kinds, simLiveMemo(), 0);
+  assert.equal(calm.animate, false);
+  assert.equal(SIM_LIVE_PULSE_MS, 1400);
+  assert.equal(SIM_LIVE_FLASH_MS, 700);
+});
+
+test("распознаватели нажатий, вид знака и кадр пульса — по одному хозяину; «Схема», мини-план и «Объём» зовут его", () => {
+  const surfaces = ["src/canvas.js", "src/panels/miniPlan.js", "src/panels/volume.js"];
+  for (const file of surfaces) {
+    const code = read(file);
+    assert.ok(!code.includes("deviceKeyPresser("), file + ": свой реестр распознавателей нажатий");
+    assert.ok(code.includes("devicePresserOf("), file + ": не зовёт общий реестр нажатий");
+    assert.ok(!/simLiveKindOf\(/.test(code), file + ": свой кэш вида знака");
+    assert.ok(code.includes("deviceLiveKinds("), file + ": не зовёт общий вид знака");
+    assert.ok(!/_(?:PULSE|FLASH)_MS\s*=/.test(code), file + ": свои мерки пульса и вспышки");
+  }
+  for (const file of ["src/canvas.js", "src/panels/miniPlan.js"]) {
+    assert.ok(read(file).includes("simLiveFrame("), file + ": свой кадр пульса и вспышки");
+  }
+  // Мерки пульса и вспышки объявлены один раз — в `render.js`.
+  const declared = [];
+  for (const file of ["src/canvas.js", "src/render.js", "src/panels/miniPlan.js", "src/panels/volume.js", "src/panels/deviceCard.js"]) {
+    for (const match of read(file).matchAll(/const\s+(\w*(?:PULSE|FLASH)_MS)\s*=/g)) declared.push(file + ":" + match[1]);
+  }
+  assert.deepEqual(declared, ["src/render.js:SIM_LIVE_PULSE_MS", "src/render.js:SIM_LIVE_FLASH_MS"]);
 });

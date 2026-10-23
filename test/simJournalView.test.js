@@ -51,6 +51,8 @@ const CONTRACT_CODES = [
   "pageReloaded", "editReset", "noWorker", "scenarioHung", "hungUnknown", "workerError",
   // команды (таск 13)
   "command", "commandUnknown",
+  // повторное движение сработавшего датчика (ревью ветки, F1)
+  "motionAgain",
 ];
 
 // Ключи `hub*`, которые не коды журнала, а ошибки чтения файла сценария.

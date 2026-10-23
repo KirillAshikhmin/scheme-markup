@@ -15,7 +15,7 @@ import { blocksOwner } from "../src/sim/blocks.js";
 import { createSimEngine } from "../src/sim/engine.js";
 import { buildHomeSpec, markAccessory } from "../src/sim/home.js";
 import { sunTimes } from "../src/sim/schedule.js";
-import { createHubOwner, hubCompatWarnings, hubContext, hubScriptCompile, hubScriptRead } from "../src/sim/hubApi.js";
+import { createHubOwner, hubCompatWarnings, hubContext, hubScriptCompile, hubScriptInfoName, hubScriptRead } from "../src/sim/hubApi.js";
 import { HUB_CHAR_TYPES, HUB_SERVICE_TYPES } from "../src/sim/hubTypes.js";
 import { hubTypesSource } from "../tools/hub-types.mjs";
 import { simHouse, simPut, simRecorder } from "./fixtures/simHome.js";
@@ -108,6 +108,28 @@ test("hubScriptRead: .js с info и trigger — логический, без н�
   // Вложенные `info` и `trigger` верхним уровнем не считаются.
   assert.equal(hubScriptRead("function f() { info = {}; function trigger() {} }").kind, "global");
   assert.equal(hubScriptRead("// info = {}\nvar s = 'function trigger() {}';").kind, "global");
+});
+
+test("hubScriptInfoName: имя из info.name разбором текста — строка, константа, поле константы; вычисляемое — null", () => {
+  assert.equal(hubScriptInfoName('info = { name: "Свет", description: "…" };\nfunction trigger() {}'), "Свет");
+  assert.equal(hubScriptInfoName("var info = {\n  version: '1',\n  'name': 'Свет \\'в\\' доме',\n};"), "Свет 'в' доме");
+  assert.equal(hubScriptInfoName('let info = { name: "\\u0421\\u0432\\u0435\\u0442\\t\\u2116 2" };'), "Свет\t№ 2");
+  // Имя в константе верхнего уровня — как у MotionLightAutomation: `name: scenarioName.ru`.
+  assert.equal(hubScriptInfoName('const scenarioName = { ru: "Автосвет", en: "Auto" };\ninfo = { name: scenarioName.ru };'), "Автосвет");
+  assert.equal(hubScriptInfoName('const TITLE = "Заголовок";\ninfo = { name: TITLE, type: HS.Switch };'), "Заголовок");
+  assert.equal(hubScriptInfoName('info = { name: { ru: "Русское", en: "English" } };'), "Русское");
+  // Без исполнения не узнать — нет имени: склейка, вызов, шаблон, вложенный `info`.
+  assert.equal(hubScriptInfoName('info = { name: "Свет " + n };'), null);
+  assert.equal(hubScriptInfoName("info = { name: makeName() };"), null);
+  assert.equal(hubScriptInfoName("info = { name: `Свет` };"), null);
+  assert.equal(hubScriptInfoName('function f() { info = { name: "Внутри" }; }'), null);
+  assert.equal(hubScriptInfoName('info = { title: "Нет имени" };'), null);
+  assert.equal(hubScriptInfoName(""), null);
+  // Настоящие сценарии Sprut.Hub_Tools.
+  const sprut = (name) => readFileSync(join(dirname(fileURLToPath(import.meta.url)), "fixtures", "sprut", name), "utf8");
+  assert.equal(hubScriptInfoName(sprut("MotionLightAutomation.js")), "💡 Автоматизация света по движению");
+  assert.equal(hubScriptInfoName(sprut("SwitchCallbackControl.Logic.js")), "🔘 Тест коллбеков");
+  assert.equal(hubScriptInfoName(sprut("HideIfTurnOn.js")), "Скрыть устройство если выключено");
 });
 
 test("hubScriptRead: JSON scenarioTemplate — вид из type; TEMPLATE и блочный экспорт — отказ", () => {

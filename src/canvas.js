@@ -140,7 +140,8 @@ import {
   planToScreen,
   screenToPlan,
   drawMarkLive,
-  simLiveKindOf,
+  simLiveFrame,
+  simLiveMemo,
   draftSnap,
   visibleMarks,
   visibleOutlines,
@@ -150,9 +151,9 @@ import { canRedo, canUndo, clearHistory, pushCommand, redo, undo } from "./histo
 import { getSetting, setSetting } from "./store.js";
 import { uiConfirm, uiDialogDepth, uiEl, uiFieldTarget, uiIcon, uiPrompt, uiSpaceTarget, uiTypingTarget } from "./panels/ui.js";
 import { createFieldPlate, plateUnseen } from "./panels/plate.js";
-import { deviceClickAct, deviceClickPlan, deviceKeyPresser } from "./panels/deviceCard.js";
-import { homeAccessories, markAccessory } from "./sim/home.js";
-import { simLive, simPress, simWatch } from "./simulation.js";
+import { deviceClickAct, deviceClickPlan, deviceLiveKinds, devicePresserOf } from "./panels/deviceCard.js";
+import { markAccessory } from "./sim/home.js";
+import { simLive, simWatch } from "./simulation.js";
 import { createElevationStrip, elevationPlace } from "./panels/elevation.js";
 import { screenPlaceOf, screenPlacePlanRead, screenPlacePlanView, screenPlaceSet } from "./screenPlace.js";
 
@@ -980,57 +981,18 @@ function canvasRedraw() {
 // живёт в `simulation.js` и **никогда** не идёт через `canvasCommit` — это
 // не правка объекта.
 
-// Период пульса сработавшего датчика и время вспышки нажатия, мс.
-const CANVAS_SIM_PULSE_MS = 1400;
-const CANVAS_SIM_FLASH_MS = 700;
 // Подсветка метки по щелчку на строку журнала.
 const CANVAS_HIGHLIGHT_MS = 1500;
 
-let canvasLiveCache = null; // {source, project, out}
-let canvasLiveKinds = null; // {project, kinds: Map markId → вид знака}
-const canvasSimFlash = new Map(); // markId → {pressedAt, at}
-const canvasSimPressers = new Map(); // "markId|индекс" → распознаватель нажатий
+// Кадр пульса и вспышки, вид знака и распознаватели нажатий — общие с
+// мини-планом и «Объёмом» (`simLiveFrame` в `render.js`, `deviceLiveKinds` и
+// `devicePresserOf` в `deviceCard.js`); здесь — только своя память кадров.
+const canvasLiveMemo = simLiveMemo();
 let canvasHighlight = null; // {markId, at}
 
-function canvasSimKinds(project) {
-  if (canvasLiveKinds && canvasLiveKinds.project === project) return canvasLiveKinds.kinds;
-  const kinds = new Map(homeAccessories(project).map((accessory) => [accessory.markId, simLiveKindOf(accessory)]));
-  canvasLiveKinds = { project, kinds };
-  return kinds;
-}
-
-/**
- * Кадр состояния дома для `drawScheme`: `{live, fx, animate}`. `live` — карта
- * `markId → Live` с видом знака (кэшируется, пока зеркало не изменилось);
- * `fx` — фаза пульса и затухание вспышек нажатий; `animate` — кадр нужен
- * снова (идёт пульс или вспышка).
- */
+/** Кадр состояния дома для `drawScheme`: `{live, fx, animate}` (`simLiveFrame`). */
 function canvasLiveFrame(project, now) {
-  const source = simLive(project);
-  if (!canvasLiveCache || canvasLiveCache.source !== source || canvasLiveCache.project !== project) {
-    const kinds = canvasSimKinds(project);
-    const out = new Map();
-    for (const [markId, live] of source) out.set(markId, { ...live, kind: kinds.get(markId) || "other" });
-    canvasLiveCache = { source, project, out };
-  }
-  const flash = new Map();
-  let animate = false;
-  for (const [markId, live] of canvasLiveCache.out) {
-    if (live.alert) animate = true;
-    if (live.pressedAt === null) continue;
-    const seen = canvasSimFlash.get(markId);
-    if (!seen || seen.pressedAt !== live.pressedAt) canvasSimFlash.set(markId, { pressedAt: live.pressedAt, at: now });
-    const left = 1 - (now - canvasSimFlash.get(markId).at) / CANVAS_SIM_FLASH_MS;
-    if (left > 0) {
-      flash.set(markId, left);
-      animate = true;
-    }
-  }
-  return {
-    live: canvasLiveCache.out,
-    fx: { pulse: (now % CANVAS_SIM_PULSE_MS) / CANVAS_SIM_PULSE_MS, flash },
-    animate,
-  };
+  return simLiveFrame(simLive(project), deviceLiveKinds(project), canvasLiveMemo, now);
 }
 
 /**
@@ -1070,23 +1032,6 @@ function canvasHighlightPaint(project, scheme, view, now) {
   return true;
 }
 
-// Распознаватель нажатий одной клавиши: один на клавишу, пока жив объект.
-function canvasSimPresserOf(markId, index) {
-  const key = markId + "|" + index;
-  if (!canvasSimPressers.has(key)) {
-    canvasSimPressers.set(
-      key,
-      deviceKeyPresser({
-        fire: (press) => simPress(markId, index, press),
-        now: canvasNow,
-        later: (fn, ms) => setTimeout(fn, ms),
-        clear: (id) => clearTimeout(id),
-      }),
-    );
-  }
-  return canvasSimPressers.get(key);
-}
-
 /**
  * Начало щелчка по метке в запущенном доме: что она делает (`deviceClickPlan`)
  * и, если это клавиша с нажатиями, — нажатие уже началось. Возвращает жест
@@ -1097,7 +1042,7 @@ function canvasSimBegin(state, markId) {
   const plan = deviceClickPlan(markAccessory(state.project, markId));
   const sim = { markId, plan, presser: null };
   if (plan.kind === "key" && plan.key.detect) {
-    sim.presser = canvasSimPresserOf(markId, plan.key.index);
+    sim.presser = devicePresserOf(markId, plan.key.index);
     sim.presser.down();
   }
   return sim;

@@ -12,10 +12,10 @@
 // не объект.
 import { cancelFrame, scheduleFrame } from "../app.js";
 import { findMark, findScheme, projectViewSizes, schemesInOrder } from "../model.js";
-import { drawScheme, fitView, markRadius, markStackPoints, markStacks, planToScreen, simLiveKindOf, visibleMarks } from "../render.js";
-import { homeAccessories, markAccessory } from "../sim/home.js";
-import { simAct, simLive, simPress, simRunning, simWatch } from "../simulation.js";
-import { deviceClickAct, deviceClickPlan, deviceKeyPresser } from "./deviceCard.js";
+import { drawScheme, fitView, markRadius, markStackPoints, markStacks, planToScreen, simLiveFrame, simLiveMemo, visibleMarks } from "../render.js";
+import { markAccessory } from "../sim/home.js";
+import { simLive, simRunning, simWatch } from "../simulation.js";
+import { deviceClickAct, deviceClickPlan, deviceLiveKinds, devicePresserOf } from "./deviceCard.js";
 
 /** Меньше этого радиуса (в точках экрана) метка на мини-плане не рисуется. */
 export const MINI_PLAN_MARK_PX = 7;
@@ -24,8 +24,6 @@ export const MINI_PLAN_LABEL_PX = 10;
 /** Подсветка устройства блока держится, пока на блок наведён курсор; кольцо выбора — всегда. */
 export const MINI_PLAN_RING = "#bf8700";
 
-const MINI_PLAN_PULSE_MS = 1400;
-const MINI_PLAN_FLASH_MS = 700;
 const MINI_PLAN_HIT_SLACK = 4;
 
 /**
@@ -69,47 +67,20 @@ export function miniPlanMarkAt(project, scheme, point, view, filter) {
   if (!project || !scheme) return null;
   const reach = markRadius(view) + MINI_PLAN_HIT_SLACK;
   const stacks = markStacks(project, scheme, filter, view);
-  let best = null;
+  // Сначала метки в пределах знака по близости, потом — первая из них, что
+  // устройство: аксессуар собирается у одной-двух меток под пальцем, а не у
+  // всех видимых.
+  const near = [];
   for (const mark of visibleMarks(project, scheme, filter)) {
-    if (!markAccessory(project, mark.id)) continue;
     const points = markStackPoints(mark, stacks);
     if (!points || points.length === 0) continue;
     const at = planToScreen(points[0], scheme, view);
     const distance = Math.hypot(at.x - point.x, at.y - point.y);
-    if (distance <= reach && (!best || distance < best.distance)) best = { markId: mark.id, distance };
+    if (distance <= reach) near.push({ markId: mark.id, distance });
   }
-  return best ? best.markId : null;
-}
-
-/**
- * Кадр состояния дома для `drawScheme`: `{live, fx, animate}`. `source` —
- * ответ `simLive(project)`; вид знака (`kinds`) кладётся к каждой записи;
- * `flash` — память вспышек нажатий (`markId → {pressedAt, at}`), её хранит
- * вызывающий между кадрами. `animate` — кадр нужен снова: идёт пульс или
- * вспышка.
- */
-export function miniPlanLiveFrame(source, kinds, flash, now) {
-  const live = new Map();
-  const fade = new Map();
-  let animate = false;
-  for (const [markId, item] of source) {
-    live.set(markId, { ...item, kind: kinds.get(markId) || "other" });
-    if (item.alert) animate = true;
-    if (item.pressedAt === null || item.pressedAt === undefined) continue;
-    const seen = flash.get(markId);
-    if (!seen || seen.pressedAt !== item.pressedAt) flash.set(markId, { pressedAt: item.pressedAt, at: now });
-    const left = 1 - (now - flash.get(markId).at) / MINI_PLAN_FLASH_MS;
-    if (left > 0) {
-      fade.set(markId, left);
-      animate = true;
-    }
-  }
-  return { live, fx: { pulse: (now % MINI_PLAN_PULSE_MS) / MINI_PLAN_PULSE_MS, flash: fade }, animate };
-}
-
-/** Виды знаков состояния по меткам-устройствам объекта. */
-export function miniPlanKinds(project) {
-  return new Map(homeAccessories(project).map((accessory) => [accessory.markId, simLiveKindOf(accessory)]));
+  near.sort((first, second) => first.distance - second.distance);
+  const found = near.find((item) => markAccessory(project, item.markId));
+  return found ? found.markId : null;
 }
 
 // Кольцо вокруг метки на мини-плане: выбор — синим пунктиром рисует сам
@@ -173,30 +144,13 @@ export function createMiniPlan(host, api, on = {}) {
   canvas.className = "mini-plan__canvas";
   host.append(canvas);
   const ctx = canvas.getContext("2d");
-  const flash = new Map();
-  const pressers = new Map();
+  // Кадр пульса и вспышки, вид знака и распознаватели нажатий — общие со
+  // «Схемой» и «Объёмом»; своя здесь только память кадров.
+  const memo = simLiveMemo();
   let highlight = [];
   let frame = 0;
-  let kinds = null;
-  let kindsProject = null;
   let press = null;
   let box = { width: 1, height: 1 };
-
-  const presserOf = (markId, index) => {
-    const key = markId + "|" + index;
-    if (!pressers.has(key)) {
-      pressers.set(
-        key,
-        deviceKeyPresser({
-          fire: (kind) => simPress(markId, index, kind),
-          now: () => Date.now(),
-          later: (fn, ms) => setTimeout(fn, ms),
-          clear: (id) => clearTimeout(id),
-        }),
-      );
-    }
-    return pressers.get(key);
-  };
 
   function paint() {
     frame = 0;
@@ -222,11 +176,7 @@ export function createMiniPlan(host, api, on = {}) {
     let liveFx = null;
     let animate = false;
     if (simRunning()) {
-      if (kindsProject !== state.project) {
-        kinds = miniPlanKinds(state.project);
-        kindsProject = state.project;
-      }
-      const made = miniPlanLiveFrame(simLive(state.project), kinds, flash, Date.now());
+      const made = simLiveFrame(simLive(state.project), deviceLiveKinds(state.project), memo, Date.now());
       live = made.live;
       liveFx = made.fx;
       animate = made.animate;
@@ -277,7 +227,7 @@ export function createMiniPlan(host, api, on = {}) {
     const plan = deviceClickPlan(markAccessory(state.project, markId));
     press = { markId, plan, presser: null };
     if (plan.kind === "key" && plan.key.detect) {
-      press.presser = presserOf(markId, plan.key.index);
+      press.presser = devicePresserOf(markId, plan.key.index);
       press.presser.down();
     }
   });

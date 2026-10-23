@@ -19,9 +19,8 @@
 // `simulation.js` и в объект не пишется; а всё, что в файле — сценарии и
 // профили типов, — только через `canvasCommit` со своим ярлыком истории.
 import { PANEL_IDS, layoutAllows, registerPanel, reportAppError, scheduleFrame } from "../app.js";
-import { appClockDay, appClockJump, appClockPause, appClockRead, appClockRealNow, appClockSimMs, appClockSpeed, appClockWatch } from "../appClock.js";
+import { appClockWatch } from "../appClock.js";
 import { canvasCommit } from "../canvas.js";
-import { VOLUME_CLOCK_SPEEDS, clockDayMs, clockMsStamp, volumeClockParse, volumeClockSpeedOf, volumeDateParse, volumeDateText } from "../clockMath.js";
 import {
   addScenario,
   deleteScenario,
@@ -52,21 +51,7 @@ import {
 } from "../scenarioTree.js";
 import { DEVICE_KINDS } from "../sim/catalog.js";
 import { homeAccessories } from "../sim/home.js";
-import {
-  simInPage,
-  simJournal,
-  simJournalClear,
-  simNextAt,
-  simNextEvent,
-  simReset,
-  simRunning,
-  simScenarioActive,
-  simScenarioRun,
-  simStart,
-  simStep,
-  simStop,
-  simWatch,
-} from "../simulation.js";
+import { simRunning, simScenarioActive, simScenarioRun, simWatch } from "../simulation.js";
 import { getSetting, setSetting } from "../store.js";
 import { strings, text } from "../strings.js";
 import { deviceCardView } from "./deviceCard.js";
@@ -85,10 +70,9 @@ import {
   scenarioScriptSyntaxText,
   scenarioScriptWarningText,
 } from "./scenarioScript.js";
-import { SIM_BAR_STEPS, openSimCommands, simBarClockText, simBarState } from "./simBar.js";
-import { simJournalEmpty, simJournalFilters, simJournalRows } from "./simJournal.js";
-import { uiButton, uiCheckRow, uiConfirm, uiEl, uiIcon, uiIconButton, uiModal, uiPrompt } from "./ui.js";
-import { volumeSpeedLabel } from "./volumeParams.js";
+import { simBarMount } from "./simBar.js";
+import { simJournalMount } from "./simJournal.js";
+import { uiButton, uiCheckRow, uiConfirm, uiEl, uiIconButton, uiModal, uiPrompt } from "./ui.js";
 
 /** Настройка браузера: свои заготовки сценариев (видны во всех объектах). */
 export const SCENARIO_TEMPLATES_SETTING = "scenarioTemplates";
@@ -417,8 +401,6 @@ function mountScenariosScreen(host, api) {
   let cardKey = "";
   let frame = 0;
   let firedTimer = null;
-  let journalCollapsed = false;
-  const journalFilter = { scenarioId: "", markId: "" };
 
   const state = () => api.getState();
   const canEdit = () => scenariosCanEdit(state().layout);
@@ -449,101 +431,14 @@ function mountScenariosScreen(host, api) {
   }
 
   // ——— полоса запуска и часов ———
+  // Та же сборка, что над планом «Схемы» (`simBarMount`): режим её только
+  // монтирует в свою верхнюю строку.
 
-  const barStart = uiButton("", { class: "ui-btn scn-bar__start", on: { click: () => (simRunning() ? simStop() : simStart()) } });
-  const barStatus = uiEl("span", { class: "scn-bar__status" });
-  const barWarn = uiEl("span", { class: "scn-bar__warn", text: strings.sim.bar.noWorker });
-  const barReset = uiButton(strings.sim.bar.reset, { class: "ui-btn", title: strings.sim.bar.resetHint, on: { click: () => simReset() } });
-  const barCommand = uiButton(strings.sim.bar.command, {
-    class: "ui-btn",
-    title: strings.sim.bar.commandHint,
-    on: { click: () => openSimCommands(api) },
-  });
-  const barDate = uiEl("input", {
-    class: "ui-input scn-bar__date",
-    type: "date",
-    title: strings.sim.bar.dateHint,
-    attrs: { "aria-label": strings.sim.bar.date },
-    on: {
-      change: (event) => {
-        const day = volumeDateParse(event.target.value);
-        if (day !== null) appClockDay(day);
-      },
-    },
-  });
-  const barTime = uiEl("input", {
-    class: "ui-input scn-bar__time",
-    type: "text",
-    title: strings.sim.bar.timeHint,
-    attrs: { "aria-label": strings.sim.bar.time, size: "8", spellcheck: "false" },
-    on: {
-      change: (event) => {
-        const minutes = volumeClockParse(event.target.value);
-        const day = barDate.value ? volumeDateParse(barDate.value) : clockMsStamp(appClockSimMs()).day;
-        if (minutes !== null && day !== null) appClockJump(clockDayMs(day) + minutes * 60000);
-        renderBar();
-      },
-      keydown: (event) => {
-        if (event.key !== "Enter") return;
-        event.preventDefault();
-        event.target.blur();
-      },
-    },
-  });
-  const barSpeed = uiEl(
-    "select",
-    {
-      class: "ui-select scn-bar__speed",
-      title: strings.sim.bar.speedHint,
-      attrs: { "aria-label": strings.sim.bar.speed },
-      on: { change: (event) => appClockSpeed(Number(event.target.value)) },
-    },
-    VOLUME_CLOCK_SPEEDS.map((value) => uiEl("option", { text: volumeSpeedLabel(value), attrs: { value: String(value) } })),
-  );
-  const barPause = uiButton("", {
-    class: "ui-btn",
-    on: {
-      click: () => {
-        const read = appClockRead();
-        appClockPause(!(read.clock && read.clock.fixed));
-      },
-    },
-  });
-  const barNow = uiButton(strings.sim.bar.now, { class: "ui-btn", title: strings.sim.bar.nowHint, on: { click: () => appClockRealNow() } });
-  const barSteps = SIM_BAR_STEPS.map((step) =>
-    uiButton(strings.sim.bar[step.key], { class: "ui-btn", title: strings.sim.bar.stepHint, on: { click: () => simStep(step.ms) } }),
-  );
-  const barNext = uiButton(strings.sim.bar.next, { class: "ui-btn", on: { click: () => simNextEvent() } });
-  const barClock = uiEl("div", { class: "scn-bar__group" }, [barDate, barTime, barSpeed, barPause, barNow, ...barSteps, barNext]);
-  const bar = uiEl("div", { class: "scn-bar" }, [
-    uiEl("div", { class: "scn-bar__group" }, [barStart, barStatus, barWarn, barReset, barCommand]),
-    barClock,
-  ]);
+  const bar = uiEl("div", { class: "scn__bar" });
+  const barParts = simBarMount(bar, api);
 
   function renderBar() {
-    const running = simRunning();
-    const read = appClockRead();
-    const info = simBarState({ running, clock: read.clock, speed: read.speed, nextAt: simNextAt() });
-    barStart.textContent = running ? strings.sim.bar.stop : strings.sim.bar.start;
-    barStart.title = running ? strings.sim.bar.stopHint : strings.sim.bar.startHint;
-    barStart.classList.toggle("ui-btn--primary", !running);
-    barStatus.textContent = running ? strings.sim.bar.running : strings.sim.bar.stopped;
-    barStatus.classList.toggle("is-running", running);
-    barWarn.hidden = !(running && simInPage());
-    barReset.hidden = !running;
-    barCommand.hidden = !running;
-    barClock.hidden = !running;
-    if (!running) return;
-    const parts = simBarClockText(appClockSimMs());
-    const active = typeof document !== "undefined" ? document.activeElement : null;
-    if (active !== barDate) barDate.value = volumeDateText(parts.day);
-    if (active !== barTime) barTime.value = parts.time;
-    if (active !== barSpeed) barSpeed.value = String(volumeClockSpeedOf(info.speed));
-    barPause.textContent = info.paused ? strings.sim.bar.resume : strings.sim.bar.pause;
-    barPause.title = info.paused ? strings.sim.bar.resumeHint : strings.sim.bar.pauseHint;
-    barPause.classList.toggle("is-on", info.paused);
-    barNext.disabled = !info.next;
-    barNext.title = info.next ? strings.sim.bar.nextHint + ". " + info.nextTitle : strings.sim.bar.nextNone;
+    barParts.update();
   }
 
   // ——— список слева ———
@@ -1170,97 +1065,25 @@ function mountScenariosScreen(host, api) {
   }
 
   // ——— журнал внизу ———
+  // Та же сборка, что в «Схеме» (`simJournalMount`); щелчок по строке
+  // выбирает устройство и подсвечивает его на мини-плане.
 
-  const journalToggle = uiEl("button", { class: "scn-journal__toggle", type: "button", on: { click: () => flipJournal(!journalCollapsed) } });
-  const journalCount = uiEl("span", { class: "scn-journal__count" });
-  const journalScenario = uiEl("select", {
-    class: "ui-select scn-journal__filter",
-    title: strings.sim.log.scenarioFilter,
-    attrs: { "aria-label": strings.sim.log.scenarioFilter },
-    on: {
-      change: (event) => {
-        journalFilter.scenarioId = event.target.value;
-        renderJournal();
-      },
+  const journal = uiEl("section", { class: "scn__journal" });
+  const journalParts = simJournalMount(journal, api, {
+    title: strings.scenarios.journal.title,
+    setting: SCENARIOS_JOURNAL_SETTING,
+    collapsed: false,
+    onRow: (row) => {
+      pick(row.markId);
+      if (miniPlan) {
+        miniPlan.setHighlight([row.markId]);
+        setTimeout(() => miniPlan && miniPlan.setHighlight([]), SCENARIO_FIRED_MS);
+      }
     },
   });
-  const journalMark = uiEl("select", {
-    class: "ui-select scn-journal__filter",
-    title: strings.sim.log.deviceFilter,
-    attrs: { "aria-label": strings.sim.log.deviceFilter },
-    on: {
-      change: (event) => {
-        journalFilter.markId = event.target.value;
-        renderJournal();
-      },
-    },
-  });
-  const journalClear = uiButton(strings.sim.log.clear, { class: "ui-btn", title: strings.sim.log.clearHint, on: { click: () => simJournalClear() } });
-  const journalList = uiEl("ol", { class: "scn-journal__list" });
-  const journalEmpty = uiEl("p", { class: "scn-journal__empty" });
-  const journalBody = uiEl("div", { class: "scn-journal__body" }, [
-    uiEl("div", { class: "scn-journal__tools" }, [journalScenario, journalMark, journalClear]),
-    journalList,
-    journalEmpty,
-  ]);
-  const journal = uiEl("section", { class: "scn__journal" }, [uiEl("div", { class: "scn-journal__head" }, [journalToggle, journalCount]), journalBody]);
-
-  function flipJournal(value) {
-    journalCollapsed = value;
-    Promise.resolve(setSetting(SCENARIOS_JOURNAL_SETTING, journalCollapsed)).catch(() => {});
-    renderJournal();
-  }
-
-  function fillSelect(select, all, options, current) {
-    const keep = options.some((option) => option.id === current) ? current : "";
-    select.replaceChildren(uiEl("option", { text: all, attrs: { value: "" } }), ...options.map((option) => uiEl("option", { text: option.label, attrs: { value: option.id } })));
-    select.value = keep;
-    return keep;
-  }
 
   function renderJournal() {
-    const now = state();
-    const entries = simJournal();
-    journal.classList.toggle("is-collapsed", journalCollapsed);
-    journalToggle.replaceChildren(uiIcon("chevron"), uiEl("span", { text: strings.scenarios.journal.title }));
-    journalToggle.title = journalCollapsed ? strings.sim.log.expand : strings.sim.log.collapse;
-    journalToggle.setAttribute("aria-expanded", journalCollapsed ? "false" : "true");
-    journalCount.textContent = entries.length > 0 ? text("sim.log.count", { count: entries.length }) : "";
-    journalBody.hidden = journalCollapsed;
-    if (journalCollapsed) return;
-    const variants = simJournalFilters(entries, now.project);
-    journalFilter.scenarioId = fillSelect(journalScenario, strings.sim.log.allScenarios, variants.scenarios.map((item) => ({ id: item.id, label: item.name })), journalFilter.scenarioId);
-    journalFilter.markId = fillSelect(journalMark, strings.sim.log.allDevices, variants.marks.map((item) => ({ id: item.id, label: item.label })), journalFilter.markId);
-    const rows = simJournalRows(entries, now.project, journalFilter);
-    journalList.replaceChildren(
-      ...rows.map((row) => {
-        const clickable = Boolean(row.markId);
-        const parts = [uiEl("span", { class: "scn-journal__time", text: row.time }), uiEl("span", { class: "scn-journal__text", text: row.text })];
-        if (row.chain) parts.push(uiEl("span", { class: "scn-journal__chain", text: text("sim.log.chain", { chain: row.chain }) }));
-        const item = uiEl(
-          "li",
-          {
-            class: "scn-journal__row is-" + row.kind + (row.result === true ? " is-true" : row.result === false ? " is-false" : "") + (clickable ? " is-link" : ""),
-            title: clickable ? strings.sim.log.rowHint : "",
-          },
-          parts,
-        );
-        if (clickable) {
-          // Щелчок по строке подсвечивает устройство на мини-плане и выбирает его.
-          item.addEventListener("click", () => {
-            pick(row.markId);
-            if (miniPlan) {
-              miniPlan.setHighlight([row.markId]);
-              setTimeout(() => miniPlan && miniPlan.setHighlight([]), SCENARIO_FIRED_MS);
-            }
-          });
-        }
-        return item;
-      }),
-    );
-    const note = simJournalEmpty(entries.length, rows.length, state().simRunning === true);
-    journalEmpty.hidden = note === null;
-    journalEmpty.textContent = note || "";
+    journalParts.draw();
   }
 
   // ——— сборка и перерисовка ———
@@ -1306,14 +1129,6 @@ function mountScenariosScreen(host, api) {
     built = true;
     miniPlan = createMiniPlan(planHost, api, { pick });
     scenariosLoadTemplates();
-    Promise.resolve(getSetting(SCENARIOS_JOURNAL_SETTING))
-      .then((saved) => {
-        if (saved === true) {
-          journalCollapsed = true;
-          renderJournal();
-        }
-      })
-      .catch(() => {});
   }
 
   api.subscribe((next, changed) => {

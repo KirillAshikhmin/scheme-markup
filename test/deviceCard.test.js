@@ -16,7 +16,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { markAccessory } from "../src/sim/home.js";
-import { setMarkDevice } from "../src/model.js";
+import { setMarkDevice, updateMark } from "../src/model.js";
 import { PRESS_DOUBLE_MS, PRESS_LONG_MS } from "../src/sim/presses.js";
 import {
   deviceCardModel,
@@ -24,6 +24,9 @@ import {
   deviceClickPlan,
   deviceKeyPresser,
   deviceKeysOf,
+  deviceLiveKinds,
+  devicePresserOf,
+  devicePressers,
   deviceValueText,
 } from "../src/panels/deviceCard.js";
 import { simCharMeta } from "../src/sim/catalog.js";
@@ -326,4 +329,38 @@ test("модель карточки: раздел «Логика» — прив�
   const sensor = deviceCardModel(bound.project, box.marks.ДД1, null, reader).logic;
   assert.deepEqual(sensor.bindings, []);
   assert.deepEqual(sensor.available, []);
+});
+
+// ——— общие на «Схему», мини-план и «Объём» (ревью ветки, F1) ———————————————
+
+test("вид знака по объекту: свет, штора, ТВ, розетка, прочее — с помещением метки; один ответ на объект", () => {
+  const kinds = deviceLiveKinds(box.project);
+  assert.equal(kinds.get(box.marks.С1).kind, "light");
+  assert.equal(kinds.get(box.marks.КШ1).kind, "curtain");
+  assert.equal(kinds.get(box.marks.ТВ1).kind, "tv");
+  assert.equal(kinds.get(box.marks.Р1).kind, "outlet");
+  assert.equal(kinds.get(box.marks.ДД1).kind, "other");
+  assert.equal(kinds.get(box.marks.С1).roomId, box.rooms.hall);
+  assert.equal(kinds.get(box.marks.ДД2).roomId, null, "датчик без помещения");
+  assert.equal(deviceLiveKinds(box.project), kinds, "тот же объект — та же карта");
+  const moved = updateMark(box.project, box.marks.С1, { points: [{ x: 0.26, y: 0.3 }] }).project;
+  assert.notEqual(deviceLiveKinds(moved), kinds, "правка объекта — новая карта");
+  assert.equal(deviceLiveKinds(null).size, 0);
+});
+
+test("распознаватели нажатий: один на клавишу «метка|сервис» — и у мыши, и у пальца, и у E", () => {
+  const fired = [];
+  const registry = devicePressers({
+    fire: (markId, index, press) => fired.push([markId, index, press]),
+    now: () => 0,
+    later: () => 1,
+    clear: () => {},
+  });
+  const first = registry.of("m1", 3);
+  assert.equal(registry.of("m1", 3), first, "второй раз — тот же распознаватель");
+  assert.notEqual(registry.of("m1", 4), first);
+  assert.notEqual(registry.of("m2", 3), first);
+  // Общий распознаватель сеанса — тоже один на клавишу.
+  assert.equal(devicePresserOf("общий", 1), devicePresserOf("общий", 1));
+  assert.notEqual(devicePresserOf("общий", 1), devicePresserOf("общий", 2));
 });

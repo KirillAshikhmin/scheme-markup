@@ -55,6 +55,68 @@ export const SIM_WORKER_MESSAGES = Object.freeze([
   "ping",
 ]);
 
+/**
+ * Чего у потока сценариев нет (ревью ветки, F1): сеть, хранилища браузера,
+ * чужие потоки и уведомления. Код сценария исполняется здесь уже при открытии
+ * объекта, а изоляция области (`hubApi.js`) — не защита: глобальный объект
+ * достаётся через `({}).constructor.constructor("return this")()`. Поэтому
+ * эти имена снимаются с глобального объекта до первого сообщения.
+ */
+export const SIM_WORKER_SEALED = Object.freeze([
+  "fetch",
+  "XMLHttpRequest",
+  "WebSocket",
+  "WebSocketStream",
+  "WebTransport",
+  "EventSource",
+  "importScripts",
+  "indexedDB",
+  "caches",
+  "BroadcastChannel",
+  "Worker",
+  "SharedWorker",
+  "Notification",
+  "navigator",
+]);
+
+/**
+ * Снять `SIM_WORKER_SEALED` с глобального объекта потока: с него самого и с
+ * его прототипов (у браузера одни имена лежат на объекте, другие — на
+ * `WorkerGlobalScope.prototype`); что не удаляется — заслоняется своим
+ * `undefined`. Возвращает имена, которые снять не вышло (пустой список — всё
+ * снято). Поддельный `scope` запасного пути в странице здесь ничего не теряет.
+ */
+export function simWorkerSeal(scope) {
+  const left = [];
+  if (!scope || (typeof scope !== "object" && typeof scope !== "function")) return left;
+  const gone = (name) => {
+    try {
+      return scope[name] === undefined;
+    } catch {
+      return false;
+    }
+  };
+  for (const name of SIM_WORKER_SEALED) {
+    for (let owner = scope; owner && owner !== Object.prototype; owner = Object.getPrototypeOf(owner)) {
+      if (!Object.prototype.hasOwnProperty.call(owner, name)) continue;
+      try {
+        delete owner[name];
+      } catch {
+        // неудаляемое заслоним ниже
+      }
+    }
+    if (!gone(name)) {
+      try {
+        Object.defineProperty(scope, name, { value: undefined, writable: false, enumerable: false, configurable: false });
+      } catch {
+        // не вышло — имя уйдёт в ответ
+      }
+    }
+    if (!gone(name)) left.push(name);
+  }
+  return left;
+}
+
 const SIM_WORKER_SCRIPT_KINDS = new Set(["logic", "global"]);
 const SIM_WORKER_TIMER_TAG = "hub:";
 // У сценария есть `compute` — только такие привязки хозяин зовёт до записи.
@@ -232,6 +294,8 @@ export function simWorkerTraced(owner, tracer) {
  * свои у потока). Возвращает `{engine, handle}` — для тестов и запасного пути.
  */
 export function simWorkerMain(scope) {
+  // До первого сообщения: сеть и хранилища потоку не нужны, а сценариям — запрещены.
+  simWorkerSeal(scope);
   const later = typeof scope.setTimeout === "function" ? (fn, ms) => scope.setTimeout(fn, ms) : (fn, ms) => setTimeout(fn, ms);
   const cancel = typeof scope.clearTimeout === "function" ? (id) => scope.clearTimeout(id) : (id) => clearTimeout(id);
   const realNow = typeof scope.now === "function" ? () => scope.now() : () => Date.now();

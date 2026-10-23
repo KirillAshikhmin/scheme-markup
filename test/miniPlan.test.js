@@ -9,18 +9,17 @@ import assert from "node:assert/strict";
 
 import {
   MINI_PLAN_MARK_PX,
-  miniPlanKinds,
-  miniPlanLiveFrame,
   miniPlanMarkAt,
   miniPlanPaint,
   miniPlanSchemeFor,
   miniPlanSchemes,
   miniPlanView,
 } from "../src/panels/miniPlan.js";
-import { addScheme, addMark } from "../src/model.js";
+import { addScheme, addMark, findMark, updateMark } from "../src/model.js";
 import { markAccessory } from "../src/sim/home.js";
-import { markRadius, planToScreen } from "../src/render.js";
-import { simHouse } from "./fixtures/simHome.js";
+import { markRadius, planToScreen, simLiveFrame, simLiveMemo } from "../src/render.js";
+import { deviceClickPlan, deviceLiveKinds } from "../src/panels/deviceCard.js";
+import { simBigHouse, simHouse } from "./fixtures/simHome.js";
 
 const house = simHouse();
 const { project, marks } = house;
@@ -106,13 +105,15 @@ test("метка без аксессуара устройством не выб�
   assert.equal(miniPlanMarkAt(bare.project, scheme, at, view, undefined), null);
 });
 
+// Вид знака и кадр пульса у мини-плана — те же, что у «Схемы» (ревью ветки,
+// F1): `deviceLiveKinds` и `simLiveFrame`.
 test("виды знаков состояния — по меткам-устройствам объекта", () => {
-  const kinds = miniPlanKinds(project);
-  assert.equal(kinds.get(marks.С1), "light");
-  assert.equal(kinds.get(marks.КШ1), "curtain");
-  assert.equal(kinds.get(marks.ТВ1), "tv");
-  assert.equal(kinds.get(marks.Р1), "outlet");
-  assert.equal(kinds.get(marks.ДД1), "other");
+  const kinds = deviceLiveKinds(project);
+  assert.equal(kinds.get(marks.С1).kind, "light");
+  assert.equal(kinds.get(marks.КШ1).kind, "curtain");
+  assert.equal(kinds.get(marks.ТВ1).kind, "tv");
+  assert.equal(kinds.get(marks.Р1).kind, "outlet");
+  assert.equal(kinds.get(marks.ДД1).kind, "other");
 });
 
 test("кадр дома: вид знака приложен, пульс идёт у сработавшего датчика, вспышка гаснет", () => {
@@ -121,20 +122,20 @@ test("кадр дома: вид знака приложен, пульс идёт
     [marks.ДД1, { on: false, level: 0, alert: true, open: 0, pressedAt: null }],
     [marks.В1, { on: false, level: 0, alert: false, open: 0, pressedAt: 5000 }],
   ]);
-  const kinds = miniPlanKinds(project);
-  const flash = new Map();
-  const first = miniPlanLiveFrame(source, kinds, flash, 10_000);
+  const kinds = deviceLiveKinds(project);
+  const flash = simLiveMemo();
+  const first = simLiveFrame(source, kinds, flash, 10_000);
   assert.equal(first.live.get(marks.С1).kind, "light");
   assert.equal(first.live.get(marks.ДД1).alert, true);
   assert.equal(first.animate, true);
   assert.ok(first.fx.flash.get(marks.В1) > 0.99, "вспышка только началась");
   // Через 350 мс (полвспышки) — угасла наполовину; через секунду — нет вспышки.
-  const half = miniPlanLiveFrame(source, kinds, flash, 10_350);
+  const half = simLiveFrame(source, kinds, flash, 10_350);
   assert.ok(Math.abs(half.fx.flash.get(marks.В1) - 0.5) < 0.01);
-  const late = miniPlanLiveFrame(source, kinds, flash, 11_100);
+  const late = simLiveFrame(source, kinds, flash, 11_100);
   assert.equal(late.fx.flash.has(marks.В1), false);
   // Спокойный дом — кадр больше не нужен.
-  const calm = miniPlanLiveFrame(new Map([[marks.С1, { on: true, level: 1, alert: false, open: 0, pressedAt: null }]]), kinds, new Map(), 0);
+  const calm = simLiveFrame(new Map([[marks.С1, { on: true, level: 1, alert: false, open: 0, pressedAt: null }]]), kinds, simLiveMemo(), 0);
   assert.equal(calm.animate, false);
 });
 
@@ -158,4 +159,51 @@ test("рисование: состояния — только при запущ�
   const empty = [];
   assert.equal(miniPlanPaint(scribe(empty), { project, scheme: null, box: BOX }), 0);
   assert.deepEqual(empty, ["clearRect(0,0,400,300)"]);
+});
+
+// ——— скорость щелчка (история 2.18; ревью ветки, F1) ——————————————————————
+
+// Норма скорости по часам стены — медиана повторов после прогрева: один
+// медленный прогон под чужой нагрузкой (`npm test` идёт параллельно) её не
+// сдвигает.
+function medianMs(fn, { runs = 7, warmup = 2 } = {}) {
+  for (let index = 0; index < warmup; index += 1) fn();
+  const times = [];
+  for (let index = 0; index < runs; index += 1) {
+    const started = performance.now();
+    fn();
+    times.push(performance.now() - started);
+  }
+  times.sort((first, second) => first - second);
+  return times[Math.floor(times.length / 2)];
+}
+
+test("аксессуар метки собирается раз на объект: тот же объект — тот же ответ, правка — новый", () => {
+  const first = markAccessory(project, marks.С1);
+  assert.equal(markAccessory(project, marks.С1), first, "второй вызов на том же объекте пересобрал аксессуар");
+  const moved = updateMark(project, marks.С1, { points: [{ x: 0.31, y: 0.31 }] }).project;
+  const again = markAccessory(moved, marks.С1);
+  assert.notEqual(again, first, "кэш пережил смену объекта");
+  assert.deepEqual(again, first, "тот же аксессуар — те же адреса");
+});
+
+test("щелчок по мини-плану в доме из 500 устройств — быстрее 10 мс", () => {
+  const big = simBigHouse(100);
+  const floor = big.project.schemes[0];
+  const view = miniPlanView(big.project, floor, BOX);
+  const points = big.groups.slice(0, 20).map((group) => planToScreen(findMark(big.project, group.light).points[0], floor, view));
+  let turn = 0;
+  const click = () => {
+    const markId = miniPlanMarkAt(big.project, floor, points[turn % points.length], view, undefined);
+    turn += 1;
+    return deviceClickPlan(markAccessory(big.project, markId));
+  };
+  assert.notEqual(click().kind, "none", "щелчок не попал ни в одно устройство");
+  // Прогрев длиннее, чем у тяжёлых норм: щелчок короткий, и под параллельным
+  // прогоном код без прогрева ещё не скомпилирован. Прогон — пять щелчков.
+  const five = () => {
+    for (let index = 0; index < 5; index += 1) click();
+  };
+  const ms = medianMs(five, { runs: 15, warmup: 40 }) / 5;
+  assert.ok(ms < 10, "щелчок по мини-плану занял " + ms.toFixed(2) + " мс (медиана)");
 });

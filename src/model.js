@@ -3836,6 +3836,13 @@ export function updateType(project, typeId, patch = {}) {
     const record = deviceRecordFromEdit(patch.device);
     if (record === undefined) delete next.device;
     else next.device = record;
+  } else if (next.code !== current.code && typeDeviceRecord(current) === null && typeId !== COMMENT_TYPE_ID) {
+    // Профиль без своей записи выводится по коду: новый код таблице незнаком
+    // (Т→ТЛ), и смена кода молча сняла бы аксессуар у всех меток типа. Вид,
+    // который давал прежний код, записывается в тип этой же командой — сервисы
+    // и адреса `aid.sid` меток остаются прежними.
+    const derived = deviceKindForTemplateCode(current.code);
+    if (derived && derived !== DEVICE_KIND_NONE) next.device = { kind: derived };
   }
 
   const markTypes = project.markTypes.map((type) => (type.id === typeId ? next : type));
@@ -4282,6 +4289,14 @@ function deviceSame(first, second) {
   return JSON.stringify(first === undefined ? null : first) === JSON.stringify(second === undefined ? null : second);
 }
 
+// Действуют ли два профиля одинаково: вид, сервисы, отвязка, параметры.
+// Пометки `derived`/`own` — откуда профиль взялся, а не каков он.
+function deviceProfileSame(first, second) {
+  const plain = (profile) =>
+    profile ? { kind: profile.kind, services: profile.services, decoupled: profile.decoupled, params: profile.params } : null;
+  return deviceSame(plain(first), plain(second));
+}
+
 // Полный профиль из записи: сервисы вида там, где своих нет, параметры вида
 // под своими.
 function deviceProfile(record, derived) {
@@ -4364,6 +4379,14 @@ export function setTypeDevice(project, typeId, profile) {
   if (typeId === COMMENT_TYPE_ID) throw modelError("commentNoDevice");
   const record = deviceRecordFromEdit(profile);
   if (deviceSame(type.device, record)) return { project, type };
+  // Своей записи нет, а записанное совпало бы с выведенным профилем — писать
+  // нечего: окно, отдавшее профиль целиком, не делает тип «заданным руками».
+  // Код, который таблица не знает, — исключение: «без устройства» у него —
+  // решение человека, тип уходит из списка на правку.
+  if (record !== undefined && typeDeviceRecord(type) === null && deviceKindForTemplateCode(type.code) !== null) {
+    const wanted = record.kind === DEVICE_KIND_NONE ? null : deviceProfile(record, false);
+    if (deviceProfileSame(typeDeviceOf(project, typeId), wanted)) return { project, type };
+  }
   const markTypes = project.markTypes.map((item) => (item.id === typeId ? typeWithDevice(item, record) : item));
   return { project: withProject(project, { markTypes }), type: markTypes.find((item) => item.id === typeId) };
 }
@@ -4436,26 +4459,25 @@ export function deviceExpand(profile, channels) {
 export function markDeviceProfile(project, markId) {
   const mark = findMark(project, markId);
   if (!mark || markIsComment(mark)) return null;
-  const base = typeDeviceOf(project, mark.typeId);
-  const own = markDeviceRecord(mark.device);
-  let profile;
-  if (!markDeviceRecordOwn(own)) {
-    profile = base ? { ...base, own: false } : null;
-  } else {
-    const key = own.kind || (base ? base.kind : DEVICE_KIND_NONE);
-    if (key === DEVICE_KIND_NONE) return null;
-    const kind = deviceKind(key);
-    const same = base && base.kind === key ? base : null;
-    profile = {
-      kind: key,
-      services: (own.services || (same ? same.services : kind.services)).map(deviceServiceCopy),
-      decoupled: [...(own.decoupled || (same ? same.decoupled : []))],
-      params: { ...kind.params, ...(same ? same.params : {}), ...(own.params || {}) },
-      derived: false,
-      own: true,
-    };
-  }
-  return profile;
+  return markProfileFrom(typeDeviceOf(project, mark.typeId), markDeviceRecord(mark.device));
+}
+
+// Профиль метки из профиля типа `base` и своей записи `own` (приведённой
+// `markDeviceRecord`) — одно правило для чтения и для сверки в `setMarkDevice`.
+function markProfileFrom(base, own) {
+  if (!markDeviceRecordOwn(own)) return base ? { ...base, own: false } : null;
+  const key = own.kind || (base ? base.kind : DEVICE_KIND_NONE);
+  if (key === DEVICE_KIND_NONE) return null;
+  const kind = deviceKind(key);
+  const same = base && base.kind === key ? base : null;
+  return {
+    kind: key,
+    services: (own.services || (same ? same.services : kind.services)).map(deviceServiceCopy),
+    decoupled: [...(own.decoupled || (same ? same.decoupled : []))],
+    params: { ...kind.params, ...(same ? same.params : {}), ...(own.params || {}) },
+    derived: false,
+    own: true,
+  };
 }
 
 /**
@@ -4518,6 +4540,16 @@ export function setMarkDevice(project, markId, patch) {
     if (deviceHas(patch, "kind") && !Object.prototype.hasOwnProperty.call(patch, "services")) {
       const before = markDeviceOf(project, markId);
       if ((before ? before.kind : DEVICE_KIND_NONE) !== patch.kind) delete next.services;
+    }
+    // Своей настройки не было, а записанное действует так же, как профиль
+    // типа, — это не своя настройка: профильные ключи не пишутся (дверь
+    // датчика из той же записи — пишется).
+    const had = markDeviceRecord(current);
+    if (!markDeviceRecordOwn(had)) {
+      const base = typeDeviceOf(project, mark.typeId);
+      if (deviceProfileSame(markProfileFrom(base, markDeviceRecord(next)), markProfileFrom(base, had))) {
+        for (const key of DEVICE_PROFILE_KEYS) delete next[key];
+      }
     }
   }
   const record = Object.keys(next).length > 0 ? next : undefined;

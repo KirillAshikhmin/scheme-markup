@@ -13,6 +13,7 @@ import {
   scenarioScriptAdd,
   scenarioScriptBind,
   scenarioScriptCheck,
+  scenarioScriptDirty,
   scenarioScriptFaultText,
   scenarioScriptFaults,
   scenarioScriptFieldValue,
@@ -103,6 +104,28 @@ test("вставка текста без файла: имя берётся из 
   assert.equal(scenario.name, "Сценарий JS");
 });
 
+test("«Загрузить JS» и «Вставить текст» не исполняют код в странице: имя — разбором info.name, без исполнения", () => {
+  const box = simHouse();
+  // Верхний уровень, который в странице дотянулся бы до `window` и пометил его.
+  const escape = 'var g = ({}).constructor.constructor("return this")();\ng.scenarioScriptRanInPage = true;\n';
+  delete globalThis.scenarioScriptRanInPage;
+  try {
+    const logic = escape + 'info = { name: "Свет без исполнения", sourceServices: [HS.Lightbulb], sourceCharacteristics: [HC.On] };\nfunction trigger(source, value) {}\n';
+    const fromFile = scenarioScriptAdd(box.project, scenarioScriptRead(logic, "свет.js").read);
+    assert.equal(globalThis.scenarioScriptRanInPage, undefined, "загрузка файла исполнила код сценария в странице");
+    assert.equal(findScenario(fromFile.project, fromFile.scenarioId).name, "Свет без исполнения");
+    const pasted = scenarioScriptAdd(box.project, scenarioScriptRead(logic, "").read);
+    assert.equal(globalThis.scenarioScriptRanInPage, undefined, "вставка текста исполнила код сценария в странице");
+    assert.equal(findScenario(pasted.project, pasted.scenarioId).name, "Свет без исполнения");
+    // Имя, которое без исполнения не узнать, — из имени файла.
+    const computed = scenarioScriptAdd(box.project, scenarioScriptRead(escape + "info = { name: makeName() };\nfunction trigger() {}\n", "Своё имя.js").read);
+    assert.equal(globalThis.scenarioScriptRanInPage, undefined);
+    assert.equal(findScenario(computed.project, computed.scenarioId).name, "Своё имя");
+  } finally {
+    delete globalThis.scenarioScriptRanInPage;
+  }
+});
+
 // ——— «Скачать» и правка (5.2, 5.11) ———————————————————————————————————————
 
 test("круг «загрузить → скачать»: .js отдаёт тот же текст, JSON — тот же data", () => {
@@ -133,6 +156,23 @@ test("скачивание после правки отдаёт текущий �
   assert.equal(body.data, "// правка\nvar x = 1;\n");
   assert.equal(body.type, "GLOBAL");
   assert.equal(scenarioScriptSave(saved.project, added.scenarioId, "// правка\nvar x = 1;\n"), null);
+});
+
+test("окно кода: «текст изменён» — набранное отличается от сохранённого; без права правки — не изменён", () => {
+  const box = simHouse();
+  const added = loaded(box.project, "HideIfTurnOn.js");
+  const source = findScenario(added.project, added.scenarioId).source;
+  assert.equal(scenarioScriptDirty(added.project, added.scenarioId, source), false, "тот же текст — закрывать молча");
+  assert.equal(scenarioScriptDirty(added.project, added.scenarioId, source + "\n// правка"), true);
+  assert.equal(scenarioScriptDirty(added.project, added.scenarioId, ""), true, "стёртый текст — тоже изменение");
+  // Сохранили — набранное снова совпадает с объектом.
+  const saved = scenarioScriptSave(added.project, added.scenarioId, source + "\n// правка");
+  assert.equal(scenarioScriptDirty(saved.project, added.scenarioId, source + "\n// правка"), false);
+  // Только просмотр (телефон) — правки нет, спрашивать не о чем.
+  assert.equal(scenarioScriptDirty(added.project, added.scenarioId, source + "x", false), false);
+  // Сценарий удалили, пока окно открыто, — набранное всё равно не пропадает молча.
+  assert.equal(scenarioScriptDirty(simHouse().project, added.scenarioId, "var a = 1;"), true);
+  assert.equal(scenarioScriptDirty(simHouse().project, added.scenarioId, ""), false);
 });
 
 test("синтаксическая ошибка: строка и текст, сохранить можно", () => {

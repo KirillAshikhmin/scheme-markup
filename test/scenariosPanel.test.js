@@ -37,6 +37,8 @@ import { warningPlace, warningScreenPatch } from "../src/panels/warnings.js";
 import { addType, findScenario, scenariosInOrder, typeDeviceOf, typeDeviceUnknown, validate, deleteMark } from "../src/model.js";
 import { SCENARIO_TEMPLATES, scenarioIssues, scenarioToTemplate } from "../src/scenarioTree.js";
 import { strings } from "../src/strings.js";
+import { simBarMount } from "../src/panels/simBar.js";
+import { simJournalMount } from "../src/panels/simJournal.js";
 import { simHouse } from "./fixtures/simHome.js";
 
 const house = simHouse();
@@ -337,4 +339,141 @@ test("режим подключён: точка монтирования, сти
   }
   const screens = readFileSync(new URL("../src/panels/screens.js", import.meta.url), "utf8");
   assert.match(screens, /\["drawing", "scheme", "volume", "scenarios"\]/);
+});
+
+// ——— полоса и журнал — сборка «Схемы» (ревью ветки, F1) ———————————————————
+
+// Узлы без браузера: столько DOM, сколько нужно `uiEl`, `uiButton` и `uiIcon`.
+function fakeDocument() {
+  class FakeNode {
+    constructor(tag) {
+      this.tagName = String(tag).toUpperCase();
+      this.children = [];
+      this.attributes = {};
+      this.listeners = {};
+      this.className = "";
+      this.textContent = "";
+      this.title = "";
+      this.hidden = false;
+      this.value = "";
+      this.dataset = {};
+      this.style = {};
+    }
+    get classList() {
+      const names = () => this.className.split(/\s+/).filter(Boolean);
+      const write = (list) => (this.className = [...new Set(list)].join(" "));
+      return {
+        add: (...more) => write([...names(), ...more]),
+        remove: (...less) => write(names().filter((name) => !less.includes(name))),
+        contains: (name) => names().includes(name),
+        toggle: (name, on) => {
+          const want = on === undefined ? !names().includes(name) : Boolean(on);
+          write(want ? [...names(), name] : names().filter((item) => item !== name));
+          return want;
+        },
+      };
+    }
+    setAttribute(name, value) {
+      this.attributes[name] = String(value);
+    }
+    getAttribute(name) {
+      return Object.prototype.hasOwnProperty.call(this.attributes, name) ? this.attributes[name] : null;
+    }
+    addEventListener(type, fn) {
+      (this.listeners[type] = this.listeners[type] || []).push(fn);
+    }
+    removeEventListener() {}
+    fire(type) {
+      for (const fn of this.listeners[type] || []) fn({ type, target: this, preventDefault() {} });
+    }
+    click() {
+      this.fire("click");
+    }
+    append(...nodes) {
+      for (const node of nodes) if (node !== null && node !== undefined) this.children.push(node);
+    }
+    replaceChildren(...nodes) {
+      this.children = [];
+      this.append(...nodes);
+    }
+  }
+  return { createElement: (tag) => new FakeNode(tag), createElementNS: (ns, tag) => new FakeNode(tag), activeElement: null, getElementById: () => null };
+}
+
+function nodesOf(root) {
+  const out = [];
+  const walk = (node) => {
+    for (const child of node.children || []) {
+      if (typeof child !== "object") continue;
+      out.push(child);
+      walk(child);
+    }
+  };
+  walk(root);
+  return out;
+}
+const withClass = (root, name) => nodesOf(root).filter((node) => node.classList.contains(name));
+
+test("журнал «Сценариев» — сборка `simJournal.js`: те же узлы, строка нажатия со своим цветом, щелчок по строке — режиму", () => {
+  const { project, marks } = simHouse();
+  const T = Date.UTC(2026, 9, 23, 12);
+  const entries = [
+    { at: T, kind: "change", markId: marks.С1, service: 0, char: "On", from: false, to: true, code: "change", chain: [{ k: "web", at: T }] },
+    { at: T + 1000, kind: "press", markId: marks.В2, service: 0, char: "ProgrammableSwitchEvent", from: null, to: "SINGLE_PRESS", code: "press", chain: [{ k: "web", at: T }] },
+  ];
+  globalThis.document = fakeDocument();
+  try {
+    const host = document.createElement("section");
+    const picked = [];
+    const journal = simJournalMount(host, { getState: () => ({ project, simRunning: true }) }, {
+      title: strings.scenarios.journal.title,
+      collapsed: false,
+      entries: () => entries,
+      onRow: (row) => picked.push(row.markId),
+    });
+    journal.draw();
+    assert.ok(host.classList.contains("sim-journal"), "узел журнала без общего класса");
+    const rows = withClass(host, "sim-journal__row");
+    assert.equal(rows.length, 2);
+    const press = rows.find((row) => row.classList.contains("is-press"));
+    assert.ok(press, "у строки нажатия нет класса is-press — нет и цвета");
+    assert.equal(withClass(press, "sim-journal__time")[0].textContent, "12:00:01");
+    press.click();
+    assert.deepEqual(picked, [marks.В2]);
+    const toggle = withClass(host, "sim-journal__toggle")[0];
+    assert.ok(nodesOf(toggle).some((node) => node.textContent === strings.scenarios.journal.title), "заголовок режима не дошёл до сборки");
+    toggle.click();
+    assert.ok(host.classList.contains("is-collapsed"));
+    assert.equal(withClass(host, "sim-journal__body")[0].hidden, true);
+  } finally {
+    delete globalThis.document;
+  }
+});
+
+test("полоса «Сценариев» — сборка `simBar.js`: те же узлы и кнопки, что в «Схеме»", () => {
+  globalThis.document = fakeDocument();
+  try {
+    const host = document.createElement("div");
+    const bar = simBarMount(host, { getState: () => ({}), notify() {} });
+    bar.update();
+    assert.ok(host.classList.contains("sim-bar"));
+    assert.equal(withClass(host, "sim-bar__row").length, 1);
+    assert.equal(withClass(host, "sim-bar__clock").length, 1);
+    const start = withClass(host, "sim-bar__start")[0];
+    assert.equal(start.textContent, strings.sim.bar.start, "остановленный дом — кнопка «Запустить дом»");
+    assert.equal(withClass(host, "sim-bar__clock")[0].hidden, true, "часы у остановленного дома спрятаны");
+    assert.equal(withClass(host, "sim-bar__time").length, 1);
+  } finally {
+    delete globalThis.document;
+  }
+});
+
+test("полоса и журнал «Сценариев» режим только монтирует, а стили у них — одна пара правил со «Схемой»", () => {
+  const code = readFileSync(new URL("../src/panels/scenarios.js", import.meta.url), "utf8");
+  assert.ok(code.includes("simBarMount(") && code.includes("simJournalMount("), "режим не монтирует общие сборки");
+  for (const own of ["scn-bar__", "scn-journal__", "simJournalRows(", "simJournalFilters(", "simJournalEmpty(", "simBarState(", "simBarClockText(", "volumeClockParse(", "volumeDateParse("]) {
+    assert.ok(!code.includes(own), "в режиме своя копия полосы или журнала: " + own);
+  }
+  const css = readFileSync(new URL("../src/panels/scenarios.css", import.meta.url), "utf8");
+  assert.ok(!/\.scn-bar|\.scn-journal__/.test(css), "в стилях режима вторая пара правил полосы и журнала");
 });

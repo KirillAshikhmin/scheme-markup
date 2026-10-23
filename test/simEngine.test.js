@@ -859,6 +859,22 @@ test("хозяева стартуют по порядку списка: снач
 
 // ——— нормы скорости (история 2.18) ——————————————————————————————————————————
 
+// Норма по часам стены — медиана повторов после прогрева (ревью ветки, F1):
+// `npm test` открывает выкладку и идёт файлами параллельно, и одиночный замер
+// под чужой нагрузкой валил прогон («1000 нажатий заняли 102.6 мс»). Пороги —
+// с запасом больше ×10 к обычному времени (запуск ≈ 5 мс, 1000 нажатий ≈ 5 мс).
+function medianMs(fn, { runs = 7, warmup = 2 } = {}) {
+  for (let index = 0; index < warmup; index += 1) fn();
+  const times = [];
+  for (let index = 0; index < runs; index += 1) {
+    const started = performance.now();
+    fn();
+    times.push(performance.now() - started);
+  }
+  times.sort((first, second) => first - second);
+  return times[Math.floor(times.length / 2)];
+}
+
 test("большой дом: 500 устройств запускаются быстрее 1 с, 1000 событий — быстрее 100 мс", () => {
   const box = simBigHouse(100);
   let delivered = 0;
@@ -870,24 +886,29 @@ test("большой дом: 500 устройств запускаются бы�
       });
     },
   };
-  const recorder = simRecorder();
-  const started = performance.now();
-  const spec = buildHomeSpec(box.project);
-  const engine = createSimEngine({ emit: recorder.emit, owners: [owner] });
-  engine.load(spec);
-  engine.setClock({ simMs: T0 });
-  engine.start();
-  const startMs = performance.now() - started;
+  let engine = null;
+  let spec = null;
+  const launch = () => {
+    spec = buildHomeSpec(box.project);
+    engine = createSimEngine({ emit: simRecorder().emit, owners: [owner] });
+    engine.load(spec);
+    engine.setClock({ simMs: T0 });
+    engine.start();
+  };
+  const startMs = medianMs(launch, { runs: 5, warmup: 1 });
   assert.equal(spec.accessories.length, 500);
-  assert.ok(startMs < 1000, "запуск занял " + startMs.toFixed(1) + " мс");
+  assert.ok(startMs < 1000, "запуск занял " + startMs.toFixed(1) + " мс (медиана)");
 
   const switches = box.groups.map((group) => group.switch);
-  const t = performance.now();
-  for (let index = 0; index < 1000; index += 1) {
-    engine.act({ kind: "press", markId: switches[index % switches.length], service: B1_KEY, press: "single" });
-  }
-  const eventsMs = performance.now() - t;
+  const presses = () => {
+    for (let index = 0; index < 1000; index += 1) {
+      engine.act({ kind: "press", markId: switches[index % switches.length], service: B1_KEY, press: "single" });
+    }
+  };
+  delivered = 0;
+  presses();
   // Каждое нажатие — событие «Выключателя» клавиши и переключение света.
   assert.equal(delivered, 2000);
-  assert.ok(eventsMs < 100, "1000 нажатий заняли " + eventsMs.toFixed(1) + " мс");
+  const eventsMs = medianMs(presses);
+  assert.ok(eventsMs < 100, "1000 нажатий заняли " + eventsMs.toFixed(1) + " мс (медиана)");
 });

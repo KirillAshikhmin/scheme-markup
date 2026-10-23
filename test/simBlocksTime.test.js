@@ -112,6 +112,52 @@ test("2.4: свет по движению включается и гаснет �
   assert.equal(home.value("С1", "On"), false);
 });
 
+test("2.4: повторное движение по сработавшему ДД (щелчок, E, вход в помещение) доходит до триггера и продлевает «Один таймер»", () => {
+  const scenarios = (id) => [
+    {
+      id: "hall",
+      name: "Свет в коридоре",
+      targets: [
+        when(
+          [trig(ref(id("ДД1"), "MotionDetected"), "eq", true)],
+          [put(ref(id("С1"), "On"), true), delay(1, 60, "one", [put(ref(id("С1"), "On"), false)])],
+        ),
+      ],
+    },
+  ];
+  const home = house({ scenarios });
+  const runs = () => home.recorder.log().filter((entry) => entry.code === "blockRun" && entry.scenarioId === "hall").length;
+  // Человек в коридоре: датчик сработал и, пока человек там, не сбрасывается.
+  home.engine.act({ kind: "presence", roomIds: [home.box.rooms.hall] });
+  assert.equal(home.value("ДД1", "MotionDetected"), true);
+  assert.equal(home.value("С1", "On"), true);
+  assert.equal(runs(), 1);
+  // Щелчок (или E) по уже сработавшему датчику на 30-й секунде — движение снова.
+  home.to(T0 + 30 * SEC);
+  home.sensor("ДД1");
+  assert.equal(runs(), 2, "повторное движение не дошло до условия-триггера");
+  home.to(T0 + 61 * SEC);
+  assert.equal(home.value("С1", "On"), true, "повторное движение не продлило «Один таймер»");
+  home.to(T0 + 90 * SEC - 1);
+  assert.equal(home.value("С1", "On"), true);
+  home.to(T0 + 90 * SEC);
+  assert.equal(home.value("С1", "On"), false, "свет не погас через 60 с после последнего движения");
+
+  // Вышел в гостиную — движение сбросится через минуту; вернулся раньше — это
+  // повторное движение того же датчика, и сценарий запускается снова.
+  home.to(T0 + 100 * SEC);
+  home.engine.act({ kind: "presence", roomIds: [home.box.rooms.living] });
+  home.to(T0 + 120 * SEC);
+  assert.equal(home.value("ДД1", "MotionDetected"), true, "движение сбросилось раньше времени сброса");
+  home.engine.act({ kind: "presence", roomIds: [home.box.rooms.hall] });
+  assert.equal(runs(), 3, "вход в помещение сработавшего датчика не дошёл до триггера");
+  assert.equal(home.value("С1", "On"), true);
+  home.to(T0 + 180 * SEC - 1);
+  assert.equal(home.value("С1", "On"), true);
+  home.to(T0 + 180 * SEC);
+  assert.equal(home.value("С1", "On"), false);
+});
+
 test("«Один таймер» перезапускает отсчёт, «Новый таймер» — параллельные", () => {
   const home = house({
     scenarios: (id) => [

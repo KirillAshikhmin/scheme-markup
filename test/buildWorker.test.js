@@ -9,6 +9,7 @@
 // ломает ни `<script>`, ни проверку ссылок.
 import test from "node:test";
 import assert from "node:assert/strict";
+import vm from "node:vm";
 import { Worker } from "node:worker_threads";
 
 import { assertLocalLinks, assertWorkerPure, buildPage, simWorkerLiteral, workerBundle } from "../build.js";
@@ -90,6 +91,57 @@ test("текст бандла исполняется в Node с заглушко
   assert.equal(lit && lit.value, true, "сценарий в бандле не включил свет");
   worker.send({ type: "ping", n: 2 });
   assert.deepEqual(worker.sent.at(-1), { type: "pong", n: 2 });
+});
+
+// Что у потока сценариев отнято до первого сообщения (ревью ветки, F1):
+// код сценария исполняется в нём уже при открытии объекта.
+const SEALED = ["fetch", "XMLHttpRequest", "WebSocket", "EventSource", "importScripts", "indexedDB", "caches", "BroadcastChannel"];
+
+test("поток до первого сообщения без сети и хранилищ: побег из сценария через constructor видит там undefined", async () => {
+  const { source } = await workerBundle();
+  const sent = [];
+  let listener = null;
+  // Глобальный объект потока, как у настоящего Worker: `self === globalThis`,
+  // и сеть с хранилищами на нём есть.
+  const sandbox = {
+    postMessage: (message) => sent.push(structuredClone(message)),
+    addEventListener: (type, fn) => {
+      if (type === "message") listener = fn;
+    },
+    setTimeout,
+    clearTimeout,
+    console,
+    performance,
+  };
+  for (const name of SEALED) {
+    sandbox[name] = function reached() {
+      throw new Error(name + " достали из сценария");
+    };
+  }
+  const context = vm.createContext(sandbox);
+  vm.runInContext("var self = globalThis;\n" + source, context);
+  const look = (expression) => vm.runInContext(expression, context);
+  assert.equal(
+    look(JSON.stringify(SEALED) + ".map((name) => name + ':' + typeof globalThis[name]).join(',')"),
+    SEALED.map((name) => name + ":undefined").join(","),
+    "до первого сообщения в потоке осталась сеть или хранилище",
+  );
+  assert.equal(listener !== null, true, "поток не слушает сообщений");
+
+  // Глобальный сценарий исполняет свой верхний уровень уже на `load` — при
+  // открытии объекта — и пробует достать глобальный объект потока.
+  const box = simHouse();
+  const escape =
+    'var g = ({}).constructor.constructor("return this")();\n' +
+    "g.escapeSeen = " + JSON.stringify(SEALED) + ".map(function (name) { return name + ':' + typeof g[name]; }).join(',');\n";
+  box.project = addScenario(box.project, { kind: "global", name: "Побег", source: escape }).project;
+  listener({ data: { type: "clock", clock: fixedAt(T0) } });
+  listener({ data: { type: "load", spec: { ...buildHomeSpec(box.project), site: null, rooms: [] } } });
+  listener({ data: { type: "start", values: {} } });
+  assert.equal(look("globalThis.escapeSeen"), SEALED.map((name) => name + ":undefined").join(","), "побег из сценария увидел сеть или хранилище");
+  // Поток при этом работает: на ping — pong.
+  listener({ data: { type: "ping", n: 7 } });
+  assert.deepEqual(sent.at(-1), { type: "pong", n: 7 });
 });
 
 test("бандл исполняется в настоящем потоке: щелчок по клавише → свет через поток", { timeout: 20000 }, async () => {

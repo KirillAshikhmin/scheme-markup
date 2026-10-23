@@ -61,6 +61,44 @@ export function deviceAid(markId) {
  * устройствам: заведённый у соседа профиль не сдвигает чужой адрес.
  */
 export function deviceAids(project) {
+  return new Map(deviceHomeCache(project).aids());
+}
+
+// Кэш чтения по ссылке на объект (ревью ветки, F1): объект неизменяем — каждая
+// правка даёт новый, — поэтому всё, что прочитано из одного объекта, верно для
+// него навсегда. Без кэша `markAccessory` на каждый вызов сортировал адреса
+// всех меток, а мини-план зовёт его на каждую видимую метку: 105 мс на щелчок в
+// доме из 500 устройств. `WeakMap` отпускает старые объекты сам.
+const DEVICE_HOME_CACHE = new WeakMap();
+const DEVICE_HOME_NONE = { aids: () => new Map(), accessories: new Map() };
+
+function deviceHomeCache(project) {
+  if (!project || typeof project !== "object") return DEVICE_HOME_NONE;
+  let cached = DEVICE_HOME_CACHE.get(project);
+  if (!cached) {
+    let aids = null;
+    cached = { aids: () => aids || (aids = deviceAidsOf(project)), accessories: new Map() };
+    DEVICE_HOME_CACHE.set(project, cached);
+  }
+  return cached;
+}
+
+// Замороженный аксессуар: один ответ на всех читателей, и случайная правка
+// ответа одним из них не испортит его другим. Словарь характеристики (`meta`)
+// — общий справочник, он не трогается.
+function deviceFrozen(accessory) {
+  if (!accessory) return null;
+  for (const service of accessory.services) {
+    for (const char of service.chars) Object.freeze(char);
+    Object.freeze(service.chars);
+    Object.freeze(service);
+  }
+  Object.freeze(accessory.services);
+  Object.freeze(accessory.params);
+  return Object.freeze(accessory);
+}
+
+function deviceAidsOf(project) {
   const ids = (project && Array.isArray(project.marks) ? project.marks : [])
     .map((mark) => mark.id)
     .filter((id) => typeof id === "string")
@@ -144,9 +182,12 @@ function deviceAccessory(project, mark, aid) {
  * клавиши — сам номер).
  */
 export function markAccessory(project, markId) {
+  const cache = deviceHomeCache(project);
+  if (cache.accessories.has(markId)) return cache.accessories.get(markId);
   const mark = project ? findMark(project, markId) : null;
-  if (!mark || markIsComment(mark)) return null;
-  return deviceAccessory(project, mark, deviceAids(project).get(mark.id) || deviceAid(mark.id));
+  const accessory = !mark || markIsComment(mark) ? null : deviceFrozen(deviceAccessory(project, mark, cache.aids().get(mark.id) || deviceAid(mark.id)));
+  if (project && typeof project === "object") cache.accessories.set(markId, accessory);
+  return accessory;
 }
 
 /**
@@ -168,7 +209,7 @@ export function deviceKeyIndex(accessory, channel = 1) {
 /** Аксессуары всех меток-устройств объекта, в порядке объекта. */
 export function homeAccessories(project) {
   if (!project || !Array.isArray(project.marks)) return [];
-  const aids = deviceAids(project);
+  const aids = deviceHomeCache(project).aids();
   const out = [];
   for (const mark of project.marks) {
     if (markIsComment(mark)) continue;

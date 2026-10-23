@@ -202,11 +202,27 @@ export function simJournalEmpty(total, shown, running) {
   return strings.sim.log.noMatch;
 }
 
-function mountSimJournal(host, api) {
+/**
+ * Сборка журнала в узле `host` — одна на «Схему» и «Сценарии» (ревью ветки,
+ * F1): заголовок со счётчиком и сворачиванием, фильтры по сценарию и
+ * устройству, «Очистить», лента (`.sim-journal__row is-<вид>`), пустое
+ * состояние. `options`:
+ *   title      — подпись заголовка;
+ *   setting    — настройка браузера «свёрнут» (`SIM_JOURNAL_SETTING`);
+ *   collapsed  — свёрнут ли, пока настройка не ответила;
+ *   onRow(row) — щелчок по строке с устройством (`row.markId`);
+ *   visible(state) — виден ли журнал (нет — `host.hidden`);
+ *   entries()  — лента, по умолчанию `simJournal()`.
+ * Ответ — `{draw(), flip(collapsed), collapsed()}`. Подписки — у того, кто
+ * монтирует: `draw` он зовёт сам.
+ */
+export function simJournalMount(host, api, options = {}) {
   host.classList.add("sim-journal");
-  let collapsed = true;
+  const title = options.title || strings.sim.log.title;
+  const setting = options.setting || SIM_JOURNAL_SETTING;
+  const entriesOf = typeof options.entries === "function" ? options.entries : simJournal;
+  let collapsed = options.collapsed !== false;
   const filter = { scenarioId: "", markId: "" };
-  let frame = 0;
 
   const toggle = uiEl("button", { class: "sim-journal__toggle", type: "button", on: { click: () => flip(!collapsed) } });
   const count = uiEl("span", { class: "sim-journal__count" });
@@ -246,30 +262,29 @@ function mountSimJournal(host, api) {
 
   function flip(value) {
     collapsed = value;
-    Promise.resolve(setSetting(SIM_JOURNAL_SETTING, collapsed)).catch(() => {});
+    Promise.resolve(setSetting(setting, collapsed)).catch(() => {});
     draw();
   }
 
   // Список вариантов фильтра с сохранением выбора; пропавший вариант сбрасывается.
-  function fillSelect(select, all, options, current) {
-    const keep = options.some((option) => option.id === current) ? current : "";
+  function fillSelect(select, all, variants, current) {
+    const keep = variants.some((variant) => variant.id === current) ? current : "";
     select.replaceChildren(
       uiEl("option", { text: all, attrs: { value: "" } }),
-      ...options.map((option) => uiEl("option", { text: option.label, attrs: { value: option.id } })),
+      ...variants.map((variant) => uiEl("option", { text: variant.label, attrs: { value: variant.id } })),
     );
     select.value = keep;
     return keep;
   }
 
   function draw() {
-    frame = 0;
     const state = api.getState();
-    const visible = Boolean(state.schemeId) && state.screen === "scheme";
+    const visible = typeof options.visible === "function" ? options.visible(state) : true;
     host.hidden = !visible;
     if (!visible) return;
-    const entries = simJournal();
+    const entries = entriesOf();
     host.classList.toggle("is-collapsed", collapsed);
-    toggle.replaceChildren(uiIcon("chevron"), uiEl("span", { text: strings.sim.log.title }));
+    toggle.replaceChildren(uiIcon("chevron"), uiEl("span", { text: title }));
     toggle.title = collapsed ? strings.sim.log.expand : strings.sim.log.collapse;
     toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
     count.textContent = entries.length > 0 ? text("sim.log.count", { count: entries.length }) : "";
@@ -291,7 +306,7 @@ function mountSimJournal(host, api) {
     const rows = simJournalRows(entries, state.project, filter);
     list.replaceChildren(
       ...rows.map((row) => {
-        const clickable = Boolean(row.markId);
+        const clickable = Boolean(row.markId) && typeof options.onRow === "function";
         const parts = [
           uiEl("span", { class: "sim-journal__time", text: row.time }),
           uiEl("span", { class: "sim-journal__text", text: row.text }),
@@ -306,7 +321,7 @@ function mountSimJournal(host, api) {
               (row.result === true ? " is-true" : row.result === false ? " is-false" : "") +
               (clickable ? " is-link" : ""),
             title: clickable ? strings.sim.log.rowHint : "",
-            on: clickable ? { click: () => canvasHighlightMark(row.markId) } : undefined,
+            on: clickable ? { click: () => options.onRow(row) } : undefined,
           },
           parts,
         );
@@ -315,6 +330,35 @@ function mountSimJournal(host, api) {
     const note = simJournalEmpty(entries.length, rows.length, state.simRunning === true);
     empty.hidden = note === null;
     empty.textContent = note || "";
+  }
+
+  Promise.resolve(getSetting(setting))
+    .then((saved) => {
+      if (typeof saved === "boolean" && saved !== collapsed) {
+        collapsed = saved;
+        draw();
+      }
+    })
+    .catch(() => {});
+
+  return { draw, flip, collapsed: () => collapsed };
+}
+
+// Журнал «Схемы»: сборка `simJournalMount` справа под полосой; щелчок по
+// строке подсвечивает метку на плане.
+function mountSimJournal(host, api) {
+  let frame = 0;
+  const journal = simJournalMount(host, api, {
+    title: strings.sim.log.title,
+    setting: SIM_JOURNAL_SETTING,
+    collapsed: true,
+    visible: (state) => Boolean(state.schemeId) && state.screen === "scheme",
+    onRow: (row) => canvasHighlightMark(row.markId),
+  });
+
+  function draw() {
+    frame = 0;
+    journal.draw();
   }
 
   // Перерисовка — одним кадром, сколько бы записей ни пришло за него.
@@ -328,17 +372,9 @@ function mountSimJournal(host, api) {
     if ("schemeId" in changed || "screen" in changed || "simRunning" in changed || "project" in changed) draw();
   });
   simWatch((payload) => {
-    if (payload.log.length > 0 || !collapsed) later();
+    if (payload.log.length > 0 || !journal.collapsed()) later();
   });
   draw();
-  Promise.resolve(getSetting(SIM_JOURNAL_SETTING))
-    .then((saved) => {
-      if (saved === false) {
-        collapsed = false;
-        draw();
-      }
-    })
-    .catch(() => {});
 }
 
 registerPanel(PANEL_IDS.simJournal, mountSimJournal);

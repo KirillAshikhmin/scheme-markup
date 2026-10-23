@@ -28,8 +28,10 @@
   gap: 8px;
 }
 
-/* ——— полоса запуска дома и часов ——— */
-.scn-bar {
+/* ——— полоса запуска дома и часов ———
+   Узлы и их стили — общие со «Схемой» (`simBarMount`, `sim.css`); здесь
+   только место: полоса — строкой над колонками, а не плашкой над планом. */
+.scn__bar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -37,59 +39,12 @@
   flex: none;
 }
 
-.scn-bar__group {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
+.scn__bar .sim-bar__row,
+.scn__bar .sim-bar__group {
+  justify-content: flex-start;
   padding: 5px 8px;
-  border: 1px solid var(--canvas-line);
-  border-radius: 8px;
   background: #fff;
-}
-
-.scn-bar__start {
-  font-weight: 600;
-}
-
-.scn-bar__status {
-  color: #57606a;
-}
-
-.scn-bar__status.is-running {
-  color: #1a7f37;
-  font-weight: 600;
-}
-
-.scn-bar__warn {
-  color: #9a6700;
-  font-size: 12px;
-}
-
-.scn-bar__date,
-.scn-bar__time {
-  width: auto;
-  flex: none;
-}
-
-.scn-bar__time {
-  width: 11ch;
-  font-variant-numeric: tabular-nums;
-  text-align: center;
-}
-
-.scn-bar__speed {
-  max-width: 190px;
-}
-
-.scn-bar .ui-btn.is-on {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.scn-bar .ui-btn:disabled {
-  opacity: 0.5;
-  cursor: default;
+  box-shadow: none;
 }
 
 /* ——— три колонки ——— */
@@ -563,7 +518,10 @@
   font-size: 12px;
 }
 
-/* ——— журнал внизу ——— */
+/* ——— журнал внизу ———
+   Узлы и их стили — общие со «Схемой» (`simJournalMount`, `sim.css`); здесь
+   только место: журнал — полосой под колонками во всю ширину, а не плашкой
+   над планом. */
 .scn__journal {
   flex: none;
   display: flex;
@@ -574,120 +532,13 @@
   font-size: 12px;
 }
 
-.scn-journal__head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 2px 8px 2px 2px;
-}
-
-.scn-journal__toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 8px;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.scn-journal__toggle:hover,
-.scn-journal__toggle:focus-visible {
-  color: var(--accent);
-}
-
-.scn__journal.is-collapsed .scn-journal__toggle .ui-icon {
-  --ui-icon: 14px;
-  transform: rotate(180deg);
-}
-
-.scn__journal:not(.is-collapsed) .scn-journal__toggle .ui-icon {
-  --ui-icon: 14px;
-}
-
-.scn-journal__count {
-  margin-left: auto;
-  color: #57606a;
-}
-
-.scn-journal__body {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  border-top: 1px solid var(--canvas-line);
-}
-
-.scn-journal__tools {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  padding: 6px 8px;
-}
-
-.scn-journal__filter {
+.scn__journal .sim-journal__filter {
   flex: 0 1 220px;
-  min-width: 0;
-  font-size: 12px;
 }
 
-.scn-journal__list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  overflow: auto;
+.scn__journal .sim-journal__list {
   height: 110px;
-}
-
-.scn-journal__row {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 0 8px;
-  padding: 3px 8px;
-  border-top: 1px solid #eaeef2;
-}
-
-.scn-journal__row.is-link {
-  cursor: pointer;
-}
-
-.scn-journal__row.is-link:hover {
-  background: #f6f8fa;
-}
-
-.scn-journal__time {
-  color: #6e7781;
-  font-variant-numeric: tabular-nums;
-}
-
-.scn-journal__text {
-  overflow-wrap: anywhere;
-}
-
-.scn-journal__chain {
-  grid-column: 2;
-  color: #6e7781;
-  overflow-wrap: anywhere;
-}
-
-.scn-journal__row.is-error .scn-journal__text {
-  color: var(--danger);
-}
-
-.scn-journal__row.is-true .scn-journal__text {
-  color: #1a7f37;
-}
-
-.scn-journal__row.is-false .scn-journal__text {
-  color: #6e7781;
-}
-
-.scn-journal__empty {
-  margin: 0;
-  padding: 8px;
-  color: #6e7781;
+  max-height: none;
 }
 
 /* ——— окно заготовок ——— */
@@ -806,17 +657,13 @@
   }
 }
 
-/* Телефон: только просмотр — устройств с мини-планом нет, журнал короче. */
+/* Телефон: только просмотр — устройств с мини-планом нет. */
 #app.is-mobile #screen-scenarios {
   padding: 48px 6px 6px;
 }
 
 #app.is-mobile .scn__side {
   display: none;
-}
-
-#app.is-mobile .scn-journal__list {
-  height: 110px;
 }
 
 .scn.is-view-only .scn-list__creates {

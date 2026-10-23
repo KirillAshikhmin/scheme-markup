@@ -187,7 +187,15 @@ export function openSimCommands(api) {
   return modal;
 }
 
-function mountSimBar(host, api) {
+/**
+ * Сборка полосы в узле `host` — одна на «Схему» и «Сценарии» (ревью ветки,
+ * F1): ряд запуска (`.sim-bar__row`: «Запустить дом» / «Остановить», статус,
+ * «Сбросить дом», «Выполнить команду») и часы (`.sim-bar__group.sim-bar__clock`:
+ * дата, время, ускорение, пауза, «Сейчас», шаги, «К следующему событию»).
+ * Ответ — `{update(), togglePause()}`: `update` приводит узлы к состоянию дома
+ * и часов. Видимость самого `host`, подписки и клавиши — у того, кто монтирует.
+ */
+export function simBarMount(host, api) {
   host.classList.add("sim-bar");
   const start = uiButton("", { class: "ui-btn sim-bar__start", on: { click: () => (simRunning() ? simStop() : simStart()) } });
   const status = uiEl("span", { class: "sim-bar__status" });
@@ -258,12 +266,9 @@ function mountSimBar(host, api) {
   }
 
   function update() {
-    const state = api.getState();
-    const visible = Boolean(state.schemeId) && state.screen === "scheme";
-    host.hidden = !visible;
-    if (!visible) return;
     const running = simRunning();
-    const view = simBarState({ running, clock: appClockRead().clock, speed: appClockRead().speed, nextAt: simNextAt() });
+    const read = appClockRead();
+    const view = simBarState({ running, clock: read.clock, speed: read.speed, nextAt: simNextAt() });
     start.textContent = running ? strings.sim.bar.stop : strings.sim.bar.start;
     start.title = running ? strings.sim.bar.stopHint : strings.sim.bar.startHint;
     start.classList.toggle("ui-btn--primary", !running);
@@ -275,8 +280,7 @@ function mountSimBar(host, api) {
     clock.hidden = !running;
     host.classList.toggle("is-running", running);
     if (!running) return;
-    const shown = appClockSimMs();
-    const parts = simBarClockText(shown);
+    const parts = simBarClockText(appClockSimMs());
     // Поле, в котором сейчас курсор, не перезаписывается — человек набирает.
     const active = typeof document !== "undefined" ? document.activeElement : null;
     if (active !== dateField) dateField.value = volumeDateText(parts.day);
@@ -287,6 +291,20 @@ function mountSimBar(host, api) {
     pause.classList.toggle("is-on", view.paused);
     next.disabled = !view.next;
     next.title = view.next ? strings.sim.bar.nextHint + ". " + view.nextTitle : strings.sim.bar.nextNone;
+  }
+
+  return { update, togglePause };
+}
+
+// Полоса «Схемы»: сборка `simBarMount`, видна только в «Схеме» над планом.
+function mountSimBar(host, api) {
+  const bar = simBarMount(host, api);
+
+  function update() {
+    const state = api.getState();
+    const visible = Boolean(state.schemeId) && state.screen === "scheme";
+    host.hidden = !visible;
+    if (visible) bar.update();
   }
 
   api.subscribe((state, changed) => {
@@ -311,7 +329,7 @@ function mountSimBar(host, api) {
         field: uiTypingTarget(event.target) || uiFieldTarget(event.target),
       });
       if (!action) return;
-      if (action === "pause") togglePause();
+      if (action === "pause") bar.togglePause();
       else if (action === "next") simNextEvent();
       else if (action === "press" && state.selectedMarkIds.length === 1) deviceClickMark(state.project, state.selectedMarkIds[0]);
       else return;

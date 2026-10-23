@@ -41,6 +41,7 @@ import {
 import { PROJECT_ENTRY, packProject, readZip, unpackProject } from "../src/projectFile.js";
 import { projectsMigrateStored } from "../src/panels/projects.js";
 import { typesSnapshot, typesTemplateFrom } from "../src/panels/types.js";
+import { markAccessory } from "../src/sim/home.js";
 import { simLegacySwitchProject } from "./fixtures/simHome.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -186,9 +187,46 @@ test("комментарий и свой тип без профиля — «бе
   const own = addType(project, { code: "ЖЖ", name: "Жалюзи", categoryId: project.categories[0].id });
   assert.equal(typeDeviceOf(own.project, own.type.id), null);
   assert.equal(typeDeviceUnknown(own.project, own.type.id), true, "догадку не угадать — тип в списке на правку");
-  // Переименованный тип справочника таблице тоже незнаком.
+  // Переименованный тип справочника таблице незнаком, но профиль не теряет:
+  // смена кода записывает выведенный вид в сам тип (ревью ветки, F1).
   const renamed = updateType(project, typeByCode(project, "Т").id, { code: "ТТ" }).project;
-  assert.equal(typeDeviceOf(renamed, typeByCode(renamed, "ТТ").id), null);
+  const kept = typeDeviceOf(renamed, typeByCode(renamed, "ТТ").id);
+  assert.ok(kept, "переименование типа сняло профиль");
+  assert.equal(kept.kind, "light");
+  assert.equal(typeDeviceUnknown(renamed, typeByCode(renamed, "ТТ").id), false);
+});
+
+test("смена кода у типа без своего профиля (Т→ТЛ) оставляет меткам аксессуар и адреса aid.sid", () => {
+  let box = place(scene(), "Т", { x: 0.2, y: 0.2 });
+  const first = box.markId;
+  box = place(box, "Т", { x: 0.4, y: 0.2 });
+  const second = box.markId;
+  const typeId = typeByCode(box.project, "Т").id;
+  const addresses = (project, markId) => {
+    const accessory = markAccessory(project, markId);
+    return accessory ? { kind: accessory.kind, services: accessory.services.map((service) => [service.address, service.chars.map((char) => char.address)]) } : null;
+  };
+  const before = [addresses(box.project, first), addresses(box.project, second)];
+  assert.equal(before[0].kind, "light");
+
+  const renamed = updateType(box.project, typeId, { code: "ТЛ" }).project;
+  // Профиль записан той же командой — в тип, видом прежнего кода.
+  assert.deepEqual(findType(renamed, typeId).device, { kind: "light" });
+  assert.equal(typeDeviceOwn(renamed, typeId), true);
+  assert.deepEqual([addresses(renamed, first), addresses(renamed, second)], before, "метки потеряли аксессуар или адреса");
+
+  // Свой профиль у типа смена кода не трогает.
+  const own = setTypeDevice(box.project, typeId, { kind: "lightCct" }).project;
+  assert.deepEqual(findType(updateType(own, typeId, { code: "ТЛ" }).project, typeId).device, { kind: "lightCct" });
+  // Явный `device` в той же правке главнее: «без устройства» так и записывается.
+  assert.deepEqual(findType(updateType(box.project, typeId, { code: "ТЛ", device: null }).project, typeId).device, { kind: "none" });
+  // Тип, чей код профиля не давал (щит), профиль не получает.
+  const shield = typeByCode(box.project, "Щ").id;
+  const shieldRenamed = updateType(box.project, shield, { code: "ЩЩ" }).project;
+  assert.equal(Object.prototype.hasOwnProperty.call(findType(shieldRenamed, shield), "device"), false);
+  // Смена только имени профиль не пишет.
+  const named = updateType(box.project, typeId, { name: "Светильник" }).project;
+  assert.equal(Object.prototype.hasOwnProperty.call(findType(named, typeId), "device"), false);
 });
 
 test("правка профиля у типа меняет метки без своей настройки и не трогает метки со своей", () => {
@@ -240,6 +278,44 @@ test("пустая правка возвращает тот же объект п
   assert.equal(setTypeDevice(set, typeId, { kind: "lightCct" }).project, set, "тот же профиль второй раз");
   const own = setMarkDevice(set, box.markId, { params: {}, kind: "light" }).project;
   assert.equal(setMarkDevice(own, box.markId, { kind: "light" }).project, own, "та же своя настройка второй раз");
+});
+
+test("запись, совпадающая с действующим профилем, у типа и метки без своей записи — тот же объект по ссылке", () => {
+  const box = place(scene(), "Т");
+  const typeId = typeByCode(box.project, "Т").id;
+  // Тип: выведенный профиль целиком, тот же вид, вид с умолчаниями вида.
+  assert.equal(setTypeDevice(box.project, typeId, typeDeviceOf(box.project, typeId)).project, box.project, "выведенный профиль типа");
+  assert.equal(setTypeDevice(box.project, typeId, { kind: "light" }).project, box.project, "тот же вид у типа");
+  // Метка: всё, что отдал `markDeviceProfile`, и частичные записи того же.
+  const full = markDeviceProfile(box.project, box.markId);
+  assert.equal(setMarkDevice(box.project, box.markId, full).project, box.project, "профиль метки целиком");
+  assert.equal(setMarkDevice(box.project, box.markId, { kind: "light" }).project, box.project, "тот же вид у метки");
+  assert.equal(setMarkDevice(box.project, box.markId, { decoupled: [] }).project, box.project, "та же отвязка у метки");
+  assert.equal(markDeviceOwn(box.project, box.markId), false);
+
+  // Выключатель с отвязкой у типа: та же отвязка у метки — не своя настройка.
+  const keys = place(scene(), "ВВ");
+  const keysType = typeByCode(keys.project, "ВВ").id;
+  const decoupled = setTypeDevice(keys.project, keysType, { kind: "switchRelay", decoupled: [2] }).project;
+  assert.equal(setMarkDevice(decoupled, keys.markId, { decoupled: [2] }).project, decoupled);
+  assert.equal(setMarkDevice(decoupled, keys.markId, markDeviceProfile(decoupled, keys.markId)).project, decoupled);
+
+  // «Без устройства» у щита и так без устройства — ничего не дописывается.
+  const shield = typeByCode(box.project, "Щ").id;
+  assert.equal(setTypeDevice(box.project, shield, null).project, box.project, "«без устройства» у не-устройства");
+
+  // Отличие пишется, как прежде; у незнакомого кода «без устройства» — решение
+  // человека (тип уходит из списка на правку), оно тоже пишется.
+  assert.notEqual(setTypeDevice(box.project, typeId, { kind: "lightCct" }).project, box.project);
+  assert.notEqual(setMarkDevice(box.project, box.markId, { kind: "lightCct" }).project, box.project);
+  const unknown = addType(box.project, { code: "ЖЖ", name: "Жалюзи", categoryId: box.project.categories[0].id });
+  assert.deepEqual(findType(setTypeDevice(unknown.project, unknown.type.id, null).project, unknown.type.id).device, { kind: "none" });
+
+  // Дверь датчика в той же записи пишется, а совпавший профиль — нет.
+  const contact = place(scene(), "ДО");
+  const door = setMarkDevice(contact.project, contact.markId, { kind: "contact", doorId: null }).project;
+  assert.deepEqual(findMark(door, contact.markId).device, { doorId: null });
+  assert.equal(markDeviceOwn(door, contact.markId), false);
 });
 
 test("отвязанные клавиши — у типа для всех и у метки своей настройкой", () => {

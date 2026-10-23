@@ -519,11 +519,18 @@ export function createSimEngine({ emit, owners = [] } = {}) {
         to: valueLabel(char, value),
       }),
     });
+    enqueue(device, service, char, slot, value, from, causes);
+    return true;
+  }
+
+  // Событие характеристики подписчикам и поведениям; первое звено цепочки —
+  // само изменение.
+  function enqueue(device, service, char, slot, value, from, causes) {
     const cause = {
       k: "char",
-      markId,
+      markId: device.markId,
       aid: device.aid,
-      service: index,
+      service: service.index,
       sid: service.sid,
       serviceType: service.type,
       char,
@@ -533,9 +540,9 @@ export function createSimEngine({ emit, owners = [] } = {}) {
     };
     queue.push({
       at: now,
-      markId,
+      markId: device.markId,
       aid: device.aid,
-      service: index,
+      service: service.index,
       sid: service.sid,
       serviceType: service.type,
       char,
@@ -545,6 +552,32 @@ export function createSimEngine({ emit, owners = [] } = {}) {
       from,
       chain: [cause, ...causes],
     });
+  }
+
+  // Повторное движение (ревью ветки, F1): датчик уже сработал, а движение
+  // снова — щелчок или E по нему, человек вошёл в его помещение. Значение то
+  // же, но событие уходит подписчикам: условия-триггеры `MotionDetected`
+  // запускают сценарий, и «Один таймер» продлевается; сброс датчика
+  // отсчитывается заново (поведение `react`).
+  function motionAgain(device, service, chain) {
+    const slot = service.chars.get("MotionDetected");
+    const causes = Array.isArray(chain) ? chain : [];
+    if (!slot || causes.length > SIM_CHAIN_MAX) return false;
+    const vars = { label: device.label };
+    outLog.push({
+      at: now,
+      kind: "change",
+      markId: device.markId,
+      service: service.index,
+      char: "MotionDetected",
+      from: true,
+      to: true,
+      chain: causes,
+      code: "motionAgain",
+      vars,
+      text: text("sim.journal.motionAgain", vars),
+    });
+    enqueue(device, service, "MotionDetected", slot, true, true, causes);
     return true;
   }
 
@@ -1003,10 +1036,8 @@ export function createSimEngine({ emit, owners = [] } = {}) {
     if (!service) return false;
     if (service.type === "MotionSensor") {
       if (value === false) return apply(device.markId, service.index, "MotionDetected", false, chain);
-      const changed = apply(device.markId, service.index, "MotionDetected", true, chain);
-      // Повторное движение продлевает сброс, хотя значение то же.
-      if (!changed) armReset(device, service, chain, false);
-      return changed;
+      if (read(device, service, "MotionDetected") === true) return motionAgain(device, service, chain);
+      return apply(device.markId, service.index, "MotionDetected", true, chain);
     }
     const alert = SIM_ENGINE_ALERTS[service.type];
     if (!alert) return false;
@@ -1068,7 +1099,8 @@ export function createSimEngine({ emit, owners = [] } = {}) {
         const device = devices.get(markId);
         const own = device.services[service];
         if (own.type === "MotionSensor") {
-          changed = apply(markId, service, "MotionDetected", true, chain) || changed;
+          const again = read(device, own, "MotionDetected") === true;
+          changed = (again ? motionAgain(device, own, chain) : apply(markId, service, "MotionDetected", true, chain)) || changed;
           armReset(device, own, chain, false);
         } else {
           changed = apply(markId, service, "OccupancyDetected", "OCCUPANCY_DETECTED", chain) || changed;

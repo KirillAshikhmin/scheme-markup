@@ -634,6 +634,145 @@ function hubKindOf(source) {
   return hubTopLevel(hubScan(source).tokens).logic ? "logic" : "global";
 }
 
+// ——— имя сценария без исполнения (ревью ветки, F1) —————————————————————————
+//
+// Загрузка и вставка текста в странице код сценария не исполняют: `while(true)`
+// повесил бы страницу насовсем, а верхний уровень дотянулся бы до `window`.
+// Имя берётся разбором лексем: `info = {name: …}` верхнего уровня, где `name`
+// — строка, константа верхнего уровня или её поле (`scenarioName.ru`), или
+// объект `{ru, en}`. Всё, что без исполнения не узнать, — `null`.
+
+const HUB_NAME_ESCAPES = { n: "\n", t: "\t", r: "\r", b: "\b", f: "\f", v: "\v", 0: "\0" };
+const HUB_NAME_DEPTH = 4;
+
+// Текст строкового литерала из его сырого содержимого (без кавычек).
+function hubUnquote(raw) {
+  let out = "";
+  for (let at = 0; at < raw.length; at += 1) {
+    const ch = raw[at];
+    if (ch !== "\\") {
+      out += ch;
+      continue;
+    }
+    const next = raw[at + 1];
+    at += 1;
+    if (next === undefined) break;
+    if (next === "\n") continue;
+    if (next === "\r") {
+      if (raw[at + 1] === "\n") at += 1;
+      continue;
+    }
+    if (Object.prototype.hasOwnProperty.call(HUB_NAME_ESCAPES, next) && !(next === "0" && /\d/.test(raw[at + 1] || ""))) {
+      out += HUB_NAME_ESCAPES[next];
+      continue;
+    }
+    if (next === "x" && /^[0-9a-fA-F]{2}$/.test(raw.slice(at + 1, at + 3))) {
+      out += String.fromCharCode(parseInt(raw.slice(at + 1, at + 3), 16));
+      at += 2;
+      continue;
+    }
+    if (next === "u" && raw[at + 1] === "{") {
+      const end = raw.indexOf("}", at + 2);
+      const code = end > 0 ? parseInt(raw.slice(at + 2, end), 16) : NaN;
+      if (Number.isFinite(code) && code <= 0x10ffff) {
+        out += String.fromCodePoint(code);
+        at = end;
+        continue;
+      }
+    }
+    if (next === "u" && /^[0-9a-fA-F]{4}$/.test(raw.slice(at + 1, at + 5))) {
+      out += String.fromCharCode(parseInt(raw.slice(at + 1, at + 5), 16));
+      at += 4;
+      continue;
+    }
+    out += next;
+  }
+  return out;
+}
+
+// Значение кончается здесь: дальше разделитель, конец текста или новая строка.
+function hubNameEnds(tokens, end) {
+  const next = tokens[end];
+  if (!next) return true;
+  if (next.type === "punct") return next.value === ";" || next.value === "," || next.value === "}" || next.value === ")" || next.value === "]";
+  return next.line !== tokens[end - 1].line;
+}
+
+// Начало значения поля `key` в литерале объекта, открытом скобкой `open`; -1 — нет.
+function hubNameField(tokens, open, key) {
+  const close = hubPair(tokens, open);
+  if (close < 0) return -1;
+  const depth = tokens[open].depth + 1;
+  for (let at = open + 1; at < close; at += 1) {
+    const token = tokens[at];
+    if (token.depth !== depth || (token.type !== "name" && token.type !== "str") || token.value !== key) continue;
+    const before = tokens[at - 1];
+    if (!(hubIsPunct(before, "{") || hubIsPunct(before, ",")) || !hubIsPunct(tokens[at + 1], ":")) continue;
+    return at + 2 < close ? at + 2 : -1;
+  }
+  return -1;
+}
+
+// Начало значения объявления верхнего уровня `name = …` (`const`/`let`/`var` или без них); -1 — нет.
+function hubNameDecl(tokens, name) {
+  for (let at = 0; at < tokens.length; at += 1) {
+    const token = tokens[at];
+    if (token.depth !== 0 || token.type !== "name" || token.value !== name || !hubIsPunct(tokens[at + 1], "=")) continue;
+    const before = tokens[at - 1];
+    if (before && hubIsPunct(before, ".")) continue;
+    return at + 2;
+  }
+  return -1;
+}
+
+// Строка, которую выражение с лексемы `at` даёт без исполнения, или `null`.
+function hubNameValue(tokens, at, depth) {
+  const token = tokens[at];
+  if (!token || depth > HUB_NAME_DEPTH) return null;
+  if (token.type === "str") return hubNameEnds(tokens, at + 1) ? hubUnquote(token.value) : null;
+  if (hubIsPunct(token, "{")) {
+    const close = hubPair(tokens, at);
+    if (close < 0 || !hubNameEnds(tokens, close + 1)) return null;
+    for (const key of ["ru", "en"]) {
+      const field = hubNameField(tokens, at, key);
+      if (field >= 0) return hubNameValue(tokens, field, depth + 1);
+    }
+    return null;
+  }
+  if (token.type !== "name") return null;
+  const path = [token.value];
+  let end = at + 1;
+  while (hubIsPunct(tokens[end], ".") && tokens[end + 1] && tokens[end + 1].type === "name") {
+    path.push(tokens[end + 1].value);
+    end += 2;
+  }
+  if (!hubNameEnds(tokens, end)) return null;
+  let value = hubNameDecl(tokens, path[0]);
+  for (const key of path.slice(1)) {
+    if (value < 0 || !hubIsPunct(tokens[value], "{")) return null;
+    value = hubNameField(tokens, value, key);
+  }
+  return value < 0 ? null : hubNameValue(tokens, value, depth + 1);
+}
+
+/**
+ * Имя логического сценария из `info.name` — разбором текста, без исполнения:
+ * строка, константа верхнего уровня, её поле или `{ru, en}`. Узнать без
+ * исполнения нельзя (склейка, вызов, шаблон) — `null`.
+ */
+export function hubScriptInfoName(source) {
+  const tokens = hubScan(String(source === null || source === undefined ? "" : source)).tokens;
+  for (let at = 0; at < tokens.length; at += 1) {
+    const token = tokens[at];
+    if (token.depth !== 0 || token.type !== "name" || token.value !== "info" || hubIsPunct(tokens[at - 1], ".")) continue;
+    if (!hubIsPunct(tokens[at + 1], "=") || !hubIsPunct(tokens[at + 2], "{")) continue;
+    const field = hubNameField(tokens, at + 2, "name");
+    const name = field >= 0 ? hubNameValue(tokens, field, 0) : null;
+    if (typeof name === "string" && name.trim()) return name.trim();
+  }
+  return null;
+}
+
 /**
  * Разобрать загруженный файл сценария (история 5.1). `.js` — логический,
  * если на верхнем уровне есть `info = {…}` и `function trigger`/`compute`,

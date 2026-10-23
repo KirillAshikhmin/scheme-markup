@@ -779,24 +779,48 @@ test("большой дом: 500 устройств и 50 сценариев з�
       ],
     }).project;
   }
-  const recorder = simRecorder();
-  const started = performance.now();
-  const engine = createSimEngine({ emit: recorder.emit, owners: [blocksOwner()] });
-  engine.load(buildHomeSpec(box.project));
-  engine.setClock({ simMs: T0 });
-  engine.start();
-  const startMs = performance.now() - started;
-  assert.ok(startMs < 1000, "запуск занял " + startMs.toFixed(1) + " мс");
-  let worst = 0;
-  for (let index = 0; index < 200; index += 1) {
-    const group = box.groups[index % 50];
-    const at = performance.now();
-    engine.act({ kind: "sensor", markId: group.motion, value: index % 100 < 50 });
-    worst = Math.max(worst, performance.now() - at);
-  }
-  assert.ok(worst < 100, "событие со сценарием заняло " + worst.toFixed(1) + " мс");
+  // Норма по часам стены — медиана повторов после прогрева (ревью ветки, F1):
+  // одиночный замер под параллельным `npm test` валил прогон. Запас больше
+  // ×10: запуск ≈ 6 мс, худшее событие прогона ≈ 0,5 мс.
+  let engine = null;
+  const launch = () => {
+    engine = createSimEngine({ emit: simRecorder().emit, owners: [blocksOwner()] });
+    engine.load(buildHomeSpec(box.project));
+    engine.setClock({ simMs: T0 });
+    engine.start();
+  };
+  const startMs = medianMs(launch, { runs: 5, warmup: 1 });
+  assert.ok(startMs < 1000, "запуск занял " + startMs.toFixed(1) + " мс (медиана)");
+  // Худшее из 200 событий одного прогона; норма — медиана таких прогонов.
+  const worstOfRun = () => {
+    let worst = 0;
+    for (let index = 0; index < 200; index += 1) {
+      const group = box.groups[index % 50];
+      const at = performance.now();
+      engine.act({ kind: "sensor", markId: group.motion, value: index % 100 < 50 });
+      worst = Math.max(worst, performance.now() - at);
+    }
+    return worst;
+  };
+  for (let index = 0; index < 2; index += 1) worstOfRun();
+  const worsts = Array.from({ length: 7 }, worstOfRun).sort((first, second) => first - second);
+  const worst = worsts[3];
+  assert.ok(worst < 100, "событие со сценарием заняло " + worst.toFixed(1) + " мс (медиана худших)");
   assert.equal(engine.value(box.groups[0].light, 0, "On"), true, "сценарии большого дома не сработали");
 });
+
+// Медиана замеров после прогрева (см. выше): `fn` — один прогон.
+function medianMs(fn, { runs = 7, warmup = 2 } = {}) {
+  for (let index = 0; index < warmup; index += 1) fn();
+  const times = [];
+  for (let index = 0; index < runs; index += 1) {
+    const started = performance.now();
+    fn();
+    times.push(performance.now() - started);
+  }
+  times.sort((first, second) => first - second);
+  return times[Math.floor(times.length / 2)];
+}
 
 // ——— условие «Команда» (G16) ——————————————————————————————————————————————
 

@@ -4728,6 +4728,56 @@ export function simLiveKindOf(accessory) {
   return "other";
 }
 
+/** Период пульса сработавшего датчика, мс — один на «Схему» и мини-план. */
+export const SIM_LIVE_PULSE_MS = 1400;
+/** Сколько гаснет вспышка нажатия, мс — одна на «Схему» и мини-план. */
+export const SIM_LIVE_FLASH_MS = 700;
+
+/**
+ * Память кадров одной поверхности для `simLiveFrame`: когда началась вспышка
+ * каждой метки и последний собранный кадр (`live` пересобирается, только
+ * когда сменилось зеркало или виды знаков).
+ */
+export function simLiveMemo() {
+  return { flash: new Map(), source: null, kinds: null, live: null };
+}
+
+/**
+ * Кадр состояния дома для `drawScheme` (ревью ветки, F1: один на «Схему» и
+ * мини-план): `{live, fx, animate}`. `source` — `simLive(project)`; `kinds` —
+ * `Map<markId, {kind}>` (`deviceLiveKinds`), метка без записи — «прочее»;
+ * `memo` — `simLiveMemo()` поверхности; `now` — её часы, мс. `fx` — фаза
+ * пульса и угасание вспышек; `animate` — кадр нужен снова (идёт пульс или
+ * вспышка).
+ */
+export function simLiveFrame(source, kinds, memo, now) {
+  const own = memo || simLiveMemo();
+  if (!own.live || own.source !== source || own.kinds !== kinds) {
+    const live = new Map();
+    for (const [markId, item] of source || []) {
+      const meta = kinds ? kinds.get(markId) : null;
+      live.set(markId, { ...item, kind: (meta && meta.kind) || "other" });
+    }
+    own.source = source;
+    own.kinds = kinds;
+    own.live = live;
+  }
+  const flash = new Map();
+  let animate = false;
+  for (const [markId, item] of own.live) {
+    if (item.alert) animate = true;
+    if (item.pressedAt === null || item.pressedAt === undefined) continue;
+    const seen = own.flash.get(markId);
+    if (!seen || seen.pressedAt !== item.pressedAt) own.flash.set(markId, { pressedAt: item.pressedAt, at: now });
+    const left = 1 - (now - own.flash.get(markId).at) / SIM_LIVE_FLASH_MS;
+    if (left > 0) {
+      flash.set(markId, left);
+      animate = true;
+    }
+  }
+  return { live: own.live, fx: { pulse: (now % SIM_LIVE_PULSE_MS) / SIM_LIVE_PULSE_MS, flash }, animate };
+}
+
 function simLiveShare(value) {
   const number = Number(value);
   return Number.isFinite(number) ? Math.max(0, Math.min(1, number)) : 0;
