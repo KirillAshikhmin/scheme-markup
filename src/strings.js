@@ -2137,6 +2137,18 @@ export const strings = {
       rain: "дождь",
       snow: "снег",
     },
+    // Климат помещений (правка после сборки сценариев): «эти параметры у
+    // каждого помещения должны быть, как и уровень углекислого газа. Их тоже
+    // можно задавать» и «Число людей в комнате».
+    climateRooms: "КЛИМАТ ПОМЕЩЕНИЙ",
+    climateRoomsNote:
+      "Сейчас в каждом помещении: температура, влажность, CO₂ и сколько в нём людей. Впишите своё — дом пойдёт от этого. Считается, пока имитация запущена.",
+    climateRoomUnnamed: "Помещение без имени",
+    climateTemp: "Температура",
+    climateHumidity: "Влажность",
+    climateCo2: "CO₂",
+    climatePeople: "Людей",
+    climatePeopleUnit: "чел.",
     backdrop: "ТИП ФОНА",
     backdropPlain: "Простой",
     backdropPlainHint: "Зелёная земля, голубое небо и светило — больше ничего",
@@ -3799,6 +3811,9 @@ export const strings = {
       conditioner: "Кондиционер",
       thermostat: "Термостат",
       fan: "Вентиляция",
+      breezer: "Бризер с подогревом",
+      warmFloor: "Тёплый пол",
+      xmasTree: "Новогодняя ель",
       tv: "Телевизор",
       speaker: "Колонка",
       doorbell: "Звонок",
@@ -3814,6 +3829,15 @@ export const strings = {
       climateSensor: "Датчик температуры и влажности",
       lightSensor: "Датчик освещённости",
       co2: "Датчик CO2",
+      climateFull: "Датчик климата (температура, влажность, CO₂)",
+    },
+    // Подписи сервисов по виду устройства (правка после сборки сценариев,
+    // `deviceServiceRole`).
+    roles: {
+      breezerHeat: "Подогрев",
+      treeGarland: "Гирлянда",
+      treeStar: "Звезда",
+      warmFloor: "Тёплый пол",
     },
     services: {
       Lightbulb: "Лампочка",

@@ -37,9 +37,16 @@ import { text } from "../strings.js";
 import { blocksOwner } from "./blocks.js";
 import { createSimEngine } from "./engine.js";
 import { createHubOwner } from "./hubApi.js";
+import { climateOwner } from "./climate.js";
 
 /** Самый долгий сон потока между событиями при идущих часах, мс настоящего времени. */
 export const SIM_WORKER_TICK_MAX_MS = 1000;
+/**
+ * Не чаще этого климат дома уходит странице, мс настоящего времени (правка
+ * после сборки сценариев): при ускорении шаг климата идёт десятки раз в
+ * секунду, а странице довольно последнего — «Объём» перерисовывается по нему.
+ */
+export const SIM_WORKER_CLIMATE_MS = 1000;
 /** Сообщения, которые поток понимает (`interfaces.md`, «Протокол»). */
 export const SIM_WORKER_MESSAGES = Object.freeze([
   "load",
@@ -52,6 +59,7 @@ export const SIM_WORKER_MESSAGES = Object.freeze([
   "next",
   "run",
   "active",
+  "climate",
   "ping",
 ]);
 
@@ -305,6 +313,10 @@ export function simWorkerMain(scope) {
   let tick = null;
   let lastNext;
   let quietStart = false;
+  // Климат дома — последним снимком не чаще `SIM_WORKER_CLIMATE_MS`.
+  let climatePending = null;
+  let climateTimer = null;
+  let climateAt = -Infinity;
 
   function post(message) {
     try {
@@ -327,7 +339,24 @@ export function simWorkerMain(scope) {
     };
   }
 
+  function flushClimate() {
+    climateTimer = null;
+    if (!climatePending) return;
+    climateAt = realNow();
+    const message = climatePending;
+    climatePending = null;
+    post(message);
+  }
+
   function emit(message) {
+    if (message.type === "climate") {
+      climatePending = message;
+      if (climateTimer !== null) return;
+      const wait = Math.max(0, SIM_WORKER_CLIMATE_MS - (realNow() - climateAt));
+      if (wait === 0) flushClimate();
+      else climateTimer = later(flushClimate, wait);
+      return;
+    }
     if (message.type === "changes") {
       // Остановленный дом — не источник правды: зеркало страницы держит
       // своё, а значения после `load` — это умолчания движка.
@@ -343,7 +372,7 @@ export function simWorkerMain(scope) {
   }
 
   const tracer = simWorkerTracer(post);
-  engine = createSimEngine({ emit, owners: [simWorkerTraced(createHubOwner(), tracer), blocksOwner()] });
+  engine = createSimEngine({ emit, owners: [simWorkerTraced(createHubOwner(), tracer), blocksOwner(), climateOwner()] });
 
   function clockNow() {
     return clock ? clockSimMs(clock, realNow()) : engine.now();
@@ -367,7 +396,7 @@ export function simWorkerMain(scope) {
     if (tick !== null) cancel(tick);
     tick = null;
     if (!engine.running() || !clock || clock.fixed) return;
-    const next = engine.nextAt();
+    const next = engine.wakeAt();
     if (next === null) return;
     const speed = volumeClockSpeedOf(clock.speed);
     const wait = Math.max(0, Math.min(SIM_WORKER_TICK_MAX_MS, (next - clockNow()) / speed));
@@ -423,6 +452,9 @@ export function simWorkerMain(scope) {
         break;
       case "active":
         engine.setScenarioActive(data.scenarioId, data.on === true);
+        break;
+      case "climate":
+        engine.tell("climate", data.data);
         break;
       default:
         break;

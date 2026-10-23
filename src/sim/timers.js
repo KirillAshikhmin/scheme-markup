@@ -30,7 +30,11 @@ export const SIM_TIMERS_RUN_MAX = 100000;
  *   время. `tag` — метка для `cancelTag` (например, «задержка №2 сценария»).
  * - `cancel(id)`, `cancelTag(tag)` — снять; снятое не исполнится, даже если
  *   стоит в том же миге, что исполняемое сейчас.
- * - `nextAt() -> ms | null` — ближайшее событие; `null` — ничего не ждёт.
+ * - `nextAt(all?) -> ms | null` — ближайшее событие; `null` — ничего не ждёт.
+ *   **Фоновые** события (`add(…, {background: true})`, шаг климата дома)
+ *   в ответ не идут: «ничего не запланировано» и «к следующему событию»
+ *   говорят о сценариях и устройствах, а не о том, что воздух остывает. С
+ *   `all` — идут: так поток будит себя вовремя.
  * - `runUntil(simMs, setNow?) -> {ran, cut}` — исполнить всё, что наступает не
  *   позже `simMs`, по порядку. Перед каждым событием — `setNow(его время)`,
  *   в конце — `setNow(simMs)`. Поставленное по ходу шага исполняется в том же
@@ -94,12 +98,13 @@ export function simTimers() {
     return heap.length > 0 ? heap[0] : null;
   }
 
-  function add(atMs, fn, tag) {
+  function add(atMs, fn, tag, options = null) {
     const at = Number(atMs);
     if (!Number.isFinite(at)) throw new TypeError("simTimers.add: time must be a finite number");
     if (typeof fn !== "function") throw new TypeError("simTimers.add: handler must be a function");
     lastId += 1;
-    const entry = { id: lastId, at, seq: seq++, fn, tag: tag === undefined ? null : tag, gone: false };
+    const background = Boolean(options && options.background === true);
+    const entry = { id: lastId, at, seq: seq++, fn, tag: tag === undefined ? null : tag, gone: false, background };
     heap.push(entry);
     up(heap.length - 1);
     live.set(entry.id, entry);
@@ -119,9 +124,16 @@ export function simTimers() {
     }
   }
 
-  function nextAt() {
+  function nextAt(all = false) {
     const top = head();
-    return top ? top.at : null;
+    if (!top) return null;
+    if (all || !top.background) return top.at;
+    let best = null;
+    for (const entry of live.values()) {
+      if (entry.background) continue;
+      if (best === null || entry.at < best) best = entry.at;
+    }
+    return best;
   }
 
   function runUntil(simMs, setNow) {

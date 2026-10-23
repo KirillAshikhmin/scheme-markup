@@ -463,7 +463,7 @@ export function createSimEngine({ emit, owners = [] } = {}) {
    * хозяевам вычислить (`compute`), сохранить, записать в журнал и поставить
    * событие в очередь. `true` — значение изменилось или событие ушло.
    */
-  function apply(markId, index, char, raw, chain) {
+  function apply(markId, index, char, raw, chain, quiet = false) {
     const device = devices.get(markId);
     const service = device ? device.services[index] : null;
     const slot = service ? service.chars.get(char) : null;
@@ -502,7 +502,10 @@ export function createSimEngine({ emit, owners = [] } = {}) {
     }
     recordChange(markId, index, char, value, slot.event);
     const press = char === "ProgrammableSwitchEvent";
-    outLog.push({
+    // Тихая запись (климат дома, правка после сборки сценариев): градусник,
+    // меняющийся на десятую каждые несколько минут, засыпал бы журнал. Событие
+    // при этом уходит как обычно — сценарии видят изменение.
+    if (!quiet) outLog.push({
       at: now,
       kind: press ? "press" : "change",
       markId,
@@ -675,14 +678,19 @@ export function createSimEngine({ emit, owners = [] } = {}) {
 
   // ——— таймеры ————————————————————————————————————————————————————————————
 
-  function ownerTimer(entry, atMs, fn, tag) {
+  function ownerTimer(entry, atMs, fn, tag, options = null) {
     if (typeof fn !== "function") throw new TypeError("host.timer: handler must be a function");
     if (!isRunning) return null;
-    const id = timers.add(atMs, (at) => {
-      entry.timers.delete(id);
-      guard(entry, () => fn(at));
-      drain();
-    });
+    const id = timers.add(
+      atMs,
+      (at) => {
+        entry.timers.delete(id);
+        guard(entry, () => fn(at));
+        drain();
+      },
+      undefined,
+      options,
+    );
     entry.timers.set(id, tag === undefined ? null : tag);
     return id;
   }
@@ -1112,6 +1120,12 @@ export function createSimEngine({ emit, owners = [] } = {}) {
 
   function doorAct(openingId, open, chain) {
     let changed = false;
+    // Хозяевам — что дверь открыли или закрыли (климат дома: воздух ходит
+    // через открытую дверь).
+    for (const entry of entries) {
+      call(entry, "door", { openingId, open, chain });
+      drain();
+    }
     for (const markId of doorSensors.get(openingId) || []) {
       const device = devices.get(markId);
       const service = device.services.find((item) => item.type === "ContactSensor");
@@ -1193,10 +1207,12 @@ export function createSimEngine({ emit, owners = [] } = {}) {
       values: () => snapshot(),
       write: (write) => {
         if (!isRunning || !write || typeof write !== "object") return false;
-        return apply(write.markId, write.service, write.char, write.value, write.chain);
+        return apply(write.markId, write.service, write.char, write.value, write.chain, write.quiet === true);
       },
       subscribe: (filter, handler) => subscribe(entry, filter, handler),
-      timer: (atMs, fn, tag) => ownerTimer(entry, atMs, fn, tag),
+      // `options.background` — фоновое событие (шаг климата): в «ближайшее
+      // событие» не идёт (`simTimers.nextAt`).
+      timer: (atMs, fn, tag, options) => ownerTimer(entry, atMs, fn, tag, options),
       cancelTimer: (id) => {
         if (!entry.timers.has(id)) return;
         timers.cancel(id);
@@ -1436,6 +1452,20 @@ export function createSimEngine({ emit, owners = [] } = {}) {
     });
   }
 
+  /**
+   * Сообщение страницы хозяину по имени (правка после сборки сценариев): климат
+   * дома слушает выбор погоды, людей и заданные значения помещений. Хозяина
+   * нет — ничего.
+   */
+  function tell(name, data) {
+    return batch(() => {
+      const entry = entries.find((item) => item.owner.name === name);
+      if (!entry) return false;
+      call(entry, "message", data);
+      return true;
+    });
+  }
+
   function setScenarioActive(id, on) {
     return batch(() => {
       const owner = scenarioOwner(id);
@@ -1457,10 +1487,13 @@ export function createSimEngine({ emit, owners = [] } = {}) {
     advanceTo,
     setClock,
     nextAt: () => (isRunning ? timers.nextAt() : null),
+    // Когда будить поток — с фоновыми событиями: климат идёт и без сценариев.
+    wakeAt: () => (isRunning ? timers.nextAt(true) : null),
     now: () => now,
     running: () => isRunning,
     runScenario,
     setScenarioActive,
+    tell,
     scenarios: scenarioList,
   };
 }

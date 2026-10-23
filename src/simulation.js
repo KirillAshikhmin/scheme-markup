@@ -39,7 +39,8 @@
 // `pageReloaded`, `editReset`, `noWorker`, `reset` (сброс остановленного дома),
 // `scenarioHung` (`{name, label, where}`), `hungUnknown` (`{count}`).
 import { appClockJump, appClockNow, appClockSimMs, appClockStep, appClockWatch } from "./appClock.js";
-import { roomsInOrder, scenariosInOrder } from "./model.js";
+import { appWeatherRead, appWeatherWatch } from "./appWeather.js";
+import { findMark, findType, markControlsByChannel, roomAtPoint, roomsInOrder, scenariosInOrder } from "./model.js";
 import { getSetting, setSetting } from "./store.js";
 import { text } from "./strings.js";
 import { SIM_BRIDGE_REPLAY, createSimBridge } from "./sim/bridge.js";
@@ -48,7 +49,7 @@ import { simClamp } from "./sim/catalog.js";
 import { buildHomeSpec, homeAccessories } from "./sim/home.js";
 import { hubScriptKey } from "./sim/hubApi.js";
 import { simLiveOf, simValueKey } from "./sim/live.js";
-import { volumeSiteOf } from "./volume.js";
+import { volumeClimateGeometry, volumeSiteOf } from "./volume.js";
 
 /** Ключ настроек браузера: `{[project.key]: {values, at, running}}`. */
 export const SIM_STATE_SETTING = "simState";
@@ -100,11 +101,45 @@ export function simProjectKey(project) {
 export function simHomeOf(project) {
   // Координаты — тем же чтением, что у солнца «Объёма»: одно небо на двоих.
   const { latDeg, lonDeg } = volumeSiteOf(project);
+  const spec = buildHomeSpec(project);
   return {
-    ...buildHomeSpec(project),
+    ...spec,
     site: latDeg === null || lonDeg === null ? null : { latDeg, lonDeg },
     rooms: roomsInOrder(project).map((room) => ({ id: room.id, name: String(room.name || "") })),
+    climate: simClimateOf(project, spec.accessories),
   };
+}
+
+/**
+ * Климат дома для потока (правка после сборки сценариев): помещения и проёмы
+ * (`volumeClimateGeometry`) и устройства, от которых климат зависит или
+ * которым его показывают, — `{markId, roomId, role, controls}`. `role` —
+ * что делает вентилятор: приток (бризер), вытяжка, кухонная вытяжка; у реле —
+ * осушитель. `controls` — кем управляет термостат («чем управляет»).
+ */
+export function simClimateOf(project, accessories) {
+  const geometry = volumeClimateGeometry(project);
+  const devices = [];
+  for (const accessory of accessories || []) {
+    const mark = findMark(project, accessory.markId);
+    if (!mark) continue;
+    const type = findType(project, mark.typeId);
+    const code = type ? String(type.code || "").trim().toUpperCase() : "";
+    const first = Array.isArray(mark.points) && mark.points.length > 0 ? mark.points[0] : null;
+    const roomId = mark.roomId || (first && mark.schemeId ? roomAtPoint(project, mark.schemeId, first) : null) || null;
+    let role = null;
+    if (accessory.kind === "breezer" || code === "Б") role = "supply";
+    else if (code === "ВЫТ") role = "hood";
+    else if (accessory.kind === "fan") role = "exhaust";
+    else if (code === "ОВ") role = "dry";
+    const thermostat = accessory.services.some((service) => service.type === "Thermostat");
+    const controls =
+      thermostat && accessory.kind !== "warmFloor"
+        ? markControlsByChannel(project, accessory.markId).flatMap((group) => group.marks.map((item) => item.id))
+        : [];
+    devices.push({ markId: accessory.markId, roomId, role, controls });
+  }
+  return { ...geometry, devices };
 }
 
 /**
@@ -214,9 +249,18 @@ export function createSimulation(options = {}) {
   const makeBridge = typeof given.bridge === "function" ? given.bridge : createSimBridge;
   const settings = given.settings || { get: getSetting, set: setSetting };
   const clock = given.clock || { now: appClockNow, simMs: appClockSimMs, watch: appClockWatch, step: appClockStep, jump: appClockJump };
+  // Выбор погоды (правка после сборки сценариев): климат дома считает улицу по
+  // нему же, что и «Объём».
+  const weather = given.weather || { read: appWeatherRead, watch: appWeatherWatch };
   const timers = given.timers || simulationTimers();
   let bridge = null;
   let clockOff = null;
+  let weatherOff = null;
+  // Климат дома от потока: `{at, outdoor, rooms: {roomId: {t, rh, co2, people}}}`
+  // (`sim/climate.js`); `savedClimate` — помещения из памяти браузера, они
+  // уходят потоку до запуска.
+  let climate = null;
+  let savedClimate = null;
   let inPage = false;
   let closed = false;
 
@@ -260,6 +304,10 @@ export function createSimulation(options = {}) {
     clockOff = clock.watch((read) => {
       if (bridge) bridge.post({ type: "clock", clock: (read && read.clock) || clock.now() });
     });
+    bridge.post(climateWeather());
+    weatherOff = weather.watch(() => {
+      if (bridge) bridge.post(climateWeather());
+    });
     return bridge;
   }
 
@@ -281,14 +329,25 @@ export function createSimulation(options = {}) {
     notify({ log: entries });
   }
 
+  function climateWeather() {
+    return { type: "climate", data: { kind: "weather", choice: weather.read() } };
+  }
+
+  function climateRestore() {
+    const rooms = climate ? climate.rooms : savedClimate;
+    return rooms && typeof rooms === "object" ? { type: "climate", data: { kind: "restore", rooms } } : null;
+  }
+
   function restoreMessages() {
-    const out = [{ type: "clock", clock: clock.now() }];
+    const out = [{ type: "clock", clock: clock.now() }, climateWeather()];
     if (home) {
       const spec = overlay(home);
       sentText = JSON.stringify(spec);
       sentSpec = spec;
       out.push({ type: "load", spec });
     }
+    const rooms = climateRestore();
+    if (rooms) out.push(rooms);
     if (running && startPosted) out.push({ type: "start", values: mirrorValues(), restore: true });
     return out;
   }
@@ -316,6 +375,15 @@ export function createSimulation(options = {}) {
       case "forms":
         forms.set(formKey(message.scenarioId, message.bindingId), message);
         notify({ forms: [message] });
+        break;
+      case "climate":
+        climate = {
+          at: Number(message.at) || 0,
+          outdoor: message.outdoor && typeof message.outdoor === "object" ? message.outdoor : null,
+          rooms: message.rooms && typeof message.rooms === "object" ? message.rooms : {},
+        };
+        markDirty();
+        notify({ climate: true });
         break;
       default:
         break;
@@ -486,6 +554,7 @@ export function createSimulation(options = {}) {
       inPage,
       forms: delta.forms || [],
       fault: delta.fault || null,
+      climate: delta.climate === true,
     };
     for (const watcher of [...watchers]) watcher(payload);
   }
@@ -524,7 +593,10 @@ export function createSimulation(options = {}) {
   // ——— память в браузере ——————————————————————————————————————————————————
 
   function recordNow() {
-    return { values: mirrorValues(), at: timers.now(), running };
+    const record = { values: mirrorValues(), at: timers.now(), running };
+    const rooms = climate ? climate.rooms : savedClimate;
+    if (rooms) record.climate = rooms;
+    return record;
   }
 
   function markDirty() {
@@ -566,6 +638,9 @@ export function createSimulation(options = {}) {
         if (key !== own || loading !== own) return;
         loading = null;
         const record = all && typeof all === "object" ? all[own] : null;
+        if (record && typeof record === "object" && record.climate && typeof record.climate === "object" && !climate) {
+          savedClimate = record.climate;
+        }
         if (record && typeof record === "object" && record.values && typeof record.values === "object" && !startPosted) {
           for (const [markId, values] of Object.entries(record.values)) {
             const accessory = accessories.get(markId);
@@ -602,6 +677,8 @@ export function createSimulation(options = {}) {
       scenarios = [];
       forms.clear();
       nextAt = null;
+      climate = null;
+      savedClimate = null;
     }
     forgetEdited();
     fitMirror(before);
@@ -630,6 +707,8 @@ export function createSimulation(options = {}) {
 
   function postStart() {
     startPosted = true;
+    const rooms = climateRestore();
+    if (rooms) post(rooms);
     post({ type: "start", values: mirrorValues() });
     for (const message of held.splice(0)) post(message);
   }
@@ -764,6 +843,8 @@ export function createSimulation(options = {}) {
     clockOff = null;
     if (saveTimer !== null) timers.clearTimeout(saveTimer);
     saveTimer = null;
+    if (weatherOff) weatherOff();
+    weatherOff = null;
     if (bridge) bridge.close();
     watchers.clear();
   }
@@ -781,6 +862,12 @@ export function createSimulation(options = {}) {
     door: (openingId, open) => act({ kind: "door", openingId, open: open === true }),
     value,
     live,
+    climate: () => climate,
+    climateSet: (roomId, patch) => {
+      if (closed || !project || typeof roomId !== "string" || !patch || typeof patch !== "object") return false;
+      post({ type: "climate", data: { kind: "set", roomId, patch } });
+      return true;
+    },
     watch: (fn) => {
       if (typeof fn !== "function") return () => {};
       watchers.add(fn);
@@ -867,7 +954,21 @@ export function simLive(project) {
   return simSessionOf().live(project);
 }
 
-/** Подписка: `fn({changes, log, running, scenarios, next, inPage, forms, fault})`. */
+/**
+ * Климат дома (правка после сборки сценариев): `{at, outdoor: {tempC, humidity,
+ * sky, season}, rooms: {roomId: {t, rh, co2, people}}}` — или `null`, пока
+ * поток не прислал ни одного шага.
+ */
+export function simClimate() {
+  return simSessionOf().climate();
+}
+
+/** Задать помещению температуру, влажность, CO₂ или число людей: `{t, rh, co2, people}`. */
+export function simClimateSet(roomId, patch) {
+  return simSessionOf().climateSet(roomId, patch);
+}
+
+/** Подписка: `fn({changes, log, running, scenarios, next, inPage, forms, fault, climate})`. */
 export function simWatch(fn) {
   return simSessionOf().watch(fn);
 }

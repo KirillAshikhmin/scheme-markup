@@ -62,6 +62,7 @@ export function simLiveOf(accessory, values) {
   const blow = (kind, level) => {
     if (!live.flow || live.flow.level < level) live.flow = { kind, level };
   };
+  let warm = false;
   for (const service of accessory.services) {
     switch (service.type) {
       case "Lightbulb":
@@ -73,6 +74,12 @@ export function simLiveOf(accessory, values) {
       case "Switch":
       case "Outlet": {
         const on = Boolean(read(service, "On"));
+        // У бризера «Выключатель» — подогрев (правка после сборки сценариев):
+        // он не включает бризер, а греет его поток.
+        if (accessory.kind === "breezer" && service.type === "Switch") {
+          if (on) warm = true;
+          break;
+        }
         if (on) lit(1);
         if (service.type === "Switch" && Number.isInteger(service.channel)) {
           if (!live.keys) live.keys = {};
@@ -142,6 +149,8 @@ export function simLiveOf(accessory, values) {
         break;
     }
   }
+  // Подогрев бризера красит его поток тёплым.
+  if (warm && live.flow && live.flow.kind === "air") live.flow = { kind: "heat", level: live.flow.level };
   const pressedAt = values instanceof Map ? values.get("pressedAt") : values && values.pressedAt;
   live.pressedAt = typeof pressedAt === "number" && Number.isFinite(pressedAt) ? pressedAt : null;
   return live;

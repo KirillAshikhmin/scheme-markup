@@ -37,6 +37,7 @@ import { createFieldPlate, plateUnseen } from "./plate.js";
 import {
   createVolumeParams,
   createVolumeParamsFields,
+  volumeAirLine,
   volumeParamsArrive,
   volumeParamsClock,
   volumeParamsHome,
@@ -54,6 +55,7 @@ import {
   findRoom,
   findScheme,
   schemeFloorOf,
+  roomsInOrder,
   schemeObjectsOnScheme,
 } from "../model.js";
 import { drawDrawing, drawingUnitBridge, visibleMarks } from "../render.js";
@@ -152,6 +154,7 @@ import {
   simProjectKey,
   simRunning,
   simStart,
+  simClimate,
   simStop,
   simWatch,
 } from "../simulation.js";
@@ -1622,7 +1625,13 @@ function createVolume({ api, hosts }) {
   // другого времени у поля нет: заведи полоса свои часы — они разошлись бы с
   // небом на первой же правке ускорения. Отсюда и частота: раз в секунду, а при
   // остановленном времени таймера нет вовсе (G282) — полоса стоит и не мигает.
-  const clockNode = uiEl("div", { class: "volume__clock", attrs: { hidden: "hidden" } });
+  // Полоса часов — две строки (правка после сборки сценариев): час и климат
+  // того места, где стоит человек, — «выводи эти 3 параметра возле часов на
+  // экране по тому месту, где камера 1 лица».
+  const clockTime = uiEl("span", { class: "volume__clockTime" });
+  const clockAir = uiEl("span", { class: "volume__clockAir", attrs: { hidden: "hidden" } });
+  const clockNode = uiEl("div", { class: "volume__clock", attrs: { hidden: "hidden" } }, [clockTime, clockAir]);
+  let airSaid = null;
   // Что на полосе уже написано: с плавными светилами снимок часа считается
   // тридцать раз в секунду, а минута на полосе столько раз не меняется.
   let clockSaid = { value: null, line: null };
@@ -1650,6 +1659,9 @@ function createVolume({ api, hosts }) {
     // схемы в шапке (G217) и переход по лестнице. Второго способа сменить
     // схему здесь не заводится.
     goFloor: (option) => setState({ schemeId: option.schemeId }),
+    // Помещения объекта для раздела «Климат помещений» (правка после сборки
+    // сценариев): имя и ключ, по порядку списка помещений.
+    rooms: () => roomsInOrder(getState().project).map((room) => ({ id: room.id, name: String(room.name || "") })),
   };
   // Ряды в левой колонке (таск 231, G349) — главное место: обычная раскладка
   // показывает их, и кнопки в углу поля при ней нет вовсе.
@@ -2220,9 +2232,29 @@ function createVolume({ api, hosts }) {
     // часто, как идёт время: раз в секунду при ×60 и шестнадцать раз при ×960.
     if (clockSaid.value === value && clockSaid.line === line) return;
     clockSaid = { value, line };
-    clockNode.textContent = value;
+    clockTime.textContent = value;
     clockNode.title = line;
     clockNode.setAttribute("aria-label", line);
+  }
+
+  /**
+   * Климат у часов: от первого лица — температура, влажность и CO₂ того
+   * помещения, где стоит человек (`simClimate`), на улице — улица. Дом не
+   * идёт и климата нет — строки нет.
+   */
+  function syncAir() {
+    const climate = view === "person" && homeOn() ? simClimate() : null;
+    const room = climate ? volumeRoomAt(scene, person) : null;
+    const own = room && room.roomId && climate.rooms ? climate.rooms[room.roomId] : null;
+    const said = own
+      ? volumeAirLine(own.t, own.rh, own.co2)
+      : climate && climate.outdoor && !room
+        ? volumeAirLine(climate.outdoor.tempC, climate.outdoor.humidity, null)
+        : "";
+    if (said === airSaid) return;
+    airSaid = said;
+    clockAir.textContent = said;
+    clockAir.hidden = said === "";
   }
 
   /**
@@ -2362,6 +2394,7 @@ function createVolume({ api, hosts }) {
     shown = volumeFrame(scene, spot, box, [...shadow, ...spots, ...moonSpots, ...overlay, ...marker, ...lights.signs], at.tint, lights.light);
     volumeDraw(ctx, shown);
     syncRain(at);
+    syncAir();
     // Второй проход фона: вещи, которые ближе кромки плиты, дом закрыть не
     // может — они перед ним (таск 199, разбор у `volumeDrawBackdrop`). Внутри
     // плиты проход пуст, то есть у ходящего по дому его нет вовсе.
@@ -4983,6 +5016,9 @@ function createVolume({ api, hosts }) {
       return;
     }
     if (payload.changes.length > 0 || homeStale) homeRefresh();
+    // Климат дома пришёл новым шагом — строка у часов (правка после сборки
+    // сценариев). Кадр для этого не нужен: строка — не часть сцены.
+    if (payload.climate) syncAir();
   });
   const projectKey = simProjectKey(getState().project);
   Promise.all([

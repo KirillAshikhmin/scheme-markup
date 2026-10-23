@@ -55,6 +55,9 @@ const LIGHT = { kind: "light", services: [["Lightbulb", ["On", "Brightness"]]] }
 const SWITCH = { kind: "switchRelay", services: [["Switch", ["On"]], KEY], perChannel: true };
 const OUTLET = { kind: "outlet", services: [["Outlet", ["On"]]] };
 const FAN = { kind: "fan", services: [["Fan", ["Active", "RotationSpeed"]]] };
+// Бризер (правка после сборки сценариев): «у бризера должен быть выключатель
+// подогрева» — вентилятор приточки и «Выключатель» подогрева.
+const BREEZER = { kind: "breezer", services: [["Fan", ["Active", "RotationSpeed"]], ["Switch", ["On"]]] };
 const RELAY = { kind: "relay", services: [["Switch", ["On"]]] };
 const TV = { kind: "tv", services: [["Television", ["Active"]]] };
 const NONE = null;
@@ -85,7 +88,7 @@ const PROFILE_BY_CODE = {
       ],
     ],
   },
-  Б: FAN, ВЫТ: FAN, ВЕНТ: FAN,
+  Б: BREEZER, ВЫТ: FAN, ВЕНТ: FAN,
   ОВ: RELAY, СУШ: RELAY, РП: RELAY, ПОС: RELAY, ДЭП: RELAY,
   УК: { kind: "speaker", services: [["Speaker", ["Mute", "Volume"]]] },
   Д: { kind: "doorbell", services: [["Doorbell", ["ProgrammableSwitchEvent"]]] },

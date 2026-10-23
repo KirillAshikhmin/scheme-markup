@@ -366,6 +366,20 @@ function deviceCardControl(meta) {
  *              value, text, control: {kind: "toggle" | "range" | "select" |
  *              "readout", …}}`.
  */
+/**
+ * Подпись сервиса по виду устройства (правка после сборки сценариев): у
+ * бризера «Выключатель» — это подогрев, у ели две лампы — гирлянда и звезда, у
+ * тёплого пола термостат — сам пол. Имени в профиле у них нет: оно выводится,
+ * а не пишется (ADR 013). `null` — у вида своих подписей нет.
+ */
+export function deviceServiceRole(kind, service) {
+  const roles = strings.sim.roles || {};
+  if (kind === "breezer" && service.type === "Switch") return roles.breezerHeat || null;
+  if (kind === "xmasTree" && service.type === "Lightbulb") return (service.index === 0 ? roles.treeGarland : roles.treeStar) || null;
+  if (kind === "warmFloor" && service.type === "Thermostat") return roles.warmFloor || null;
+  return null;
+}
+
 export function deviceCardModel(project, markId, read = null, readForms = undefined) {
   const accessory = markAccessory(project, markId);
   if (!accessory) return null;
@@ -407,6 +421,7 @@ export function deviceCardModel(project, markId, read = null, readForms = undefi
       type: service.type,
       name:
         service.name ||
+        deviceServiceRole(accessory.kind, service) ||
         text("sim.services." + service.type) +
           (sameType.get(service.type) > 1 && Number.isInteger(service.channel) ? " " + service.channel : ""),
       address: service.address,

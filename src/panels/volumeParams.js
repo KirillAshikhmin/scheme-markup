@@ -62,6 +62,7 @@ import {
 import { uiButton, uiCheckRow, uiEl, uiIconButton, uiModal } from "./ui.js";
 import { WEATHER_AUTO, WEATHER_SEASONS, WEATHER_SKIES } from "../weather.js";
 import { appWeatherRead, appWeatherSet, appWeatherWatch } from "../appWeather.js";
+import { simClimate, simClimateSet, simWatch } from "../simulation.js";
 
 export const VOLUME_BACKDROP_SETTING = "volumeBackdrop";
 export const VOLUME_MINIMAP_SETTING = "volumeMinimap";
@@ -627,6 +628,10 @@ export function createVolumeParamsFields(options) {
       // возможность выбрать погоду, температуры и влажность». Всё «Авто» —
       // сезон по дате, небо, градусник и влажность сами по дате и часу.
       ...weatherRows(),
+      // Климат помещений: «эти параметры у каждого помещения должны быть, как
+      // и уровень углекислого газа. Их тоже можно задавать» и число людей —
+      // от них растёт CO₂.
+      ...climateRows(),
       uiEl("p", { class: "tools__label", text: strings.volume.clock }),
       // Дата стоит **над** часами (G289): от неё зависит место солнца, то
       // есть и рассвет с закатом, и фаза луны. Час без даты — полдела.
@@ -702,7 +707,66 @@ export function createVolumeParamsFields(options) {
     const date = box.querySelector(".tools__date");
     if (date && document.activeElement !== date) date.value = volumeDateText(dayOf(at));
     weatherState.textContent = volumeWeatherLine(at && at.weather);
+    syncClimateRows();
   };
+
+  // ——— климат помещений ———
+  //
+  // Поля показывают то, что сейчас в помещении, и идут вместе с ним, пока
+  // курсора в них нет (то же правило, что у поля часа): набранное не
+  // переписывается под рукой. Набрали и ушли из поля — значение уходит дому.
+  const climateFields = new Map();
+
+  function climateRows() {
+    climateFields.clear();
+    const rooms = (options.rooms ? options.rooms() : []) || [];
+    if (rooms.length === 0) return [];
+    const rows = [uiEl("p", { class: "tools__label", text: strings.volume.climateRooms })];
+    rows.push(uiEl("p", { class: "tools__note", text: strings.volume.climateRoomsNote }));
+    for (const room of rooms) {
+      const field = (key, label, unit, min, max, step) => {
+        const input = uiEl("input", {
+          class: "ui-input volume__paramsNumber",
+          type: "number",
+          title: label,
+          attrs: { "aria-label": room.name + ": " + label, min: String(min), max: String(max), step: String(step) },
+          on: {
+            change: () => {
+              if (input.value === "") return;
+              simClimateSet(room.id, { [key]: Number(input.value) });
+            },
+          },
+        });
+        climateFields.set(room.id + "|" + key, input);
+        return [input, uiEl("span", { class: "volume__paramsName volume__paramsUnit", text: unit })];
+      };
+      rows.push(
+        uiEl("p", { class: "volume__climateName", text: room.name || strings.volume.climateRoomUnnamed }),
+        uiEl("div", { class: "volume__paramsRow volume__climateRow" }, [
+          ...field("t", strings.volume.climateTemp, "°C", -40, 60, 0.5),
+          ...field("rh", strings.volume.climateHumidity, "%", 0, 100, 1),
+          ...field("co2", strings.volume.climateCo2, "ppm", 400, 5000, 10),
+          ...field("people", strings.volume.climatePeople, strings.volume.climatePeopleUnit, 0, 50, 1),
+        ]),
+      );
+    }
+    syncClimateRows();
+    return rows;
+  }
+
+  function syncClimateRows() {
+    if (climateFields.size === 0) return;
+    const climate = simClimate();
+    const rooms = (climate && climate.rooms) || {};
+    for (const [key, input] of climateFields) {
+      if (typeof document !== "undefined" && document.activeElement === input) continue;
+      const [id, name] = key.split("|");
+      const own = rooms[id];
+      const value = own ? own[name] : undefined;
+      input.value = value === undefined || value === null ? "" : String(value);
+      input.placeholder = climate ? "" : "—";
+    }
+  }
 
   /** Ряды погоды: время года и небо списками, градусник и влажность полями. */
   function weatherRows() {
@@ -830,6 +894,10 @@ export function createVolumeParamsFields(options) {
 
   const stopWatch = volumeParamsWatch(() => render());
   const stopWeather = appWeatherWatch(() => render());
+  // Климат дома приходит шагами — поля помещений идут вместе с ним.
+  const stopClimate = simWatch((payload) => {
+    if (payload && payload.climate) syncClimateRows();
+  });
   render();
   if (typeof setInterval === "function") tick = setInterval(line, 1000);
 
@@ -853,6 +921,7 @@ export function createVolumeParamsFields(options) {
       tick = 0;
       stopWatch();
       stopWeather();
+      stopClimate();
     },
   };
 }
@@ -869,6 +938,15 @@ export function volumeWeatherLine(weather) {
     temp: volumeTempText(weather.tempC),
     humidity: String(Math.round(weather.humidity)),
   });
+}
+
+/**
+ * Климат у часов: «+22,4 °C · 45 % · CO₂ 650». CO₂ нет (улица) — без него.
+ */
+export function volumeAirLine(tempC, humidity, co2) {
+  const parts = [volumeTempText(tempC) + " °C", Math.round(Number(humidity) || 0) + " %"];
+  if (co2 !== null && co2 !== undefined && Number.isFinite(Number(co2))) parts.push("CO₂ " + Math.round(Number(co2)));
+  return parts.join(" · ");
 }
 
 /** Градусы со знаком и запятой: «+6,2», «−3», «0». */

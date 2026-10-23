@@ -175,7 +175,12 @@ test("в бандле воркера только движок: ни карка�
   assert.equal(modules.at(-1), "src/sim/worker.js");
   for (const name of ["src/sim/engine.js", "src/sim/blocks.js", "src/sim/hubApi.js"]) assert.ok(modules.includes(name), "нет " + name);
   for (const name of modules) {
-    assert.ok(name.startsWith("src/sim/") || name === "src/strings.js" || name === "src/clockMath.js", "лишний модуль в потоке: " + name);
+    // Погода (правка после сборки сценариев) — чистый модуль: климат дома
+    // считает по ней улицу.
+    assert.ok(
+      name.startsWith("src/sim/") || name === "src/strings.js" || name === "src/clockMath.js" || name === "src/weather.js",
+      "лишний модуль в потоке: " + name,
+    );
   }
   for (const name of ["src/app.js", "src/store.js", "src/model.js", "src/render.js", "src/simulation.js", "src/sim/bridge.js"]) {
     assert.equal(modules.includes(name), false, name + " в потоке");

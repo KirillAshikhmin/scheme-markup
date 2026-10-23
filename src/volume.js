@@ -3171,6 +3171,58 @@ export function volumeRooms(project, schemeId) {
   return rooms;
 }
 
+/**
+ * **Климат дома** (правка после сборки сценариев): помещения с площадью,
+ * высотой и окнами и проёмы между ними — для потока имитации
+ * (`sim/climate.js`). Слова заказчика: «Температура в помещении. Воздухообмен
+ * по помещениям и с улицей при открытых дверях».
+ *
+ * `{rooms: [{id, areaMm2, heightMm, windowsMm2}], ways: [{id, a, b, areaMm2,
+ * window, leaf}]}` — у проёма стороны `a`, `b` (помещение или `null` — улица),
+ * окно ли это (`window`) и есть ли полотно (`leaf`): у арки и проёма полотна
+ * нет, и воздух через них ходит всегда. Сторона спрашивается тем же щупом, что
+ * у света (`VOLUME_SUN_PROBE_MM`). Помещение из двух контуров — одно.
+ */
+export function volumeClimateGeometry(project) {
+  const rooms = new Map();
+  const ways = [];
+  if (!project) return { rooms: [], ways };
+  for (const scheme of schemesInOrder(project)) {
+    const list = volumeRooms(project, scheme.id).filter((room) => room.roomId);
+    if (list.length === 0) continue;
+    for (const room of list) {
+      const own = rooms.get(room.roomId) || { id: room.roomId, areaMm2: 0, heightMm: 0, windowsMm2: 0 };
+      own.areaMm2 += volumeArea(room.pointsMm);
+      own.heightMm = Math.max(own.heightMm, Number(room.heightMm) || 0);
+      rooms.set(room.roomId, own);
+    }
+    const roomAt = (point) => {
+      const found = list.find((room) => volumePointInside(point, room.pointsMm));
+      return found ? found.roomId : null;
+    };
+    for (const wall of wallsOnScheme(project, scheme.id)) {
+      const vectors = wallVectors(wall);
+      if (!vectors) continue;
+      const half = Number(wall.thicknessMm) / 2;
+      for (const opening of openingsInWall(project, wall.id)) {
+        const middle = Number(opening.atMm) + Number(opening.widthMm) / 2;
+        const probe = (sign) => ({
+          x: Number(wall.aMm.x) + vectors.u.x * middle + vectors.n.x * sign * (half + VOLUME_SUN_PROBE_MM),
+          y: Number(wall.aMm.y) + vectors.u.y * middle + vectors.n.y * sign * (half + VOLUME_SUN_PROBE_MM),
+        });
+        const a = roomAt(probe(1));
+        const b = roomAt(probe(-1));
+        if ((!a && !b) || a === b) continue;
+        const areaMm2 = Math.max(0, Number(opening.widthMm) || 0) * Math.max(0, Number(opening.heightMm) || 0);
+        const window = !openingWalkThrough(opening.kind);
+        ways.push({ id: opening.id, a, b, areaMm2, window, leaf: openingOpens(opening.kind) });
+        if (window && (!a || !b)) rooms.get(a || b).windowsMm2 += areaMm2;
+      }
+    }
+  }
+  return { rooms: [...rooms.values()], ways };
+}
+
 /** Высота в точке: по накрывающему её контуру, иначе по схеме. */
 function volumeHeightAt(project, schemeId, pointMm, fallbackMm) {
   const fraction = planMmToFraction(project, schemeId, pointMm);

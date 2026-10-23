@@ -333,6 +333,27 @@ export const DEVICE_KINDS = Object.freeze([
     { extras: ["BatteryService"] },
   ),
   simKind("fan", [["Fan", ["Active", "RotationSpeed"]]]),
+  // Бризер (правка после сборки сценариев): «у бризера должен быть
+  // выключатель подогрева». Вентилятор приточки и «Выключатель» — подогрев
+  // воздуха; подпись «Подогрев» ему даёт окно устройства по виду
+  // (`deviceCard.js`), в профиль имя не пишется.
+  simKind("breezer", [
+    ["Fan", ["Active", "RotationSpeed"]],
+    ["Switch", ["On"]],
+  ]),
+  // Тёплый пол (правка после сборки сценариев): «им значение можно напрямую
+  // задавать или через термостат». Свой термостат — уставка напрямую; связь
+  // «чем управляет» от метки-термостата — уставка и режим идут от него
+  // (`sim/climate.js`).
+  simKind("warmFloor", [
+    ["Thermostat", ["CurrentTemperature", "TargetTemperature", "CurrentHeatingCoolingState", "TargetHeatingCoolingState"]],
+  ]),
+  // Новогодняя ель (правка после сборки сценариев): «у которой можно включить
+  // гирлянду и звезду наверху» — две лампы, первая гирлянда, вторая звезда.
+  simKind("xmasTree", [
+    ["Lightbulb", ["On"]],
+    ["Lightbulb", ["On"]],
+  ]),
   simKind("tv", [["Television", ["Active"]]], { extras: ["Speaker"] }),
   simKind("speaker", [["Speaker", ["Mute", "Volume"]]]),
   simKind("doorbell", [["Doorbell", ["ProgrammableSwitchEvent"]]]),
@@ -361,6 +382,17 @@ export const DEVICE_KINDS = Object.freeze([
   ),
   simKind("lightSensor", [["LightSensor", ["CurrentAmbientLightLevel"]]], { extras: ["BatteryService"] }),
   simKind("co2", [["CarbonDioxideSensor", ["CarbonDioxideLevel", "CarbonDioxideDetected"]]]),
+  // Датчик климата (правка после сборки сценариев): температура, влажность и
+  // CO₂ в одном корпусе — «3 шкалы вертикальных как на ртутном градуснике».
+  simKind(
+    "climateFull",
+    [
+      ["TemperatureSensor", ["CurrentTemperature"]],
+      ["HumiditySensor", ["CurrentRelativeHumidity"]],
+      ["CarbonDioxideSensor", ["CarbonDioxideLevel", "CarbonDioxideDetected"]],
+    ],
+    { extras: ["BatteryService"] },
+  ),
 ]);
 
 const DEVICE_KIND_BY_KEY = new Map(DEVICE_KINDS.map((kind) => [kind.key, kind]));
@@ -389,7 +421,13 @@ const DEVICE_KIND_BY_CODE_SOURCE = [
   ["switchRelay", ["В", "П", "МВ", "ВВ", "ПП", "ВВВ"]],
   ["outlet", ["Р", "РC"]],
   ["conditioner", ["К"]],
-  ["fan", ["Б", "ВЫТ", "ВЕНТ"]],
+  // Бризер — своим видом с подогревом (правка после сборки сценариев).
+  ["breezer", ["Б"]],
+  ["fan", ["ВЫТ", "ВЕНТ"]],
+  ["thermostat", ["ТМ"]],
+  ["warmFloor", ["ТП"]],
+  ["climateFull", ["ДК"]],
+  ["xmasTree", ["НЕ"]],
   ["relay", ["ОВ", "СУШ", "РП", "ПОС", "ДЭП"]],
   ["speaker", ["УК"]],
   ["doorbell", ["Д"]],

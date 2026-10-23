@@ -237,6 +237,16 @@ export function weatherLook(sky, day = 0) {
   }
 }
 
+/**
+ * Норма температуры суток в этот миг — без неба и без того, как гуляет погода:
+ * по ней решается, идёт ли отопительный сезон (климат дома, `sim/climate.js`).
+ */
+export function weatherNormTemp(simMs, latDeg = WEATHER_BASE_LAT) {
+  const day = Math.floor((Number(simMs) || 0) / WEATHER_DAY_MS);
+  const lat = Number.isFinite(Number(latDeg)) ? Number(latDeg) : WEATHER_BASE_LAT;
+  return weatherNorm(WEATHER_MONTH_TEMP, day, lat) + weatherLatShift(lat);
+}
+
 /** Выбор, приведённый к правилам: чужое значение становится «Авто». */
 export function weatherChoiceOf(value) {
   const source = value && typeof value === "object" ? value : {};
