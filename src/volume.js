@@ -2502,39 +2502,50 @@ export function volumeWallFaces(wall, openings, heightMm, out = [], openDoorIds 
     // сетки, которой она резалась в тасках 148–150 ради порядка рисования,
     // больше нет: порядок выкладывает дерево (`volumeOrderTree`), а вещь стоит
     // перед плоскостью стены на два миллиметра — этого дереву довольно.
+    // Чья это сторона (таск 09 сценариев): щуп в полутора сантиметрах от
+    // грани — тот же, которым солнце ищет комнату (`volumeInnerSide`).
+    // Наружная сторона — улица, ничья. Помещение у стороны меняется вдоль
+    // стены (`volumeSideStops`), и кусок между проёмами режется ещё и там.
+    const known = rooms && rooms.length > 0;
+    const stops = known ? volumeSideStops(wall, side, rooms) : [];
+    const roomAt = (along) => (known ? volumeRoomKeyAt(rooms, at(along, (half + VOLUME_SUN_PROBE_MM) * side)) : null);
     for (const tile of volumeWallTiles(len, heightMm, openings)) {
-      // Крайние куски стороны дотягиваются до уса: внутренняя кромка угла
-      // отступает, внешняя выходит за вершину — и обе кончаются там же, где
-      // кромки соседки.
-      const from = at(tile.fromMm === 0 ? startOf(side) : tile.fromMm, half * side);
-      const to = at(tile.toMm === len ? endOf(side) : tile.toMm, half * side);
-      // Нижняя кромка куска бывает наклонной — так стена садится на дугу арки
-      // (таск 219). У прямого куска оба угла на одной высоте, и кадр прежних
-      // стен от этого не меняется ни на грань.
-      const bottomFrom = tile.bottomFromMm == null ? tile.bottomMm : tile.bottomFromMm;
-      const bottomTo = tile.bottomToMm == null ? tile.bottomMm : tile.bottomToMm;
-      // Обход берётся так, чтобы нормаль смотрела на свою сторону: на правой
-      // стороне концы меняются местами.
-      const first = side > 0 ? to : from;
-      const second = side > 0 ? from : to;
-      const firstBottom = side > 0 ? bottomTo : bottomFrom;
-      const secondBottom = side > 0 ? bottomFrom : bottomTo;
-      // Чья это сторона (таск 09 сценариев): щуп в полутора сантиметрах от
-      // грани посреди куска — тот же, которым солнце ищет комнату
-      // (`volumeInnerSide`). Наружная сторона — улица, ничья.
-      const room = rooms && rooms.length > 0 ? volumeRoomKeyAt(rooms, at((tile.fromMm + tile.toMm) / 2, (half + VOLUME_SUN_PROBE_MM) * side)) : null;
-      out.push(
-        volumeFace(
-          [
-            volumeAt(first, firstBottom),
-            volumeAt(second, secondBottom),
-            volumeAt(second, tile.topMm),
-            volumeAt(first, tile.topMm),
-          ],
-          VOLUME_WALL_RGB,
-          { normal, room },
-        ),
-      );
+      // Наклонный низ (пазухи арки) режется только проёмом: куски у арки
+      // короткие, и помещение у них одно.
+      const sloped = tile.bottomFromMm != null || tile.bottomToMm != null;
+      const parts = sloped
+        ? [{ fromMm: tile.fromMm, toMm: tile.toMm, room: roomAt((tile.fromMm + tile.toMm) / 2) }]
+        : volumeSideParts(tile.fromMm, tile.toMm, stops, roomAt);
+      for (const part of parts) {
+        // Крайние куски стороны дотягиваются до уса: внутренняя кромка угла
+        // отступает, внешняя выходит за вершину — и обе кончаются там же, где
+        // кромки соседки.
+        const from = at(part.fromMm === 0 ? startOf(side) : part.fromMm, half * side);
+        const to = at(part.toMm === len ? endOf(side) : part.toMm, half * side);
+        // Нижняя кромка куска бывает наклонной — так стена садится на дугу арки
+        // (таск 219). У прямого куска оба угла на одной высоте, и кадр прежних
+        // стен от этого не меняется ни на грань.
+        const bottomFrom = tile.bottomFromMm == null ? tile.bottomMm : tile.bottomFromMm;
+        const bottomTo = tile.bottomToMm == null ? tile.bottomMm : tile.bottomToMm;
+        // Обход берётся так, чтобы нормаль смотрела на свою сторону: на правой
+        // стороне концы меняются местами.
+        const first = side > 0 ? to : from;
+        const second = side > 0 ? from : to;
+        const firstBottom = side > 0 ? bottomTo : bottomFrom;
+        const secondBottom = side > 0 ? bottomFrom : bottomTo;
+        out.push(
+          volumeFace(
+            [
+              volumeAt(first, firstBottom),
+              volumeAt(second, secondBottom),
+              volumeAt(second, tile.topMm),
+              volumeAt(first, tile.topMm),
+            ],
+            VOLUME_WALL_RGB,
+            { normal, room: part.room },
+          ),
+        );
+      }
     }
   }
   for (const end of [0, 1]) {
@@ -2545,13 +2556,32 @@ export function volumeWallFaces(wall, openings, heightMm, out = [], openDoorIds 
     const normal = { x: u.x * (end === 0 ? -1 : 1), y: u.y * (end === 0 ? -1 : 1), z: 0 };
     const left = at(along, half);
     const right = at(along, -half);
-    const first = end === 0 ? left : right;
-    const second = end === 0 ? right : left;
-    out.push(
-      volumeFace([volumeAt(first, 0), volumeAt(second, 0), volumeAt(second, heightMm), volumeAt(first, heightMm)], VOLUME_WALL_RGB, {
-        normal,
-      }),
-    );
+    const mid = at(along, 0);
+    // Торец перегородки в проходе — пополам по толщине, как откос проёма
+    // (`volumeTagSides`): половина светлеет своей комнатой, а не более светлой
+    // из двух. Щуп — у стороны стены, чуть отступя от торца внутрь.
+    const inward = Math.min(len / 2, VOLUME_SUN_PROBE_MM) * (end === 0 ? 1 : -1);
+    // Обход прежний — от `first` к `second` через середину; половина у `left`
+    // — сторона `+1`, у `right` — `−1`.
+    // Помещений нет — торец цельный, как был.
+    const start = end === 0 ? left : right;
+    const finish = end === 0 ? right : left;
+    const known = rooms && rooms.length > 0;
+    const pieces = known
+      ? [
+          [start, mid, end === 0 ? 1 : -1],
+          [mid, finish, end === 0 ? -1 : 1],
+        ]
+      : [[start, finish, 0]];
+    for (const [first, second, sign] of pieces) {
+      const room = known ? volumeRoomKeyAt(rooms, at(along + inward, (half + VOLUME_SUN_PROBE_MM) * sign)) : null;
+      out.push(
+        volumeFace([volumeAt(first, 0), volumeAt(second, 0), volumeAt(second, heightMm), volumeAt(first, heightMm)], VOLUME_WALL_RGB, {
+          normal,
+          room,
+        }),
+      );
+    }
   }
   out.push(
     volumeFace(
@@ -2573,10 +2603,24 @@ export function volumeWallFaces(wall, openings, heightMm, out = [], openDoorIds 
 /**
  * Откосы, перемычка, подоконник, рама и полотно проёма — **между** двумя
  * помещениями (правка после сборки сценариев: «что бы светил и в проёмах»).
- * Своего помещения у них нет, и свет комнаты их не светлил: между двумя
- * освещёнными комнатами дверной проём стоял тёмной рамкой. Теперь у них обе
- * стороны (`sides`), и при физическом свете они светлеют по более светлой.
- * Щуп тот же, что у стороны стены (`VOLUME_SUN_PROBE_MM`); улица — ничья.
+ *
+ * Сперва у них были обе стороны (`sides`), и при физическом свете они
+ * светлели по более светлой. Живой прогон заказчика это отверг: «почему
+ * подсвечивается справа стена с проёмом… При чем даже с закрытой дверью».
+ * Более светлая сторона светила и полотно закрытой двери со стороны тёмного
+ * коридора, и откос, которого лампа из комнаты не видит.
+ *
+ * Теперь каждая грань проёма — **своей стороны стены**, тем же правилом, что
+ * сторона стены (`volumeWallFaces`): откосы, перемычка и подоконник поделены
+ * пополам по толщине стены (`volumeOpeningFaces`), и половина берёт помещение
+ * своей стороны. Грань посреди толщины — полотно закрытой двери, стекло, рама —
+ * своей нормалью: двусторонняя смотрит лицом в одну комнату, изнанкой в другую
+ * (`backRoom`), и кадр берёт ту, что видна. Сторона на улицу — улица:
+ * помещения у неё нет, и `volumeTagIndoor` её не трогает (`indoor: false`).
+ *
+ * Обе стороны (`sides`) остаются у рамы и стекла окна — свет к ним идёт с обеих
+ * сторон, сквозь само стекло, — и у мелочи посреди толщины, у которой своей
+ * стороны нет вовсе: верх и торцы ручки.
  */
 function volumeTagSides(wall, opening, faces, from, rooms) {
   const vectors = wallVectors(wall);
@@ -2593,9 +2637,120 @@ function volumeTagSides(wall, opening, faces, from, rooms) {
   // `out` — с одной стороны улица (правка «солнце и луна»): откос окна светлеет
   // и по небу.
   const sides = { a: a || b, b: b || a, key: (a || "") + "|" + (b || ""), out: !a || !b };
+  const roomOf = (sign) => (sign > 0 ? a : b);
   for (let index = from; index < faces.length; index += 1) {
-    if (!faces[index].line && !faces[index].room) faces[index].sides = sides;
+    const face = faces[index];
+    if (face.line || face.room) continue;
+    // Рама и стекло окна светятся с обеих сторон — сквозь стекло свет и идёт,
+    // — и для них «светлее из двух» верно. По сторонам делится только то, что
+    // свет держит: стена, пол, полотно двери и его ручка.
+    const opaque = !face.clear && (face.rgb === VOLUME_WALL_RGB || face.rgb === VOLUME_FLOOR_RGB || Boolean(face.doorId));
+    if (!opaque) {
+      face.sides = sides;
+      continue;
+    }
+    const at = volumeMiddleOf(face.p);
+    const across = (at.x - Number(wall.aMm.x)) * vectors.n.x + (at.y - Number(wall.aMm.y)) * vectors.n.y;
+    const facing = face.n ? face.n.x * vectors.n.x + face.n.y * vectors.n.y : 0;
+    const central = Math.abs(across) <= VOLUME_SIDE_CENTRE_MM;
+    const sign = !central ? Math.sign(across) : Math.abs(facing) > 0.5 ? Math.sign(facing) : 0;
+    if (sign === 0) {
+      face.sides = sides;
+      continue;
+    }
+    const own = roomOf(sign);
+    if (own) face.room = own;
+    else face.indoor = false;
+    // Изнанка двусторонней грани: у полотна закрытой двери — соседняя
+    // комната, у раскрытого полотна в комнате — та же. Пустая строка — улица.
+    if (face.both) face.backRoom = (central ? roomOf(-sign) : own) || "";
   }
+}
+
+/**
+ * Насколько грань может отстоять от середины толщины стены и всё ещё считаться
+ * серединой: полотно закрытой двери и стекло стоят ровно на ней.
+ */
+const VOLUME_SIDE_CENTRE_MM = 1;
+/**
+ * Кусок стороны без помещения короче этого (за углом соседки, под торцом
+ * перегородки) — не свой кусок, а часть соседнего: его закрывает стена, и
+ * резать сторону ради него незачем.
+ */
+const VOLUME_SIDE_GAP_MM = 600;
+
+/**
+ * **Где вдоль стены меняется помещение** с её стороны `side` (правка после
+ * сборки сценариев): места `(0, len)`, в которых линия щупа стороны — та, по
+ * которой сторона стены ищет свою комнату, — пересекает контуры помещений.
+ *
+ * Нужны затем, что щуп у стороны один на кусок между проёмами, а наружная
+ * стена квартиры идёт вдоль трёх комнат сразу: посреди неё коридор, и вся её
+ * внутренняя сторона красилась коридором — и в гостиной, где горит свет, и в
+ * спальне. Пятна ламп на такую сторону не ложились вовсе: они ищут свою
+ * комнату (`volumeDecalHosts`).
+ */
+function volumeSideStops(wall, side, rooms) {
+  if (!rooms || rooms.length === 0) return [];
+  const vectors = wallVectors(wall);
+  if (!vectors) return [];
+  const { u, n, len } = vectors;
+  const reach = (Number(wall.thicknessMm) / 2 + VOLUME_SUN_PROBE_MM) * side;
+  const ax = Number(wall.aMm.x) + n.x * reach;
+  const ay = Number(wall.aMm.y) + n.y * reach;
+  const stops = [];
+  for (const room of rooms) {
+    const points = room.pointsMm || [];
+    for (let index = 0; index < points.length; index += 1) {
+      const p = points[index];
+      const q = points[(index + 1) % points.length];
+      const ex = q.x - p.x;
+      const ey = q.y - p.y;
+      // Пересечение линии щупа `A + u·t` с ребром `p + e·s`.
+      const cross = u.x * ey - u.y * ex;
+      if (Math.abs(cross) < 1e-9) continue;
+      const wx = p.x - ax;
+      const wy = p.y - ay;
+      const t = (wx * ey - wy * ex) / cross;
+      const s = (wx * u.y - wy * u.x) / cross;
+      if (s < 0 || s > 1 || !(t > 1) || !(t < len - 1)) continue;
+      stops.push(t);
+    }
+  }
+  return stops.sort((first, second) => first - second);
+}
+
+/**
+ * Куски стороны стены от `fromMm` до `toMm` по помещениям: `[{fromMm, toMm,
+ * room}]`. `stops` — где помещение может смениться (`volumeSideStops`),
+ * `roomAt(along)` — помещение у стороны в этом месте. Короткий кусок без
+ * помещения (`VOLUME_SIDE_GAP_MM`) отходит соседу, одинаковые соседи
+ * сливаются: у стены одной комнаты кусок остаётся одним, как был.
+ */
+function volumeSideParts(fromMm, toMm, stops, roomAt) {
+  const cuts = [fromMm, ...stops.filter((stop) => stop > fromMm + 1 && stop < toMm - 1), toMm];
+  let parts = [];
+  for (let index = 0; index + 1 < cuts.length; index += 1) {
+    const start = cuts[index];
+    const end = cuts[index + 1];
+    if (!(end - start > 0.5)) continue;
+    parts.push({ fromMm: start, toMm: end, room: roomAt((start + end) / 2) });
+  }
+  if (parts.length > 1) {
+    parts = parts.map((part, index) => {
+      if (part.room || part.toMm - part.fromMm >= VOLUME_SIDE_GAP_MM) return part;
+      const before = index > 0 ? parts[index - 1].room : null;
+      const after = index + 1 < parts.length ? parts[index + 1].room : null;
+      return { ...part, room: before || after };
+    });
+  }
+  const merged = [];
+  for (const part of parts) {
+    const last = merged[merged.length - 1];
+    if (last && last.room === part.room) last.toMm = part.toMm;
+    else merged.push({ ...part });
+  }
+  return merged.length > 0 ? merged : [{ fromMm, toMm, room: roomAt((fromMm + toMm) / 2) }];
 }
 
 /**
@@ -2643,14 +2798,30 @@ function volumeOpeningFaces(wall, opening, heightMm, out, openDoorIds, rooms = n
   });
   // Низ проёма смотрит вверх, верх — вниз: подоконник виден снизу, перемычка
   // сверху, и затенение разводит их само.
+  //
+  // Подоконник, перемычка, свод и откосы — **пополам по толщине стены**
+  // (правка после сборки сценариев): половина у комнаты светлеет её светом,
+  // половина у соседки или улицы — своим (`volumeTagSides`). Цельной гранью
+  // откос брал более светлую сторону и светился в тёмном коридоре и при
+  // закрытой двери. Помещений нет — светить нечем, и грань остаётся цельной:
+  // кадр такого объекта тот же до грани.
+  const halves =
+    rooms && rooms.length > 0
+      ? [
+          [half, 0],
+          [0, -half],
+        ]
+      : [[half, -half]];
   if (bottom > 0) {
-    out.push(
-      volumeFace(
-        [at(from, half), at(to, half), at(to, -half), at(from, -half)].map((point) => volumeAt(point, bottom)),
-        VOLUME_WALL_RGB,
-        { normal: { x: 0, y: 0, z: 1 } },
-      ),
-    );
+    for (const [outer, inner] of halves) {
+      out.push(
+        volumeFace(
+          [at(from, outer), at(to, outer), at(to, inner), at(from, inner)].map((point) => volumeAt(point, bottom)),
+          VOLUME_WALL_RGB,
+          { normal: { x: 0, y: 0, z: 1 } },
+        ),
+      );
+    }
   }
   // **Свод арки** (таск 219, G329): у неё верх не перемычкой, а дугой, и
   // откосы кончаются на пяте. Свод нарезан теми же отрезками, что пазухи, —
@@ -2675,40 +2846,54 @@ function volumeOpeningFaces(wall, opening, heightMm, out, openDoorIds, rooms = n
         y: (u.y * toCentre.along) / length,
         z: toCentre.z / length,
       };
+      for (const [outer, inner] of halves) {
+        out.push(
+          volumeFace(
+            [
+              volumeAt(at(left.alongMm, -outer), left.zMm),
+              volumeAt(at(right.alongMm, -outer), right.zMm),
+              volumeAt(at(right.alongMm, -inner), right.zMm),
+              volumeAt(at(left.alongMm, -inner), left.zMm),
+            ],
+            VOLUME_WALL_RGB,
+            { normal },
+          ),
+        );
+      }
+    }
+  } else if (top < heightMm) {
+    for (const [outer, inner] of halves) {
       out.push(
         volumeFace(
-          [
-            volumeAt(at(left.alongMm, -half), left.zMm),
-            volumeAt(at(right.alongMm, -half), right.zMm),
-            volumeAt(at(right.alongMm, half), right.zMm),
-            volumeAt(at(left.alongMm, half), left.zMm),
-          ],
+          [at(from, -outer), at(to, -outer), at(to, -inner), at(from, -inner)].map((point) => volumeAt(point, top)),
           VOLUME_WALL_RGB,
-          { normal },
+          { normal: { x: 0, y: 0, z: -1 } },
         ),
       );
     }
-  } else if (top < heightMm) {
-    out.push(
-      volumeFace(
-        [at(from, -half), at(to, -half), at(to, half), at(from, half)].map((point) => volumeAt(point, top)),
-        VOLUME_WALL_RGB,
-        { normal: { x: 0, y: 0, z: -1 } },
-      ),
-    );
   }
   for (const end of [from, to]) {
     const sign = end === from ? 1 : -1;
     const normal = { x: u.x * sign, y: u.y * sign, z: 0 };
     const left = at(end, half);
     const right = at(end, -half);
+    const mid = at(end, 0);
     const first = sign > 0 ? right : left;
     const second = sign > 0 ? left : right;
-    out.push(
-      volumeFace([volumeAt(first, bottom), volumeAt(second, bottom), volumeAt(second, springMm), volumeAt(first, springMm)], VOLUME_WALL_RGB, {
-        normal,
-      }),
-    );
+    const pieces =
+      halves.length > 1
+        ? [
+            [first, mid],
+            [mid, second],
+          ]
+        : [[first, second]];
+    for (const [one, two] of pieces) {
+      out.push(
+        volumeFace([volumeAt(one, bottom), volumeAt(two, bottom), volumeAt(two, springMm), volumeAt(one, springMm)], VOLUME_WALL_RGB, {
+          normal,
+        }),
+      );
+    }
   }
   // **Рамка дверного проёма** (правка после сборки сценариев): откосы,
   // подоконник и перемычка открывающегося проёма помечены его дверью. По ним
@@ -2723,7 +2908,7 @@ function volumeOpeningFaces(wall, opening, heightMm, out, openDoorIds, rooms = n
   }
   if (openingHasLeaf(opening.kind)) {
     const open = volumeDoorOpen(openDoorIds, opening.id);
-    volumeDoorLeaf(wall, opening, { from, to, bottom, top }, out, open);
+    volumeDoorLeaf(wall, opening, { from, to, bottom, top }, out, open, halves.length > 1);
     return out;
   }
   // **Роллетные и подъёмно-секционные ворота.** Закрытые стоят полотном в
@@ -2992,7 +3177,7 @@ function volumeFoldPack(root, into, across, width, links) {
  * выглядит странно, и об этом сказано вслух в отчёте: поведение заказчик не
  * отменял, а менять его без его слова нельзя.
  */
-function volumeDoorLeaf(wall, opening, span, out, open) {
+function volumeDoorLeaf(wall, opening, span, out, open, sided = false) {
   const vectors = wallVectors(wall);
   const whole = span.to - span.from;
   if (!vectors || !(whole > 0)) return out;
@@ -3076,7 +3261,7 @@ function volumeDoorLeaf(wall, opening, span, out, open) {
     };
     const bottom = Math.max(span.bottom, VOLUME_HANDLE_MM - VOLUME_HANDLE_TALL_MM / 2);
     const top = Math.min(span.top, bottom + VOLUME_HANDLE_TALL_MM);
-    if (top > bottom) {
+    if (top > bottom && !sided) {
       volumePrismFaces(
         volumeBoxCorners(handleAt, edge.along, VOLUME_HANDLE_LONG_MM, VOLUME_HANDLE_OUT_MM * 2),
         bottom,
@@ -3085,6 +3270,23 @@ function volumeDoorLeaf(wall, opening, span, out, open) {
         out,
         { doorId },
       );
+    } else if (top > bottom) {
+      // При помещениях ручка — двумя половинами, по одной на сторону полотна
+      // (правка после сборки сценариев): брусок насквозь стоял верхом посреди
+      // полотна и светлел более светлой стороной — из тёмного коридора
+      // светилась ручка закрытой двери (`volumeTagSides`).
+      const across = { x: edge.along.y, y: -edge.along.x };
+      for (const sign of [1, -1]) {
+        const shift = (VOLUME_HANDLE_OUT_MM / 2) * sign;
+        volumePrismFaces(
+          volumeBoxCorners({ x: handleAt.x + across.x * shift, y: handleAt.y + across.y * shift }, edge.along, VOLUME_HANDLE_LONG_MM, VOLUME_HANDLE_OUT_MM),
+          bottom,
+          top,
+          VOLUME_HANDLE_RGB,
+          out,
+          { doorId },
+        );
+      }
     }
   }
   return out;
@@ -6426,6 +6628,14 @@ export function volumeScene(project, schemeId, options = {}) {
     //
     // Нужна полоса только там, где плита стала землёй: без обведённых помещений
     // плита сама пол, и подкладывать под стену нечего.
+    //
+    // Полоса — **две половины по сторонам стены** (правка после сборки
+    // сценариев: «В проёмах и у стены какая странная тень»). Цельной гранью она
+    // была одного помещения на обе стороны: напуск в пять сантиметров ложился
+    // в соседнюю комнату чужим светом — тёмной каймой у стены освещённой
+    // гостиной и светлой в тёмном коридоре, а порог светлел как попало.
+    // Половина берёт помещение своей стороны тем же щупом и с теми же резами,
+    // что сторона стены (`volumeSideStops`); половина на улицу — улица.
     if (rooms.length > 0) {
       const middleMm = vectors.len / 2;
       const strip = volumeBoxCorners(
@@ -6437,11 +6647,29 @@ export function volumeScene(project, schemeId, options = {}) {
         vectors.len + VOLUME_FLOOR_LAP * 2,
         Number(wall.thicknessMm) + VOLUME_FLOOR_LAP * 2,
       );
-      faces.push(
-        volumeFace(strip.map((point) => volumeAt(point, 0)), VOLUME_FLOOR_RGB, {
-          normal: { x: 0, y: 0, z: 1 },
-        }),
-      );
+      const halfT = Number(wall.thicknessMm) / 2;
+      const spot = (along, across) => ({
+        x: Number(wall.aMm.x) + vectors.u.x * along + vectors.n.x * across,
+        y: Number(wall.aMm.y) + vectors.u.y * along + vectors.n.y * across,
+      });
+      for (const side of [1, -1]) {
+        const roomAt = (along) => volumeRoomKeyAt(rooms, spot(along, (halfT + VOLUME_SUN_PROBE_MM) * side));
+        const outer = (halfT + VOLUME_FLOOR_LAP) * side;
+        for (const part of volumeSideParts(-VOLUME_FLOOR_LAP, vectors.len + VOLUME_FLOOR_LAP, volumeSideStops(wall, side, rooms), roomAt)) {
+          const piece = volumeFace(
+            volumeClockwise([spot(part.fromMm, 0), spot(part.toMm, 0), spot(part.toMm, outer), spot(part.fromMm, outer)]).map((point) =>
+              volumeAt(point, 0),
+            ),
+            VOLUME_FLOOR_RGB,
+            { normal: { x: 0, y: 0, z: 1 }, room: part.room },
+          );
+          // Половина на улицу — пол дома (снег на нём не идёт, «пол бывает
+          // только в доме»), но без комнаты: светит её улица. Щупы
+          // `volumeTagIndoor` её не трогают — нашли бы ей комнату за стеной.
+          if (!part.room) piece.indoor = true;
+          faces.push(piece);
+        }
+      }
       // Тело у полосы — такое же, как у пола комнаты (таск 209): иначе
       // перекрытие кончалось бы у контура помещения, а под стеной верхнего
       // этажа на фасаде оставалась бы щель ровно в толщину плиты.
@@ -7357,7 +7585,9 @@ const VOLUME_ROOM_PROBE_MM = 50;
 function volumeTagIndoor(faces, rooms) {
   if (!rooms || rooms.length === 0) return;
   for (const face of faces) {
-    if (face.line || face.room || face.sides || !face.p || face.p.length < 3) continue;
+    // `indoor` уже стоит — сторону грани назвала сборка (половина откоса или
+    // полосы под стеной снаружи): щупы ниже нашли бы ей комнату за стеной.
+    if (face.line || face.room || face.sides || face.indoor !== undefined || !face.p || face.p.length < 3) continue;
     // Земля и плита под домом — улица всегда: её видно в окно и в дверь, и
     // снег на ней обязан идти.
     if (face.rgb === VOLUME_LAND_RGB || face.layer !== VOLUME_LAYER_BODY) continue;
@@ -7888,7 +8118,7 @@ export function volumeFrame(scene, camera, box, extra = null, tint = null, live 
         const strength = live.lamps ? live.lamps.get(ring.markId) : 0;
         const alpha = ring.alpha * (strength || 0);
         if (!(alpha > VOLUME_LAMP_INVISIBLE)) continue;
-        take({ p: ring.p, n: face.n, rgb: face.rgb, layer: face.layer, flat: face.flat, decal: alpha, lamp: true }, rank);
+        take({ p: ring.p, n: ring.n || face.n, rgb: face.rgb, layer: face.layer, flat: face.flat, decal: alpha, lamp: true }, rank);
       }
     }
     // Кольца окон — тем же правилом; сила окна — доля неба на штору.
@@ -7898,7 +8128,7 @@ export function volumeFrame(scene, camera, box, extra = null, tint = null, live 
         const strength = live.windows ? live.windows.get(ring.markId) : 0;
         const alpha = ring.alpha * (strength || 0);
         if (!(alpha > VOLUME_LAMP_INVISIBLE)) continue;
-        take({ p: ring.p, n: face.n, rgb: face.rgb, layer: face.layer, flat: face.flat, decal: alpha, lamp: false }, rank);
+        take({ p: ring.p, n: ring.n || face.n, rgb: face.rgb, layer: face.layer, flat: face.flat, decal: alpha, lamp: false }, rank);
       }
     }
     rank += 1;
@@ -8005,9 +8235,14 @@ function volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, b
   const vz = camera.at.z - first.z;
   let normal = face.n;
   let facing = normal.x * vx + normal.y * vy + normal.z * vz;
+  // Двусторонняя грань, видная изнанкой, — изнанкой и светится: полотно
+  // закрытой двери со стороны тёмного коридора — коридором (`backRoom`,
+  // `volumeTagSides`), пустая строка — улицей.
+  let seen = face;
   if (face.both && facing < 0) {
     normal = { x: -normal.x, y: -normal.y, z: -normal.z };
     facing = -facing;
+    if (live && typeof face.backRoom === "string") seen = { ...face, room: face.backRoom || null };
   }
   if (facing <= 0) return out;
   const clipped = volumeClipNear(face.p.map((point) => volumeToCamera(point, camera.at, basis)));
@@ -8051,7 +8286,7 @@ function volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, b
     fill: fogged
       ? volumeFill(rgb, face.flat ? 1 : volumeShade(normal), face.alpha === undefined ? 1 : face.alpha, tint, fogged)
       : live
-        ? volumeLiveFill(rgb === face.rgb ? face : { ...face, rgb }, normal, tint, live)
+        ? volumeLiveFill(rgb === face.rgb ? seen : { ...seen, rgb }, normal, tint, live)
         : face.led
           ? volumeFill(face.rgb, 1, 1, null)
           : volumeFill(rgb, face.flat ? 1 : volumeShade(normal), face.alpha === undefined ? 1 : face.alpha, tint),
@@ -8368,6 +8603,10 @@ function volumeLampOpenings(scene) {
       // Сторона `left` — та, куда смотрит нормаль стены (`volumeSunOpenings`).
       plus: side(1),
       minus: side(-1),
+      // Вдоль проёма: по нему лампа размером светит клин с мягким краем.
+      u: { x: spot.u.x, y: spot.u.y },
+      // Поперёк: по нему кусок знает, за какой стороной проёма он лежит.
+      n: { x: spot.n.x, y: spot.n.y },
       areaMm2: (spot.toMm - spot.fromMm) * (spot.topMm - spot.bottomMm),
       shut: Boolean(spot.shut || spot.sheerMarkId),
     });
@@ -8645,7 +8884,11 @@ function volumeDecalHosts(scene) {
   const byRoom = new Map();
   for (const face of volumeOrderAll(scene.order, [])) {
     if (!face.room || face.line) continue;
-    if (face.rgb !== VOLUME_FLOOR_RGB && face.rgb !== VOLUME_WALL_RGB && face.rgb !== VOLUME_CEILING_RGB) continue;
+    // Полотно двери — тоже (правка после сборки сценариев): раскрытое стоит в
+    // тёмной соседке, и без пятна его сторона к проёму оставалась чёрной рядом
+    // со светлым проёмом.
+    const door = face.rgb === VOLUME_DOOR_RGB && face.doorId;
+    if (!door && face.rgb !== VOLUME_FLOOR_RGB && face.rgb !== VOLUME_WALL_RGB && face.rgb !== VOLUME_CEILING_RGB) continue;
     let list = byRoom.get(face.room);
     if (!list) byRoom.set(face.room, (list = []));
     list.push(face);
@@ -8654,7 +8897,25 @@ function volumeDecalHosts(scene) {
   return byRoom;
 }
 
-/** Пятно одного источника: на кусках своей комнаты и клином сквозь открытые проёмы. */
+/**
+ * Сколько точек у лампы, когда она светит сквозь проём: клин с края мягкий,
+ * а не срезанный ножом.
+ */
+export const VOLUME_LAMP_SOFT_STEPS = 6;
+
+/**
+ * Пятно одного источника: на кусках своей комнаты и клином сквозь открытые
+ * проёмы.
+ *
+ * **Клин — от лампы размером, а не от точки** (правка после сборки сценариев:
+ * «В проёмах и у стены какая странная тень»). Из точки косяки срезали клин
+ * ножом, и у трёх ламп гостиной на полу коридора сходились в углу проёма три
+ * пары резких рёбер — веером, кусками разной светлоты. Теперь лампа — отрезок
+ * вдоль проёма шириной в её размытие (`VOLUME_LAMP_SOFT_MM` в обе стороны), и
+ * клин кладут `VOLUME_LAMP_SOFT_STEPS` его точек, каждая своей долей: у угла
+ * проёма край по-прежнему резкий — там тень касается косяка, — а дальше
+ * расходится полутенью, как от настоящего плафона.
+ */
 function volumeSourcePools(decals, byRoom, ways, key, id, source) {
   for (const host of byRoom.get(key) || []) volumeLampPool(decals, host, id, source, null);
   for (const way of ways) {
@@ -8664,7 +8925,16 @@ function volumeSourcePools(decals, byRoom, ways, key, id, source) {
     // срезают его косяки.
     const near = way.left === key ? way.plus : way.minus;
     const far = way.left === key ? way.minus : way.plus;
-    for (const host of byRoom.get(into) || []) volumeLampPool(decals, host, id, source, { near, far });
+    const share = 1 / VOLUME_LAMP_SOFT_STEPS;
+    for (let step = 0; step < VOLUME_LAMP_SOFT_STEPS; step += 1) {
+      // Точки — по диагонали: у каждой своя доля и вдоль проёма, и по высоте,
+      // и мягкими выходят и бока клина (тень косяков), и его дальний край
+      // (тень перемычки).
+      const shift = ((step + 0.5) / VOLUME_LAMP_SOFT_STEPS - 0.5) * 2 * VOLUME_LAMP_SOFT_MM;
+      const at = { x: source.at.x + way.u.x * shift, y: source.at.y + way.u.y * shift, z: source.at.z - shift / 2 };
+      const point = { ...source, at };
+      for (const host of byRoom.get(into) || []) volumeLampPool(decals, host, id, point, { near, far, n: way.n }, share);
+    }
   }
 }
 
@@ -8704,15 +8974,25 @@ function volumeLampFacing(n, source, distanceMm) {
  * Прозрачность кольца — приращение: наложенные друг на друга кольца дают ровно
  * долю своего кольца.
  */
-function volumeLampPool(decals, host, markId, source, way) {
-  const n = host.n;
+function volumeLampPool(decals, host, markId, source, way, share = 1) {
+  let n = host.n;
   const o = host.p[0];
   const L = source.at;
-  const d = n.x * (L.x - o.x) + n.y * (L.y - o.y) + n.z * (L.z - o.z);
+  let d = n.x * (L.x - o.x) + n.y * (L.y - o.y) + n.z * (L.z - o.z);
+  // Двусторонняя грань (полотно двери) светится той стороной, что смотрит на
+  // лампу; кольцо несёт нормаль этой стороны, и с изнанки его не видно.
+  const flipped = host.both && d < -1;
+  if (flipped) {
+    n = { x: -n.x, y: -n.y, z: -n.z };
+    d = -d;
+  }
   if (!(d > 1)) return;
   const soft2 = d * d + VOLUME_LAMP_SOFT_MM * VOLUME_LAMP_SOFT_MM;
-  const peak = Math.min(VOLUME_LAMP_PEAK, (VOLUME_LAMP_GAIN * source.power) / soft2) * volumeLampFacing(n, source, d);
-  if (peak < VOLUME_LAMP_FAINT) return;
+  const whole = Math.min(VOLUME_LAMP_PEAK, (VOLUME_LAMP_GAIN * source.power) / soft2) * volumeLampFacing(n, source, d);
+  // Тусклое отбрасывается по силе всей лампы, а не своей доли: доля клина
+  // (`volumeSourcePools`) слабее, но светит вместе с соседками.
+  if (whole < VOLUME_LAMP_FAINT) return;
+  const peak = whole * share;
   const radii = VOLUME_LAMP_RINGS.map((q) => Math.min(VOLUME_LAMP_REACH_MM, source.beam * Math.sqrt(soft2 * (1 / q - 1))));
   // Оси плоскости: у пола и потолка — оси плана, у стены — вдоль неё и вверх.
   const flat = Math.abs(n.z) > 0.9;
@@ -8746,7 +9026,17 @@ function volumeLampPool(decals, host, markId, source, way) {
     if (Math.hypot(gapX, gapY) > reach) return;
   }
   if (way) {
+    const middle = volumeMiddleOf(host.p);
     for (const edge of [way.near, way.far]) {
+      // Сторона проёма режет пучок только тому, что лежит **за ней**: порог и
+      // откос внутри толщины стены лампа видит сквозь ближнюю сторону, а
+      // дальняя от них по ту же руку, что лампа. Без этого правила половина
+      // порога у соседки оставалась тёмной полосой посреди светлого проёма.
+      if (way.n) {
+        const sideOf = (point) => (point.x - edge[0].x) * way.n.x + (point.y - edge[0].y) * way.n.y;
+        const here = sideOf(middle);
+        if (Math.abs(here) < 1 || here * sideOf(L) > 0) continue;
+      }
       const beam = volumeLampBeam(edge, L, n, o);
       if (!beam) return;
       shape = volumeClipPolygon(shape, beam.map(to2));
@@ -8772,7 +9062,7 @@ function volumeLampPool(decals, host, markId, source, way) {
     before = target;
     if (piece.length < 3) continue;
     if (!list) decals.set(host, (list = []));
-    list.push({ markId, p: piece.map(from2), alpha });
+    list.push(flipped ? { markId, p: piece.map(from2), alpha, n } : { markId, p: piece.map(from2), alpha });
   }
 }
 

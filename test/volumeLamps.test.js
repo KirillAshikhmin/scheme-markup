@@ -34,6 +34,7 @@ import {
   VOLUME_FLOOR_RGB,
   VOLUME_LAMP_BOUNCE,
   VOLUME_LAMP_RINGS,
+  VOLUME_LAMP_SOFT_STEPS,
   VOLUME_NIGHT_RGB,
   VOLUME_WALL_RGB,
   volumeFrame,
@@ -296,13 +297,185 @@ test("подсветка картины светит свою стену, а н�
   assert.ok(light.rooms.get(box.rooms.living) < 0.1);
 });
 
-test("откосы и полотно двери — между двумя помещениями и светлеют по светлой стороне", () => {
+// ——— «странная тень» и светлый откос (правка после сборки сценариев) ————————
+//
+// Слова заказчика: «В проёмах и у стены какая странная тень и почему
+// подсвечивается справа стена с проёмом… При чем даже с закрытой дверью».
+// Откос, полотно и полоса пола под стеной брали более светлую из двух сторон
+// или помещение одной стороны на обе; клин сквозь проём срезался из точки, и у
+// нескольких ламп в углу проёма сходился веер резких рёбер.
+
+/** Помещение стенда по стороне перегородки `x = 0`: гостиная слева, коридор справа. */
+const sideRoom = (box, x) => (x < 0 ? box.rooms.living : box.rooms.hall);
+
+test("откосы, перемычка и порог — пополам по стене, и половина светлеет своей комнатой", () => {
+  const box = stand();
+  for (const open of [false, true]) {
+    const scene = sceneOf(box, open);
+    // Откосы и перемычка проёма (рамка двери): у каждой половины помещение её
+    // стороны, обе стороны есть.
+    const frame = scene.faces.filter((face) => face.doorway === box.doorId);
+    assert.ok(frame.length >= 4, "у проёма нет половин откосов: " + frame.length);
+    for (const face of frame) {
+      const middle = face.p.reduce((sum, point) => sum + point.x, 0) / face.p.length;
+      assert.equal(face.room, sideRoom(box, middle), "половина откоса не своей стороны");
+      assert.equal(face.sides, undefined, "откос снова светлеет по более светлой стороне");
+    }
+    assert.deepEqual(new Set(frame.map((face) => face.room)), new Set([box.rooms.living, box.rooms.hall]));
+    // Полоса пола под перегородкой с напуском: половина у коридора — коридора,
+    // и в гостиную она не заходит.
+    const strip = scene.faces.filter(
+      (face) => face.rgb === VOLUME_FLOOR_RGB && face.n.z > 0 && face.p.every((point) => Math.abs(point.x) <= 150 + 0.01),
+    );
+    assert.equal(strip.length, 2, "полоса под перегородкой не двумя половинами");
+    for (const face of strip) {
+      const xs = face.p.map((point) => point.x);
+      assert.ok(Math.min(...xs) >= -0.01 || Math.max(...xs) <= 0.01, "половина полосы перешла середину стены");
+      assert.equal(face.room, sideRoom(box, (Math.min(...xs) + Math.max(...xs)) / 2), "половина полосы не своей стороны");
+    }
+  }
+  // Полотно закрытой двери — лицом в одну комнату, изнанкой в другую.
+  const leaf = sceneOf(box, false).faces.find((face) => face.doorId === box.doorId && face.both && face.rgb !== VOLUME_WALL_RGB);
+  assert.ok(leaf, "у закрытой двери нет полотна");
+  assert.deepEqual(new Set([leaf.room, leaf.backRoom]), new Set([box.rooms.living, box.rooms.hall]));
+});
+
+test("закрытая дверь в коридор не светит: из коридора свет гостиной не виден ничем", () => {
+  const box = stand();
+  const scene = sceneOf(box, false);
+  // Из коридора на дверь: полотно, откосы, порог и пол у стены — всё в кадре.
+  const camera = { at: { x: 1700, y: 1200, z: 1600 }, yaw: Math.atan2(-1300, -1700), pitch: -0.3 };
+  const frameBox = { width: 800, height: 500 };
+  const hallOnly = volumeLiveLight(scene, liveOf(box, { hallLamp: 0.3 }), { physical: true });
+  const withLiving = volumeLiveLight(scene, liveOf(box, { hallLamp: 0.3, lamp: 1 }), { physical: true });
+  // Что **видно** — по пикселям: кадр выкладывается в порядке рисования, и
+  // спрятанное за полотном и стеной закрывается тем, что ближе. Из коридора
+  // при закрытой двери не меняется ни один пиксель. Было — полотно, откос и
+  // полоса пола у стены светлели по гостиной.
+  const seen = (light) => volumeRaster(volumeFrame(scene, camera, frameBox, null, NIGHT, light), frameBox);
+  const hall = seen(hallOnly);
+  assert.ok(volumeFrame(scene, camera, frameBox, null, NIGHT, hallOnly).some((polygon) => polygon.door === box.doorId), "дверь не в кадре");
+  const changed = seen(withLiving).filter((pixel, index) => pixel !== hall[index]).length;
+  assert.equal(changed, 0, "лампа гостиной видна из коридора сквозь закрытую дверь: пикселей " + changed);
+  // А из гостиной та же дверь светлеет её лампой.
+  const living = { at: { x: -3000, y: 1000, z: 1600 }, yaw: Math.atan2(-1000, 3000), pitch: -0.25 };
+  const fromLiving = (light) => volumeRaster(volumeFrame(scene, living, frameBox, null, NIGHT, light), frameBox);
+  const dark = fromLiving(hallOnly);
+  assert.ok(fromLiving(withLiving).some((pixel, index) => pixel !== dark[index]), "своя лампа не светит гостиную");
+});
+
+/**
+ * Кадр в пиксели — грубо, шагом в четыре точки: многоугольники по порядку
+ * рисования, прозрачные смешиваются с тем, что под ними. Ответ — список
+ * цветов `"r,g,b"` по точкам.
+ */
+function volumeRaster(polygons, frameBox, step = 4) {
+  const width = Math.ceil(frameBox.width / step);
+  const height = Math.ceil(frameBox.height / step);
+  const pixels = Array.from({ length: width * height }, () => [0, 0, 0]);
+  for (const polygon of polygons) {
+    if (polygon.stroke || !polygon.fill) continue;
+    const parts = polygon.fill.match(/[\d.]+/g).map(Number);
+    const alpha = parts.length > 3 ? parts[3] : 1;
+    const xy = polygon.xy;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (let index = 0; index < xy.length; index += 2) {
+      minX = Math.min(minX, xy[index]);
+      maxX = Math.max(maxX, xy[index]);
+      minY = Math.min(minY, xy[index + 1]);
+      maxY = Math.max(maxY, xy[index + 1]);
+    }
+    for (let row = Math.max(0, Math.floor(minY / step)); row < Math.min(height, Math.ceil(maxY / step) + 1); row += 1) {
+      for (let column = Math.max(0, Math.floor(minX / step)); column < Math.min(width, Math.ceil(maxX / step) + 1); column += 1) {
+        const x = column * step + step / 2;
+        const y = row * step + step / 2;
+        let hit = false;
+        for (let i = 0, j = xy.length / 2 - 1; i < xy.length / 2; j = i++) {
+          const yi = xy[2 * i + 1];
+          const yj = xy[2 * j + 1];
+          if (yi > y !== yj > y && x < ((xy[2 * j] - xy[2 * i]) * (y - yi)) / (yj - yi) + xy[2 * i]) hit = !hit;
+        }
+        if (!hit) continue;
+        const pixel = pixels[row * width + column];
+        for (let channel = 0; channel < 3; channel += 1) pixel[channel] = pixel[channel] * (1 - alpha) + parts[channel] * alpha;
+      }
+    }
+  }
+  return pixels.map((pixel) => pixel.map((value) => Math.round(value)).join(","));
+}
+
+test("сторона длинной стены — своей комнаты в каждой: наружная стена гостиной не красится коридором", () => {
+  const box = stand();
+  const scene = sceneOf(box, false);
+  // Южная наружная стена (y = −1500) идёт вдоль гостиной и коридора разом.
+  const inner = scene.faces.filter(
+    (face) => face.rgb === VOLUME_WALL_RGB && face.n.y > 0.9 && face.p.every((point) => Math.abs(point.y + 1400) < 0.01),
+  );
+  assert.ok(inner.length >= 2, "внутренняя сторона наружной стены не поделена по комнатам: " + inner.length);
+  for (const face of inner) {
+    const xs = face.p.map((point) => point.x);
+    const middle = (Math.min(...xs) + Math.max(...xs)) / 2;
+    if (Math.abs(middle) < 300) continue;
+    assert.equal(face.room, sideRoom(box, middle), "кусок стороны стены в чужой комнате");
+  }
+  // Пятно лампы гостиной ложится на свою стену у себя — и не ложится у соседки.
+  const light = volumeLiveLight(scene, liveOf(box, { lamp: 1 }), { physical: true });
+  const lit = [...light.decals.keys()].filter((host) => inner.includes(host) || (host.rgb === VOLUME_WALL_RGB && host.n.y > 0.9));
+  assert.ok(lit.some((host) => host.room === box.rooms.living), "на стену гостиной пятно её лампы не легло");
+});
+
+test("клин сквозь открытую дверь — с мягким краем: у нескольких ламп нет веера резких рёбер", () => {
   const box = stand();
   const scene = sceneOf(box, true);
-  const jambs = scene.faces.filter((face) => face.sides);
-  assert.ok(jambs.length > 0, "у проёма нет граней со сторонами");
-  const sides = jambs[0].sides;
-  assert.deepEqual(new Set([sides.a, sides.b]), new Set([box.rooms.living, box.rooms.hall]));
+  const light = volumeLiveLight(scene, liveOf(box, { lamp: 1 }), { physical: true });
+  const rings = [];
+  for (const [host, list] of light.decals) {
+    if (host.room !== box.rooms.hall || host.rgb !== VOLUME_FLOOR_RGB) continue;
+    for (const ring of list) if (ring.markId === box.marks.lamp) rings.push(ring);
+  }
+  const inside = (polygon, x, y) => {
+    let hit = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      const a = polygon[i];
+      const b = polygon[j];
+      if (a.y > y !== b.y > y && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) hit = !hit;
+    }
+    return hit;
+  };
+  const at = (x, y) => 1 - rings.filter((ring) => inside(ring.p, x, y)).reduce((keep, ring) => keep * (1 - ring.alpha), 1);
+  // Поперёк клина на полу коридора: свет нарастает ступенями не больше
+  // четверти своей силы. Из точки край был ножом — весь свет одним шагом в
+  // сантиметр (замер до правки: ступень в 100 % силы).
+  for (const x of [400, 800]) {
+    let peak = 0;
+    let worst = 0;
+    let prev = null;
+    for (let y = -1400; y <= 1400; y += 10) {
+      const value = at(x, y);
+      peak = Math.max(peak, value);
+      if (prev !== null) worst = Math.max(worst, Math.abs(value - prev));
+      prev = value;
+    }
+    assert.ok(peak > 0.15, "клина в коридоре нет: " + peak);
+    assert.ok(worst <= peak * 0.25, "край клина резкий: ступень " + worst.toFixed(3) + " при силе " + peak.toFixed(3));
+  }
+  assert.ok(VOLUME_LAMP_SOFT_STEPS >= 4);
+});
+
+test("порог открытой двери светится сквозь проём: половина у коридора — не тёмная полоса", () => {
+  const box = stand();
+  const scene = sceneOf(box, true);
+  const light = volumeLiveLight(scene, liveOf(box, { lamp: 1 }), { physical: true });
+  const threshold = [...light.decals.keys()].find(
+    (host) => host.room === box.rooms.hall && host.rgb === VOLUME_FLOOR_RGB && host.p.every((point) => point.x >= -0.01 && point.x <= 150.01),
+  );
+  assert.ok(threshold, "на половину порога у коридора свет гостиной не лёг");
+  // Свет лежит и внутри толщины стены (0…100), а не только за ней.
+  const rings = light.decals.get(threshold).filter((ring) => ring.markId === box.marks.lamp);
+  assert.ok(rings.some((ring) => Math.min(...ring.p.map((point) => point.x)) < 50), "порог внутри проёма остался без света");
 });
 
 test("кадр ночью: кольца пятна идут сразу за своим куском, днём их нет", () => {

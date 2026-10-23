@@ -455,11 +455,15 @@ test("у комнаты есть пол, потолок и стены с тол�
   // габариты стен, от часа не зависящие.
   //
   // С таска 209 у каждого пола есть **тело**: низ плиты уходит в тот же ярус,
-  // и к пяти горизонталям добавляется пять низов (D60).
-  assert.equal(ground.length, (2 + 4) + (1 + 4), "пол, потолок, полосы под стенами и низ каждой плиты");
+  // и к горизонталям добавляется пять низов (D60).
+  //
+  // Верх полосы под стеной — **две половины по сторонам стены** (правка после
+  // сборки сценариев: «В проёмах и у стены какая странная тень»): у каждой
+  // половины помещение своей стороны. Тело у полосы прежнее — одно.
+  assert.equal(ground.length, (2 + 4 * 2) + (1 + 4), "пол, потолок, полосы под стенами и низ каждой плиты");
   const floorFaces = ground.filter((face) => face.n.z > 0);
   const slabBottoms = ground.filter((face) => face.n.z < 0 && face.p[0].z < 0);
-  assert.equal(floorFaces.length, 5, "пол комнаты и четыре полосы под стенами");
+  assert.equal(floorFaces.length, 1 + 4 * 2, "пол комнаты и четыре полосы под стенами, по две половины");
   assert.equal(slabBottoms.length, 5, "у каждого — свой низ на глубине перекрытия");
   assert.ok(slabBottoms.every((face) => face.p.every((point) => point.z === -VOLUME_SLAB_MM)));
   // Кромка плиты стоит вертикально и идёт в дерево порядка, как стена.
@@ -484,7 +488,7 @@ test("у комнаты есть пол, потолок и стены с тол�
   ]);
   const ceiling = ground.find((face) => face.n.z < 0 && face.p[0].z > 0);
   const floors = ground.filter((face) => face.n.z > 0);
-  assert.equal(floors.length, 5, "у пола нормаль вверх, у потолка вниз");
+  assert.equal(floors.length, 1 + 4 * 2, "у пола нормаль вверх, у потолка вниз");
   assert.ok(floors.every((face) => face.p.every((point) => point.z === 0)), "весь пол лежит на нуле");
   assert.ok(ceiling.p.every((point) => point.z === 2700), "потолок — на высоте схемы");
   // Под ними — плита по габариту чертежа. Полом она больше не работает: пол у
@@ -7112,10 +7116,12 @@ test("снятый пол — дыра в перекрытии, и край её
   const scene = roomScene();
   const withFloor = volumeScene(scene.project, scene.schemeId);
   const floors = (built) => built.faces.filter((face) => face.n.z > 0 && face.rgb === VOLUME_FLOOR_RGB);
-  assert.equal(floors(withFloor).length, 5, "пол комнаты и четыре полосы под стенами");
+  // Полоса под стеной — двумя половинами по сторонам стены (правка после
+  // сборки сценариев): у каждой помещение своей стороны.
+  assert.equal(floors(withFloor).length, 1 + 4 * 2, "пол комнаты и четыре полосы под стенами");
   const off = setRoomFloor(scene.project, scene.roomId, false).project;
   const holed = volumeScene(off, scene.schemeId);
-  assert.equal(floors(holed).length, 4, "пола комнаты нет — остались только полосы под стенами");
+  assert.equal(floors(holed).length, 4 * 2, "пола комнаты нет — остались только полосы под стенами");
   // Потолок остаётся: он не перекрытие, а верх этой комнаты.
   assert.equal(
     holed.faces.filter((face) => face.n.z < 0 && face.p[0].z > 0).length,
