@@ -713,10 +713,15 @@ export function volumeTintCss(rgb, tint) {
  * **светящемуся** окну города остаться светящимся. Здесь же цена нулевая: три
  * умножения на грань в том же счёте, где уже считается светлота.
  */
-export function volumeFill(rgb, shade, alpha = 1, tint = null) {
+export function volumeFill(rgb, shade, alpha = 1, tint = null, fog = null) {
   const hour = volumeTintRgb(rgb, tint);
-  const channel = (value) => Math.max(0, Math.min(255, Math.round(value * shade)));
-  const parts = channel(hour[0]) + "," + channel(hour[1]) + "," + channel(hour[2]);
+  // Туман (правка «погода») — поверх светлоты: дальнее тонет в его цвете.
+  const haze = fog ? volumeShare01(fog.share) : 0;
+  const channel =
+    haze > 0
+      ? (value, index) => Math.max(0, Math.min(255, Math.round(value * shade * (1 - haze) + fog.rgb[index] * haze)))
+      : (value) => Math.max(0, Math.min(255, Math.round(value * shade)));
+  const parts = channel(hour[0], 0) + "," + channel(hour[1], 1) + "," + channel(hour[2], 2);
   if (!(alpha < 1)) return "rgb(" + parts + ")";
   return "rgba(" + parts + "," + Math.round(alpha * 100) / 100 + ")";
 }
@@ -879,13 +884,17 @@ export function volumeShadowOutline(corners, heightMm, at = VOLUME_SUN_AT) {
  * углу дома вышло бы вдвое темнее, чем вдоль стены (та же причина, по которой
  * тень сплошная с таска 178).
  */
-export function volumeShadowFaces(boxes, shadow, out = []) {
+export function volumeShadowFaces(boxes, shadow, out = [], land = VOLUME_LAND_RGB) {
   const fade = shadow ? Math.max(0, Math.min(1, Number(shadow.fade))) : 1;
   if (!boxes || boxes.length === 0 || !(fade > 0)) return out;
+  // Земля под тенью — земля времени года (правка «погода»): тень на снегу —
+  // тот же снег, только темнее.
+  const ground = land || VOLUME_LAND_RGB;
+  const dark = ground === VOLUME_LAND_RGB ? VOLUME_SHADOW_RGB : ground.map((value) => Math.round(value * 0.72));
   const rgb = [
-    Math.round(VOLUME_LAND_RGB[0] + (VOLUME_SHADOW_RGB[0] - VOLUME_LAND_RGB[0]) * fade),
-    Math.round(VOLUME_LAND_RGB[1] + (VOLUME_SHADOW_RGB[1] - VOLUME_LAND_RGB[1]) * fade),
-    Math.round(VOLUME_LAND_RGB[2] + (VOLUME_SHADOW_RGB[2] - VOLUME_LAND_RGB[2]) * fade),
+    Math.round(ground[0] + (dark[0] - ground[0]) * fade),
+    Math.round(ground[1] + (dark[1] - ground[1]) * fade),
+    Math.round(ground[2] + (dark[2] - ground[2]) * fade),
   ];
   const at = shadow ? { az: shadow.az, rise: shadow.rise } : VOLUME_SUN_AT;
   for (const box of boxes) {
@@ -7700,16 +7709,30 @@ function volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, b
   }
   if (maxX < 0 || minX > box.width || maxY < 0 || minY > box.height) return out;
   const middle = depth / clipped.length;
+  // Время года и туман (правка «погода»): земля плиты — земля сезона, а всё
+  // снаружи дома тонет в тумане по дальности. В доме тумана нет: у граней
+  // комнаты и проёма своё помещение (`room`, `sides`).
+  const rgb = tint && tint.land && face.rgb === VOLUME_LAND_RGB ? tint.land : face.rgb;
+  // Земля плиты тонет ровно, как земля фона ниже горизонта (`VOLUME_FOG_GROUND`).
+  const fogged =
+    tint && tint.fog && !face.room && !face.sides && !face.led && face.decal === undefined && !face.lit
+      ? {
+          rgb: tint.fog.rgb,
+          share: tint.fog.share * (face.rgb === VOLUME_LAND_RGB ? VOLUME_FOG_GROUND : 1 - Math.exp(-middle / tint.fog.mm)),
+        }
+      : null;
   out.push({
     xy,
     depth: middle,
     order: order === null ? -middle : order,
     layer: face.layer,
-    fill: live
-      ? volumeLiveFill(face, normal, tint, live)
-      : face.led
-        ? volumeFill(face.rgb, 1, 1, null)
-        : volumeFill(face.rgb, face.flat ? 1 : volumeShade(normal), face.alpha === undefined ? 1 : face.alpha, tint),
+    fill: fogged
+      ? volumeFill(rgb, face.flat ? 1 : volumeShade(normal), face.alpha === undefined ? 1 : face.alpha, tint, fogged)
+      : live
+        ? volumeLiveFill(rgb === face.rgb ? face : { ...face, rgb }, normal, tint, live)
+        : face.led
+          ? volumeFill(face.rgb, 1, 1, null)
+          : volumeFill(rgb, face.flat ? 1 : volumeShade(normal), face.alpha === undefined ? 1 : face.alpha, tint),
     // Многоугольник просвечивает (таск 169): взгляд смотрит сквозь него
     // дальше — если за ним есть кому отвечать (таск 189, см. `volumeSightAt`).
     // Рисование об этом не спрашивает — прозрачность уже в цвете.
@@ -9048,6 +9071,8 @@ function volumePolygonCentre(xy) {
  */
 export const VOLUME_LAND_RGB = [123, 160, 93];
 const VOLUME_CLOUD = "#ffffff";
+// Тучи под пасмурным небом — серые: белое облако на сером небе читалось бы дырой.
+const VOLUME_CLOUD_DARK = "#a3a9b1";
 const VOLUME_TRUNK = "#6b5134";
 const VOLUME_CROWN_FAR = "#6f8f5a";
 const VOLUME_CROWN = "#4f7a3c";
@@ -9832,7 +9857,7 @@ export function volumeDrawBackdrop(ctx, box, camera, mood = null, land = null) {
   if (hour.stars > 0) volumeDrawStars(ctx, above, hour);
   volumeDrawSun(ctx, above, hour);
   volumeDrawMoon(ctx, above, hour);
-  if (hour.kind !== "plain") for (const cloud of VOLUME_CLOUDS) volumeDrawCloud(ctx, above, cloud, palette);
+  if (hour.kind !== "plain") volumeDrawClouds(ctx, above, hour);
   if (line < box.height) {
     // Земля — плоским тоном (G237): тем же, которым красится плита чертежа, и
     // дом от этого стоит на ней, а не на доске. Час красит обе одной краской
@@ -9840,9 +9865,61 @@ export function volumeDrawBackdrop(ctx, box, camera, mood = null, land = null) {
     ctx.fillStyle = palette.land;
     ctx.fillRect(0, Math.max(0, line), box.width, box.height - Math.max(0, line));
   }
-  if (hour.kind === "plain") return line;
-  volumeDrawGround(ctx, box, camera, hour, land, false);
+  if (hour.kind !== "plain") volumeDrawGround(ctx, box, camera, hour, land, false);
+  volumeDrawFogBand(ctx, box, line, hour);
   return line;
+}
+
+/**
+ * Облака по погоде: в ясный день — прежние семь, в облачный — вдвое больше и
+ * крупнее, под сплошными тучами — серые клочья по серому небу.
+ */
+function volumeDrawClouds(ctx, aim, hour) {
+  const cloud = hour.weather ? volumeShare01(hour.weather.cloud) : 0;
+  const palette = hour.palette;
+  // В тумане облаков не видно вовсе: небо — сам туман.
+  if (hour.weather && hour.weather.fog >= 1) return;
+  if (!(cloud > 0.3)) {
+    for (const one of VOLUME_CLOUDS) volumeDrawCloud(ctx, aim, one, palette.cloud);
+    return;
+  }
+  const paint = cloud >= 1 ? palette.cloudDark : palette.cloud;
+  for (const one of VOLUME_CLOUDS) volumeDrawCloud(ctx, aim, { ...one, size: one.size * 1.3 }, paint);
+  for (const one of VOLUME_CLOUDS_MORE) volumeDrawCloud(ctx, aim, one, paint);
+}
+
+/** Ещё облака — для облачного и пасмурного неба. */
+const VOLUME_CLOUDS_MORE = [
+  { az: 0, rise: 12, size: 6 },
+  { az: 48, rise: 21, size: 9 },
+  { az: 95, rise: 13, size: 7 },
+  { az: 142, rise: 23, size: 8.5 },
+  { az: 200, rise: 10, size: 6 },
+  { az: 262, rise: 22, size: 9 },
+  { az: 300, rise: 12, size: 6.5 },
+  { az: 345, rise: 25, size: 8 },
+];
+
+/**
+ * Туман над землёй: полоса его цвета у горизонта, гуще всего на самом
+ * горизонте и тоньше к низу кадра — дальнее тонет, ближнее видно.
+ */
+function volumeDrawFogBand(ctx, box, line, hour) {
+  const fog = hour.tint && hour.tint.fog;
+  if (!fog) return;
+  const rgb = fog.rgb.join(",");
+  const strength = volumeShare01(fog.share);
+  const top = line - box.height * 0.3;
+  const gradient = ctx.createLinearGradient(0, top, 0, box.height);
+  const at = (y) => Math.max(0, Math.min(1, (y - top) / Math.max(1, box.height - top)));
+  gradient.addColorStop(0, "rgba(" + rgb + ",0)");
+  gradient.addColorStop(at(line), "rgba(" + rgb + "," + Math.round(strength * 100) / 100 + ")");
+  // Ниже горизонта густота ровная — та же, что у земли плиты сцены
+  // (`VOLUME_FOG_GROUND`): стыка земли у дома и земли за ним не видно и в тумане.
+  gradient.addColorStop(Math.min(1, at(line) + 0.02), "rgba(" + rgb + "," + Math.round(strength * VOLUME_FOG_GROUND * 100) / 100 + ")");
+  gradient.addColorStop(1, "rgba(" + rgb + "," + Math.round(strength * VOLUME_FOG_GROUND * 100) / 100 + ")");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, Math.max(0, top), box.width, box.height - Math.max(0, top));
 }
 
 /**
@@ -10188,6 +10265,8 @@ function volumeDrawStars(ctx, aim, hour) {
 // и подрезано полем, под горизонтом его нет вовсе.
 function volumeDrawSun(ctx, aim, hour) {
   if (hour.sun.height < -3) return;
+  // За сплошными тучами солнца не видно (правка «погода»).
+  if (hour.weather && !(hour.weather.sun > 0)) return;
   const at = volumeSkyPoint(aim, hour.sun.az, hour.sun.rise);
   if (!at) return;
   const radius = Math.max(4, VOLUME_SUN_AT.size * DEG * at.scale);
@@ -10219,6 +10298,7 @@ function volumeDrawSun(ctx, aim, hour) {
 function volumeDrawMoon(ctx, aim, hour) {
   const moon = hour.moon;
   if (moon.rise < -2 || !(moon.glow > 0) || !(moon.lit > VOLUME_MOON_THIN)) return;
+  if (hour.weather && !(hour.weather.sun > 0)) return;
   const at = volumeSkyPoint(aim, moon.az, moon.rise);
   if (!at) return;
   const radius = Math.max(4, VOLUME_MOON_SIZE_DEG * DEG * at.scale);
@@ -10268,11 +10348,11 @@ function volumeDrawPeak(ctx, aim, peak, palette) {
   ctx.fill();
 }
 
-function volumeDrawCloud(ctx, aim, cloud, palette) {
+function volumeDrawCloud(ctx, aim, cloud, paint) {
   const at = volumeSkyPoint(aim, cloud.az, cloud.rise);
   if (!at) return;
   const radius = Math.max(4, cloud.size * DEG * at.scale * 0.4);
-  ctx.fillStyle = palette.cloud;
+  ctx.fillStyle = paint;
   ctx.beginPath();
   ctx.arc(at.x - radius, at.y, radius * 0.72, 0, Math.PI * 2);
   ctx.arc(at.x, at.y - radius * 0.3, radius, 0, Math.PI * 2);
@@ -10304,6 +10384,12 @@ function volumeDrawTree(ctx, aim, tree, palette) {
   const slim = tree.kind === "spruce" || tree.kind === "poplar" || tree.kind === "birch";
   ctx.fillStyle = tree.kind === "birch" ? palette.birchTrunk : palette.trunk;
   const trunk = Math.max(1, height * (slim ? 0.05 : 0.08));
+  // Зимой лиственное дерево голое (правка «погода»): ствол во весь рост и
+  // ветви — кроны нет.
+  if (palette.bare && tree.kind !== "spruce") {
+    volumeDrawBareTree(ctx, base, height, trunk, tree, palette);
+    return;
+  }
   const bare = tree.kind === "spruce" ? 0.2 : tree.kind === "poplar" ? 0.3 : tree.kind === "birch" ? 0.58 : 0.45;
   const trunkTop = base.y - height * bare;
   ctx.fillRect(base.x - trunk / 2, trunkTop, trunk, base.y - trunkTop);
@@ -10331,12 +10417,28 @@ function volumeDrawTree(ctx, aim, tree, palette) {
       ctx.closePath();
       ctx.fill();
     }
+    // Зимой на ели снег — шапкой на верхушке каждого яруса.
+    if (palette.snowCap) {
+      ctx.fillStyle = palette.snowCap;
+      for (const level of [0, 1, 2]) {
+        const bottom = base.y - height * (0.18 + level * 0.26);
+        const top = bottom - height * 0.42;
+        const spread = half * (1 - level * 0.22) * 0.45;
+        const capBottom = top + height * 0.42 * 0.45;
+        ctx.beginPath();
+        ctx.moveTo(base.x - spread, capBottom);
+        ctx.lineTo(base.x + spread, capBottom);
+        ctx.lineTo(base.x, top);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
     return;
   }
   // Тополь: узкая высокая крона в одно пятно — силуэт у него такой и есть,
   // и издали он отличается от круглого дерева одним только очерком.
   if (tree.kind === "poplar") {
-    ctx.fillStyle = far ? palette.crownFar : palette.crownDark;
+    ctx.fillStyle = far ? palette.crownFar : palette.crowns ? volumeCrownOf(tree, palette) : palette.crownDark;
     ctx.beginPath();
     ctx.ellipse(base.x, base.y - height * 0.6, height * 0.17, height * 0.44, 0, 0, Math.PI * 2);
     ctx.fill();
@@ -10368,13 +10470,67 @@ function volumeDrawTree(ctx, aim, tree, palette) {
     ctx.fill();
     return;
   }
-  ctx.fillStyle = far ? palette.crownFar : palette.crown;
+  ctx.fillStyle = far ? palette.crownFar : volumeCrownOf(tree, palette);
   const radius = height * 0.34;
   ctx.beginPath();
   ctx.arc(base.x, base.y - height * 0.66, radius, 0, Math.PI * 2);
   ctx.arc(base.x - radius * 0.72, base.y - height * 0.47, radius * 0.66, 0, Math.PI * 2);
   ctx.arc(base.x + radius * 0.7, base.y - height * 0.5, radius * 0.6, 0, Math.PI * 2);
   ctx.fill();
+  // Весной круглые деревья в цвету: несколько светлых пятнышек по кроне.
+  if (palette.blossom && !far && radius > 3) {
+    const seed = volumeTreeSeed(tree);
+    for (let index = 0; index < 5; index += 1) {
+      const angle = (seed * 7 + index * 2.4) % (Math.PI * 2);
+      const reach = radius * (0.25 + ((seed * 13 + index * 0.37) % 0.6));
+      ctx.fillStyle = palette.blossom[index % palette.blossom.length];
+      ctx.beginPath();
+      ctx.arc(base.x + Math.cos(angle) * reach, base.y - height * 0.6 + Math.sin(angle) * reach * 0.8, Math.max(1, radius * 0.11), 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+/** Число дерева по его месту: у каждого дерева своё и одно и то же в каждом кадре. */
+function volumeTreeSeed(tree) {
+  const value = Math.sin((Number(tree.x) || 0) * 0.0007 + (Number(tree.y) || 0) * 0.0013) * 43758.5453;
+  return value - Math.floor(value);
+}
+
+/** Крона круглого дерева: осенью у каждого своя — жёлтая, рыжая, красная. */
+function volumeCrownOf(tree, palette) {
+  if (!palette.crowns) return palette.crown;
+  return palette.crowns[Math.floor(volumeTreeSeed(tree) * palette.crowns.length) % palette.crowns.length];
+}
+
+/**
+ * Голое дерево — зимой: ствол во весь рост и ветви от него вверх и в стороны.
+ * У тополя ветви идут почти вверх, у ивы свисают.
+ */
+function volumeDrawBareTree(ctx, base, height, trunk, tree, palette) {
+  const topY = base.y - height * 0.92;
+  ctx.fillRect(base.x - trunk / 2, topY, trunk, base.y - topY);
+  ctx.strokeStyle = tree.kind === "birch" ? palette.birchTrunk : palette.trunk;
+  ctx.lineWidth = Math.max(1, trunk * 0.45);
+  const spread = tree.kind === "poplar" ? 0.12 : tree.kind === "willow" ? 0.42 : 0.3;
+  const droop = tree.kind === "willow" ? 0.12 : -0.14;
+  ctx.beginPath();
+  for (const [at, side] of [
+    [0.45, -1],
+    [0.55, 1],
+    [0.66, -1],
+    [0.74, 1],
+    [0.84, -1],
+  ]) {
+    const y = base.y - height * at;
+    ctx.moveTo(base.x, y);
+    ctx.lineTo(base.x + side * height * spread, y + height * droop);
+  }
+  ctx.stroke();
+  if (palette.snowCap && trunk > 2) {
+    ctx.fillStyle = palette.snowCap;
+    ctx.fillRect(base.x - trunk / 2, topY, trunk, Math.max(1, trunk * 0.6));
+  }
 }
 
 // ——— час суток: одно непрерывное время (таск 181, G282) —————————————————
@@ -10921,7 +11077,11 @@ export function volumeMood(options = {}) {
   const sun = volumeSunAt(minutes, times, topDeg);
   const place = volumeMoonAt(minutes, times, topDeg);
   const share = volumeNightShare(sun.height);
-  const sky = volumeSkyColors(sun.height);
+  // Погода (правка после сборки сценариев): `weatherAt` из `weather.js`. Нет
+  // её — снимок тот же, что до правки: лето и ясное небо, вызов в вызов.
+  const weather = options.weather || null;
+  const see = weather ? volumeShare01(weather.sun) : 1;
+  const sky = volumeWeatherSky(volumeSkyColors(sun.height), weather, share);
   // Месяц виден не всегда, когда он над горизонтом: настоящая луна половину
   // месяца стоит в дневном небе и там не читается вовсе. Поэтому у него своя
   // яркость — от высоты **солнца**, как у звёзд, только порог выше: месяц
@@ -10937,18 +11097,21 @@ export function volumeMood(options = {}) {
   // видна ли луна и высоко ли стоит. Ею ночь снаружи светлее и белее — под
   // полной луной тьма `VOLUME_MOON_NIGHT_SHARE` вместо `VOLUME_NIGHT_SHARE`, — а
   // при физическом свете луна ещё и кладёт пятна в окна (`volumeMoonSpotFaces`).
+  // Луну, как и солнце, закрывают тучи (`see`).
   const moonLight = {
     az: moon.az,
     rise: moon.rise,
-    fade: moon.up ? volumeShare01(moon.lit) * moon.glow * volumeShare(moon.height, 1, 7) : 0,
+    fade: moon.up ? volumeShare01(moon.lit) * moon.glow * volumeShare(moon.height, 1, 7) * see : 0,
   };
-  const tint =
+  let tint =
     moonLight.fade > 0
       ? {
           rgb: volumeMix(VOLUME_NIGHT_RGB, VOLUME_MOON_NIGHT_RGB, moonLight.fade),
           share: share * (1 - (1 - VOLUME_MOON_NIGHT_SHARE / VOLUME_NIGHT_SHARE) * moonLight.fade),
         }
       : { rgb: VOLUME_NIGHT_RGB, share };
+  const season = weather && VOLUME_SEASON_PALETTE[weather.season] ? weather.season : "summer";
+  if (weather) tint = volumeWeatherTint(tint, weather, share, season);
   return {
     minutes,
     times,
@@ -10961,8 +11124,9 @@ export function volumeMood(options = {}) {
     tint,
     sky: { top: "rgb(" + sky.top.join(",") + ")", low: "rgb(" + sky.low.join(",") + ")" },
     sunColors: volumeSunColors(sun.height),
-    // Звёзды зажигаются после сумерек и только там, где небо уже тёмное.
-    stars: volumeShare(sun.height, -2, -7),
+    // Звёзды зажигаются после сумерек и только там, где небо уже тёмное; тучи
+    // их закрывают.
+    stars: volumeShare(sun.height, -2, -7) * (weather ? 1 - volumeShare01(weather.cloud) : 1),
     // Окна города: к ночи загораются, днём гаснут (слова заказчика «как живой
     // город»). Доля — сколько окон светится, а какие именно, решает не случай,
     // а сами окна (`volumeCityWindowLit`): иначе они мигали бы каждую секунду.
@@ -10970,9 +11134,90 @@ export function volumeMood(options = {}) {
     // Тень дома: куда её кладёт солнце сейчас и насколько она видна. У
     // горизонта она не тянется в бесконечность, а гаснет — так же плавно, как
     // темнеет небо.
-    shadow: { az: sun.az, rise: sun.rise, fade: sun.up ? volumeShare(sun.height, 1, 7) : 0 },
-    palette: volumeBackdropPalette(tint),
+    shadow: { az: sun.az, rise: sun.rise, fade: sun.up ? volumeShare(sun.height, 1, 7) * see : 0 },
+    palette: volumeBackdropPalette(tint, season),
+    // Погода и время года — для неба, листвы, тумана и осадков.
+    weather,
+    season,
   };
+}
+
+// ——— погода в кадре (правка после сборки сценариев) ————————————————————————
+//
+// Слова заказчика: «Зимой снег, осенью жёлтые листья и т.д. а так же небо —
+// ясное, пасмурное, облачное. Может быть туман, снег и дождь». Что погода
+// меняет в «Объёме»:
+//
+//   — **небо**: тучи сводят растяжку к серому, туман — к белёсому; солнце,
+//     луна и звёзды за сплошными тучами не видны;
+//   — **свет**: пасмурный день темнее ясного и серее (`volumeWeatherTint`),
+//     тень дома и солнечные пятна гаснут по доле солнца (`weather.sun`);
+//   — **время года**: земля, листва, кусты и холмы своим цветом
+//     (`VOLUME_SEASON_PALETTE`), зимой лиственные деревья голые, а на елях снег;
+//   — **туман**: всё снаружи тонет в нём по дальности (`tint.fog`);
+//   — **осадки** — дождь и снег — рисует поле поверх кадра (`panels/volume.js`).
+
+/** Насколько пасмурный день темнее ясного, и цвет этой тьмы — серый, а не синий. */
+export const VOLUME_OVERCAST_DIM = 0.16;
+export const VOLUME_OVERCAST_RGB = [92, 98, 108];
+/** Дождь и снег темнят ещё, туман — чуть. */
+const VOLUME_RAIN_DIM = 0.08;
+const VOLUME_FOG_DIM = 0.06;
+/** Туман: цвет, предел густоты и дальность, на которой он съедает треть цвета. */
+export const VOLUME_FOG_RGB = [206, 210, 214];
+const VOLUME_FOG_SHARE = 0.85;
+/** Густота тумана над землёй — одна у фона ниже горизонта и у плиты сцены. */
+const VOLUME_FOG_GROUND = 0.75;
+export const VOLUME_FOG_MM = 60000;
+/** Серое небо под тучами и белёсое в тумане. */
+const VOLUME_OVERCAST_SKY = { top: [156, 163, 172], low: [192, 197, 203] };
+
+function volumeMixRgb(a, b, t) {
+  return [0, 1, 2].map((index) => Math.round(a[index] + (b[index] - a[index]) * t));
+}
+
+/**
+ * Небо по погоде: под тучами растяжка сводится к серому (ночью — к серому той
+ * же темноты), в тумане — к его цвету.
+ */
+function volumeWeatherSky(sky, weather, share) {
+  if (!weather) return sky;
+  const cloud = volumeShare01(weather.cloud);
+  const overcast = Math.max(0, (cloud - 0.5) / 0.5);
+  const fog = volumeShare01(weather.fog);
+  if (!(overcast > 0) && !(fog > 0)) return sky;
+  // Темнота неба та же, что у часа: серая растяжка темнеет вместе с ночью.
+  const dark = Math.min(1, share / VOLUME_NIGHT_SHARE);
+  const shade = (rgb) => volumeMixRgb(rgb, [26, 30, 38], dark * 0.85);
+  let top = volumeMixRgb(sky.top, shade(VOLUME_OVERCAST_SKY.top), overcast * 0.85);
+  let low = volumeMixRgb(sky.low, shade(VOLUME_OVERCAST_SKY.low), overcast * 0.85);
+  if (fog > 0) {
+    top = volumeMixRgb(top, shade(VOLUME_FOG_RGB), fog * 0.7);
+    low = volumeMixRgb(low, shade(VOLUME_FOG_RGB), fog * 0.95);
+  }
+  return { top, low };
+}
+
+/**
+ * Тон часа по погоде: днём тучи, дождь и туман темнят и серят свет; ночью
+ * темнее уже некуда — тон тот же. У тона появляются земля времени года
+ * (`land`, ею красится плита сцены) и туман (`fog`), если он есть.
+ */
+function volumeWeatherTint(tint, weather, share, season) {
+  const day = 1 - Math.min(1, share / VOLUME_NIGHT_SHARE);
+  const wet = Math.max(volumeShare01(weather.rain), volumeShare01(weather.snow));
+  const fog = volumeShare01(weather.fog);
+  const dim = (VOLUME_OVERCAST_DIM * (1 - volumeShare01(weather.sun)) + VOLUME_RAIN_DIM * wet + VOLUME_FOG_DIM * fog) * day;
+  const base = volumeShare01(tint.share);
+  const out = { rgb: tint.rgb, share: base };
+  if (dim > 0) {
+    const sum = base + dim;
+    out.rgb = volumeMixRgb(tint.rgb, VOLUME_OVERCAST_RGB, dim / sum);
+    out.share = Math.min(1, sum);
+  }
+  out.land = VOLUME_SEASON_PALETTE[season].land;
+  if (fog > 0) out.fog = { rgb: volumeTintRgb(VOLUME_FOG_RGB, out), share: VOLUME_FOG_SHARE * fog, mm: VOLUME_FOG_MM };
+  return out;
 }
 
 /**
@@ -10983,26 +11228,77 @@ export function volumeMood(options = {}) {
  * покрашена она тем же `volumeTintRgb`: стык между землёй у дома и землёй за
  * ним не виден ни в полдень, ни в полночь (G237 держится и во времени).
  */
-export function volumeBackdropPalette(tint) {
+// Время года в палитре фона (правка после сборки сценариев): «Зимой снег,
+// осенью жёлтые листья и т.д.». Лето — ровно прежние цвета, байт в байт: без
+// погоды палитра та же, что до правки. Весной зелень светлее и на круглых
+// деревьях цвет; осенью кроны жёлтые, рыжие и красные — у каждого дерева своя
+// (`crowns`), — земля пожухлая; зимой земля, холмы и кусты под снегом,
+// лиственные деревья голые (`bare`), а на ели — снег, река подо льдом.
+export const VOLUME_SEASON_PALETTE = Object.freeze({
+  spring: {
+    land: [128, 168, 90],
+    crown: "#6fa64a",
+    crownFar: "#86a873",
+    bush: "#79a852",
+    birchCrown: "#8cbf5a",
+    willow: "#93c062",
+    hillFar: "#a9c7b0",
+    hillNear: "#93b88a",
+    blossom: ["#f4e9ee", "#f2c6d6"],
+  },
+  summer: { land: VOLUME_LAND_RGB },
+  autumn: {
+    land: [150, 145, 84],
+    crown: "#d9a62e",
+    crownFar: "#b89a5c",
+    bush: "#b8862f",
+    birchCrown: "#e3c03a",
+    willow: "#c9b048",
+    hillFar: "#b9b597",
+    hillNear: "#a8a170",
+    crowns: ["#d9a62e", "#d9822b", "#b5492a", "#c9b33a", "#6f8f3c"],
+  },
+  winter: {
+    land: [230, 234, 239],
+    bush: "#dde3e8",
+    hillFar: "#d5dbe1",
+    hillNear: "#c9d1d8",
+    roadNear: "#c4c1bc",
+    roadFar: "#dedbd6",
+    riverNear: "#c3d4df",
+    riverFar: "#e2eaef",
+    bare: true,
+    snow: "#f2f5f8",
+  },
+});
+
+export function volumeBackdropPalette(tint, season = "summer") {
   const css = (hex) => volumeTintCss(volumeHexRgb(hex), tint);
+  const look = VOLUME_SEASON_PALETTE[season] || VOLUME_SEASON_PALETTE.summer;
+  const pick = (key, fallback) => css(look[key] || fallback);
   return {
-    land: volumeTintCss(VOLUME_LAND_RGB, tint),
+    land: volumeTintCss(look.land || VOLUME_LAND_RGB, tint),
     cloud: css(VOLUME_CLOUD),
+    cloudDark: css(VOLUME_CLOUD_DARK),
     trunk: css(VOLUME_TRUNK),
-    crown: css(VOLUME_CROWN),
-    crownFar: css(VOLUME_CROWN_FAR),
+    crown: pick("crown", VOLUME_CROWN),
+    crownFar: pick("crownFar", VOLUME_CROWN_FAR),
     crownDark: css(VOLUME_CROWN_DARK),
-    bush: css(VOLUME_BUSH),
+    bush: pick("bush", VOLUME_BUSH),
     birchTrunk: css(VOLUME_BIRCH_TRUNK),
     birchMark: css(VOLUME_BIRCH_MARK),
-    birchCrown: css(VOLUME_BIRCH_CROWN),
-    willow: css(VOLUME_WILLOW),
-    roadNear: css(VOLUME_ROAD_NEAR),
-    roadFar: css(VOLUME_ROAD_FAR),
-    riverNear: css(VOLUME_RIVER_NEAR),
-    riverFar: css(VOLUME_RIVER_FAR),
-    hillFar: css(VOLUME_HILL_FAR),
-    hillNear: css(VOLUME_HILL_NEAR),
+    birchCrown: pick("birchCrown", VOLUME_BIRCH_CROWN),
+    willow: pick("willow", VOLUME_WILLOW),
+    roadNear: pick("roadNear", VOLUME_ROAD_NEAR),
+    roadFar: pick("roadFar", VOLUME_ROAD_FAR),
+    riverNear: pick("riverNear", VOLUME_RIVER_NEAR),
+    riverFar: pick("riverFar", VOLUME_RIVER_FAR),
+    hillFar: pick("hillFar", VOLUME_HILL_FAR),
+    hillNear: pick("hillNear", VOLUME_HILL_NEAR),
+    crowns: look.crowns ? look.crowns.map(css) : null,
+    blossom: look.blossom ? look.blossom.map(css) : null,
+    bare: look.bare === true,
+    snowCap: look.snow ? css(look.snow) : null,
     rock: css(VOLUME_MOUNTAIN_ROCK),
     rockFar: css(VOLUME_MOUNTAIN_FAR_ROCK),
     snow: css(VOLUME_MOUNTAIN_SNOW),

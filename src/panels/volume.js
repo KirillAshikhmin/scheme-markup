@@ -59,9 +59,13 @@ import {
 import { drawDrawing, drawingUnitBridge, visibleMarks } from "../render.js";
 import { lightFadeLive, lightFadeMemo } from "../lightFade.js";
 import { screenPlaceOf, screenPlacePlanRead, screenPlaceSet } from "../screenPlace.js";
-import { volumeClockStamp, volumeClockText, volumeDateShort, volumeDayDateOf, volumeDayTimes } from "../clockMath.js";
+import { clockStampMs, volumeClockStamp, volumeClockText, volumeDateShort, volumeDayDateOf, volumeDayTimes } from "../clockMath.js";
+import { weatherAt } from "../weather.js";
+import { appWeatherRead, appWeatherWatch } from "../appWeather.js";
+import { volumeRainCreate } from "./volumeRain.js";
 import { strings, text } from "../strings.js";
 import {
+  VOLUME_NIGHT_SHARE,
   VOLUME_AROUND_NEAR_MM,
   VOLUME_AROUND_PITCH_DEG,
   VOLUME_CEILING_RGB,
@@ -1473,6 +1477,8 @@ function createVolume({ api, hosts }) {
   );
 
   const node = uiEl("canvas", { class: "volume__canvas" });
+  // Дождь и снег — своим полем поверх кадра (правка «погода», `volumeRain.js`).
+  const rain = volumeRainCreate();
   // Карточка выделенной метки — внизу поверх поля, ровно так же, как она стоит
   // внизу поверх плана (заказчик: «Да, и карточку»). Собирается тем же
   // `markCardParts` и из той же `markCardModel`: второй правды о метке в сборке
@@ -1662,8 +1668,16 @@ function createVolume({ api, hosts }) {
   // этой же подпиской приезжают настройки из хранилища (читаются они
   // асинхронно, как у плашек и слоёв, и первый кадр рисуется умолчаниями).
   const stopParams = volumeParamsWatch(() => paramsChanged());
+  // Погода (правка после сборки сценариев): выбрали в опциях — снимок часа
+  // пересчитывается сразу, а не через секунду.
+  const stopWeather = appWeatherWatch(() => {
+    if (closed) return;
+    refreshHour();
+    redraw();
+  });
   const stage = uiEl("div", { class: "volume__stage", attrs: { tabindex: "-1" } }, [
     node,
+    rain.node,
     card,
     stairButton,
     padNode,
@@ -2086,6 +2100,7 @@ function createVolume({ api, hosts }) {
     node.style.height = box.height + "px";
     node.width = Math.round(box.width * ratio);
     node.height = Math.round(box.height * ratio);
+    rain.resize(box.width, box.height, ratio);
     placeStance();
     redraw();
   }
@@ -2139,7 +2154,7 @@ function createVolume({ api, hosts }) {
 
   function refreshShadow() {
     const at = hour ? hour.shadow : null;
-    shadow = volumeShadowFaces(scene.shadowBoxes, at);
+    shadow = volumeShadowFaces(scene.shadowBoxes, at, [], (hour && hour.tint.land) || undefined);
     spots = volumeSunSpotFaces(scene.sunSpots, at);
     moonSpots =
       hour && volumeParamsRead().physical !== false ? volumeMoonSpotFaces(scene.sunSpots, hour.moonLight, scene.rooms) : [];
@@ -2166,11 +2181,15 @@ function createVolume({ api, hosts }) {
   function refreshHour() {
     const at = Date.now();
     const { site, stamp, times } = dayTimes(at);
+    // Погода на этот миг часов (правка после сборки сценариев): сезон, небо,
+    // туман и осадки — по выбору в опциях или сами, по дате и часу.
+    const weather = weatherAt(appWeatherRead(), clockStampMs(stamp), site.latDeg);
     hour = volumeMood({
       minutes: stamp.minutes,
       times,
       topDeg: site.topDeg,
       kind: volumeParamsRead().kind,
+      weather,
     });
     refreshShadow();
     syncClockLine(stamp, at);
@@ -2342,6 +2361,7 @@ function createVolume({ api, hosts }) {
     const lights = homeLights(at);
     shown = volumeFrame(scene, spot, box, [...shadow, ...spots, ...moonSpots, ...overlay, ...marker, ...lights.signs], at.tint, lights.light);
     volumeDraw(ctx, shown);
+    syncRain(at);
     // Второй проход фона: вещи, которые ближе кромки плиты, дом закрыть не
     // может — они перед ним (таск 199, разбор у `volumeDrawBackdrop`). Внутри
     // плиты проход пуст, то есть у ходящего по дому его нет вовсе.
@@ -2364,6 +2384,18 @@ function createVolume({ api, hosts }) {
    * солнца и Луны тоже примени физический свет»): комнату светят её окна, и
    * это есть и без запущенного дома.
    */
+  /**
+   * Осадки поверх кадра: идут — видны снаружи (обзор, улица от первого лица),
+   * в комнате их нет — там потолок (разбор у `volumeRain.js`).
+   */
+  function syncRain(at) {
+    const weather = at && at.weather;
+    const kind = weather && weather.snow > 0 ? "snow" : weather && weather.rain > 0 ? "rain" : null;
+    const strength = kind === "snow" ? weather.snow : kind === "rain" ? weather.rain : 0;
+    rain.set(kind, strength, Math.min(1, (Number(at && at.tint && at.tint.share) || 0) / VOLUME_NIGHT_SHARE));
+    rain.show(Boolean(kind) && !scene.empty && (view === "around" || !volumeRoomAt(scene, person)));
+  }
+
   function homeLights(at) {
     const physical = volumeParamsRead().physical !== false;
     const sky = physical ? { tint: at.tint } : {};
@@ -4747,6 +4779,8 @@ function createVolume({ api, hosts }) {
     hourTick = 0;
     if (stageWatch) stageWatch.disconnect();
     stopParams();
+    stopWeather();
+    rain.dispose();
     paramsFields.dispose();
     paramsButton.dispose();
     if (locked && typeof document.exitPointerLock === "function") document.exitPointerLock();

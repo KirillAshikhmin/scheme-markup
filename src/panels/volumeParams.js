@@ -60,6 +60,8 @@ import {
   appClockWatch,
 } from "../appClock.js";
 import { uiButton, uiCheckRow, uiEl, uiIconButton, uiModal } from "./ui.js";
+import { WEATHER_AUTO, WEATHER_SEASONS, WEATHER_SKIES } from "../weather.js";
+import { appWeatherRead, appWeatherSet, appWeatherWatch } from "../appWeather.js";
 
 export const VOLUME_BACKDROP_SETTING = "volumeBackdrop";
 export const VOLUME_MINIMAP_SETTING = "volumeMinimap";
@@ -530,6 +532,8 @@ export function createVolumeParamsFields(options) {
     class: "tools volume__params" + (options.window === true ? " volume__params--window" : ""),
   });
   const state = uiEl("p", { class: "tools__note volume__paramsState" });
+  // Погода сейчас (правка после сборки сценариев) — строкой, как час.
+  const weatherState = uiEl("p", { class: "tools__note volume__paramsState" });
   let tick = 0;
 
   const render = () => {
@@ -619,6 +623,10 @@ export function createVolumeParamsFields(options) {
       checkRow(strings.volume.minimap, chosen.minimap, strings.volume.minimapHint, (on) =>
         volumeParamsMinimap(on),
       ),
+      // Погода (правка после сборки сценариев): «В опциях должна быть
+      // возможность выбрать погоду, температуры и влажность». Всё «Авто» —
+      // сезон по дате, небо, градусник и влажность сами по дате и часу.
+      ...weatherRows(),
       uiEl("p", { class: "tools__label", text: strings.volume.clock }),
       // Дата стоит **над** часами (G289): от неё зависит место солнца, то
       // есть и рассвет с закатом, и фаза луны. Час без даты — полдела.
@@ -693,7 +701,50 @@ export function createVolumeParamsFields(options) {
     // ускорении 960 — каждые полторы минуты.
     const date = box.querySelector(".tools__date");
     if (date && document.activeElement !== date) date.value = volumeDateText(dayOf(at));
+    weatherState.textContent = volumeWeatherLine(at && at.weather);
   };
+
+  /** Ряды погоды: время года и небо списками, градусник и влажность полями. */
+  function weatherRows() {
+    const chosen = appWeatherRead();
+    const choose = (key, values, label, hint) => {
+      const select = uiEl(
+        "select",
+        {
+          class: "ui-input tools__select",
+          title: hint,
+          attrs: { "aria-label": label },
+          on: { change: () => appWeatherSet({ [key]: select.value }) },
+        },
+        [WEATHER_AUTO, ...values].map((value) =>
+          uiEl("option", { value, text: value === WEATHER_AUTO ? strings.volume.weatherAuto : strings.volume.weatherNames[value] }),
+        ),
+      );
+      select.value = chosen[key];
+      return uiEl("div", { class: "volume__paramsRow" }, [uiEl("span", { class: "volume__paramsName", text: label }), select]);
+    };
+    const number = (key, label, unit, min, max, step) => {
+      const field = uiEl("input", {
+        class: "ui-input volume__paramsNumber",
+        type: "number",
+        value: chosen[key] === null ? "" : String(chosen[key]),
+        title: strings.volume.weatherOwnHint,
+        attrs: { "aria-label": label, min: String(min), max: String(max), step: String(step), placeholder: strings.volume.weatherAutoShort },
+        on: { change: () => appWeatherSet({ [key]: field.value === "" ? null : Number(field.value) }) },
+      });
+      return [uiEl("span", { class: "volume__paramsName", text: label }), field, uiEl("span", { class: "volume__paramsName", text: unit })];
+    };
+    return [
+      uiEl("p", { class: "tools__label", text: strings.volume.weather }),
+      choose("season", WEATHER_SEASONS, strings.volume.weatherSeason, strings.volume.weatherSeasonHint),
+      choose("sky", WEATHER_SKIES, strings.volume.weatherSky, strings.volume.weatherSkyHint),
+      uiEl("div", { class: "volume__paramsRow" }, [
+        ...number("tempC", strings.volume.weatherTemp, "°C", -50, 50, 0.5),
+        ...number("humidity", strings.volume.weatherHumidity, "%", 0, 100, 1),
+      ]),
+      weatherState,
+    ];
+  }
 
   /**
    * Строка с галкой — **готовый кирпич** `uiCheckRow`: подпись и квадратик
@@ -778,6 +829,7 @@ export function createVolumeParamsFields(options) {
   }
 
   const stopWatch = volumeParamsWatch(() => render());
+  const stopWeather = appWeatherWatch(() => render());
   render();
   if (typeof setInterval === "function") tick = setInterval(line, 1000);
 
@@ -800,8 +852,30 @@ export function createVolumeParamsFields(options) {
       if (tick && typeof clearInterval === "function") clearInterval(tick);
       tick = 0;
       stopWatch();
+      stopWeather();
     },
   };
+}
+
+/**
+ * Строка погоды: «Сейчас: осень, пасмурно, +6,2 °C, влажность 84 %». Чисел
+ * без погоды нет — пустая строка.
+ */
+export function volumeWeatherLine(weather) {
+  if (!weather) return "";
+  return text("volume.weatherNow", {
+    season: strings.volume.weatherNames[weather.season],
+    sky: strings.volume.weatherNames[weather.sky],
+    temp: volumeTempText(weather.tempC),
+    humidity: String(Math.round(weather.humidity)),
+  });
+}
+
+/** Градусы со знаком и запятой: «+6,2», «−3», «0». */
+export function volumeTempText(value) {
+  const number = Math.round((Number(value) || 0) * 10) / 10;
+  const body = String(Math.abs(number)).replace(".", ",");
+  return number > 0 ? "+" + body : number < 0 ? "−" + body : "0";
 }
 
 /**
