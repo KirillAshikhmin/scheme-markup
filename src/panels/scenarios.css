@@ -553,6 +553,7 @@
 }
 
 .scn-side__card {
+  flex: none;
   min-width: 0;
   overflow-x: auto;
 }

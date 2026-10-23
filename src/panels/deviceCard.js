@@ -12,13 +12,16 @@
 //     выбирают в карточке;
 //   — **карточка** (`deviceCardModel` — чистая модель, `deviceCardView` — узлы):
 //     клавиши с тремя кнопками нажатий, сервисы с органом управления по формату
-//     характеристики. Её кладут в `#canvas-card` через `markCardParts(…, {extra})`.
+//     характеристики и раздел «Логика» — привязки логических сценариев с
+//     формой опций (`scenarioScript.js`, история 5.7). Её кладут в
+//     `#canvas-card` через `markCardParts(…, {extra})`.
 //
 // Состояние дома — зеркало `simulation.js`; здесь ничего не пишется в объект.
 import { simAct, simPress, simRunning, simValue, simWatch } from "../simulation.js";
 import { markAccessory } from "../sim/home.js";
 import { pressDetector } from "../sim/presses.js";
 import { strings, text } from "../strings.js";
+import { scenarioScriptLogicOf, scenarioScriptLogicView } from "./scenarioScript.js";
 import { uiButton, uiEl } from "./ui.js";
 
 // Что срабатывает как датчик (движок: `SIM_ENGINE_SENSORS`).
@@ -218,9 +221,11 @@ function deviceCardControl(meta) {
 }
 
 /**
- * Модель карточки устройства: `{markId, label, running, keys, services}` — или
- * `null`, если метка не устройство. `read(service, char)` отдаёт значение
- * (по умолчанию — зеркало имитации).
+ * Модель карточки устройства: `{markId, label, running, keys, services,
+ * logic}` — или `null`, если метка не устройство. `read(service, char)` отдаёт
+ * значение (по умолчанию — зеркало имитации); `logic` — раздел «Логика»
+ * (`scenarioScriptLogicOf`: привязки метки и подходящие сервису сценарии,
+ * формы опций читаются у имитации; `readForms` подменяет их в тесте).
  *
  *   keys     — `[{index, channel, relay, decoupled, bell, detect, on, presses:
  *              [{press, enabled}]}]`; «двойное» и «долгое» у привязанной
@@ -229,7 +234,7 @@ function deviceCardControl(meta) {
  *              value, text, control: {kind: "toggle" | "range" | "select" |
  *              "readout", …}}`.
  */
-export function deviceCardModel(project, markId, read = null) {
+export function deviceCardModel(project, markId, read = null, readForms = undefined) {
   const accessory = markAccessory(project, markId);
   if (!accessory) return null;
   const value = typeof read === "function" ? read : (service, char) => simValue(markId, service, char);
@@ -277,7 +282,8 @@ export function deviceCardModel(project, markId, read = null) {
       chars,
     });
   }
-  return { markId, label: accessory.label, aid: accessory.aid, running: simRunning(), keys, services };
+  const logic = scenarioScriptLogicOf(project, markId, readForms);
+  return { markId, label: accessory.label, aid: accessory.aid, running: simRunning(), keys, services, logic };
 }
 
 // ——— карточка: узлы ———————————————————————————————————————————————————
@@ -386,6 +392,11 @@ export function deviceCardView(project, markId) {
     for (const char of service.chars) node.append(deviceCardCharRow(markId, service, char, refs));
   }
 
+  // Раздел «Логика» перерисовывает себя сам: привязки живут в объекте и
+  // меняются, пока карточка открыта.
+  const logic = scenarioScriptLogicView(markId);
+  node.append(logic.node);
+
   const refresh = () => {
     const fresh = deviceCardModel(project, markId);
     if (!fresh) return;
@@ -415,6 +426,7 @@ export function deviceCardView(project, markId) {
     if (!node.isConnected && node.dataset.seen === "1") {
       if (off) off();
       off = null;
+      logic.dispose();
       return;
     }
     if (node.isConnected) node.dataset.seen = "1";
@@ -425,6 +437,7 @@ export function deviceCardView(project, markId) {
     dispose: () => {
       if (off) off();
       off = null;
+      logic.dispose();
     },
   };
 }

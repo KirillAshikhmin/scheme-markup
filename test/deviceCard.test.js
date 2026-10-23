@@ -307,3 +307,23 @@ test("жест оказался панорамой: начатое нажати�
   assert.deepEqual(rig.fired, []);
   assert.equal(rig.presser.idle(), true);
 });
+
+// ——— раздел «Логика» (таск 12 сценариев; история 5.7) ——————————————————
+
+test("модель карточки: раздел «Логика» — привязки метки и подходящие сервису сценарии", async () => {
+  const { addScenario, addLogicBinding } = await import("../src/model.js");
+  const source = 'info = {name: "Свет", sourceServices: [HS.Lightbulb], sourceCharacteristics: [HC.On], options: {delay: {name: "Пауза", type: "Integer", value: 5, minValue: 1, maxValue: 60}}};\nfunction trigger(){}\n';
+  const added = addScenario(box.project, { kind: "logic", name: "Свет", source });
+  const bound = addLogicBinding(added.project, { scenarioId: added.scenario.id, markId: box.marks.С1, service: 0, options: { delay: 9 } });
+  const form = { name: "Свет", description: "", fields: [{ key: "delay", type: "Integer", formType: null, label: "Пауза", value: 9, min: 1, max: 60 }], sourceServices: ["Lightbulb"], sourceCharacteristics: ["On"] };
+  const reader = (bindingId) => ({ form, fault: bindingId ? { code: "hung", line: null, message: "" } : null });
+  const lamp = deviceCardModel(bound.project, box.marks.С1, null, reader).logic;
+  assert.equal(lamp.bindings.length, 1);
+  assert.equal(lamp.bindings[0].fields[0].value, 9);
+  assert.equal(lamp.bindings[0].fault.code, "hung");
+  assert.deepEqual(lamp.available.map((item) => item.scenarioId), [added.scenario.id]);
+  // Датчик движения сервису «Лампочка» не подходит: раздел пуст.
+  const sensor = deviceCardModel(bound.project, box.marks.ДД1, null, reader).logic;
+  assert.deepEqual(sensor.bindings, []);
+  assert.deepEqual(sensor.available, []);
+});

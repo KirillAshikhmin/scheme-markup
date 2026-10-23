@@ -60,6 +60,7 @@ import {
   simNextEvent,
   simReset,
   simRunning,
+  simScenarioActive,
   simScenarioRun,
   simStart,
   simStep,
@@ -71,6 +72,19 @@ import { strings, text } from "../strings.js";
 import { deviceCardView } from "./deviceCard.js";
 import { deviceDraftKind, deviceTypeRecord } from "./deviceSettings.js";
 import { createMiniPlan, miniPlanSchemeFor, miniPlanSchemes } from "./miniPlan.js";
+import {
+  scenarioScriptCommitter,
+  scenarioScriptDownload,
+  scenarioScriptEdit,
+  scenarioScriptFaultText,
+  scenarioScriptFaults,
+  scenarioScriptLoad,
+  scenarioScriptLogicView,
+  scenarioScriptPaste,
+  scenarioScriptStatus,
+  scenarioScriptSyntaxText,
+  scenarioScriptWarningText,
+} from "./scenarioScript.js";
 import { SIM_BAR_STEPS, openSimCommands, simBarClockText, simBarState } from "./simBar.js";
 import { simJournalEmpty, simJournalFilters, simJournalRows } from "./simJournal.js";
 import { uiButton, uiCheckRow, uiConfirm, uiEl, uiIcon, uiIconButton, uiModal, uiPrompt } from "./ui.js";
@@ -106,8 +120,11 @@ export function scenariosCurrent(project, scenarioId) {
  * (`""` — все). `index`, `first`, `last` — место в **полном** списке: под
  * поиском порядок не меняется, а кнопки перестановки читают их.
  * `accessories` — готовый `homeAccessories(project)` (один раз на кадр).
+ * `faults` — `Map<id сценария, fault>` от имитации: у строки появляются `fault`
+ * (слова: «остановлен: завис», «ошибка в строке 3») и `hung`; зависший
+ * сценарий показан выключенным — включение возвращает его.
  */
-export function scenariosListRows(project, { query = "", kind = "" } = {}, accessories = null) {
+export function scenariosListRows(project, { query = "", kind = "" } = {}, accessories = null, faults = null) {
   if (!project) return [];
   const ordered = scenariosInOrder(project);
   const wanted = scenariosKey(query);
@@ -116,11 +133,14 @@ export function scenariosListRows(project, { query = "", kind = "" } = {}, acces
   ordered.forEach((scenario, index) => {
     if (kind && scenario.kind !== kind) return;
     if (wanted && !scenariosKey(scenario.name).includes(wanted)) return;
+    const fault = faults && faults.get ? faults.get(scenario.id) || null : null;
     rows.push({
       id: scenario.id,
       name: scenario.name,
       kind: scenario.kind,
-      active: scenario.active !== false,
+      active: scenario.active !== false && !(fault && fault.code === "hung"),
+      hung: Boolean(fault && fault.code === "hung"),
+      fault: scenarioScriptFaultText(fault, "list"),
       phrase: scenarioPhraseParts(project, scenario)
         .map((part) => part.text)
         .join(""),
@@ -544,7 +564,12 @@ function mountScenariosScreen(host, api) {
     title: strings.scenarios.list.createScriptHint,
     on: { click: () => loadScript() },
   });
-  const createRow = uiEl("div", { class: "scn-list__creates" }, [createEmpty, createTemplate, createScript]);
+  const createPaste = uiButton(strings.scenarios.script.paste, {
+    class: "ui-btn scn-list__create",
+    title: strings.scenarios.script.pasteHint,
+    on: { click: () => pasteScript() },
+  });
+  const createRow = uiEl("div", { class: "scn-list__creates" }, [createEmpty, createTemplate, createScript, createPaste]);
   const search = uiEl("input", {
     class: "ui-input scn-list__search",
     type: "search",
@@ -596,13 +621,22 @@ function mountScenariosScreen(host, api) {
     if (hook) hook(centerContext());
   }
 
+  function pasteScript() {
+    const hook = scenariosHooks.get("pasteScript");
+    if (hook) hook(centerContext());
+  }
+
   function renderRow(row, selected, editable) {
     const now = state();
     const active = uiEl("input", { type: "checkbox", attrs: { "aria-label": strings.scenarios.list.active } });
     active.checked = row.active;
     active.disabled = !editable;
     active.addEventListener("click", (event) => event.stopPropagation());
-    active.addEventListener("change", () => commit(scenariosSetActive(state().project, row.id, active.checked)));
+    active.addEventListener("change", () => {
+      commit(scenariosSetActive(state().project, row.id, active.checked));
+      // Повторная активация возвращает остановленный сторожем сценарий.
+      if (active.checked && row.hung) simScenarioActive(row.id, true);
+    });
     const activeLabel = uiEl("label", { class: "scn-row__active", title: editable ? strings.scenarios.list.activeHint : strings.scenarios.list.activeReadOnly }, [
       active,
       uiEl("span", { text: strings.scenarios.list.active }),
@@ -612,6 +646,7 @@ function mountScenariosScreen(host, api) {
       uiEl("span", { class: "scn-row__kind is-" + row.kind, text: strings.scenarios.list.kinds[row.kind] }),
     ]);
     const parts = [head, uiEl("p", { class: "scn-row__phrase", text: row.phrase }), activeLabel];
+    if (row.fault) parts.push(uiEl("span", { class: "scn-row__fault", title: row.hung ? strings.scenarios.list.fault.hungHint : "", text: row.fault }));
     if (row.issues > 0) parts.push(uiEl("span", { class: "scn-row__issues", title: strings.scenarios.list.issuesHint, text: text("scenarios.list.issues", { count: row.issues }) }));
     const item = uiEl("li", { class: "scn-row" + (selected ? " is-selected" : "") + (row.active ? "" : " is-inactive"), attrs: { "data-scenario": row.id } }, parts);
     item.addEventListener("click", () => open(row.id));
@@ -637,8 +672,9 @@ function mountScenariosScreen(host, api) {
     createRow.hidden = !editable;
     createScript.disabled = !scenariosHooks.has("loadScript");
     createScript.title = createScript.disabled ? strings.scenarios.list.createScriptLater : strings.scenarios.list.createScriptHint;
+    createPaste.disabled = !scenariosHooks.has("pasteScript");
     const current = scenariosCurrent(now.project, now.scenarioId);
-    const rows = scenariosListRows(now.project, view, homeAccessories(now.project));
+    const rows = scenariosListRows(now.project, view, homeAccessories(now.project), scenarioScriptFaults(state().project));
     listRows.replaceChildren(...rows.map((row) => renderRow(row, current !== null && row.id === current.id, editable)));
     const total = scenariosInOrder(now.project).length;
     const noScenarios = total === 0;
@@ -933,6 +969,34 @@ function mountScenariosScreen(host, api) {
     );
   }
 
+  // Логический и глобальный сценарий: кнопки «Код» и «Скачать», состояние
+  // текста (синтаксис, совместимость с хабом) и где он привязан.
+  function renderScript(project, scenario, editable) {
+    const status = scenarioScriptStatus(scenario);
+    const fault = scenarioScriptFaults(state().project).get(scenario.id) || null;
+    const faultLine = scenarioScriptFaultText(fault, "list");
+    const buttons = uiEl("div", { class: "scn-script__buttons" }, [
+      uiButton(editable ? strings.scenarios.script.edit : strings.scenarios.script.editHint, {
+        class: "ui-btn ui-btn--primary",
+        title: strings.scenarios.script.editHint,
+        on: { click: () => scenarioScriptEdit(centerContext(), scenario.id) },
+      }),
+      uiButton(strings.scenarios.script.editDownload, {
+        class: "ui-btn",
+        title: strings.scenarios.script.editDownloadHint,
+        on: { click: () => scenarioScriptDownload(scenario) },
+      }),
+    ]);
+    const lines = [];
+    if (faultLine) lines.push(uiEl("li", { class: "scn-script__fault", text: faultLine }));
+    if (status.syntax) lines.push(uiEl("li", { class: "scn-script__syntax", text: scenarioScriptSyntaxText(status.syntax) }));
+    if (status.warnings.length > 0) {
+      lines.push(uiEl("li", { class: "scn-script__warn-title", text: strings.scenarios.script.warningsTitle }));
+      for (const warning of status.warnings) lines.push(uiEl("li", { class: "scn-script__warn", text: scenarioScriptWarningText(warning) }));
+    }
+    centerEditor.append(buttons, uiEl("ul", { class: "scn-script__status" }, lines));
+  }
+
   function renderCenter() {
     const now = state();
     const project = now.project;
@@ -981,11 +1045,13 @@ function mountScenariosScreen(host, api) {
     // Место редактора блоков (таск 11): если он подключён — рисует он.
     const editor = scenariosHooks.get("editor");
     centerEditor.replaceChildren();
-    centerEditor.hidden = scenario.kind !== "block";
+    centerEditor.hidden = false;
     if (scenario.kind === "block") {
       if (editor) editor(centerEditor, centerContext());
       else if (editable) centerEditor.append(uiEl("p", { class: "scn-center__slot", text: strings.scenarios.center.editorSlot }));
       else centerEditor.append(uiEl("p", { class: "scn-center__slot", text: strings.scenarios.center.readOnly }));
+    } else {
+      renderScript(project, scenario, editable);
     }
     renderParams(project, scenario, editable);
   }
@@ -1093,7 +1159,10 @@ function mountScenariosScreen(host, api) {
       return;
     }
     if (!running) {
-      cardHost.replaceChildren(uiEl("p", { class: "scn-side__empty", text: strings.sim.card.stopped }));
+      // Привязки логики правят и при остановленном доме: формы опций приходят
+      // от сухого прогона сценариев.
+      cardView = scenarioScriptLogicView(markId);
+      cardHost.replaceChildren(uiEl("p", { class: "scn-side__empty", text: strings.sim.card.stopped }), cardView.node);
       return;
     }
     cardView = deviceCardView(now.project, markId);
@@ -1265,8 +1334,15 @@ function mountScenariosScreen(host, api) {
   // доме каждый кадр имитации перестраивал бы сотни строк.
   let liveFrame = 0;
   let liveLog = false;
+  let faultKey = "";
   simWatch((payload) => {
     if (state().screen !== "scenarios") return;
+    // Зависание или ошибка сценария — в списке и в середине сразу, не по следующей правке.
+    const nextKey = JSON.stringify([...scenarioScriptFaults(state().project)]);
+    if (nextKey !== faultKey) {
+      faultKey = nextKey;
+      later();
+    }
     if (payload.log && payload.log.length > 0) {
       fired.note(payload.log, Date.now());
       liveLog = true;
@@ -1297,5 +1373,10 @@ function mountScenariosScreen(host, api) {
     later();
   }
 }
+
+// Загрузка JS и вставка текста — через двери; запись в объект — `canvasCommit`.
+scenarioScriptCommitter(canvasCommit);
+scenariosHook("loadScript", scenarioScriptLoad);
+scenariosHook("pasteScript", scenarioScriptPaste);
 
 registerPanel(PANEL_IDS.screenScenarios, mountScenariosScreen);
