@@ -37,6 +37,14 @@ const ICON_FILE = "icon.svg";
 // значка вкладки рамка плана идёт почти от края.
 const ICON_MASKABLE_FILE = "icon-maskable.svg";
 const WORKER_FILE = "sw.js";
+// Памятка — тот же рассказ, что в `AGENTS.md`, но страницей на сайте (таск 236,
+// G355). Исходник лежит в `web/` рядом со служебным скриптом и едет в `dist/`
+// как есть: в `src/` ему нельзя — туда смотрит сборщик бандла, и памятка стала
+// бы либо куском страницы, либо исключением в каждом обходе исходников.
+//
+// Имя — адрес, который заказчик рассылает людям, и он нарочно тот же, с
+// которого отдаётся сервис: `…/scheme-markup/guide.html` рядом с `…/scheme-markup/`.
+export const GUIDE_FILE = "guide.html";
 // Точка входа склеивается последней: к моменту её выполнения определены все модули.
 const entryFile = path.join(srcDir, "app.js");
 // Поток имитации умного дома (таск 07 сценариев): свой бандл — движок, блочные
@@ -324,14 +332,14 @@ export async function workerBundle() {
 // регулярки), браузер при разборе HTML заменяет на U+FFFD — и весь бандл падает
 // с SyntaxError ещё до старта. В Node тот же файл разбирается молча, поэтому
 // проверка стоит здесь, на выходе сборки.
-function assertPlainText(html) {
+function assertPlainText(html, where = "собранной странице") {
   const found = html.match(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/);
   if (!found) return;
   const at = html.indexOf(found[0]);
   const line = html.slice(0, at).split("\n").length;
   const code = found[0].codePointAt(0).toString(16).toUpperCase().padStart(4, "0");
   throw new Error(
-    "Управляющий символ U+" + code + " в собранной странице, строка " + line +
+    "Управляющий символ U+" + code + " в " + where + ", строка " + line +
       ": в браузере он ломает разбор. Пиши его экранированием (\\x00-\\x1f), а не байтом.",
   );
 }
@@ -340,16 +348,21 @@ function assertPlainText(html) {
 // затронуло (ADR 006). Отдельным файлом рядом лежат ресурсы (шрифт), а не
 // бандл: `<script src>` в результате почти всегда значит, что подстановка в
 // `build()` не сработала и страница вышла пустой.
-function assertOffline(html, files) {
-  const forbidden = [
-    /<script[^>]+src=/i,
-    /<link[^>]+rel=["']?stylesheet/i,
-    /@import\s/i,
-  ];
-  for (const pattern of forbidden) {
+const CODE_OUTSIDE = [
+  /<script[^>]+src=/i,
+  /<link[^>]+rel=["']?stylesheet/i,
+  /@import\s/i,
+];
+
+function assertCodeInside(html) {
+  for (const pattern of CODE_OUTSIDE) {
     const found = html.match(pattern);
     if (found) throw new Error("Код или стили не попали внутрь страницы: " + found[0]);
   }
+}
+
+function assertOffline(html, files) {
+  assertCodeInside(html);
   assertLocalLinks(html, files);
 }
 
@@ -386,42 +399,88 @@ function pageLinks(html) {
 //  - **имя, которого в `dist/` нет** — опечатка иначе превратилась бы в молча
 //    неработающий шрифт: страница открылась, а знаки не те.
 //
-// `files` — список всего, что сборка пишет в `dist/`; его знает только `build()`,
+// `own` — всё, что сборка пишет в `dist/`; этот список знает только `build()`,
 // поэтому он приходит аргументом, а не собирается здесь заново.
+function assertOwnFile(raw, own) {
+  const target = raw.trim();
+  // Пустой адрес, рисунок в самом адресе и якорь внутри страницы никуда не ведут.
+  if (target === "" || target.startsWith("#") || target.startsWith("data:")) return;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith("//")) {
+    throw new Error(
+      "В собранной странице внешняя ссылка: " + target +
+        ". Рядом в dist/ могут лежать только свои файлы, чужих хостов нет ни одного.",
+    );
+  }
+  if (target.startsWith("/")) {
+    throw new Error(
+      "Абсолютный путь в собранной странице: " + target +
+        ". На GitHub Pages приложение живёт в подпапке — ссылка должна быть относительной.",
+    );
+  }
+  const name = target.replace(/[?#].*$/, "").replace(/^\.\//, "");
+  if (name.split("/").includes("..")) {
+    throw new Error(
+      "Ссылка уводит выше папки страницы: " + target + ". Pages выкладывает dist/ и ничего кроме.",
+    );
+  }
+  // Папка приложения — тоже свой адрес: `./` ведёт в `dist/`, то есть на саму
+  // страницу. Так на неё ссылается памятка, и это не опечатка в имени файла.
+  if (name === "" || name === "./") return;
+  if (!own.has(name)) {
+    throw new Error(
+      "Ссылка на файл, которого в dist/ нет: " + name + " (опечатка в имени?). " +
+        "Сборка положила рядом: " + [...own].join(", "),
+    );
+  }
+}
+
+// Страница приложения: каждый её адрес — свой файл рядом, и ссылка на манифест
+// обязательна.
 export function assertLocalLinks(html, files) {
   const own = new Set(files);
-  for (const raw of pageLinks(html)) {
-    const target = raw.trim();
-    // Пустой адрес, рисунок в самом адресе и якорь внутри страницы никуда не ведут.
-    if (target === "" || target.startsWith("#") || target.startsWith("data:")) continue;
-    if (/^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith("//")) {
-      throw new Error(
-        "В собранной странице внешняя ссылка: " + target +
-          ". Рядом в dist/ могут лежать только свои файлы, чужих хостов нет ни одного.",
-      );
-    }
-    if (target.startsWith("/")) {
-      throw new Error(
-        "Абсолютный путь в собранной странице: " + target +
-          ". На GitHub Pages приложение живёт в подпапке — ссылка должна быть относительной.",
-      );
-    }
-    const name = target.replace(/[?#].*$/, "").replace(/^\.\//, "");
-    if (name.split("/").includes("..")) {
-      throw new Error(
-        "Ссылка уводит выше папки страницы: " + target + ". Pages выкладывает dist/ и ничего кроме.",
-      );
-    }
-    if (!own.has(name)) {
-      throw new Error(
-        "Ссылка на файл, которого в dist/ нет: " + name + " (опечатка в имени?). " +
-          "Сборка положила рядом: " + [...own].join(", "),
-      );
-    }
-  }
+  for (const raw of pageLinks(html)) assertOwnFile(raw, own);
   if (!html.includes('href="' + MANIFEST_FILE + '"')) {
     throw new Error("Пропала ссылка на " + MANIFEST_FILE + ": с сайта страницу перестанут предлагать к установке");
   }
+}
+
+// Адреса, по которым памятка **грузит файлы**: `src` любого тега, `href` тега
+// `<link>` и `url()` стилей. Ссылку `<a href>` сюда не берут нарочно — см.
+// `assertGuideOffline`.
+function guideResourceLinks(html) {
+  const links = [];
+  for (const [, double, single] of html.matchAll(/(?<![-\w.$])src\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)) {
+    links.push(double ?? single ?? "");
+  }
+  for (const [tag] of html.matchAll(/<link\b[^>]*>/gi)) {
+    const href = tag.match(/(?<![-\w.$])href\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+    if (href) links.push(href[1] ?? href[2] ?? "");
+  }
+  for (const [, double, single, bare] of html.matchAll(
+    /(?<![-\w.$])url\(\s*(?:"([^"]*)"|'([^']*)'|([^"')]*))\s*\)/gi,
+  )) {
+    links.push(double ?? single ?? bare ?? "");
+  }
+  return links;
+}
+
+/**
+ * Памятка под тем же правилом офлайна, что и страница приложения, — но ссылки
+ * у неё двух родов, и путать их нельзя.
+ *
+ * Файл, который страница **грузит** (стиль, скрипт, значок, шрифт), обязан
+ * лежать рядом в `dist/`: с чужого хоста он не дойдёт ни с диска, ни на объекте
+ * без сети, и памятка осталась бы без вида. Поэтому стили у неё внутри, а шрифты
+ * системные — своего файла шрифта она не заводит.
+ *
+ * Ссылка `<a href>` — другое дело: по ней человек уходит сам, страница от её
+ * недоступности не меняется, и назвать репозиторий она вправе. Поэтому
+ * проверяется то, что грузится, а не то, куда ведёт.
+ */
+export function assertGuideOffline(html, files) {
+  assertCodeInside(html);
+  const own = new Set(files);
+  for (const raw of guideResourceLinks(html)) assertOwnFile(raw, own);
 }
 
 // Значок приложения достаётся из самой страницы: рисунок вкладки и рисунок на
@@ -497,6 +556,9 @@ export async function workerScript(html, assets) {
   const result = source
     .replaceAll("__CACHE_VERSION__", version)
     .replaceAll("__PAGE_FILE__", "./" + PAGE_FILE)
+    // Имя памятки — тоже отсюда: по нему скрипт узнаёт её среди соседних
+    // адресов папки и отдаёт без сети её, а не схему (таск 236).
+    .replaceAll("__GUIDE_FILE__", "./" + GUIDE_FILE)
     .replaceAll("__ASSETS__", JSON.stringify(assets.map((name) => "./" + name)));
   const left = result.match(/__[A-Z_]+__/);
   if (left) throw new Error("В служебном скрипте осталась незаполненная подстановка " + left[0]);
@@ -542,10 +604,18 @@ export async function buildPage() {
     [ICON_FILE, iconSvgFrom(html) + "\n"],
     [ICON_MASKABLE_FILE, maskableSvgFrom(iconSvgFrom(html)) + "\n"],
     [WORKER_FILE, await workerScript(html, assetNames)],
+    // Памятка едет в `dist/` как есть: ни склейки, ни подстановок в ней нет.
+    [GUIDE_FILE, await readFile(path.join(webDir, GUIDE_FILE), "utf8")],
   ];
+  const written = [PAGE_FILE, ...extras.map(([name]) => name), ...assetNames];
 
   assertPlainText(html);
-  assertOffline(html, [PAGE_FILE, ...extras.map(([name]) => name), ...assetNames]);
+  assertOffline(html, written);
+  // Памятка — вторая страница той же папки, и правило офлайна на неё
+  // распространяется: ни одного файла с чужого хоста (`assertGuideOffline`).
+  const guide = extras.find(([name]) => name === GUIDE_FILE)[1];
+  assertPlainText(guide, GUIDE_FILE);
+  assertGuideOffline(guide, written);
 
   return { html, extras, assets, worker, modules: sources.size };
 }
