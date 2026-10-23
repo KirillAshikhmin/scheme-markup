@@ -2423,15 +2423,20 @@ function createVolume({ api, hosts }) {
    * это есть и без запущенного дома.
    */
   /**
-   * Осадки поверх кадра: идут — видны снаружи (обзор, улица от первого лица),
-   * в комнате их нет — там потолок (разбор у `volumeRain.js`).
+   * Осадки поверх кадра: снаружи — по всему полю (обзор, улица от первого
+   * лица); в доме — только там, где в кадре улица: за окном, в открытой двери
+   * («Снег и дождь не видно в окно, если ты дома, надо поправить»). Комнату
+   * закрывает маска (`volumeRainMask`), собранная по тому же кадру.
    */
   function syncRain(at) {
     const weather = at && at.weather;
     const kind = weather && weather.snow > 0 ? "snow" : weather && weather.rain > 0 ? "rain" : null;
     const strength = kind === "snow" ? weather.snow : kind === "rain" ? weather.rain : 0;
     rain.set(kind, strength, Math.min(1, (Number(at && at.tint && at.tint.share) || 0) / VOLUME_NIGHT_SHARE));
-    rain.show(Boolean(kind) && !scene.empty && (view === "around" || !volumeRoomAt(scene, person)));
+    const on = Boolean(kind) && !scene.empty;
+    const indoors = on && view === "person" && Boolean(volumeRoomAt(scene, person));
+    rain.mask(indoors ? shown : null);
+    rain.show(on);
   }
 
   function homeLights(at) {

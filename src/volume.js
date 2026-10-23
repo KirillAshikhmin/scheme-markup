@@ -6495,6 +6495,7 @@ export function volumeScene(project, schemeId, options = {}) {
     if (rooms.length > 0) volumeTagRoom(faces, markFrom, rooms, volumeMarkProbe(place));
     if (markImages || !place.model) volumeMarkViewLines(place, faces);
   }
+  volumeTagIndoor(faces, rooms);
   // `wallCount` — настоящее число стен чертежа, а не длина `solids`: препятствий
   // больше, потому что проём режет стену на куски, а вещи на полу тоже держат.
   // Окно говорит о чертеже, и путать эти два числа нельзя.
@@ -7255,6 +7256,39 @@ export function volumeRoomKeyAt(rooms, at) {
 const VOLUME_ROOM_PROBE_MM = 50;
 
 /**
+ * **Грань в доме** (правка после сборки сценариев, маска осадков): у граней
+ * без своего помещения — порогов, торцов стен, кромок перекрытий — середина,
+ * сдвинутая по нормали на щуп, лежит в контуре помещения и не выше его
+ * потолка. За такой гранью улицы нет, и снег на ней не рисуется
+ * (`volumeRainMask`). Наружная сторона стены, земля и крыша остаются улицей.
+ */
+function volumeTagIndoor(faces, rooms) {
+  if (!rooms || rooms.length === 0) return;
+  for (const face of faces) {
+    if (face.line || face.room || face.sides || !face.p || face.p.length < 3) continue;
+    // Земля и плита под домом — улица всегда: её видно в окно и в дверь, и
+    // снег на ней обязан идти.
+    if (face.rgb === VOLUME_LAND_RGB || face.layer !== VOLUME_LAYER_BODY) continue;
+    // Пол бывает только в доме: порог в проёме лежит между контурами
+    // помещений, но это всё равно пол.
+    if (face.rgb === VOLUME_FLOOR_RGB) {
+      face.indoor = true;
+      continue;
+    }
+    const middle = volumeMiddleOf(face.p);
+    const n = face.n || { x: 0, y: 0, z: 0 };
+    const probe = { x: middle.x + n.x * VOLUME_ROOM_PROBE_MM * 2, y: middle.y + n.y * VOLUME_ROOM_PROBE_MM * 2 };
+    const room = rooms.find((item) => volumePointInside(probe, item.pointsMm));
+    if (!room || middle.z < 0 || middle.z + n.z * VOLUME_ROOM_PROBE_MM > (Number(room.heightMm) || 0) + 1) continue;
+    face.indoor = true;
+    // Грань смотрит в комнату — свет комнаты её и светлит (правка «как будто
+    // прозрачные»): торец перегородки посреди гостиной, кромка, у которой не
+    // было помещения, красились улицей и в освещённой комнате читались дырой.
+    face.room = volumeRoomKey(room);
+  }
+}
+
+/**
  * Приписать грани `faces[from…]` помещению, в котором стоит вещь: ключ
  * помещения точки `at` (таск 09 сценариев). Линиям помещение не нужно — у них
  * свой цвет.
@@ -7907,6 +7941,9 @@ function volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, b
     // дальше — если за ним есть кому отвечать (таск 189, см. `volumeSightAt`).
     // Рисование об этом не спрашивает — прозрачность уже в цвете.
     clear: Boolean(face.clear),
+    // Грань дома — комнаты или проёма (правка после сборки сценариев): за ней
+    // дождя и снега не видно (`volumeRainMask`).
+    inside: Boolean(face.room || face.sides || face.indoor),
     // Хозяева — только у своего этажа (`volumeFloorFaces`): у грани чужого
     // этажа их нет, и кадр не отдаёт её ни прицелу, ни щелчку, ни клавише
     // выключателя. Своего правила здесь нет — только послушание пометке.
@@ -9181,6 +9218,30 @@ export function volumeDraw(ctx, polygons) {
     ctx.restore();
   }
   return polygons.length;
+}
+
+/**
+ * **Где в кадре улица** (правка после сборки сценариев): «Снег и дождь не
+ * видно в окно, если ты дома». Маска для поля осадков: залито — там дом,
+ * капель не видно. Многоугольники идут в порядке рисования, поэтому то, что
+ * ближе, решает: плотная грань дома закрашивает маску, грань улицы (наружная
+ * стена, земля, дом напротив в окне) её стирает, прозрачное (стекло, тюль) —
+ * пропускается: сквозь стекло улица видна. Фон — небо и земля — не
+ * многоугольники, там маски нет вовсе.
+ */
+export function volumeRainMask(ctx, polygons) {
+  ctx.fillStyle = "#000";
+  for (const polygon of polygons || []) {
+    if (polygon.stroke || polygon.clear || (typeof polygon.fill === "string" && polygon.fill.startsWith("rgba("))) continue;
+    const xy = polygon.xy;
+    ctx.globalCompositeOperation = polygon.inside ? "source-over" : "destination-out";
+    ctx.beginPath();
+    ctx.moveTo(xy[0], xy[1]);
+    for (let index = 2; index < xy.length; index += 2) ctx.lineTo(xy[index], xy[index + 1]);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.globalCompositeOperation = "source-over";
 }
 
 // Наконечник стрелки — в экранных точках, по направлению последнего отрезка:

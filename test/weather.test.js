@@ -166,3 +166,29 @@ test("строка погоды в опциях", () => {
   assert.equal(line, "Сейчас: осень, пасмурно, +6,2 °C, влажность 84 %");
   assert.equal(volumeWeatherLine(null), "");
 });
+
+test("снег и дождь в окно: маска закрывает дом, улицу за окном оставляет", async () => {
+  const { volumeRainMask } = await import("../src/volume.js");
+  const ops = [];
+  const ctx = new Proxy(
+    {},
+    {
+      get: (target, key) => (key in target ? target[key] : (...args) => ops.push({ call: String(key), mode: target.globalCompositeOperation, args })),
+      set: (target, key, value) => {
+        target[key] = value;
+        return true;
+      },
+    },
+  );
+  const square = [0, 0, 10, 0, 10, 10, 0, 10];
+  volumeRainMask(ctx, [
+    { xy: square, fill: "rgb(1,2,3)", inside: true },
+    { xy: square, fill: "rgb(1,2,3)", inside: false },
+    { xy: square, fill: "rgba(1,2,3,0.4)", inside: true, clear: true },
+    { xy: square, stroke: "#000", inside: true },
+  ]);
+  const fills = ops.filter((op) => op.call === "fill");
+  assert.equal(fills.length, 2, "стекло и линии не пропущены");
+  assert.equal(fills[0].mode, "source-over", "грань дома не закрыла маску");
+  assert.equal(fills[1].mode, "destination-out", "грань улицы не стёрла маску");
+});

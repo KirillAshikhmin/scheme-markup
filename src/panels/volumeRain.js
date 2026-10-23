@@ -12,6 +12,7 @@
 // небом, тучами и туманом, а капли за стеклом поле не рисует (у поверх-кадра
 // нет знания, где окно). Это названная граница, а не недосмотр.
 import { uiEl } from "./ui.js";
+import { volumeRainMask } from "../volume.js";
 
 /** Сколько капель и хлопьев на миллион точек поля при полной силе осадков. */
 const VOLUME_RAIN_PER_MPX = { rain: 520, snow: 360 };
@@ -82,6 +83,10 @@ export function volumeRainCreate() {
   let drops = [];
   let frame = 0;
   let last = 0;
+  // Маска дома (`volumeRainMask`): где кадр показывает комнату, капель нет —
+  // за окном они идут. `null` — маски нет, осадки по всему полю.
+  let maskNode = null;
+  let masked = false;
   const live = () => shown && kind && strength > 0 && width > 0 && height > 0;
   const clear = () => {
     if (ctx) ctx.clearRect(0, 0, node.width, node.height);
@@ -118,6 +123,12 @@ export function volumeRainCreate() {
         ctx.lineTo(drop.x - drop.size * 0.25, drop.y - drop.size);
       }
       ctx.stroke();
+    }
+    if (masked && maskNode) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalCompositeOperation = "destination-out";
+      ctx.drawImage(maskNode, 0, 0);
+      ctx.globalCompositeOperation = "source-over";
     }
     schedule();
   };
@@ -162,6 +173,28 @@ export function volumeRainCreate() {
       node.height = Math.round(height * ratio);
       reseed();
       sync();
+    },
+    /**
+     * Маска дома по многоугольникам кадра (`polygons`) — или `null`: осадки
+     * по всему полю (обзор, улица от первого лица).
+     */
+    mask(polygons) {
+      if (!polygons) {
+        masked = false;
+        return;
+      }
+      if (!maskNode) maskNode = uiEl("canvas", {});
+      if (maskNode.width !== node.width || maskNode.height !== node.height) {
+        maskNode.width = node.width;
+        maskNode.height = node.height;
+      }
+      const own = maskNode.getContext ? maskNode.getContext("2d") : null;
+      if (!own) return;
+      own.setTransform(1, 0, 0, 1, 0, 0);
+      own.clearRect(0, 0, maskNode.width, maskNode.height);
+      own.setTransform(ratio, 0, 0, ratio, 0, 0);
+      volumeRainMask(own, polygons);
+      masked = true;
     },
     dispose() {
       shown = false;

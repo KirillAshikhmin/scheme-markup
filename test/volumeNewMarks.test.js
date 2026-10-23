@@ -214,3 +214,17 @@ test("«Прозрачные объекты»: по умолчанию вещи 
   assert.equal(solid.objectsClear, false);
   assert.equal(solid.faces.length, clear.faces.length, "плотная вещь — не та же вещь");
 });
+
+test("улица и дом в кадре: земля — улица (снег виден в окно и в дверь), пол и стены комнаты — дом", async () => {
+  const { VOLUME_LAND_RGB, VOLUME_FLOOR_RGB, volumeFrame } = await import("../src/volume.js");
+  const box = stand();
+  const scene = volumeScene(box.project, box.schemeId, { roofOff: false });
+  const land = scene.faces.filter((face) => face.rgb === VOLUME_LAND_RGB);
+  assert.ok(land.length > 0 && land.every((face) => !face.indoor && !face.room), "земля записана в дом");
+  const floors = scene.faces.filter((face) => face.rgb === VOLUME_FLOOR_RGB);
+  assert.ok(floors.every((face) => face.room || face.indoor), "пол оказался улицей");
+  // Кадр знает, где дом: многоугольники пола — дом, земли — улица.
+  const frame = volumeFrame(scene, { at: { x: 0, y: 6000, z: 3000 }, yaw: -Math.PI / 2, pitch: -0.5 }, { width: 800, height: 500 });
+  assert.ok(frame.some((polygon) => polygon.inside === false && !polygon.stroke), "в кадре нет улицы");
+  assert.ok(frame.some((polygon) => polygon.inside === true), "в кадре нет дома");
+});
