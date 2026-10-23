@@ -203,44 +203,40 @@ test("полоса часов стоит в правом нижнем углу �
   assert.equal(prop(clock, "pointer-events"), "none");
 });
 
-test("полоса часов поднимается на площадку ходьбы и встаёт в строку с «Действием» — их же мерами", () => {
+// Пальцем — как в мобильных шутерах (правка после сборки сценариев): кнопки
+// дугой под правым пальцем, полоса часов — над ними, их же мерами.
+test("пальцем: кнопки дугой под правым пальцем, полоса часов над ними — их же мерами", () => {
   const stage = ruleBody(VOLUME_CSS, ".volume__stage");
-  const pad = ruleBody(VOLUME_CSS, ".volume__pad");
-  // Мера площадки объявлена один раз, и сама площадка берёт её оттуда же.
-  const size = prop(stage, "--volume-pad-size");
   const edge = prop(stage, "--volume-pad-edge");
-  // Кнопка над площадкой (правка после сборки сценариев) — тоже одной мерой.
+  const action = prop(stage, "--volume-action-size");
   const button = prop(stage, "--volume-stance-size");
   const gap = prop(stage, "--volume-stance-gap");
-  const action = ruleBody(VOLUME_CSS, ".volume__actionBtn");
-  assert.equal(prop(action, "right"), "var(--volume-pad-edge)", "«Действие» стоит над площадкой, у её края");
-  assert.equal(prop(pad, "width"), "var(--volume-pad-size)");
-  assert.equal(prop(pad, "height"), "var(--volume-pad-size)");
-  assert.equal(prop(pad, "right"), "var(--volume-pad-edge)");
-  assert.equal(prop(pad, "bottom"), "var(--volume-pad-edge)");
-  // Подъём — площадка целиком плюс общий промежуток угла, и ни одного своего
-  // числа: в выражении только имена мер.
-  const lift = prop(ruleBody(VOLUME_CSS, ".volume__clock--overPad"), "bottom");
-  for (const name of ["--volume-pad-size", "--volume-pad-edge", "--volume-stance-gap"]) {
+  assert.ok(px(action) > px(button), "«Действие» не крупнее прыжка и приседа");
+  const cluster = ruleBody(VOLUME_CSS, ".volume__stance");
+  assert.equal(prop(cluster, "right"), "var(--volume-pad-edge)", "дуга кнопок не у правого края");
+  assert.equal(prop(cluster, "bottom"), "var(--volume-pad-edge)", "дуга кнопок не у нижнего края");
+  const act = ruleBody(VOLUME_CSS, ".volume__actionBtn");
+  assert.equal(prop(act, "right"), "0", "«Действие» не в самом углу");
+  assert.equal(prop(act, "bottom"), "0");
+  assert.ok(prop(ruleBody(VOLUME_CSS, ".volume__jumpBtn"), "bottom").includes("var(--volume-action-size)"), "прыжок не над «Действием»");
+  assert.ok(prop(ruleBody(VOLUME_CSS, ".volume__crouchBtn"), "right").includes("var(--volume-action-size)"), "присед не слева от «Действия»");
+  // Полоса часов — над дугой, ни одного своего числа.
+  const lift = prop(ruleBody(VOLUME_CSS, ".volume__clock--touch"), "bottom");
+  for (const name of ["--volume-pad-edge", "--volume-action-size", "--volume-stance-size", "--volume-stance-gap"]) {
     assert.ok(lift.includes("var(" + name + ")"), "в подъёме нет меры " + name + ": " + lift);
   }
-  // В строке с «Действием» — слева от него, его же мерой.
-  const aside = prop(ruleBody(VOLUME_CSS, ".volume__clock--overPad"), "right");
-  for (const name of ["--volume-pad-edge", "--volume-stance-size", "--canvas-corner-gap"]) {
-    assert.ok(aside.includes("var(" + name + ")"), "в отступе справа нет меры " + name + ": " + aside);
-  }
   const filled = lift
-    .replace(/var\(--volume-pad-size\)/g, size.replace("px", ""))
     .replace(/var\(--volume-pad-edge\)/g, edge.replace("px", ""))
+    .replace(/var\(--volume-action-size\)/g, action.replace("px", ""))
     .replace(/var\(--volume-stance-size\)/g, button.replace("px", ""))
     .replace(/var\(--volume-stance-gap\)/g, gap.replace("px", ""))
-    .replace(/var\(--canvas-corner-gap\)/g, String(CORNER.gap))
     .replace(/calc/g, "")
     .replace(/px/g, "");
   assert.match(filled, /^[\d\s+*().]+$/, "в подъёме осталось чужое имя: " + lift);
   const up = Function("return " + filled)();
-  assert.ok(up >= px(size) + px(edge) + px(gap), "полоса поднялась не выше площадки: " + up);
-  assert.ok(px(button) > 0, "мера кнопки над площадкой объявлена");
+  assert.ok(up >= px(edge) + px(action) + px(button) + px(gap), "полоса не поднялась над кнопками: " + up);
+  // Джойстик хода плавающий: его круг ловить касания не должен — их ловит поле.
+  assert.equal(prop(ruleBody(VOLUME_CSS, ".volume__stick"), "pointer-events"), "none");
 });
 
 // ——— полный экран «Объёма»: что уходит и что остаётся (G246) ———————————————

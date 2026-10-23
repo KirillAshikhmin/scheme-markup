@@ -298,7 +298,10 @@ import {
   volumeNotes,
   volumeStackLine,
   volumePadVector,
-  volumeLookVector,
+  volumeStickFollow,
+  volumeTouchLook,
+  volumeTouchZone,
+  VOLUME_STICK_RADIUS,
   volumeFloorAction,
   volumeFloorName,
   volumeFloorWord,
@@ -6083,32 +6086,32 @@ test("площадка ходьбы: вверх — вперёд, в сторо�
   assert.ok(Math.hypot(far.forward, far.side) <= 1.0000001);
 });
 
-// Слова заказчика: «слева снизу добавить джойстик поворота камеры что ты можно
-// было одновременно двумя управлять для движения».
-test("джойстик взгляда: вправо — направо, вверх — взгляд вверх, у середины — тонко", () => {
-  const radius = 64;
-  assert.deepEqual(volumeLookVector(0, 0, radius), { yaw: 0, pitch: 0 }, "палец в середине не вертит");
-  assert.deepEqual(volumeLookVector(5, -5, radius), { yaw: 0, pitch: 0 }, "дрожание пальца — не поворот");
-  const right = volumeLookVector(radius, 0, radius);
-  assert.equal(right.yaw, 1, "у края — полная скорость");
-  assert.equal(Math.abs(right.pitch), 0);
-  assert.equal(volumeLookVector(-radius, 0, radius).yaw, -1);
-  assert.equal(volumeLookVector(0, -radius, radius).pitch, 1, "палец вверх — взгляд вверх");
-  assert.equal(volumeLookVector(0, radius, radius).pitch, -1);
-  // Отклик квадратный: на полпути от мёртвой зоны — четверть скорости, и
-  // прицел доводится, а не прыгает.
-  const dead = radius * 0.18;
-  const mid = volumeLookVector(dead + (radius - dead) / 2, 0, radius);
-  assert.ok(Math.abs(mid.yaw - 0.25) < 1e-9, "полпути — четверть: " + mid.yaw);
-  const far = volumeLookVector(radius * 3, radius * 3, radius);
-  assert.ok(Math.hypot(far.yaw, far.pitch) <= 1.0000001, "за краем — как на краю");
+// Пальцем — как в мобильных шутерах (правка после сборки сценариев): «сделай
+// хорошо и удобно, как стандарт в отрасли»; «Джойстики можно плавающие».
+test("пальцем: левая половина ходит, правая смотрит; джойстик плавающий, взгляд — свайпом", () => {
+  assert.equal(volumeTouchZone(100, 800), "move");
+  assert.equal(volumeTouchZone(399, 800), "move");
+  assert.equal(volumeTouchZone(400, 800), "look");
+  assert.equal(volumeTouchZone(780, 800), "look");
+  // Плавающий: палец в пределах круга — середина стоит; ушёл дальше — едет за
+  // ним, а палец остаётся на краю.
+  const inside = volumeStickFollow({ x: 100, y: 100 }, { x: 130, y: 100 }, VOLUME_STICK_RADIUS);
+  assert.deepEqual(inside, { base: { x: 100, y: 100 }, dx: 30, dy: 0 });
+  const far = volumeStickFollow({ x: 100, y: 100 }, { x: 300, y: 100 }, VOLUME_STICK_RADIUS);
+  assert.equal(far.base.x, 300 - VOLUME_STICK_RADIUS, "середина не поехала за пальцем");
+  assert.equal(far.dx, VOLUME_STICK_RADIUS);
+  // Взгляд свайпом: поворот — ровно на сдвиг пальца, удвоенный сдвиг —
+  // удвоенный поворот (никакой скорости «пока держишь»).
+  const one = volumeTouchLook(100, 0);
+  const two = volumeTouchLook(200, 0);
+  assert.ok(one.yaw > 0 && Math.abs(two.yaw - one.yaw * 2) < 1e-12, "поворот не пропорционален свайпу");
+  assert.ok(volumeTouchLook(0, -50).pitch > 0, "палец вверх — взгляд не вверх");
+  assert.ok(volumeTouchLook(0, -50, 1, true).pitch < 0, "инверсия не переворачивает вертикаль");
+  assert.ok(volumeTouchLook(100, 0, 2).yaw > one.yaw, "чувствительность ничего не меняет");
+  // Полэкрана свайпа — около девяноста градусов на средней чувствительности.
+  const half = (volumeTouchLook(420, 0).yaw * 180) / Math.PI;
+  assert.ok(half > 70 && half < 110, "полэкрана свайпа — не четверть оборота: " + half);
 });
-
-// ——— подсказка плашкой (G218) ————————————————————————————————————————————
-//
-// Вид плашки проверяется снимком — зелёный прогон про стили не говорит ничего.
-// А вот текст её чистый, и собирается он из шести кусков: разойдись сборка —
-// человек останется без клавиш, о которых больше написать негде.
 
 test("текст подсказки говорит про тот вид и то управление, которые сейчас", () => {
   const base = {

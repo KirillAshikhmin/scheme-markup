@@ -636,8 +636,8 @@ export const VOLUME_PAD_DEAD = 0.18;
 
 /**
  * Куда ведёт палец на площадке ходьбы: `{forward, side}` от −1 до 1 — вперёд
- * и вбок. Вбок с правки после сборки сценариев значит шаг, а не поворот:
- * поворачивает джойстик взгляда (`volumeLookVector`).
+ * и вбок. Вбок значит шаг, а не поворот: поворачивает свайп правой половиной
+ * поля (`volumeTouchLook`).
  *
  * Величина растёт от края мёртвой зоны к краю площадки: тронул слегка — идёшь
  * шагом, увёл до края — бежишь. Дальше края не считается — палец, уехавший за
@@ -652,56 +652,74 @@ export function volumePadVector(dx, dy, radius) {
   return { forward: -dy * power, side: dx * power };
 }
 
-/** Как быстро вертит голову джойстик взгляда, увёденный до края: градусы в секунду. */
-export const VOLUME_LOOK_PAD_YAW_DEG_S = 150;
-export const VOLUME_LOOK_PAD_PITCH_DEG_S = 90;
+// ——— пальцем, как в мобильных шутерах (правка после сборки сценариев) ————————
+//
+// Слова заказчика: «изучи информацию как управление делают в играх от первого
+// лица на сенсорных экранах, в шутерах и т.д. и давай сделаем такое… сделай
+// хорошо и удобно, как стандарт в отрасли», и следом: «Да, Джойстики можно
+// плавающие, это норм».
+//
+// Стандарт отрасли (Modern Combat, PUBG Mobile, Call of Duty: Mobile,
+// Fortnite) — и ровно так устроено поле:
+//
+//   — **левая половина — ход**: джойстик **плавающий**, он появляется там, где
+//     лёг палец, а не ждёт в углу; увёл палец за край круга — круг едет следом.
+//     Увёл до края — бег, бег отдельной кнопкой не нужен;
+//   — **правая половина — взгляд свайпом**: голова поворачивается ровно на
+//     столько, на сколько сдвинулся палец (`VOLUME_TOUCH_LOOK_DEG_PX` на
+//     точку, чувствительность — в опциях). Джойстика взгляда нет: держать палец
+//     на месте и ждать, пока голова довернётся, — это и было неудобно;
+//   — **кнопки — под правым пальцем**, дугой: «Действие» крупно в углу, над
+//     ним «Прыжок», слева «Присесть»;
+//   — **касание без сдвига** — нажатие: дверь, устройство, перенос по
+//     миникарте, как щелчок мышью.
 
-/**
- * Куда ведёт палец на джойстике взгляда: `{yaw, pitch}` от −1 до 1 — доля
- * полной скорости поворота (`VOLUME_LOOK_PAD_*_DEG_S`). Вверх — взгляд
- * поднимается.
- *
- * Мёртвая зона та же, что у ходьбы, а отклик **квадратный**: у края — полный
- * разворот, у середины — тонкая доводка прицела. Линейный отклик на 150° в
- * секунду не давал навести прицел на клавишу выключателя: малейший сдвиг
- * пальца уводил взгляд на полметра.
- */
-export function volumeLookVector(dx, dy, radius) {
-  const reach = radius > 0 ? radius : 1;
-  const dead = reach * VOLUME_PAD_DEAD;
-  const length = Math.hypot(dx, dy);
-  if (!(length > dead)) return { yaw: 0, pitch: 0 };
-  const share = Math.min(1, (length - dead) / (reach - dead));
-  const power = (share * share) / length;
-  return { yaw: dx * power, pitch: -dy * power };
+/** Радиус плавающего джойстика хода, точек: от середины круга до края. */
+export const VOLUME_STICK_RADIUS = 56;
+/** С какой доли хода начинается бег: увёл до края — бежишь. */
+export const VOLUME_STICK_RUN = 0.9;
+/** Отступ следа джойстика хода от левого и нижнего края поля — та же мера в `volume.css`. */
+export const VOLUME_STICK_EDGE_PX = 24;
+/** Сколько точек пальцу можно уехать, чтобы касание осталось нажатием. */
+export const VOLUME_TAP_SLOP_PX = 10;
+/** Взгляд свайпом: градусов на точку при средней чувствительности. */
+export const VOLUME_TOUCH_LOOK_DEG_PX = 0.22;
+
+/** Какой половине поля принадлежит касание: левая — ход, правая — взгляд. */
+export function volumeTouchZone(x, width) {
+  return Number(x) < (Number(width) || 0) / 2 ? "move" : "look";
 }
 
 /**
- * Что делают два джойстика: `{forward, side, yaw, pitch}`. `right` и `left` —
- * их пальцы (`{move, look}` — оба отклика, `volumePadVector` и
- * `volumeLookVector`) или `null`.
- *
- * Обычно правый ходит (вверх — вперёд, вбок — шаг вбок), левый вертит головой
- * (вбок — поворот, вверх — наклон). `crossed` — отметка «Вертикали джойстиков
- * наоборот» (правка после сборки сценариев): «Поменяй местами вертикальные оси
- * между левым и правым. Левый верх вниз — движение вперёд назад, а влево вправо
- * поворот камеры, а справа вверх вниз наклон камеры, а влево вправо движение в
- * сторону. Но это сделай опцией». Меняются только вертикали; отклик у каждой
- * оси свой, как был: ход — прямой, взгляд — квадратный.
+ * Плавающий джойстик: `{base, dx, dy}` — середина круга и сдвиг пальца от неё.
+ * Палец ушёл дальше круга — середина едет за ним, и палец остаётся на краю:
+ * так джойстик не «теряет» руку, ушедшую в сторону.
  */
-export function volumePadsAxes(right, left, crossed = false) {
-  const out = { forward: 0, side: 0, yaw: 0, pitch: 0 };
-  if (right) {
-    out.side = right.move.side;
-    if (crossed) out.pitch = right.look.pitch;
-    else out.forward = right.move.forward;
+export function volumeStickFollow(base, finger, radius) {
+  const reach = radius > 0 ? radius : 1;
+  let bx = base.x;
+  let by = base.y;
+  let dx = finger.x - bx;
+  let dy = finger.y - by;
+  const length = Math.hypot(dx, dy);
+  if (length > reach) {
+    const over = (length - reach) / length;
+    bx += dx * over;
+    by += dy * over;
+    dx = finger.x - bx;
+    dy = finger.y - by;
   }
-  if (left) {
-    out.yaw = left.look.yaw;
-    if (crossed) out.forward = left.move.forward;
-    else out.pitch = left.look.pitch;
-  }
-  return out;
+  return { base: { x: bx, y: by }, dx, dy };
+}
+
+/**
+ * Поворот взгляда свайпом: `{yaw, pitch}` в радианах — сдвиг пальца на
+ * градусы на точку и чувствительность. Палец вверх — взгляд вверх;
+ * `invert` — наоборот, как у самолётных настроек.
+ */
+export function volumeTouchLook(dx, dy, sensitivity = 1, invert = false) {
+  const perPixel = (VOLUME_TOUCH_LOOK_DEG_PX * (Number(sensitivity) || 1) * Math.PI) / 180;
+  return { yaw: (Number(dx) || 0) * perPixel, pitch: (Number(dy) || 0) * perPixel * (invert ? 1 : -1) };
 }
 
 /**
@@ -845,7 +863,7 @@ export function volumeHintText(state) {
     parts.push(strings.volume.hintAroundFly);
   }
   // Пальцем про захват мыши говорить нечего: мыши нет (таск 149).
-  if (state.touching) parts.push(state.padsCrossed ? strings.volume.hintTouchCrossed : strings.volume.hintTouch);
+  if (state.touching) parts.push(strings.volume.hintTouch);
   else parts.push(state.locked ? strings.volume.hintLocked : strings.volume.hintGrab);
   parts.push(strings.volume.pickHint);
   // Про клавиши каналов — только когда они под рукой: у одноклавишного
@@ -1362,10 +1380,16 @@ function createVolume({ api, hosts }) {
   // Зашли пальцем (таск 149). Догадка по виду указателя — сразу, точный ответ —
   // по первому касанию: мышь площадку ходьбы не увидит никогда.
   let touching = volumeTouchLikely();
-  // Палец на правом джойстике (ходьбы) и на левом (взгляда): `{id, move,
-  // look}` — оба отклика; какая ось что делает, решает `volumePadsAxes`.
+  // Палец на поле (правка после сборки сценариев, «как стандарт в отрасли»):
+  // `stick` — палец хода в левой половине, `{id, bx, by, sx, sy, moved}` —
+  // середина плавающего джойстика и где палец лёг; `pad` — куда он ведёт,
+  // `{forward, side, run}`; `swipe` — палец взгляда в правой половине,
+  // `{id, x, y, sx, sy, moved}`; `pinchPair` — второй палец справа в обзоре:
+  // щипок вместе с `swipe`.
+  let stick = null;
   let pad = null;
-  let lookPad = null;
+  let swipe = null;
+  let pinchPair = null;
   // Где на поле есть место миникарте при сенсорной оснастке — `{top, bottom}`
   // или `null` (`volumeMinimapBox`). Меряется вместе с местом кнопок.
   let minimapRoom = null;
@@ -1377,8 +1401,6 @@ function createVolume({ api, hosts }) {
   // «листать или приближать» не меняется, иначе разогнавшийся мах переключался
   // бы на зум на полпути.
   let wheelStreak = null;
-  // Касания на поле, по которым узнаётся щипок.
-  const touches = new Map();
   // Открытый вопрос про этаж и лестница, про которую уже спросили. Вторая нужна
   // затем, чтобы вопрос не задавался заново на каждом шаге у той же лестницы:
   // отошёл и подошёл снова — спросится опять.
@@ -1494,30 +1516,16 @@ function createVolume({ api, hosts }) {
     on: { click: () => select(null) },
   });
   const card = uiEl("div", { class: "mark-card mark-card--volume", attrs: { hidden: "hidden" } });
-  // Площадка ходьбы (таск 149): видна только там, где ходят пальцем. Кружок
-  // внутри показывает, куда палец уведён, — без него непонятно, держит ли
-  // площадка касание вообще.
-  const padKnob = uiEl("span", { class: "volume__padKnob" });
-  const padNode = uiEl(
-    "div",
-    {
-      class: "volume__pad",
-      attrs: { hidden: "hidden", "aria-hidden": "true", title: strings.volume.padLabel },
-    },
-    [padKnob],
-  );
-  // Джойстик взгляда (правка после сборки сценариев): «слева снизу добавить
-  // джойстик поворота камеры». Та же площадка, что у ходьбы, зеркально в
-  // левом углу, — две руки и две площадки одного вида.
-  const lookKnob = uiEl("span", { class: "volume__padKnob" });
-  const lookNode = uiEl(
-    "div",
-    {
-      class: "volume__pad volume__pad--look",
-      attrs: { hidden: "hidden", "aria-hidden": "true", title: strings.volume.lookPadLabel },
-    },
-    [lookKnob],
-  );
+  // Плавающий джойстик хода (правка после сборки сценариев): круг появляется
+  // там, где лёг палец в левой половине поля, и уходит вместе с пальцем.
+  // Пока пальца нет, в углу виден его бледный след (`stickGhost`) — подсказка,
+  // где ходят. Касаний ни тот, ни другой не берут: их ловит само поле.
+  const stickKnob = uiEl("span", { class: "volume__stickKnob" });
+  const stickNode = uiEl("div", { class: "volume__stick", attrs: { hidden: "hidden", "aria-hidden": "true" } }, [stickKnob]);
+  const stickGhost = uiEl("div", {
+    class: "volume__stick volume__stick--ghost",
+    attrs: { hidden: "hidden", "aria-hidden": "true", title: strings.volume.stickHint },
+  });
   // Присед и прыжок пальцем (таск 163, G242). Своих правил у кнопок нет: они
   // зовут ровно то, что зовут Control и пробел, — `crouchStart`/`crouchStop` и
   // `jump`. Числа стойки (550 мм приседа, 300 мм прыжка, полсекунды дуги)
@@ -1525,13 +1533,13 @@ function createVolume({ api, hosts }) {
   // пальцем с правки после сборки сценариев не держат, а переключают
   // (`crouchLatch`): «присед сделай не удержанием, а переключением».
   const jumpButton = uiIconButton("jump", {
-    class: "ui-btn volume__stanceBtn",
+    class: "ui-btn volume__stanceBtn volume__jumpBtn",
     label: strings.volume.jump,
     title: strings.volume.jumpHint,
     on: { click: () => jump() },
   });
   const crouchButton = uiIconButton("crouch", {
-    class: "ui-btn volume__stanceBtn",
+    class: "ui-btn volume__stanceBtn volume__crouchBtn",
     label: strings.volume.crouch,
     title: strings.volume.crouchHint,
   });
@@ -1547,11 +1555,11 @@ function createVolume({ api, hosts }) {
     class: "ui-btn volume__stanceBtn volume__actionBtn",
     label: strings.volume.action,
     title: strings.volume.actionHint,
-    attrs: { hidden: "hidden" },
   });
-  // Строка стойки над джойстиком взгляда: «прыжок и присяд в таком порядке в
-  // строку». Место — у строки, а не у кнопок (`volume.css`).
-  const stanceBox = uiEl("div", { class: "volume__stance", attrs: { hidden: "hidden" } }, [jumpButton, crouchButton]);
+  // Кнопки под правым пальцем (правка после сборки сценариев, «как стандарт в
+  // отрасли»): «Действие» крупно в углу, над ним «Прыжок», слева «Присесть» —
+  // дугой, до каждой большой палец дотягивается, не отрываясь от взгляда.
+  const stanceBox = uiEl("div", { class: "volume__stance", attrs: { hidden: "hidden" } }, [actionButton, jumpButton, crouchButton]);
   // Смена вида кнопкой прямо на поле (таск 165, G244), значком под кнопкой
   // полного экрана (таск 166, G245).
   //
@@ -1694,10 +1702,9 @@ function createVolume({ api, hosts }) {
     rain.node,
     card,
     stairButton,
-    padNode,
-    lookNode,
+    stickGhost,
+    stickNode,
     stanceBox,
-    actionButton,
     viewButton,
     paramsButton.node,
     aimNode,
@@ -2150,8 +2157,10 @@ function createVolume({ api, hosts }) {
     for (const rect of [rectOf(paramsButton.node), rectOf(hintPlate.node)]) {
       if (rect && rect.left < box.width / 2) top = Math.max(top, rect.bottom + gap);
     }
-    const row = rectOf(stanceBox);
-    return { top, bottom: row ? row.top - gap : box.height };
+    // Снизу — след джойстика хода в левом углу (правка после сборки
+    // сценариев): его место — мерой круга, а не прямоугольником: след прячется,
+    // пока палец ведёт, и карта под рукой прыгать не должна.
+    return { top, bottom: box.height - VOLUME_STICK_EDGE_PX - VOLUME_STICK_RADIUS * 2 - gap };
   }
 
   // ——— час суток: один снимок на секунду ———
@@ -2330,7 +2339,6 @@ function createVolume({ api, hosts }) {
     refreshHour();
     syncClock();
     placeStance();
-    syncPadTitles();
     // Отметка «Проходить сквозь стены» меняет не только картинку: подсказка
     // говорит про другое, а снятые стены поднимают того, кому не давали встать.
     syncHint();
@@ -3097,7 +3105,7 @@ function createVolume({ api, hosts }) {
     };
     // Без сенсорной оснастки карточка стоит, как стояла, — и у лестницы тоже:
     // «Этаж» посреди низа ей не мешал никогда (она прижата влево).
-    const touch = [rectOf(stanceBox), rectOf(lookNode), rectOf(padNode), rectOf(actionButton)].filter(Boolean);
+    const touch = [rectOf(stanceBox), rectOf(stickGhost)].filter(Boolean);
     const controls = touch.length > 0 ? [...touch, rectOf(stairButton)].filter(Boolean) : [];
     // Сверху — угловые кнопки и развёрнутые плашки подсказки и сводки: плашка
     // лежит слоем выше карточки и закрыла бы её голову с кнопкой «закрыть».
@@ -3148,7 +3156,7 @@ function createVolume({ api, hosts }) {
   // есть куда ехать (G234). Прыжок без ходьбы иначе замер бы в воздухе: часы в
   // объёме идут только пока их держат, и присед с прыжком — третий повод.
   function moving() {
-    if (keys.size > 0 || Boolean(pad) || Boolean(lookPad)) return true;
+    if (keys.size > 0 || Boolean(pad)) return true;
     // Обзор летит, пока держат клавишу высоты: висящая камера никуда не едет,
     // и крутить ей кадры незачем (таск 200, G304).
     if (view === "around" && (riseHeld || crouchHeld)) return true;
@@ -3585,22 +3593,13 @@ function createVolume({ api, hosts }) {
       side += move.side;
       turn += move.turn;
     }
-    // Площадка ходьбы (таск 149) складывается с клавишами, а не спорит с ними:
-    // в одном окне бывают и мышь с клавиатурой, и палец.
-    // Джойстик взгляда вертит голову, пока его держат: скорость — от того,
-    // насколько увели палец (`volumeLookVector`), поворот — тем же счётом, что
-    // у мыши (`lookTurn`). Какая ось что делает, решает `volumePadsAxes`: у
-    // отметки «Вертикали джойстиков наоборот» вертикали меняются местами.
-    if (pad || lookPad) {
-      const axes = volumePadsAxes(pad, lookPad, volumeParamsRead().padsCrossed === true);
-      forward += axes.forward;
-      side += axes.side;
-      if (axes.yaw !== 0 || axes.pitch !== 0) {
-        lookTurn(
-          axes.yaw * VOLUME_LOOK_PAD_YAW_DEG_S * (Math.PI / 180) * step,
-          axes.pitch * VOLUME_LOOK_PAD_PITCH_DEG_S * (Math.PI / 180) * step,
-        );
-      }
+    // Джойстик хода складывается с клавишами, а не спорит с ними: в одном окне
+    // бывают и мышь с клавиатурой, и палец. Увёл до края — бег
+    // (`VOLUME_STICK_RUN`), как у мобильных шутеров.
+    if (pad) {
+      forward += pad.forward;
+      side += pad.side;
+      if (pad.run) run = true;
     }
     // ——— скорость (таск 207, G311) ———
     //
@@ -3712,18 +3711,12 @@ function createVolume({ api, hosts }) {
     // щелчок по кнопке начинал бы поворот головы, а отпускание снимало бы
     // выделение.
     if (event.target !== node) return;
-    if (event.pointerType === "touch") setTouch(true);
     stage.focus({ preventScroll: true });
+    // Пальцем — своё управление: ход слева, взгляд справа (`touchDown`).
     if (event.pointerType === "touch") {
-      touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
-      // Второй палец — жест двумя пальцами, а не второй поворот: взгляд
-      // перестаёт ехать за первым пальцем, иначе щипок водил бы головой заодно.
-      if (touches.size === 2) {
-        look = null;
-        pinch = gesturePinchOf(touches.values());
-        return;
-      }
-      if (touches.size > 2) return;
+      setTouch(true);
+      touchDown(event);
+      return;
     }
     look = { x: event.clientX, y: event.clientY, moved: false };
     // Отвязанная клавиша под рукой — нажатие начинается сейчас (таск 09).
@@ -3731,44 +3724,12 @@ function createVolume({ api, hosts }) {
   }
 
   function onPointerMove(event) {
-    // Палец на площадке ходьбы — это ход, а не поворот: пока он там, поле
-    // взгляда его движений не видит вовсе (таск 149).
-    if (pad && event.pointerId === pad.id) {
-      padMove(event);
-      return;
-    }
-    if (lookPad && event.pointerId === lookPad.id) {
-      lookMove(event);
-      return;
-    }
+    // Палец на поле — ход или взгляд (`touchMove`): мышиному повороту его
+    // движения не достаются.
+    if (event.pointerType === "touch" && touchMove(event)) return;
     if (locked) {
       lookBy(event.movementX || 0, event.movementY || 0);
       return;
-    }
-    if (event.pointerType === "touch" && touches.has(event.pointerId)) {
-      touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
-      // Два пальца в обзоре возят карту и щипком приближают — ровно как на
-      // плане и в чертеже (таск 174, G256). Разбирает жест общий
-      // `gestures.js`, и порядок применения оттуда же: сперва масштаб, потом
-      // сдвиг на то, насколько уехала середина между пальцами.
-      //
-      // От первого лица два пальца не делают ничего, и это прежнее поведение:
-      // там ходят площадкой и вертят головой, приближать нечего, а поле зрения
-      // человек не просил.
-      if (pinch && touches.size === 2) {
-        const step = gesturePinchStep(pinch, touches.values());
-        if (step) pinch = step.pinch;
-        if (step && view === "around") {
-          // Развели пальцы — приблизились, то есть камера подошла: расстояние
-          // делится на множитель, а не умножается. Взгляд щипок не трогает
-          // (таск 195): куда смотрят — выбор руки, а не приближения.
-          aroundZoom(step.factor);
-          const moved = volumeAroundPan(around, viewport(), step.panX, step.panY);
-          aroundSlide(moved.dx, moved.dy);
-          redraw();
-        }
-        return;
-      }
     }
     const rect = node.getBoundingClientRect ? node.getBoundingClientRect() : { left: 0, top: 0 };
     const at = { x: event.clientX - rect.left, y: event.clientY - rect.top };
@@ -3789,14 +3750,9 @@ function createVolume({ api, hosts }) {
   }
 
   function onPointerUp(event) {
+    if (event.pointerType === "touch" && touchUp(event)) return;
     const started = look;
     look = null;
-    if (event.pointerType === "touch") {
-      touches.delete(event.pointerId);
-      if (touches.size < 2) pinch = null;
-    }
-    padEnd(event);
-    lookEnd(event);
     // Захвата указателя кнопка могла и не получить — тогда отпускание придёт
     // сюда, и присед обязан сняться здесь же: палец свой она узнает сама.
     crouchRelease(event);
@@ -3809,6 +3765,14 @@ function createVolume({ api, hosts }) {
       homeGesture = null;
       return;
     }
+    fieldTap(event);
+  }
+
+  /**
+   * Нажатие по полю — щелчок мышью или касание пальцем без сдвига: перенос по
+   * миникарте, дверь, устройство, выделение, перенос кликом по полу в обзоре.
+   */
+  function fieldTap(event) {
     // ——— щелчок равноценен E (G235) ———
     //
     // Слова заказчика: «клик на дверь должен тоже её открывать. Клик
@@ -3975,103 +3939,160 @@ function createVolume({ api, hosts }) {
     sync();
   }
 
-  /** Подписи джойстиков — по тому, что они делают: вертикали бывают переставлены. */
-  function syncPadTitles() {
-    const crossed = volumeParamsRead().padsCrossed === true;
-    padNode.title = crossed ? strings.volume.padCrossedLabel : strings.volume.padLabel;
-    lookNode.title = crossed ? strings.volume.lookPadCrossedLabel : strings.volume.lookPadLabel;
-  }
-
-  /**
-   * Где палец на площадке — `{dx, dy, radius}` от её середины, — и кружок
-   * за ним. Одна мерка на обе площадки: ходьбы и взгляда.
-   */
-  function knobAt(area, knob, event) {
-    const rect = area.getBoundingClientRect ? area.getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 };
-    const cx = rect.left + rect.width / 2;
-    const cy = rect.top + rect.height / 2;
-    const radius = Math.max(1, Math.min(rect.width, rect.height) / 2);
-    const dx = event.clientX - cx;
-    const dy = event.clientY - cy;
-    // Кружок показывает палец, но из площадки не выезжает.
-    const length = Math.hypot(dx, dy) || 1;
-    const reach = Math.min(1, length / radius) * radius * 0.62;
-    knob.style.transform = "translate(" + (dx / length) * reach + "px, " + (dy / length) * reach + "px)";
-    return { dx, dy, radius };
-  }
-
-  /** Оба отклика пальца на джойстике: ход и взгляд — что из них брать, решает `volumePadsAxes`. */
-  function stickAt(area, knob, event) {
-    const at = knobAt(area, knob, event);
-    return { move: volumePadVector(at.dx, at.dy, at.radius), look: volumeLookVector(at.dx, at.dy, at.radius) };
-  }
-
-  function padStart(event) {
-    if (pad || closed) return;
-    setTouch(true);
-    event.preventDefault();
-    if (padNode.setPointerCapture) {
-      try {
-        padNode.setPointerCapture(event.pointerId);
-      } catch (error) {
-        // захват указателя площадкой не дали — обойдёмся событиями окна
-      }
-    }
-    pad = { id: event.pointerId, ...stickAt(padNode, padKnob, event) };
-    padNode.classList.add("is-on");
-    walkSchedule();
-  }
-
-  function padMove(event) {
-    if (!pad || event.pointerId !== pad.id) return;
-    event.preventDefault();
-    pad = { id: pad.id, ...stickAt(padNode, padKnob, event) };
-    walkSchedule();
-  }
-
-  function padEnd(event) {
-    if (!pad || (event && event.pointerId !== undefined && event.pointerId !== pad.id)) return;
-    pad = null;
-    padNode.classList.remove("is-on");
-    padKnob.style.transform = "";
-    walkStop();
-  }
-
-  // ——— джойстик взгляда (правка после сборки сценариев) ———
+  // ——— палец на поле: ход слева, взгляд справа (правка после сборки сценариев) ———
   //
-  // Держат его, как площадку ходьбы: палец лёг — голова вертится, пока он
-  // уведён от середины; снят — встала. Ходьба и взгляд — разные пальцы, и
-  // каждый узнаёт свой по `pointerId`.
+  // Разбор — у `VOLUME_STICK_RADIUS`. Каждый палец узнаётся по `pointerId`:
+  // левый ходит, правый смотрит, оба вместе — как в любом мобильном шутере.
 
-  function lookStart(event) {
-    if (lookPad || closed) return;
-    setTouch(true);
-    event.preventDefault();
-    if (lookNode.setPointerCapture) {
-      try {
-        lookNode.setPointerCapture(event.pointerId);
-      } catch (error) {
-        // захват указателя джойстиком не дали — обойдёмся событиями окна
-      }
-    }
-    lookPad = { id: event.pointerId, ...stickAt(lookNode, lookKnob, event) };
-    lookNode.classList.add("is-on");
-    walkSchedule();
+  function fieldRect() {
+    return node.getBoundingClientRect ? node.getBoundingClientRect() : { left: 0, top: 0, width: viewport().width, height: viewport().height };
   }
 
-  function lookMove(event) {
-    if (!lookPad || event.pointerId !== lookPad.id) return;
-    event.preventDefault();
-    lookPad = { id: lookPad.id, ...stickAt(lookNode, lookKnob, event) };
-    walkSchedule();
+  /** Круг джойстика под пальцем: середина — где лёг палец, кружок — куда увёл. */
+  function drawStick(dx, dy) {
+    if (!stick) return;
+    const rect = fieldRect();
+    stickNode.hidden = false;
+    stickNode.style.left = stick.bx - rect.left - VOLUME_STICK_RADIUS + "px";
+    stickNode.style.top = stick.by - rect.top - VOLUME_STICK_RADIUS + "px";
+    stickKnob.style.transform = "translate(" + dx + "px, " + dy + "px)";
+    stickGhost.hidden = true;
   }
 
-  function lookEnd(event) {
-    if (!lookPad || (event && event.pointerId !== undefined && event.pointerId !== lookPad.id)) return;
-    lookPad = null;
-    lookNode.classList.remove("is-on");
-    lookKnob.style.transform = "";
+  function hideStick() {
+    stickNode.hidden = true;
+    stickKnob.style.transform = "";
+    stickGhost.hidden = !touching || scene.empty;
+  }
+
+  /** Пальцы сняты все: поле перестало быть сенсорным, поле пустое, окно ушло. */
+  function touchCancel() {
+    stick = null;
+    pad = null;
+    swipe = null;
+    pinchPair = null;
+    pinch = null;
+    hideStick();
     walkStop();
+  }
+
+  function touchDown(event) {
+    event.preventDefault();
+    const rect = fieldRect();
+    const zone = volumeTouchZone(event.clientX - rect.left, rect.width || viewport().width);
+    const at = { id: event.pointerId, sx: event.clientX, sy: event.clientY, moved: false };
+    if (zone === "move" && !stick) {
+      stick = { ...at, bx: event.clientX, by: event.clientY };
+      homeGestureStart(event);
+      return;
+    }
+    if (!swipe) {
+      swipe = { ...at, x: event.clientX, y: event.clientY };
+      homeGestureStart(event);
+      return;
+    }
+    // Второй палец справа в обзоре — щипок вместе с первым: приблизить и
+    // возить карту, как на плане (таск 174, G256).
+    if (view === "around" && !pinchPair) {
+      pinchPair = { id: event.pointerId, x: event.clientX, y: event.clientY };
+      swipe.moved = true;
+      homeGesture = null;
+      pinch = gesturePinchOf([{ x: swipe.x, y: swipe.y }, { x: pinchPair.x, y: pinchPair.y }]);
+    }
+  }
+
+  /** Сдвиг пальца на поле. `true` — палец поля, событие разобрано. */
+  function touchMove(event) {
+    if (stick && event.pointerId === stick.id) {
+      event.preventDefault();
+      const next = volumeStickFollow({ x: stick.bx, y: stick.by }, { x: event.clientX, y: event.clientY }, VOLUME_STICK_RADIUS);
+      stick.bx = next.base.x;
+      stick.by = next.base.y;
+      if (!stick.moved && Math.hypot(event.clientX - stick.sx, event.clientY - stick.sy) > VOLUME_TAP_SLOP_PX) stick.moved = true;
+      if (!stick.moved) return true;
+      const move = volumePadVector(next.dx, next.dy, VOLUME_STICK_RADIUS);
+      pad = { ...move, run: Math.hypot(move.forward, move.side) >= VOLUME_STICK_RUN };
+      drawStick(next.dx, next.dy);
+      walkSchedule();
+      return true;
+    }
+    if (pinchPair && (event.pointerId === pinchPair.id || (swipe && event.pointerId === swipe.id))) {
+      event.preventDefault();
+      if (event.pointerId === pinchPair.id) {
+        pinchPair.x = event.clientX;
+        pinchPair.y = event.clientY;
+      } else {
+        swipe.x = event.clientX;
+        swipe.y = event.clientY;
+      }
+      const step = pinch ? gesturePinchStep(pinch, [{ x: swipe.x, y: swipe.y }, { x: pinchPair.x, y: pinchPair.y }]) : null;
+      if (step) {
+        pinch = step.pinch;
+        // Развели пальцы — приблизились: расстояние делится на множитель.
+        // Взгляд щипок не трогает (таск 195).
+        aroundZoom(step.factor);
+        const moved = volumeAroundPan(around, viewport(), step.panX, step.panY);
+        aroundSlide(moved.dx, moved.dy);
+        redraw();
+      }
+      return true;
+    }
+    if (swipe && event.pointerId === swipe.id) {
+      event.preventDefault();
+      let dx = event.clientX - swipe.x;
+      let dy = event.clientY - swipe.y;
+      swipe.x = event.clientX;
+      swipe.y = event.clientY;
+      if (!swipe.moved) {
+        if (Math.hypot(event.clientX - swipe.sx, event.clientY - swipe.sy) <= VOLUME_TAP_SLOP_PX) return true;
+        // Порог нажатия пройден — поворачиваем на весь путь от касания, чтобы
+        // первые точки не пропали.
+        swipe.moved = true;
+        dx = event.clientX - swipe.sx;
+        dy = event.clientY - swipe.sy;
+      }
+      const chosen = volumeParamsRead();
+      const turn = volumeTouchLook(dx, dy, chosen.lookSpeed, chosen.lookInvert === true);
+      lookTurn(turn.yaw, turn.pitch);
+      redraw();
+      return true;
+    }
+    return false;
+  }
+
+  /** Палец сняли. `true` — палец поля, событие разобрано. */
+  function touchUp(event) {
+    if (stick && event.pointerId === stick.id) {
+      const moved = stick.moved;
+      stick = null;
+      pad = null;
+      hideStick();
+      walkStop();
+      homeGestureEnd(moved);
+      if (moved) homeGesture = null;
+      else fieldTap(event);
+      return true;
+    }
+    if (pinchPair && event.pointerId === pinchPair.id) {
+      pinchPair = null;
+      pinch = null;
+      return true;
+    }
+    if (swipe && event.pointerId === swipe.id) {
+      const moved = swipe.moved;
+      swipe = null;
+      if (pinchPair) {
+        // Первый палец щипка сняли, второй остаётся — им дальше и смотрят.
+        swipe = { id: pinchPair.id, x: pinchPair.x, y: pinchPair.y, sx: pinchPair.x, sy: pinchPair.y, moved: true };
+        pinchPair = null;
+        pinch = null;
+      }
+      homeGestureEnd(moved);
+      if (moved) homeGesture = null;
+      else fieldTap(event);
+      return true;
+    }
+    return false;
   }
 
   // ——— лестница и этажи (таск 149) ———
@@ -4184,8 +4205,7 @@ function createVolume({ api, hosts }) {
     }
     // Вопрос забирает клавиатуру и отпускает мышь: по курсору в нём и щёлкают.
     keyStop(null);
-    padEnd(null);
-    lookEnd(null);
+    touchCancel();
     askWasLocked = locked;
     if (locked && typeof document.exitPointerLock === "function") document.exitPointerLock();
     ask = { stair, options };
@@ -4711,8 +4731,6 @@ function createVolume({ api, hosts }) {
       ghost: ghosting(),
       // Дом идёт (таск 09 сценариев): E и щелчок управляют устройствами.
       home: homeOn(),
-      // Джойстики с переставленными вертикалями говорят про себя иначе.
-      padsCrossed: volumeParamsRead().padsCrossed === true,
     });
     // Подсказка в полном экране не уходит, а **складывается в свой знак**
     // (таск 166, G246). Она единственная из спрятанного говорит про руки:
@@ -4741,16 +4759,13 @@ function createVolume({ api, hosts }) {
     // переезжают, они просто перестали исчезать в обзоре и меняют подписи
     // (`syncStanceWords`). Второй оснастки для полёта камеры не заведено.
     const noWalk = !touching || scene.empty;
-    padNode.hidden = noWalk;
-    lookNode.hidden = noWalk;
-    actionButton.hidden = noWalk;
-    if (noWalk) lookEnd(null);
-    // Полоса часов стоит в том же углу, что площадка ходьбы, и уступает ей:
-    // площадкой ходят не глядя, и накрывать её строкой нельзя. Подъём — ровно
-    // на площадку, мерой самой площадки (`volume.css`), без своих чисел.
-    clockNode.classList.toggle("volume__clock--overPad", !noWalk);
+    // Пальцем (правка после сборки сценариев): след джойстика хода слева и
+    // кнопки под правым пальцем. Полоса часов уступает кнопкам и встаёт над
+    // ними — их же мерой (`volume.css`).
+    if (noWalk) touchCancel();
+    else if (!stick || !stick.moved) stickGhost.hidden = false;
+    clockNode.classList.toggle("volume__clock--touch", !noWalk);
     clockNode.hidden = scene.empty;
-    if (padNode.hidden) padEnd(null);
     stanceBox.hidden = noWalk;
     if (stanceBox.hidden) {
       crouchRelease(null);
@@ -4957,8 +4972,6 @@ function createVolume({ api, hosts }) {
 
   stage.addEventListener("pointerdown", onPointerDown);
   stage.addEventListener("wheel", onWheel, { passive: false });
-  padNode.addEventListener("pointerdown", padStart);
-  lookNode.addEventListener("pointerdown", lookStart);
   jumpButton.addEventListener("pointerdown", risePress);
   jumpButton.addEventListener("pointerup", riseRelease);
   jumpButton.addEventListener("pointercancel", riseRelease);

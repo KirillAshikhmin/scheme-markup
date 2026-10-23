@@ -69,11 +69,12 @@
   /* Площадка ходьбы (таск 149) и полоса часов над ней (таск 191) считают себя
      от одной меры: размер площадки и её отступ от краёв. Живёт она здесь, на
      самом поле, — и площадка, и полоса читают её отсюда. */
-  --volume-pad-size: 128px;
   --volume-pad-edge: 18px;
+  /* «Действие» под правым пальцем — крупнее прыжка и приседа. */
+  --volume-action-size: 64px;
   /* Кнопки над площадками (правка после сборки сценариев): их размер и зазор
      до площадки — тоже одна мера на всех, её читает и полоса часов. */
-  --volume-stance-size: 44px;
+  --volume-stance-size: 50px;
   --volume-stance-gap: 10px;
   /* Поле занимает поверхность целиком (таск 153): рамки и скругления у него
      больше нет — это основной экран, а не карточка окна на нём. */
@@ -185,72 +186,83 @@
    таска 191 в том же углу стоит полоса часов, и она поднимается **ровно на
    площадку**. Два числа на одну площадку разошлись бы первой же правкой её
    размера. */
-.volume__pad {
+/* ——— пальцем, как в мобильных шутерах (правка после сборки сценариев) ——————
+   «сделай хорошо и удобно, как стандарт в отрасли»: ход — плавающий джойстик
+   в левой половине поля (появляется под пальцем), взгляд — свайп правой
+   половиной, кнопки — дугой под правым пальцем. Круг джойстика — мерой
+   `VOLUME_STICK_RADIUS` (56 точек) в `panels/volume.js`. */
+.volume__stick {
   position: absolute;
-  right: var(--volume-pad-edge);
-  bottom: var(--volume-pad-edge);
-  width: var(--volume-pad-size);
-  height: var(--volume-pad-size);
+  width: 112px;
+  height: 112px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.22);
-  border: 2px solid rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.16);
+  border: 2px solid rgba(255, 255, 255, 0.55);
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
-  touch-action: none;
+  pointer-events: none;
   z-index: 3;
 }
 
-.volume__pad[hidden] {
+.volume__stick[hidden] {
   display: none;
 }
 
-.volume__pad.is-on {
-  background: rgba(255, 255, 255, 0.32);
+/* След джойстика, пока пальца нет: бледный круг в левом углу — подсказка,
+   где ходят. Отступ — `VOLUME_STICK_EDGE_PX`. */
+.volume__stick--ghost {
+  left: 24px;
+  bottom: 24px;
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.3);
+  box-shadow: none;
 }
 
-/* Джойстик взгляда (правка после сборки сценариев): «слева снизу добавить
-   джойстик поворота камеры». Та же площадка зеркально, в левом нижнем углу:
-   миникарта при сенсорной оснастке уходит из него наверх (`volumeMinimapBox`). */
-.volume__pad--look {
-  right: auto;
-  left: var(--volume-pad-edge);
-}
-
-/* Кружок под пальцем: без него непонятно, держит ли площадка касание вообще. */
-.volume__padKnob {
+/* Кружок под пальцем: куда палец увёл ход. */
+.volume__stickKnob {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 46px;
-  height: 46px;
-  margin: -23px 0 0 -23px;
+  width: 50px;
+  height: 50px;
+  margin: -25px 0 0 -25px;
   border-radius: 50%;
   background: #fff;
   opacity: 0.85;
   pointer-events: none;
 }
 
-/* ——— строка стойки (таск 163, правка после сборки сценариев) ——————————
+/* ——— кнопки под правым пальцем (правка после сборки сценариев) ——————————
 
-   «на интерфейсе для планшетов и смартфонов добавь кнопки прыжкак и присяда»
-   (G242) — и потом: «прыжок и присяд в таком порядке в строку над джойстиком
-   поворота взгляда».
-
-   Строка стоит над левой площадкой, по её же мерам: левый край площадки,
-   верх площадки плюс зазор. Своих чисел у места нет — поправишь площадку, и
-   строка останется над ней. Прыжок первым, присед вторым — порядок слов
-   заказчика. */
+   «Действие» — крупно в правом нижнем углу, над ним «Прыжок», слева
+   «Присесть»: дугой вокруг большого пальца, как у мобильных шутеров. Своих
+   чисел у мест нет — только меры кнопок и зазора. */
 .volume__stance {
   position: absolute;
-  left: var(--volume-pad-edge);
-  bottom: calc(var(--volume-pad-edge) + var(--volume-pad-size) + var(--volume-stance-gap));
-  display: flex;
-  flex-direction: row;
-  gap: var(--volume-stance-gap);
+  right: var(--volume-pad-edge);
+  bottom: var(--volume-pad-edge);
+  width: calc(var(--volume-action-size) + var(--volume-stance-gap) + var(--volume-stance-size));
+  height: calc(var(--volume-action-size) + var(--volume-stance-gap) + var(--volume-stance-size));
+  pointer-events: none;
   z-index: 3;
+}
+
+.volume__stance > * {
+  position: absolute;
+  pointer-events: auto;
 }
 
 .volume__stance[hidden] {
   display: none;
+}
+
+.volume__jumpBtn {
+  right: calc((var(--volume-action-size) - var(--volume-stance-size)) / 2);
+  bottom: calc(var(--volume-action-size) + var(--volume-stance-gap));
+}
+
+.volume__crouchBtn {
+  right: calc(var(--volume-action-size) + var(--volume-stance-gap));
+  bottom: calc((var(--volume-action-size) - var(--volume-stance-size)) / 2);
 }
 
 /* ——— смена вида: вторая ячейка правого верхнего угла (таск 166, G245) ————
@@ -392,14 +404,12 @@
   display: none;
 }
 
-/* Площадка ходьбы живёт в этом же углу и старше: по ней ходят не глядя, и
-   накрывать её строкой нельзя. Полоса поднимается на площадку — её же мерой —
-   и встаёт в строку с «Действием», слева от него (правка после сборки
-   сценариев). Над кнопкой ей места нет: лёжа на телефоне поле ниже трёхсот
-   точек, и поднятая ещё на кнопку полоса легла бы на угловые кнопки справа. */
-.volume__clock--overPad {
-  bottom: calc(var(--volume-pad-edge) + var(--volume-pad-size) + var(--volume-stance-gap));
-  right: calc(var(--volume-pad-edge) + var(--volume-stance-size) + var(--canvas-corner-gap));
+/* Пальцем в этом углу кнопки под правым пальцем (правка после сборки
+   сценариев), и они старше: по ним жмут не глядя, и накрывать их строкой
+   нельзя. Полоса встаёт над дугой кнопок — их же мерами, без своих чисел. */
+.volume__clock--touch {
+  bottom: calc(var(--volume-pad-edge) + var(--volume-action-size) + var(--volume-stance-size) + var(--volume-stance-gap) * 2);
+  right: var(--volume-pad-edge);
 }
 
 /* ——— параметры объёма: ряды в колонке и те же ряды в окне (таск 181, 231) ——
@@ -553,19 +563,17 @@
   color: #1f2328;
 }
 
-/* «Действие» (таск 09 сценариев, G20) — тем же кружком, значком руки, над
-   правой площадкой: «кнопку действия сделай не буквой Е, а иконкой и
-   расположи справа сверху над джойстиком движения». Место — мерами площадки,
-   как у строки стойки слева. */
+/* «Действие» (таск 09 сценариев, G20) — значком руки, крупнее остальных: им
+   жмут чаще всего, и он в самом углу под большим пальцем. */
 .volume__actionBtn {
-  position: absolute;
-  right: var(--volume-pad-edge);
-  bottom: calc(var(--volume-pad-edge) + var(--volume-pad-size) + var(--volume-stance-gap));
-  z-index: 3;
+  right: 0;
+  bottom: 0;
+  width: var(--volume-action-size);
+  height: var(--volume-action-size);
 }
 
-.volume__actionBtn[hidden] {
-  display: none;
+.volume__actionBtn .ui-icon {
+  --ui-icon: 26px;
 }
 
 /* Кнопка «Этаж» — внизу по середине поля: она появляется только у лестницы, и

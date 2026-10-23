@@ -38,6 +38,9 @@
 import { strings, text } from "../strings.js";
 import { getSetting, setSetting } from "../store.js";
 import { VOLUME_BACKDROP_DEFAULT, VOLUME_BACKDROP_KINDS, VOLUME_SLAB_MM, volumeBackdropKindOf } from "../volume.js";
+
+/** Чувствительность взгляда пальцем — множители свайпа (`panels/volume.js`, `volumeTouchLook`). */
+export const VOLUME_LOOK_SENSITIVITIES = Object.freeze([0.5, 0.75, 1, 1.5, 2]);
 import {
   VOLUME_CLOCK_SPEEDS,
   VOLUME_CLOCK_SPEED_REAL,
@@ -147,10 +150,13 @@ export const VOLUME_HIDE_CARD_SETTING = "volumeHideCard";
 // `saved !== false` значит «не трогали». Снята — свет комнатой, как до правки.
 export const VOLUME_PHYSICAL_SETTING = "volumePhysicalLight";
 
-// Вертикали джойстиков наоборот (правка после сборки сценариев): «Поменяй
-// местами вертикальные оси между левым и правым… Но это сделай опцией».
-// Отметка **отрицательная**: умолчание — оси как были.
-export const VOLUME_PADS_SETTING = "volumePadsCrossed";
+// Взгляд пальцем (правка после сборки сценариев, «как стандарт в отрасли»):
+// чувствительность свайпа и «Инвертировать вертикаль». Прежняя отметка
+// «Вертикали джойстиков наоборот» ушла вместе с джойстиком взгляда: ось взгляда
+// теперь одна — свайп, — и переставлять нечего. Её запись в настройках браузера
+// остаётся и ни на что не влияет.
+export const VOLUME_LOOK_SPEED_SETTING = "volumeTouchLookSpeed";
+export const VOLUME_LOOK_INVERT_SETTING = "volumeTouchLookInvert";
 
 // «Прозрачные объекты» (правка после сборки сценариев): «это как сейчас, если
 // выключить, то становятся не прозрачными. По умолчанию вкл.» Отметка
@@ -180,8 +186,10 @@ const params = {
   hideCard: false,
   // Физический свет ламп (правка после сборки сценариев): умолчание — включён.
   physical: true,
-  // Вертикали джойстиков наоборот (правка после сборки сценариев): умолчание — нет.
-  padsCrossed: false,
+  // Взгляд пальцем: множитель чувствительности (`VOLUME_LOOK_SENSITIVITIES`)
+  // и инверсия вертикали — умолчания «средняя» и «нет».
+  lookSpeed: 1,
+  lookInvert: false,
   // Вещи чертежа просвечивают (правка после сборки сценариев): умолчание — да.
   objectsClear: true,
 };
@@ -238,6 +246,16 @@ export function volumeParamsLoad() {
         .catch(() => {}),
     );
   }
+  waits.push(
+    Promise.resolve(getSetting(VOLUME_LOOK_SPEED_SETTING))
+      .then((saved) => {
+        const value = Number(saved);
+        if (!VOLUME_LOOK_SENSITIVITIES.includes(value) || value === params.lookSpeed) return;
+        params.lookSpeed = value;
+        tell();
+      })
+      .catch(() => {}),
+  );
   // Ускорение поднимают часы приложения, а «Объём» слышит каждый их перевод —
   // и свой, и сделанный шагом в «Схеме»: поле перерисовывает час тем же путём,
   // каким принимает правку в окне параметров.
@@ -250,7 +268,7 @@ export function volumeParamsLoad() {
     [VOLUME_SMOOTH_SETTING, "smooth"],
     [VOLUME_GHOST_SETTING, "ghost"],
     [VOLUME_HIDE_CARD_SETTING, "hideCard"],
-    [VOLUME_PADS_SETTING, "padsCrossed"],
+    [VOLUME_LOOK_INVERT_SETTING, "lookInvert"],
   ]) {
     waits.push(
       Promise.resolve(getSetting(key))
@@ -288,7 +306,8 @@ export function volumeParamsRead() {
     simulation: params.simulation,
     hideCard: params.hideCard,
     physical: params.physical,
-    padsCrossed: params.padsCrossed,
+    lookSpeed: params.lookSpeed,
+    lookInvert: params.lookInvert,
     objectsClear: params.objectsClear,
   };
 }
@@ -350,7 +369,7 @@ export function volumeParamsFlag(name, on) {
     simulation: VOLUME_SIMULATION_SETTING,
     hideCard: VOLUME_HIDE_CARD_SETTING,
     physical: VOLUME_PHYSICAL_SETTING,
-    padsCrossed: VOLUME_PADS_SETTING,
+    lookInvert: VOLUME_LOOK_INVERT_SETTING,
     objectsClear: VOLUME_OBJECTS_CLEAR_SETTING,
   };
   const key = keys[name];
@@ -359,6 +378,15 @@ export function volumeParamsFlag(name, on) {
   if (next === params[name]) return;
   params[name] = next;
   setSetting(key, next);
+  tell();
+}
+
+/** Чувствительность взгляда пальцем: один из `VOLUME_LOOK_SENSITIVITIES`. */
+export function volumeParamsLookSpeed(value) {
+  const next = VOLUME_LOOK_SENSITIVITIES.includes(Number(value)) ? Number(value) : 1;
+  if (next === params.lookSpeed) return;
+  params.lookSpeed = next;
+  setSetting(VOLUME_LOOK_SPEED_SETTING, next);
   tell();
 }
 
@@ -699,8 +727,14 @@ export function createVolumeParamsFields(options) {
         volumeParamsFlag("ghost", on),
       ),
       // Вертикали джойстиков наоборот — тоже про руки, и только пальцем.
-      checkRow(strings.volume.padsCrossed, chosen.padsCrossed, strings.volume.padsCrossedHint, (on) =>
-        volumeParamsFlag("padsCrossed", on),
+      // Взгляд пальцем: чувствительность свайпа и инверсия вертикали — то, что
+      // есть в настройках любого мобильного шутера.
+      uiEl("div", { class: "volume__paramsRow" }, [
+        uiEl("span", { class: "volume__paramsName", text: strings.volume.lookSpeed }),
+        lookSpeedSelect(chosen),
+      ]),
+      checkRow(strings.volume.lookInvert, chosen.lookInvert, strings.volume.lookInvertHint, (on) =>
+        volumeParamsFlag("lookInvert", on),
       ),
     );
     line();
@@ -844,6 +878,22 @@ export function createVolumeParamsFields(options) {
     });
     input.checked = on === true;
     return uiCheckRow(input, label, title);
+  }
+
+  /** Чувствительность взгляда пальцем — списком множителей. */
+  function lookSpeedSelect(chosen) {
+    const select = uiEl(
+      "select",
+      {
+        class: "ui-input tools__select",
+        title: strings.volume.lookSpeedHint,
+        attrs: { "aria-label": strings.volume.lookSpeed },
+        on: { change: () => volumeParamsLookSpeed(Number(select.value)) },
+      },
+      VOLUME_LOOK_SENSITIVITIES.map((value) => uiEl("option", { value: String(value), text: strings.volume.lookSpeeds[String(value)] || String(value) })),
+    );
+    select.value = String(chosen.lookSpeed);
+    return select;
   }
 
   /** Ускорение списком. Подписи — те же `volumeSpeedLabel`, что были у кнопок. */

@@ -7,11 +7,12 @@
 // на 20% темнее текущего уровня. Динамически от фазы менять»; «Свет от
 // светильников сделай ярче, днём сейчас их вообще не видно»; «яркость ламп не
 // только днём увеличить надо, но и ночью, всегда»; «Поменяй местами
-// вертикальные оси между левым и правым… Но это сделай опцией».
+// вертикальные оси между левым и правым… Но это сделай опцией» (эту отметку
+// потом сменило управление «как стандарт в отрасли» — см. `volume.test.js`).
 //
 // Проверяются чистые швы: свет комнат (`volumeLiveLight` с тоном часа), пятна
-// окон и луны, снимок часа (`volumeMood`), кадр (`volumeFrame`) и смешение осей
-// (`volumePadsAxes`). Холст с окном — живым прогоном.
+// окон и луны, снимок часа (`volumeMood`) и кадр (`volumeFrame`). Холст с
+// окном — живым прогоном.
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -44,7 +45,6 @@ import {
   volumeScene,
   volumeTintRgb,
 } from "../src/volume.js";
-import { volumePadsAxes } from "../src/panels/volume.js";
 
 // ——— стенд: гостиная с окном и коридор без окон ——————————————————————————
 //
@@ -261,21 +261,4 @@ test("луна кладёт в окно пятно — слабым белым �
   const camera = { at: { x: -2000, y: 1200, z: 1600 }, yaw: -Math.PI / 2, pitch: -0.5 };
   const frame = volumeFrame(scene, camera, { width: 800, height: 500 }, full, NIGHT, light);
   assert.ok(frame.length > volumeFrame(scene, camera, { width: 800, height: 500 }, null, NIGHT, light).length, "пятна луны нет в кадре");
-});
-
-// ——— джойстики ————————————————————————————————————————————————————————————
-
-test("джойстики: обычно правый ходит, левый вертит; с отметкой вертикали меняются местами", () => {
-  const stick = (forward, side, yaw, pitch) => ({ move: { forward, side }, look: { yaw, pitch } });
-  // Оба пальца уведены вверх и вправо.
-  const right = stick(1, 0.5, 0.4, 0.8);
-  const left = stick(0.9, 0.3, 0.2, 0.7);
-  assert.deepEqual(volumePadsAxes(right, left, false), { forward: 1, side: 0.5, yaw: 0.2, pitch: 0.7 });
-  // «Левый верх вниз — движение вперёд назад, а влево вправо поворот камеры, а
-  // справа вверх вниз наклон камеры, а влево вправо движение в сторону».
-  assert.deepEqual(volumePadsAxes(right, left, true), { forward: 0.9, side: 0.5, yaw: 0.2, pitch: 0.8 });
-  // Один палец — одна площадка: другая ничего не добавляет.
-  assert.deepEqual(volumePadsAxes(null, left, true), { forward: 0.9, side: 0, yaw: 0.2, pitch: 0 });
-  assert.deepEqual(volumePadsAxes(right, null, false), { forward: 1, side: 0.5, yaw: 0, pitch: 0 });
-  assert.deepEqual(volumePadsAxes(null, null, true), { forward: 0, side: 0, yaw: 0, pitch: 0 });
 });
