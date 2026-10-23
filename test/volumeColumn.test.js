@@ -24,7 +24,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import { getSetting } from "../src/store.js";
-import { volumeParamsHome } from "../src/panels/volumeParams.js";
+import { VOLUME_PARAM_GROUPS, volumeParamsHome } from "../src/panels/volumeParams.js";
 
 const APP_CSS = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
 const VOLUME_CSS = readFileSync(new URL("../src/panels/volume.css", import.meta.url), "utf8");
@@ -127,19 +127,13 @@ test("ряды собираются один раз: ни колонка, ни �
   // Это главный урок таска 183 («вынесен общий скелет, окна остались четырьмя»)
   // и прямое требование G351: содержимое у колонки и у окна одно.
   const rows = code(PARAMS_JS);
-  // Семь подписей групп — «ЧТО ПОКАЗЫВАТЬ», «ТИП ФОНА», «ПОГОДА» и «КЛИМАТ
-  // ПОМЕЩЕНИЙ» (правки после сборки сценариев), «ВРЕМЯ СУТОК», «УСКОРЕНИЕ»,
-  // «ХОДЬБА» — и каждая объявлена ровно один раз: вторая значила бы вторую
-  // сборку тех же рядов.
-  assert.equal(
-    rows.split('class: "tools__label"').length - 1,
-    7,
-    "подписей групп в рядах должно быть семь — по одной на группу",
-  );
-  for (const key of ["floorsLabel", "backdrop", "weather", "climateRooms", "clock", "speed", "walking"]) {
-    const found = rows.match(new RegExp("text: strings\\.volume\\." + key + "\\b", "g")) || [];
-    assert.equal(found.length, 1, "подпись группы собрана не один раз: " + key);
+  // Семь групп (правка «сгруппировать… разворачивать отдельно») — и каждая
+  // собрана ровно один раз: вторая значила бы вторую сборку тех же рядов.
+  for (const id of VOLUME_PARAM_GROUPS) {
+    assert.equal(rows.split('group("' + id + '"').length - 1, 1, "группа собрана не один раз: " + id);
   }
+  assert.equal(VOLUME_PARAM_GROUPS.length, 7);
+  assert.doesNotMatch(rows, /class: "tools__label"/, "старые подписи групп вернулись рядом с заголовками");
   // Поля часа и даты тоже по одному: два разных поля времени разошлись бы в
   // первую же минуту.
   for (const name of ["tools__time", "tools__date"]) {

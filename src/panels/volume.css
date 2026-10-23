@@ -441,6 +441,95 @@
   min-width: 260px;
 }
 
+/* ——— группы параметров (правка после сборки сценариев) ————————————————
+   «Сгруппировать, плюс разворачивать отдельно их»: заголовок группы — кнопка во
+   всю ширину, галочка поворачивается, как у разделов колонки. Свёрнутая группа
+   говорит главное о себе справа от имени; у раскрытой сводки нет — всё видно
+   ниже. Тело с `hidden` прячется явно: `display: flex` перебил бы атрибут. */
+.volume__group {
+  border-top: 1px solid var(--panel-line);
+}
+
+.volume__groupHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 32px;
+  margin: 0;
+  padding: 6px 0;
+  border: 0;
+  background: none;
+  color: var(--panel-muted);
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: left;
+  cursor: pointer;
+}
+
+.volume__groupHead:hover,
+.volume__groupHead:focus-visible {
+  color: var(--panel-text);
+}
+
+.volume__groupChevron::before {
+  content: "▾";
+  display: inline-block;
+  font-size: 10px;
+  line-height: 1;
+  transition: transform 0.12s ease;
+}
+
+.volume__group.is-collapsed .volume__groupChevron::before {
+  transform: rotate(-90deg);
+}
+
+.volume__groupTitle {
+  flex: none;
+}
+
+.volume__groupSum {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.volume__group:not(.is-collapsed) .volume__groupSum {
+  display: none;
+}
+
+.volume__groupBody {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 10px;
+}
+
+.volume__groupBody[hidden] {
+  display: none;
+}
+
+/* Подпись внутри группы — строчными: заголовок группы уже прописной, и вторая
+   прописная строка читалась бы как соседняя группа. */
+.volume__paramsSub {
+  margin: 2px 0 0;
+  color: var(--panel-muted);
+  font-size: 11px;
+}
+
+/* Окно живёт на телефоне и в полном экране: заголовок — цель под палец. */
+.volume__params--window .volume__groupHead {
+  min-height: 44px;
+  font-size: 12px;
+}
+
 /* Список ускорения занимает строку целиком: подпись в нём — предложение, а не
    слово, и ужатый до содержимого он обрезал бы её на любой раскладке. */
 .volume__paramsRow .ui-input {
@@ -530,6 +619,12 @@
 .volume__climateRow {
   flex-wrap: wrap;
   row-gap: 4px;
+}
+
+.volume__paramsPair {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .volume__paramsUnit {

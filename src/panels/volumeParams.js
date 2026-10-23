@@ -169,6 +169,48 @@ export const VOLUME_OBJECTS_CLEAR_SETTING = "volumeObjectsClear";
 // в «Объёме»: на плане связи ведёт переключатель в шапке.
 export const VOLUME_LINK_ARROWS_SETTING = "volumeLinkArrows";
 
+// ——— группы параметров (правка после сборки сценариев) ——————————————————
+//
+// Слова заказчика: «в левом столбце Объём, да и аналогичное окно в мобильном
+// интерфейсе надо как-то сгруппировать, плюс разворачивать отдельно их и т.д.
+// организуй, а то свалка уже». Ряды разложены по группам, у каждой заголовок
+// сворачивает её отдельно, а свёрнутая говорит в заголовке главное о себе
+// («21:34 · ×60», «Природа · пасмурно, +6 °C») — чтобы не разворачивать ради
+// того, чтобы узнать.
+//
+// Что раскрыто — вид, а не объект (G68): настройка браузера, одна на колонку и
+// на окно. В ней лежат только группы, которые человек трогал; остальные берут
+// умолчание — раскрыты этажи и время, их трогают на каждом показе.
+export const VOLUME_GROUPS_SETTING = "volumeParamsGroups";
+/** Группы параметров по порядку — сверху то, что трогают чаще. */
+export const VOLUME_PARAM_GROUPS = Object.freeze(["floors", "time", "scene", "frame", "home", "climate", "walking"]);
+const VOLUME_GROUPS_OPEN = Object.freeze({ floors: true, time: true });
+const groupsChosen = {};
+const groupWatchers = new Set();
+
+/** Раскрыта ли группа: выбор человека, а без него — умолчание. */
+export function volumeParamsGroupOpen(id) {
+  return Object.prototype.hasOwnProperty.call(groupsChosen, id) ? groupsChosen[id] : VOLUME_GROUPS_OPEN[id] === true;
+}
+
+/** Раскрыть или свернуть группу: запоминается и доходит до всех рядов разом. */
+export function volumeParamsGroupSet(id, open) {
+  if (!VOLUME_PARAM_GROUPS.includes(id)) return;
+  const next = Boolean(open);
+  if (volumeParamsGroupOpen(id) === next) return;
+  groupsChosen[id] = next;
+  setSetting(VOLUME_GROUPS_SETTING, { ...groupsChosen });
+  for (const watcher of groupWatchers) watcher();
+}
+
+/** Записанное в хранилище — только знакомые группы и только «да/нет». */
+export function volumeParamsGroupsOf(saved) {
+  const own = {};
+  if (!saved || typeof saved !== "object" || Array.isArray(saved)) return own;
+  for (const id of VOLUME_PARAM_GROUPS) if (typeof saved[id] === "boolean") own[id] = saved[id];
+  return own;
+}
+
 /**
  * Выбор человека. Живёт в области модуля, а не в поверхности объёма: поверхность
  * пересобирается (сменили схему, закрыли объект), а выбор — нет.
@@ -255,6 +297,21 @@ export function volumeParamsLoad() {
         .catch(() => {}),
     );
   }
+  // Раскрытые группы: тронутое до ответа хранилища старше записанного.
+  waits.push(
+    Promise.resolve(getSetting(VOLUME_GROUPS_SETTING))
+      .then((saved) => {
+        const own = volumeParamsGroupsOf(saved);
+        let changed = false;
+        for (const [id, open] of Object.entries(own)) {
+          if (Object.prototype.hasOwnProperty.call(groupsChosen, id)) continue;
+          groupsChosen[id] = open;
+          changed = true;
+        }
+        if (changed) for (const watcher of groupWatchers) watcher();
+      })
+      .catch(() => {}),
+  );
   waits.push(
     Promise.resolve(getSetting(VOLUME_LOOK_SPEED_SETTING))
       .then((saved) => {
@@ -592,166 +649,172 @@ export function createVolumeParamsFields(options) {
     const plan = floors();
     const stacked = chosen.floorsAll === true && plan !== null && plan.can;
     const stopped = Boolean(chosen.clock && chosen.clock.fixed);
+    groupNodes.clear();
+    const rooms = (options.rooms ? options.rooms() : []) || [];
     box.replaceChildren(
-      // «Что показывать» — **первым разделом**: это выбор о самой сцене, а
+      // «Что показывать» — **первой группой**: это выбор о самой сцене, а
       // фон, час и миникарта — о том, как её показать. Человек, пришедший за
       // этажами, не должен искать их под ускорением времени.
-      uiEl("p", { class: "tools__label", text: strings.volume.floorsLabel }),
-      uiEl(
-        "div",
-        { class: "volume__paramsRow" },
-        [
-          uiButton(strings.volume.floorsAll, {
-            class: "ui-btn" + (stacked ? " is-on" : ""),
-            title: plan && plan.can ? strings.volume.floorsAllHint : volumeFloorsNote(plan, false),
-            attrs: {
-              "aria-pressed": stacked ? "true" : "false",
-              ...(plan && plan.can ? {} : { disabled: "" }),
-            },
-            on: { click: () => volumeParamsFlag("floorsAll", true) },
-          }),
-          ...((plan && plan.floors) || []).map((option) =>
-            uiButton(volumeFloorOptionLabel(option), {
-              class: "ui-btn" + (!stacked && option.current ? " is-on" : ""),
-              title: strings.volume.floorsOneHint,
-              attrs: { "aria-pressed": !stacked && option.current ? "true" : "false" },
-              on: {
-                click: () => {
-                  // Выбрали один этаж — отметка «все этажи» снимается, а
-                  // схема становится открытой: «показывать этаж 2» и значит
-                  // «открыть второй этаж». Второго способа сменить схему тут
-                  // не заводится — зовётся та же дверь, которой переводит
-                  // лестница.
-                  volumeParamsFlag("floorsAll", false);
-                  if (!option.current) goFloor(option);
-                },
+      group("floors", volumeParamsFloorsShort(stacked, chosen.roofOff), [
+        uiEl(
+          "div",
+          { class: "volume__paramsRow" },
+          [
+            uiButton(strings.volume.floorsAll, {
+              class: "ui-btn" + (stacked ? " is-on" : ""),
+              title: plan && plan.can ? strings.volume.floorsAllHint : volumeFloorsNote(plan, false),
+              attrs: {
+                "aria-pressed": stacked ? "true" : "false",
+                ...(plan && plan.can ? {} : { disabled: "" }),
               },
+              on: { click: () => volumeParamsFlag("floorsAll", true) },
+            }),
+            ...((plan && plan.floors) || []).map((option) =>
+              uiButton(volumeFloorOptionLabel(option), {
+                class: "ui-btn" + (!stacked && option.current ? " is-on" : ""),
+                title: strings.volume.floorsOneHint,
+                attrs: { "aria-pressed": !stacked && option.current ? "true" : "false" },
+                on: {
+                  click: () => {
+                    // Выбрали один этаж — отметка «все этажи» снимается, а
+                    // схема становится открытой: «показывать этаж 2» и значит
+                    // «открыть второй этаж». Второго способа сменить схему тут
+                    // не заводится — зовётся та же дверь, которой переводит
+                    // лестница.
+                    volumeParamsFlag("floorsAll", false);
+                    if (!option.current) goFloor(option);
+                  },
+                },
+              }),
+            ),
+          ],
+        ),
+        // Строка под списком этажей — **состояние, а не описание**: что встало в
+        // стопку и почему «все этажи» недоступны. Молчания здесь быть не может
+        // ни в одном случае (таск 202), поэтому в подсказку она не уходит.
+        uiEl("p", { class: "tools__note", text: volumeFloorsNote(plan, stacked) }),
+        // «Снять крышу» стоит здесь, а не рядом с фоном: это про **дом**, а не
+        // про картинку за окном, и спрашивают её там же, где выбирают, какой
+        // этаж показывать.
+        checkRow(strings.volume.roofOff, chosen.roofOff, strings.volume.roofOffHint, (on) =>
+          volumeParamsFlag("roofOff", on),
+        ),
+      ]),
+      // Время суток — второй: час на небе меняют на каждом показе.
+      group("time", "", [
+        // Дата стоит **над** часами (G289): от неё зависит место солнца, то
+        // есть и рассвет с закатом, и фаза луны. Час без даты — полдела.
+        uiEl("div", { class: "volume__paramsRow" }, [
+          uiEl("span", { class: "volume__paramsName", text: strings.volume.clockDate }),
+          dateField(dayOf(at)),
+        ]),
+        uiEl("div", { class: "volume__paramsRow" }, [
+          clockField(at.minutes),
+          uiButton(strings.volume.clockNow, {
+            class: "ui-btn",
+            title: strings.volume.clockNowHint,
+            on: { click: () => volumeParamsNow(now()) },
+          }),
+          uiButton(strings.volume.clockStop, {
+            class: "ui-btn" + (stopped ? " is-on" : ""),
+            title: strings.volume.clockStopHint,
+            attrs: { "aria-pressed": stopped ? "true" : "false" },
+            on: { click: () => volumeParamsFix(null, now()) },
+          }),
+        ]),
+        state,
+        // ——— ускорение списком, а не рядом кнопок (таск 231, G349) ————————
+        //
+        // Шесть подписей вида «Без ускорения — сутки идут сутки» кнопками — это
+        // шесть строк в колонку шириной 264 точки. Список — тот же выбор в одну
+        // строку, как шаг сетки в «Интерфейсе» (таск 193, G293). Список один и в
+        // колонке, и в окне (G351).
+        uiEl("p", { class: "volume__paramsSub", text: strings.volume.speed }),
+        uiEl("div", { class: "volume__paramsRow" }, [speedSelect(chosen)]),
+        // Рассвет и закат — тоже состояние, а не описание: они считаны по дате,
+        // часам и координатам объекта и меняются от них.
+        uiEl("p", { class: "tools__note", text: volumeParamsSunLine(times()) }),
+        // «Плавные светила» стоят в группе времени: отметка меняет не картинку,
+        // а то, как часто время доходит до неба.
+        checkRow(strings.volume.smooth, chosen.smooth, strings.volume.smoothHint, (on) =>
+          volumeParamsFlag("smooth", on),
+        ),
+      ]),
+      // Фон и погода — то, что за окном: тип фона и небо над ним.
+      group("scene", "", [
+        uiEl("p", { class: "volume__paramsSub", text: strings.volume.backdrop }),
+        uiEl(
+          "div",
+          { class: "volume__paramsRow" },
+          VOLUME_BACKDROP_KINDS.map((kind) =>
+            uiButton(backdropLabel(kind), {
+              class: "ui-btn" + (chosen.kind === kind ? " is-on" : ""),
+              title: backdropHint(kind),
+              attrs: { "aria-pressed": chosen.kind === kind ? "true" : "false" },
+              on: { click: () => volumeParamsKind(kind) },
             }),
           ),
-        ],
-      ),
-      // Строка под списком этажей — **состояние, а не описание**: что встало в
-      // стопку и почему «все этажи» недоступны. Молчания здесь быть не может
-      // ни в одном случае (таск 202), поэтому в подсказку она не уходит.
-      uiEl("p", { class: "tools__note", text: volumeFloorsNote(plan, stacked) }),
-      // «Снять крышу» стоит здесь, а не рядом с фоном: это про **дом**, а не
-      // про картинку за окном, и спрашивают её там же, где выбирают, какой
-      // этаж показывать.
-      checkRow(strings.volume.roofOff, chosen.roofOff, strings.volume.roofOffHint, (on) =>
-        volumeParamsFlag("roofOff", on),
-      ),
-      // Имитация умного дома (таск 09 сценариев, G04) — тоже «что показывать»:
-      // живой дом или тот, что был до имитации. Своей группы у неё нет — групп
-      // пять, и шестая подпись ради одной галки заняла бы строку колонки.
-      checkRow(strings.volume.simulation, chosen.simulation, strings.volume.simulationHint, (on) =>
-        volumeParamsFlag("simulation", on),
-      ),
-      // Физический свет (правка после сборки сценариев) — рядом с имитацией:
-      // отметка про то, как светит дом, — лампы и, с правки «солнце и луна»,
-      // окна.
-      checkRow(strings.volume.physicalLight, chosen.physical, strings.volume.physicalLightHint, (on) =>
-        volumeParamsFlag("physical", on),
-      ),
-      // Прозрачные объекты (правка после сборки сценариев) — «что показывать»:
-      // вещи чертежа сквозные или плотные.
-      checkRow(strings.volume.objectsClear, chosen.objectsClear, strings.volume.objectsClearHint, (on) =>
-        volumeParamsFlag("objectsClear", on),
-      ),
-      // Стрелки связей (правка после сборки сценариев) — «что показывать»:
-      // дуги «чем управляет» у выделенной метки на кадре или чистый кадр.
-      checkRow(strings.volume.linkArrows, chosen.linkArrows, strings.volume.linkArrowsHint, (on) =>
-        volumeParamsFlag("linkArrows", on),
-      ),
-      // Карточка выделенной метки (таск 09 сценариев, G22) — тоже «что
-      // показывать»: отметка убирает её из поля «Объёма», и только оттуда.
-      checkRow(strings.volume.hideCard, chosen.hideCard, strings.volume.hideCardHint, (on) =>
-        volumeParamsFlag("hideCard", on),
-      ),
-      uiEl("p", { class: "tools__label", text: strings.volume.backdrop }),
-      uiEl(
-        "div",
-        { class: "volume__paramsRow" },
-        VOLUME_BACKDROP_KINDS.map((kind) =>
-          uiButton(backdropLabel(kind), {
-            class: "ui-btn" + (chosen.kind === kind ? " is-on" : ""),
-            title: backdropHint(kind),
-            attrs: { "aria-pressed": chosen.kind === kind ? "true" : "false" },
-            on: { click: () => volumeParamsKind(kind) },
-          }),
         ),
-      ),
-      checkRow(strings.volume.minimap, chosen.minimap, strings.volume.minimapHint, (on) =>
-        volumeParamsMinimap(on),
-      ),
-      // Погода (правка после сборки сценариев): «В опциях должна быть
-      // возможность выбрать погоду, температуры и влажность». Всё «Авто» —
-      // сезон по дате, небо, градусник и влажность сами по дате и часу.
-      ...weatherRows(),
+        // Погода (правка после сборки сценариев): «В опциях должна быть
+        // возможность выбрать погоду, температуры и влажность». Всё «Авто» —
+        // сезон по дате, небо, градусник и влажность сами по дате и часу.
+        ...weatherRows(),
+      ]),
+      // Что ещё на кадре, кроме дома: вещи, стрелки, карточка, миникарта.
+      group("frame", "", [
+        // Прозрачные объекты (правка после сборки сценариев): вещи чертежа
+        // сквозные или плотные.
+        checkRow(strings.volume.objectsClear, chosen.objectsClear, strings.volume.objectsClearHint, (on) =>
+          volumeParamsFlag("objectsClear", on),
+        ),
+        // Стрелки связей (правка после сборки сценариев): дуги «чем управляет»
+        // у выделенной метки на кадре или чистый кадр.
+        checkRow(strings.volume.linkArrows, chosen.linkArrows, strings.volume.linkArrowsHint, (on) =>
+          volumeParamsFlag("linkArrows", on),
+        ),
+        // Карточка выделенной метки (таск 09 сценариев, G22): отметка убирает
+        // её из поля «Объёма», и только оттуда.
+        checkRow(strings.volume.hideCard, chosen.hideCard, strings.volume.hideCardHint, (on) =>
+          volumeParamsFlag("hideCard", on),
+        ),
+        checkRow(strings.volume.minimap, chosen.minimap, strings.volume.minimapHint, (on) =>
+          volumeParamsMinimap(on),
+        ),
+      ]),
+      // Умный дом (таск 09 сценариев, G04): живой дом или тот, что был до
+      // имитации, и как светят его лампы.
+      group("home", chosen.simulation ? strings.volume.groupSumHomeOn : strings.volume.groupSumHomeOff, [
+        checkRow(strings.volume.simulation, chosen.simulation, strings.volume.simulationHint, (on) =>
+          volumeParamsFlag("simulation", on),
+        ),
+        // Физический свет (правка после сборки сценариев) — рядом с имитацией:
+        // отметка про то, как светит дом, — лампы и, с правки «солнце и луна»,
+        // окна.
+        checkRow(strings.volume.physicalLight, chosen.physical, strings.volume.physicalLightHint, (on) =>
+          volumeParamsFlag("physical", on),
+        ),
+      ]),
       // Климат помещений: «эти параметры у каждого помещения должны быть, как
       // и уровень углекислого газа. Их тоже можно задавать» и число людей —
-      // от них растёт CO₂.
-      ...climateRows(),
-      uiEl("p", { class: "tools__label", text: strings.volume.clock }),
-      // Дата стоит **над** часами (G289): от неё зависит место солнца, то
-      // есть и рассвет с закатом, и фаза луны. Час без даты — полдела.
-      uiEl("div", { class: "volume__paramsRow" }, [
-        uiEl("span", { class: "volume__paramsName", text: strings.volume.clockDate }),
-        dateField(dayOf(at)),
+      // от них растёт CO₂. Помещений нет — нет и группы.
+      rooms.length > 0 ? group("climate", text("volume.groupSumRooms", { count: rooms.length }), climateRows(rooms)) : null,
+      // Ходьба — своя группа: это не вид за окном, а то, что делают руки.
+      // Вторая отметка была «Летать» — её убрал заказчик (таск 200): полёт
+      // уехал в обзор, где он всегда.
+      group("walking", chosen.ghost ? strings.volume.ghost : "", [
+        checkRow(strings.volume.ghost, chosen.ghost, strings.volume.ghostHint, (on) =>
+          volumeParamsFlag("ghost", on),
+        ),
+        // Взгляд пальцем: чувствительность свайпа и инверсия вертикали — то, что
+        // есть в настройках любого мобильного шутера.
+        uiEl("div", { class: "volume__paramsRow" }, [
+          uiEl("span", { class: "volume__paramsName", text: strings.volume.lookSpeed }),
+          lookSpeedSelect(chosen),
+        ]),
+        checkRow(strings.volume.lookInvert, chosen.lookInvert, strings.volume.lookInvertHint, (on) =>
+          volumeParamsFlag("lookInvert", on),
+        ),
       ]),
-      uiEl("div", { class: "volume__paramsRow" }, [
-        clockField(at.minutes),
-        uiButton(strings.volume.clockNow, {
-          class: "ui-btn",
-          title: strings.volume.clockNowHint,
-          on: { click: () => volumeParamsNow(now()) },
-        }),
-        uiButton(strings.volume.clockStop, {
-          class: "ui-btn" + (stopped ? " is-on" : ""),
-          title: strings.volume.clockStopHint,
-          attrs: { "aria-pressed": stopped ? "true" : "false" },
-          on: { click: () => volumeParamsFix(null, now()) },
-        }),
-      ]),
-      state,
-      uiEl("p", { class: "tools__label", text: strings.volume.speed }),
-      // ——— ускорение списком, а не рядом кнопок (таск 231, G349) ————————
-      //
-      // Шесть подписей вида «Без ускорения — сутки идут сутки» кнопками — это
-      // шесть строк в колонку шириной 264 точки: ряд занимал бы больше места,
-      // чем все остальные параметры вместе. Список — тот же выбор в одну
-      // строку, и приём в сборке не новый: так же стоит шаг сетки в
-      // «Интерфейсе», где «Без сетки» — первый пункт того же списка (таск 193,
-      // G293, по прямому слову заказчика).
-      //
-      // Список один и в колонке, и в окне (G351): рядом кнопок в окне он был бы
-      // второй сборкой тех же шести значений.
-      uiEl("div", { class: "volume__paramsRow" }, [speedSelect(chosen)]),
-      // Рассвет и закат — тоже состояние, а не описание: они считаны по дате,
-      // часам и координатам объекта и меняются от них.
-      uiEl("p", { class: "tools__note", text: volumeParamsSunLine(times()) }),
-      // «Плавные светила» стоят в разделе времени, а не отдельным: отметка
-      // меняет не картинку, а то, как часто время доходит до неба.
-      checkRow(strings.volume.smooth, chosen.smooth, strings.volume.smoothHint, (on) =>
-        volumeParamsFlag("smooth", on),
-      ),
-      // Ходьба — свой раздел: это не вид за окном, а то, что делают руки.
-      // Отметка одна и про запрет, который человек снимает, когда показывает
-      // объект, а не ходит по нему. Вторая была «Летать» — её убрал
-      // заказчик (таск 200): полёт уехал в обзор, где он всегда.
-      uiEl("p", { class: "tools__label", text: strings.volume.walking }),
-      checkRow(strings.volume.ghost, chosen.ghost, strings.volume.ghostHint, (on) =>
-        volumeParamsFlag("ghost", on),
-      ),
-      // Вертикали джойстиков наоборот — тоже про руки, и только пальцем.
-      // Взгляд пальцем: чувствительность свайпа и инверсия вертикали — то, что
-      // есть в настройках любого мобильного шутера.
-      uiEl("div", { class: "volume__paramsRow" }, [
-        uiEl("span", { class: "volume__paramsName", text: strings.volume.lookSpeed }),
-        lookSpeedSelect(chosen),
-      ]),
-      checkRow(strings.volume.lookInvert, chosen.lookInvert, strings.volume.lookInvertHint, (on) =>
-        volumeParamsFlag("lookInvert", on),
-      ),
     );
     line();
   };
@@ -772,8 +835,60 @@ export function createVolumeParamsFields(options) {
     const date = box.querySelector(".tools__date");
     if (date && document.activeElement !== date) date.value = volumeDateText(dayOf(at));
     weatherState.textContent = volumeWeatherLine(at && at.weather);
+    // Свёрнутые группы говорят о себе в заголовке: час идёт, погода меняется
+    // сама — сводка идёт вместе с ними.
+    groupSummary("time", volumeParamsClockShort(volumeParamsRead().clock, at.minutes));
+    groupSummary("scene", volumeParamsSceneShort(volumeParamsRead().kind, at && at.weather));
     syncClimateRows();
   };
+
+  // ——— группы ———
+  //
+  // Заголовок — кнопка: сворачивает и разворачивает свою группу, не трогая
+  // соседей. Состояние держит модуль (`volumeParamsGroupOpen`), поэтому
+  // пересборка рядов его не теряет, а колонка и окно видят одно и то же.
+  const groupNodes = new Map();
+
+  function group(id, summary, children) {
+    const sum = uiEl("span", { class: "volume__groupSum", text: summary || "" });
+    const head = uiEl(
+      "button",
+      {
+        class: "volume__groupHead",
+        type: "button",
+        on: { click: () => volumeParamsGroupSet(id, !volumeParamsGroupOpen(id)) },
+      },
+      [
+        uiEl("span", { class: "volume__groupChevron", attrs: { "aria-hidden": "true" } }),
+        uiEl("span", { class: "volume__groupTitle", text: strings.volume.groups[id] }),
+        sum,
+      ],
+    );
+    const body = uiEl("div", { class: "volume__groupBody" }, children);
+    const node = uiEl("section", { class: "volume__group", attrs: { "data-group": id } }, [head, body]);
+    groupNodes.set(id, { node, head, body, sum });
+    applyGroup(id);
+    return node;
+  }
+
+  function applyGroup(id) {
+    const parts = groupNodes.get(id);
+    if (!parts) return;
+    const open = volumeParamsGroupOpen(id);
+    parts.node.classList.toggle("is-collapsed", !open);
+    parts.body.hidden = !open;
+    parts.head.setAttribute("aria-expanded", open ? "true" : "false");
+    parts.head.title = open ? strings.volume.groupFold : strings.volume.groupUnfold;
+  }
+
+  function applyGroups() {
+    for (const id of groupNodes.keys()) applyGroup(id);
+  }
+
+  function groupSummary(id, value) {
+    const parts = groupNodes.get(id);
+    if (parts && parts.sum.textContent !== value) parts.sum.textContent = value;
+  }
 
   // ——— климат помещений ———
   //
@@ -782,12 +897,10 @@ export function createVolumeParamsFields(options) {
   // переписывается под рукой. Набрали и ушли из поля — значение уходит дому.
   const climateFields = new Map();
 
-  function climateRows() {
+  function climateRows(rooms) {
     climateFields.clear();
-    const rooms = (options.rooms ? options.rooms() : []) || [];
     if (rooms.length === 0) return [];
-    const rows = [uiEl("p", { class: "tools__label", text: strings.volume.climateRooms })];
-    rows.push(uiEl("p", { class: "tools__note", text: strings.volume.climateRoomsNote }));
+    const rows = [uiEl("p", { class: "tools__note", text: strings.volume.climateRoomsNote })];
     for (const room of rooms) {
       const field = (key, label, unit, min, max, step) => {
         const input = uiEl("input", {
@@ -861,15 +974,20 @@ export function createVolumeParamsFields(options) {
         attrs: { "aria-label": label, min: String(min), max: String(max), step: String(step), placeholder: strings.volume.weatherAutoShort },
         on: { change: () => appWeatherSet({ [key]: field.value === "" ? null : Number(field.value) }) },
       });
-      return [uiEl("span", { class: "volume__paramsName", text: label }), field, uiEl("span", { class: "volume__paramsName", text: unit })];
+      // Подпись, поле и единица переносятся вместе: «%» отдельной строкой под
+      // полем читался бы как подпись следующего ряда.
+      return uiEl("span", { class: "volume__paramsPair" }, [
+        uiEl("span", { class: "volume__paramsName", text: label }),
+        field,
+        uiEl("span", { class: "volume__paramsName volume__paramsUnit", text: unit }),
+      ]);
     };
     return [
-      uiEl("p", { class: "tools__label", text: strings.volume.weather }),
       choose("season", WEATHER_SEASONS, strings.volume.weatherSeason, strings.volume.weatherSeasonHint),
       choose("sky", WEATHER_SKIES, strings.volume.weatherSky, strings.volume.weatherSkyHint),
       uiEl("div", { class: "volume__paramsRow" }, [
-        ...number("tempC", strings.volume.weatherTemp, "°C", -50, 50, 0.5),
-        ...number("humidity", strings.volume.weatherHumidity, "%", 0, 100, 1),
+        number("tempC", strings.volume.weatherTemp, "°C", -50, 50, 0.5),
+        number("humidity", strings.volume.weatherHumidity, "%", 0, 100, 1),
       ]),
       weatherState,
     ];
@@ -974,6 +1092,7 @@ export function createVolumeParamsFields(options) {
   }
 
   const stopWatch = volumeParamsWatch(() => render());
+  groupWatchers.add(applyGroups);
   const stopWeather = appWeatherWatch(() => render());
   // Климат дома приходит шагами — поля помещений идут вместе с ним.
   const stopClimate = simWatch((payload) => {
@@ -1001,6 +1120,7 @@ export function createVolumeParamsFields(options) {
       if (tick && typeof clearInterval === "function") clearInterval(tick);
       tick = 0;
       stopWatch();
+      groupWatchers.delete(applyGroups);
       stopWeather();
       stopClimate();
     },
@@ -1018,6 +1138,32 @@ export function volumeWeatherLine(weather) {
     sky: strings.volume.weatherNames[weather.sky],
     temp: volumeTempText(weather.tempC),
     humidity: String(Math.round(weather.humidity)),
+  });
+}
+
+/** Сводка группы этажей: «одна схема · без крыши». */
+export function volumeParamsFloorsShort(stacked, roofOff) {
+  const floors = stacked ? strings.volume.groupSumFloorsAll : strings.volume.groupSumFloorsOne;
+  return roofOff ? floors + " · " + strings.volume.groupSumRoofOff : floors;
+}
+
+/** Сводка группы времени: «21:34 · ×60», «21:34 · идёт», «21:34 · стоит». */
+export function volumeParamsClockShort(clock, minutes) {
+  const time = volumeClockText(minutes);
+  if (clock && clock.fixed) return text("volume.groupSumClockFixed", { time });
+  const speed = volumeClockSpeedOf(clock ? clock.speed : null);
+  if (speed === VOLUME_CLOCK_SPEED_REAL) return text("volume.groupSumClockReal", { time });
+  return text("volume.groupSumClockFast", { time, speed });
+}
+
+/** Сводка группы фона и погоды: «Природа · пасмурно, +6,2 °C». */
+export function volumeParamsSceneShort(kind, weather) {
+  const backdrop = backdropLabel(volumeBackdropKindOf(kind));
+  if (!weather) return backdrop;
+  return text("volume.groupSumScene", {
+    backdrop,
+    sky: strings.volume.weatherNames[weather.sky],
+    temp: volumeTempText(weather.tempC),
   });
 }
 
