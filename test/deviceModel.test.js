@@ -92,7 +92,9 @@ const PROFILE_BY_CODE = {
     ],
   },
   Б: BREEZER, ВЫТ: FAN, ВЕНТ: FAN,
-  // Правки после сборки сценариев: датчик климата, термостат, тёплый пол, ель.
+  // Правки после сборки сценариев: датчик климата, термостат, тёплый пол, ель
+  // и датчик освещённости.
+  ДОС: { kind: "lightSensor", services: [["LightSensor", ["CurrentAmbientLightLevel"]]] },
   ДК: {
     kind: "climateFull",
     services: [
@@ -144,9 +146,9 @@ function place(base, code, at = { x: 0.5, y: 0.5 }) {
   return { project: added.project, schemeId: base.schemeId, markId: added.mark.id };
 }
 
-test("каждый из 55 типов стартового справочника получает профиль по таблице спецификации", () => {
+test("каждый из 56 типов стартового справочника получает профиль по таблице спецификации", () => {
   const { project, schemeId } = scene();
-  assert.equal(project.markTypes.length, 55);
+  assert.equal(project.markTypes.length, 56);
   let next = project;
   const marks = new Map();
   for (const type of project.markTypes) {

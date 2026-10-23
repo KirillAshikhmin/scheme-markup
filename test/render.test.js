@@ -357,7 +357,8 @@ test("справочник упорядочен один раз: категор�
   ]);
   assert.deepEqual(groups[1].types.map((type) => type.code), ["В", "ВВ", "П", "ПП", "ВВВ", "МВ"]);
   // Датчик климата (правка после сборки сценариев) — пятым в «Датчиках».
-  assert.deepEqual(groups[9].types.map((type) => type.code), ["ДП", "ДД", "ДО", "ДПр", "ДК"]);
+  // Датчик освещённости (правка после сборки сценариев) — шестым.
+  assert.deepEqual(groups[9].types.map((type) => type.code), ["ДП", "ДД", "ДО", "ДПр", "ДК", "ДОС"]);
   assert.deepEqual(groups[10].types.map((type) => type.code), ["Щ", "ЩС"]);
 });
 

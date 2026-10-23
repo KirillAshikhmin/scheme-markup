@@ -2,6 +2,21 @@
 import { viewArc, viewCircle, viewDrop, viewLine, viewParts, viewPoly, viewRect, viewWaves } from "./kit.js";
 
 export const VIEWS_SENSE = {
+  // Датчик освещённости (правка после сборки сценариев): шайба с окошком и
+  // лучи вокруг — «свет».
+  lightSensor: {
+    // Знак свой у типа (поле `view`), за формой изображение не закрепляется.
+    shapes: [],
+    mm: { width: 60, height: 60 },
+    parts: viewParts(
+      viewCircle(0, 0, 0.26),
+      viewCircle(0, 0, 0.1),
+      ...Array.from({ length: 8 }, (unused, index) => {
+        const angle = (index / 8) * Math.PI * 2;
+        return viewLine(Math.cos(angle) * 0.34, Math.sin(angle) * 0.34, Math.cos(angle) * 0.46, Math.sin(angle) * 0.46);
+      }),
+    ),
+  },
   // Датчик климата (правка после сборки сценариев): «3 шкалы вертикальных как
   // на ртутном градуснике» — корпус, три трубки и шарик под каждой.
   climateSensor: {

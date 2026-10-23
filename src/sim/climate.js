@@ -215,6 +215,49 @@ export function climateView(item) {
 
 const CLIMATE_TEMP_SERVICES = new Set(["TemperatureSensor", "Thermostat", "HeaterCooler"]);
 
+// ——— освещённость (правка после сборки сценариев) ————————————————————————
+//
+// «Датчик освещённости добавь ещё в виде метки». Метке нужен ответ, сколько
+// света в её помещении, иначе сценарий «темно — включи свет» проверять не на
+// чем. Счёт грубый и честный, по тем же доводам, что климат:
+//   — улица: день (`dayShare` — час и облака, как солнце в окнах у тепла)
+//     даёт до `CLIMATE_SKY_LUX`, ночь — `CLIMATE_NIGHT_LUX` (луна и город);
+//   — помещение: доля улицы по окнам — отношение окон к полу, умноженное на
+//     `CLIMATE_DAYLIGHT_FACTOR` (окна в восьмую пола дают ~3 % улицы — так и
+//     в настоящих комнатах), плюс горящие лампы помещения: поток лампы в
+//     полную яркость `CLIMATE_LAMP_LM` делится на площадь пола.
+// Датчик без помещения меряет улицу.
+
+/** Ясный полдень на улице, лк. */
+export const CLIMATE_SKY_LUX = 100000;
+/** Ночь на улице: луна и город, лк. */
+export const CLIMATE_NIGHT_LUX = 0.5;
+/** Доля улицы в помещении на единицу отношения окон к полу. */
+const CLIMATE_DAYLIGHT_FACTOR = 0.25;
+/** Окна больше половины пола света не прибавляют: это уже стеклянная стена. */
+const CLIMATE_WINDOW_MAX = 0.5;
+/** Поток лампы в полную яркость, дошедший до пола, лм. */
+export const CLIMATE_LAMP_LM = 1500;
+/** Помещение без площади — средняя комната, м². */
+const CLIMATE_ROOM_M2 = 15;
+
+/**
+ * Освещённость: `{outdoor, rooms: Map<roomId, лк>}`. `rooms` — помещения
+ * геометрии (`{id, areaMm2, windowsMm2}`), `lamps` — `Map<roomId, сумма
+ * яркостей 0…1>` горящих ламп, `dayShare` — доля дня 0…1.
+ */
+export function climateLux(rooms, lamps, dayShare) {
+  const outdoor = CLIMATE_NIGHT_LUX + CLIMATE_SKY_LUX * Math.max(0, Math.min(1, Number(dayShare) || 0));
+  const out = new Map();
+  for (const room of rooms || []) {
+    const areaM2 = Number(room.areaMm2) > 0 ? Number(room.areaMm2) / 1e6 : CLIMATE_ROOM_M2;
+    const share = Math.min(CLIMATE_WINDOW_MAX, (Number(room.windowsMm2) || 0) / 1e6 / areaM2);
+    const lamp = (lamps && lamps.get(room.id)) || 0;
+    out.set(room.id, outdoor * share * CLIMATE_DAYLIGHT_FACTOR + (lamp * CLIMATE_LAMP_LM) / areaM2);
+  }
+  return { outdoor, rooms: out };
+}
+
 /**
  * Хозяин климата для движка. Слушает `message` страницы: `{kind: "weather",
  * choice}`, `{kind: "set", roomId, patch: {t, rh, co2, people}}`, `{kind:
@@ -229,6 +272,7 @@ export function climateOwner() {
   const open = new Set();
   let timer = null;
   let last = null;
+  let lampWatch = null;
   let outdoor = { tempC: 15, humidity: 70, sun: 1, sky: "clear", season: "summer" };
 
   const lat = () => (home && home.site ? home.site.latDeg : undefined);
@@ -336,8 +380,35 @@ export function climateOwner() {
     }
   }
 
+  // Горящие лампы по помещениям: сумма яркостей 0…1 (`climateLux`).
+  function lampsNow(host) {
+    const lamps = new Map();
+    for (const device of (geometry && geometry.devices) || []) {
+      const roomId = deviceRoom(device);
+      if (!roomId) continue;
+      const accessory = host.accessory(device.markId);
+      for (const service of (accessory && accessory.services) || []) {
+        if (service.type !== "Lightbulb" || host.value(device.markId, service.index, "On") !== true) continue;
+        const dim = (service.chars || []).some((item) => item.type === "Brightness")
+          ? Math.max(0, Math.min(100, climateNumber(host.value(device.markId, service.index, "Brightness"), 100))) / 100
+          : 1;
+        lamps.set(roomId, (lamps.get(roomId) || 0) + dim);
+      }
+    }
+    return lamps;
+  }
+
+  // Доля дня: час (день с 7 до 19, вершина в полдень) и облака — та же, что
+  // греет помещения солнцем через окна.
+  function dayShareNow(host, out) {
+    const hour = ((host.now() / 3600000) % 24 + 24) % 24;
+    const day = hour > 7 && hour < 19 ? Math.sin(((hour - 7) / 12) * Math.PI) : 0;
+    return day * out.sun;
+  }
+
   // Датчики и термостаты — значения своего помещения; без помещения — улица.
   function writeSensors(host, chain) {
+    const lux = climateLux((geometry && geometry.rooms) || [], lampsNow(host), dayShareNow(host, outdoor));
     for (const device of (geometry && geometry.devices) || []) {
       const accessory = host.accessory(device.markId);
       if (!accessory) continue;
@@ -355,6 +426,12 @@ export function climateOwner() {
         if (CLIMATE_TEMP_SERVICES.has(service.type)) put("CurrentTemperature", view.t, 0.1);
         if (service.type === "HumiditySensor") put("CurrentRelativeHumidity", view.rh, 1);
         if (service.type === "CarbonDioxideSensor") put("CarbonDioxideLevel", view.co2, 5);
+        if (service.type === "LightSensor") {
+          const value = room && lux.rooms.has(device.roomId) ? lux.rooms.get(device.roomId) : lux.outdoor;
+          // Шаг — пять процентов: глаз и сценарий различают «светло» и
+          // «темно», а не десятые доли люкса.
+          put("CurrentAmbientLightLevel", Math.round(value * 10) / 10, Math.max(1, value * 0.05));
+        }
       }
     }
   }
@@ -377,11 +454,7 @@ export function climateOwner() {
     const out = weatherNow(host);
     const chain = [{ k: "timer", at: now, what: "climate" }];
     followThermostats(host, chain);
-    if (dt > 0) {
-      const hour = ((now / 3600000) % 24 + 24) % 24;
-      const day = hour > 7 && hour < 19 ? Math.sin(((hour - 7) / 12) * Math.PI) : 0;
-      climateStep(state, out, geometry, open, effectsNow(host), heatingNow(host), dt, day * out.sun);
-    }
+    if (dt > 0) climateStep(state, out, geometry, open, effectsNow(host), heatingNow(host), dt, dayShareNow(host, out));
     writeSensors(host, chain);
     tell(host);
   }
@@ -414,10 +487,19 @@ export function climateOwner() {
       last = host.now();
       step(host);
       schedule(host);
+      // Лампу включили — датчик освещённости видит это сразу, а не на
+      // следующем шаге климата через минуту: сценарий «темно — включи свет»
+      // иначе включал бы свет повторно, пока датчик не узнал о первом.
+      if (lampWatch) lampWatch();
+      lampWatch = host.subscribe({ serviceTypes: ["Lightbulb"], charTypes: ["On", "Brightness"] }, (event, own) =>
+        writeSensors(own, [...(Array.isArray(event.chain) ? event.chain : []), { k: "timer", at: own.now(), what: "climate" }]),
+      );
     },
     stop() {
       timer = null;
       last = null;
+      if (lampWatch) lampWatch();
+      lampWatch = null;
     },
     reset(info, host) {
       state.clear();

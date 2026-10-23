@@ -192,7 +192,10 @@ test("HideIfTurnOn: исходник .js и экспорт JSON — один и 
 function motion(overrides = {}, { lux } = {}) {
   const box = simHouse();
   const base = box.project.markTypes.find((type) => type.code === "ДД");
-  box.project = addType(box.project, { code: "ДОС", name: "Датчик освещённости", categoryId: base.categoryId, device: { kind: "lightSensor" } }).project;
+  // «ДОС» — в стартовом справочнике (правка после сборки сценариев).
+  if (!box.project.markTypes.some((type) => type.code === "ДОС")) {
+    box.project = addType(box.project, { code: "ДОС", name: "Датчик освещённости", categoryId: base.categoryId, device: { kind: "lightSensor" } }).project;
+  }
   simPut(box, "ДОС", { x: 0.31, y: 0.32 }, "hall");
   simPut(box, "ОВ", { x: 0.26, y: 0.36 }, "hall");
   const read = sprut("MotionLightAutomation.js");

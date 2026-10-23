@@ -19,7 +19,11 @@ import {
   CLIMATE_CO2_OUT,
   CLIMATE_HEAT_TARGET_C,
   climateAbsolute,
+  climateLux,
   climateOwner,
+  CLIMATE_LAMP_LM,
+  CLIMATE_NIGHT_LUX,
+  CLIMATE_SKY_LUX,
   climateRelative,
   climateStep,
 } from "../src/sim/climate.js";
@@ -27,7 +31,7 @@ import { createSimEngine } from "../src/sim/engine.js";
 import { simClimateOf } from "../src/simulation.js";
 import { volumeClimateGeometry } from "../src/volume.js";
 import { addOpening, addOutline, addRoom, addScheme, addWall, createProject, planMmToFraction, setPlanOrigin, setPlanScale, setSchemeWallHeight } from "../src/model.js";
-import { simHouse, simHouseSpec, simRecorder } from "./fixtures/simHome.js";
+import { simHouse, simHouseSpec, simPut, simRecorder } from "./fixtures/simHome.js";
 
 const HOUR = 3600;
 const room = (t, rh = 45, co2 = 450, people = 0) => ({ t, ah: climateAbsolute(t, rh), co2, people });
@@ -263,3 +267,58 @@ test("окно воздух не пропускает: открывать окн
   // Неплотности проветривают и так — окно сверх них не добавляет ничего.
   assert.equal(state.get("living").co2, without.get("living").co2, "окно проветрило комнату");
 });
+
+// ——— освещённость (правка после сборки сценариев) ——————————————————————
+//
+// «Датчик освещённости добавь ещё в виде метки»: метке нужен свет её
+// помещения — окна, час, облака и горящие лампы.
+
+test("освещённость: улица днём и ночью, комната — доля улицы по окнам и лампы на площадь", () => {
+  const rooms = [
+    { id: "living", areaMm2: 16e6, windowsMm2: 2e6 },
+    { id: "hall", areaMm2: 6e6, windowsMm2: 0 },
+  ];
+  const noon = climateLux(rooms, new Map(), 1);
+  assert.equal(noon.outdoor, CLIMATE_NIGHT_LUX + CLIMATE_SKY_LUX);
+  const living = noon.rooms.get("living");
+  assert.ok(living > 1000 && living < 10000, "в комнате с окнами днём не светло: " + living);
+  assert.ok(noon.rooms.get("hall") < 1, "в коридоре без окон днём светло без ламп");
+  const night = climateLux(rooms, new Map([["hall", 1]]), 0);
+  assert.equal(night.outdoor, CLIMATE_NIGHT_LUX);
+  assert.ok(Math.abs(night.rooms.get("hall") - CLIMATE_LAMP_LM / 6) < 1e-9, "лампа в коридоре светит не на его площадь");
+  assert.ok(night.rooms.get("living") < 1, "ночью гостиная светла без ламп");
+  // Половина яркости — половина света.
+  assert.ok(Math.abs(climateLux(rooms, new Map([["hall", 0.5]]), 0).rooms.get("hall") - CLIMATE_LAMP_LM / 12) < 1e-9);
+});
+
+test("в движке: датчик освещённости ночью — темно, включили лампу — светло сразу, днём — светло от окон", () => {
+  const box = simHouse();
+  simPut(box, "ДОС", { x: 0.88, y: 0.3 }, "bedroom");
+  const sensor = box.marks["ДОС1"];
+  const spec = simHouseSpec(box);
+  spec.site = { latDeg: 55.75, lonDeg: 37.6 };
+  spec.climate = {
+    rooms: [{ id: box.rooms.bedroom, areaMm2: 12e6, heightMm: 2700, windowsMm2: 1.5e6 }],
+    ways: [],
+    devices: spec.accessories.map((accessory) => ({ markId: accessory.markId, roomId: accessory.roomId, role: null, controls: [] })),
+  };
+  const engine = createSimEngine({ emit: () => {}, owners: [climateOwner()] });
+  const midnight = Math.floor(Date.UTC(2026, 5, 15) / 86400000) * 86400000;
+  engine.load(spec);
+  engine.setClock({ simMs: midnight + 23 * 3600000 });
+  engine.start();
+  engine.tell("climate", { kind: "weather", choice: { season: "auto", sky: "clear", tempC: null, humidity: null } });
+  engine.advanceTo(midnight + 23 * 3600000 + 120000);
+  assert.ok(engine.value(sensor, 0, "CurrentAmbientLightLevel") < 5, "ночью в спальне светло без ламп");
+  // Лампа спальни — без ожидания шага климата.
+  engine.act({ kind: "set", markId: box.marks["С3"], service: 0, char: "On", value: true });
+  const lit = engine.value(sensor, 0, "CurrentAmbientLightLevel");
+  assert.ok(lit > 50, "лампа включена, а датчик не видит света: " + lit);
+  engine.act({ kind: "set", markId: box.marks["С3"], service: 0, char: "On", value: false });
+  assert.ok(engine.value(sensor, 0, "CurrentAmbientLightLevel") < 5, "лампу выключили, а свет остался");
+  // Полдень следующего дня: светло от окон.
+  engine.advanceTo(midnight + 36 * 3600000);
+  assert.ok(engine.value(sensor, 0, "CurrentAmbientLightLevel") > 500, "в полдень в спальне темно");
+  engine.stop();
+});
+

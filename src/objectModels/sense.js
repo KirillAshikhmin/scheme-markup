@@ -8,6 +8,12 @@
 import { modelBox, modelCyl, modelParts } from "./kit.js";
 
 export const MODELS_SENSE = {
+  // Датчик освещённости (правка после сборки сценариев): светлая шайба и
+  // тёмное окошко фотоэлемента в лицо.
+  lightSensor: modelParts(
+    modelCyl("window", { x: -0.2, width: 0.4, y: -0.5, depth: 0.12, z: 0.3, height: 0.4, material: "dark" }),
+    modelCyl("puck", { x: -0.5, width: 1, y: -0.38, depth: 0.88, z: 0, height: 1, material: "light" }),
+  ),
   // Датчик климата (правка после сборки сценариев): светлый корпус и три
   // тёмные трубки «как на ртутном градуснике». Столбики в трубках — значения
   // его помещения — кладёт кадр (`volumeLiveSigns`), пока дом идёт.

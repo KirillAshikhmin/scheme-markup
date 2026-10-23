@@ -84,15 +84,14 @@ function decoupleDuoKey2(box, id) {
   box.project = setMarkDevice(box.project, id("ВВ1"), { decoupled: [2] }).project;
 }
 
-// Дом с датчиком освещённости в спальне (свой тип человека): дерево §2.5 вики.
+// Дом с датчиком освещённости в спальне: дерево §2.5 вики. Тип «ДОС» — из
+// стартового справочника (правка после сборки сценариев: «Датчик
+// освещённости добавь ещё в виде метки»); до неё тест заводил его сам.
 function withLux(box) {
-  const base = box.project.markTypes.find((type) => type.code === "ДД");
-  box.project = addType(box.project, {
-    code: "ДОС",
-    name: "Датчик освещённости",
-    categoryId: base.categoryId,
-    device: { kind: "lightSensor" },
-  }).project;
+  if (!box.project.markTypes.some((type) => type.code === "ДОС")) {
+    const base = box.project.markTypes.find((type) => type.code === "ДД");
+    box.project = addType(box.project, { code: "ДОС", name: "Датчик освещённости", categoryId: base.categoryId, device: { kind: "lightSensor" } }).project;
+  }
   simPut(box, "ДОС", { x: 0.88, y: 0.3 }, "bedroom");
 }
 

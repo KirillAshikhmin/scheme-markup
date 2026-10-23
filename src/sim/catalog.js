@@ -552,6 +552,8 @@ const DEVICE_KIND_BY_CODE_SOURCE = [
   ["thermostat", ["ТМ"]],
   ["warmFloor", ["ТП"]],
   ["climateFull", ["ДК"]],
+  // Датчик освещённости (правка после сборки сценариев).
+  ["lightSensor", ["ДОС"]],
   ["xmasTree", ["НЕ"]],
   ["relay", ["ОВ", "СУШ", "РП", "ПОС", "ДЭП"]],
   ["speaker", ["УК"]],

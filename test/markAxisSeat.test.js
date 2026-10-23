@@ -319,7 +319,7 @@ test("справочник типов: посадку решает умолча�
   // высота над полом задана, и подписи у них стенные.
   // Тёплый пол и новогодняя ель (правки после сборки сценариев) стоят на полу.
   assert.deepEqual(flat, ["Т", "С", "ПК", "ТР", "ПС", "Л", "ПШ", "ЛЮ", "ОВ", "ДПр", "РП", "ТП", "НЕ"]);
-  assert.equal(project.markTypes.length - flat.length, 42);
+  assert.equal(project.markTypes.length - flat.length, 43);
   for (const code of ["В", "Р", "К", "Щ", "СУШ", "ЛВ", "ТВ", "ПОС"]) {
     const type = typeByCode(project, code);
     assert.equal(typeAxisSeat(type), MARK_AXIS_UPRIGHT, "вещь на стене прочлась потолочной: " + code);
