@@ -19,8 +19,8 @@
 //      на диагоналях там же, где на осях. У квадрата она дальше в √2 раза.
 //   3. **Два отверстия под штыри** — на средней линии внутри круга ровно два
 //      тёмных пятна, симметрично от середины, и между ними — не тёмное.
-//   4. **Заземляющие контакты сверху и снизу** — на вертикальной оси светлое
-//      выходит за круг узким язычком, а сбоку от оси на той же высоте — рамка.
+//   4. **Контактов земли нет** (G19, уточнение заказчика) — на вертикальной оси
+//      круг кончается там же, где на других направлениях, за ним рамка.
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -198,8 +198,8 @@ function assertEuroSocket(place, label) {
   ]) {
     assert.equal(at(s, t), "body", label + ": у края лица в (" + s + ", " + t + ") нет рамки");
   }
-  // 2. Круглое углубление. Оси 90° и 270° пропущены нарочно: там контакты.
-  const angles = [0, 45, 135, 180, 225, 315].map((degrees) => (degrees * Math.PI) / 180);
+  // 2. Круглое углубление.
+  const angles = [0, 45, 90, 135, 180, 225, 270, 315].map((degrees) => (degrees * Math.PI) / 180);
   const edges = angles.map((angle) => edgeAlong(at, angle));
   const radius = Math.min(...edges);
   assert.ok(radius > 0.2 && Math.max(...edges) < 0.47, label + ": углубления не видно — границы " + edges.join(", "));
@@ -226,32 +226,23 @@ function assertEuroSocket(place, label) {
     assert.equal(at(centre, 0.5 + radius * 0.5), recess, label + ": над отверстием не углубление");
     assert.equal(at(centre, 0.5 - radius * 0.5), recess, label + ": под отверстием не углубление");
   }
-  // 4. Заземляющие контакты сверху и снизу: на вертикальной оси светлое
-  // выходит за круг, а сбоку на той же высоте — рамка.
-  const reach = (direction) => edgeAlong(at, direction);
-  const up = reach(Math.PI / 2);
-  const down = reach(-Math.PI / 2);
-  for (const [name, span, sign] of [
-    ["сверху", up, 1],
-    ["снизу", down, -1],
+  // 4. Контактов земли нет (G19): на вертикальной оси круг кончается там же,
+  // где на диагоналях и осях гнёзд, и за ним сразу рамка.
+  const up = edgeAlong(at, Math.PI / 2);
+  const down = edgeAlong(at, -Math.PI / 2);
+  for (const [name, span] of [
+    ["сверху", up],
+    ["снизу", down],
   ]) {
-    assert.ok(span > radius * 1.08, label + ": контакта " + name + " нет — за круг ничего не выходит (" + span.toFixed(3) + " при круге " + radius.toFixed(3) + ")");
-    const t = 0.5 + sign * (radius * 1.04 + (span - radius * 1.04) / 2);
-    const contact = at(0, t);
-    assert.ok(contact && contact !== "body" && contact !== "dark", label + ": контакт " + name + " цвета " + contact);
-    const width = runsOf(at, -radius, radius, (s) => [s, t], contact);
-    assert.equal(width.length, 1, label + ": контакт " + name + " не одним язычком");
-    const wide = width[0].to - width[0].from;
-    assert.ok(wide > 0.03 && wide < radius * 0.8, label + ": контакт " + name + " шириной " + wide.toFixed(3) + " — это не язычок");
-    assert.ok(Math.abs(width[0].from + width[0].to) < 0.01, label + ": контакт " + name + " не на оси");
+    assert.ok(span < radius * 1.08, label + ": контакт " + name + " остался — за круг выходит светлое (" + span.toFixed(3) + " при круге " + radius.toFixed(3) + ")");
   }
-  assert.ok(Math.abs(up - down) < 0.01, label + ": контакты сверху и снизу разной длины");
+  // Гнёзда по-прежнему два: между ними углубление, не перемычка-контакт.
   return { radius, holes: centres, reach: up };
 }
 
 // ——— тесты ———————————————————————————————————————————————————————————————
 
-test("розетка в объёме — евро-розетка с заземлением: рамка, круг, два гнезда, контакты сверху и снизу", () => {
+test("розетка в объёме — евро-розетка без контактов земли: рамка, круг, два гнезда", () => {
   const scene = roomScene();
   const typeId = typeByCode(scene.project, "Р").id;
   const put = putOnWall(scene, scene.project, typeId, 2000);

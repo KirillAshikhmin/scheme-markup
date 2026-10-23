@@ -951,7 +951,7 @@ test("модель метки стоит лицом в комнату, на то
   assert.equal(place.mode, "wall", "стенд обязан поставить метку на стену, иначе он проверяет другое");
   assert.equal(place.model.key, "socket", "розетка нашла свою модель по форме знака");
   // Призмы — коробки модели: у евро-розетки (таск 15 сценариев, G18) это
-  // перемычка с контактами, гнёзда и рамка. Круг углубления — лежачий цилиндр,
+  // два гнезда и рамка (контактов земли нет, G19). Круг углубления — лежачий цилиндр,
   // призмой он не бывает, и его грани сверяются ниже отдельно.
   const prisms = volumeModelPrisms(place.frame, place.model.parts);
   assert.equal(prisms.length, 3);
@@ -980,9 +980,10 @@ test("модель метки стоит лицом в комнату, на то
   }
   // Перемычка — переднее тело: она ближе к комнате, чем рамка за ней, и
   // стоит ровно на лице габарита — у коробки недотяга нет.
-  const earth = prisms.find((prism) => prism.name === "earth");
+  const earth = prisms.find((prism) => prism.name === "pinLeft");
+  assert.ok(!prisms.some((prism) => prism.name === "earth"), "контактов земли в модели нет");
   const frame = prisms.find((prism) => prism.name === "frame");
-  assert.ok(ahead(earth.corners) > ahead(frame.corners), "перемычка впереди рамки");
+  assert.ok(ahead(earth.corners) > ahead(frame.corners), "гнездо впереди рамки");
   assert.ok(boxAhead - ahead(earth.corners) < 0.01, "переднее тело стоит на лице габарита");
   const back = Math.min(...box.corners.map(along));
   assert.equal(Math.round(behind(frame.corners)), Math.round(back), "рамка коробкой упирается в задник ровно");
