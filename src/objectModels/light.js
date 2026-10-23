@@ -22,9 +22,19 @@
 // люстры, свечение ночника и зеркала, рассеиватель ленты. Признак значит «может
 // светиться»: горит тело или нет и насколько ярко — решает состояние дома в
 // кадре «Объёма», а не модель. Подставка, чашка, корпус и стекло не светятся.
-import { modelBox, modelCyl, modelParts, modelTube } from "./kit.js";
+import { modelBox, modelCone, modelCyl, modelParts, modelTube } from "./kit.js";
 
 export const MODELS_LIGHT = {
+  // Новогодняя ель (правка после сборки сценариев): два яруса хвои и звезда
+  // на верхушке — она горит, пока включена вторая лампа (`bulb: 1`). Огоньки
+  // гирлянды по ярусам кладёт кадр (`volumeLiveSigns`): тел у модели не
+  // больше пяти и граней не больше тридцати, а огоньков дюжина.
+  xmasTree: modelParts(
+    modelBox("trunk", { x: -0.06, width: 0.12, y: -0.06, depth: 0.12, z: 0, height: 0.12, material: "dark" }),
+    modelCone("lower", { x: -0.5, width: 1, y: -0.5, depth: 1, z: 0.08, height: 0.56 }),
+    modelCone("upper", { x: -0.36, width: 0.72, y: -0.36, depth: 0.72, z: 0.4, height: 0.52 }),
+    modelBox("star", { x: -0.05, width: 0.1, y: -0.05, depth: 0.1, z: 0.9, height: 0.1, material: "light", lit: true, bulb: 1 }),
+  ),
   // Светильник: плафон двумя ярусами и тонкий подвес над ними.
   //
   // **Люстра «побольше и посимпатичнее»** (таск 177, G262) лечится здесь, а не

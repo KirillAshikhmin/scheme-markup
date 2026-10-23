@@ -1,0 +1,131 @@
+// Датчик климата, тёплый пол, термостат и новогодняя ель в «Объёме» (правки
+// после сборки сценариев).
+//
+// Слова заказчика: «Датчики климата (метку) изображай как 3 шкалы вертикальных
+// как на ртутном градуснике. С реальным значением в комнате расположения»;
+// «добавь теплые полы и им значение можно напрямую задавать или через
+// термостат»; «добавь метку Новогодняя ель. Ставится на пол, модель — ёлка, у
+// которой можно включить гирлянду и звезду наверху».
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import { addMark, addOutline, addRoom, addScheme, applyMarkWalls, createProject, planMmToFraction, setPlanOrigin, setPlanScale, setSchemeWallHeight, addWall } from "../src/model.js";
+import { markAccessory } from "../src/sim/home.js";
+import { simLiveOf } from "../src/sim/live.js";
+import {
+  VOLUME_HEAT_GLOW_RGB,
+  VOLUME_SCALES,
+  volumeCo2Rgb,
+  volumeLiveLight,
+  volumeLiveSigns,
+  volumeMarkPlace,
+  volumeScene,
+} from "../src/volume.js";
+import { deviceServiceRole } from "../src/panels/deviceCard.js";
+
+function stand() {
+  const added = addScheme(createProject(), { name: "1 этаж", imageId: "plan-1", width: 1200, height: 800 });
+  let project = setPlanScale(added.project, added.scheme.id, { a: { x: 0.1, y: 0.5 }, b: { x: 0.6, y: 0.5 }, meters: 6 }).project;
+  project = setPlanOrigin(project, added.scheme.id, { at: { x: 0.5, y: 0.5 }, turn: 0 }).project;
+  project = setSchemeWallHeight(project, added.scheme.id, 2700).project;
+  const schemeId = added.scheme.id;
+  const fr = (point) => planMmToFraction(project, schemeId, point);
+  const outer = [
+    { x: -3000, y: -2000 },
+    { x: 3000, y: -2000 },
+    { x: 3000, y: 2000 },
+    { x: -3000, y: 2000 },
+  ];
+  outer.forEach((point, index) => {
+    project = addWall(project, { schemeId, aMm: point, bMm: outer[(index + 1) % 4], thicknessMm: 200 }).project;
+  });
+  const made = addRoom(project, "Гостиная");
+  project = made.project;
+  project = addOutline(project, {
+    schemeId,
+    roomId: made.room.id,
+    points: [{ x: -2900, y: -1900 }, { x: 2900, y: -1900 }, { x: 2900, y: 1900 }, { x: -2900, y: 1900 }].map(fr),
+  }).project;
+  const marks = {};
+  const put = (key, code, at) => {
+    const type = project.markTypes.find((item) => item.code === code);
+    const added = addMark(project, { schemeId, typeId: type.id, kind: "point", points: [fr(at)] });
+    project = added.project;
+    marks[key] = added.marks[0].id;
+  };
+  put("sensor", "ДК", { x: -2950, y: 0 });
+  put("tree", "НЕ", { x: 0, y: 0 });
+  put("floor", "ТП", { x: 1500, y: 1000 });
+  project = applyMarkWalls(project, schemeId).project;
+  return { project, schemeId, marks, roomId: made.room.id };
+}
+
+const liveOf = (box, key, values) => {
+  const accessory = markAccessory(box.project, box.marks[key]);
+  return { ...simLiveOf(accessory, values), kind: accessory.services.some((service) => service.type === "Lightbulb") ? "light" : "other", roomId: box.roomId };
+};
+
+test("датчик климата: три трубки, столбики по значениям его комнаты", () => {
+  const box = stand();
+  const scene = volumeScene(box.project, box.schemeId, { roofOff: true });
+  const place = volumeMarkPlace(scene, box.marks.sensor);
+  assert.equal(place.view.name, "climateSensor", "датчик климата не своей моделью");
+  assert.equal(place.model.parts.filter((part) => part.name.startsWith("tube")).length, 3, "трубок не три");
+  const accessory = markAccessory(box.project, box.marks.sensor);
+  assert.deepEqual(accessory.services.map((service) => service.type), ["TemperatureSensor", "HumiditySensor", "CarbonDioxideSensor"]);
+  const signsAt = (t, rh, co2) =>
+    volumeLiveSigns(scene, new Map([[box.marks.sensor, liveOf(box, "sensor", { "0.CurrentTemperature": t, "1.CurrentRelativeHumidity": rh, "2.CarbonDioxideLevel": co2 })]]));
+  const heightOf = (face) => Math.max(...face.p.map((point) => point.z)) - Math.min(...face.p.map((point) => point.z));
+  const bars = (signs) => signs.filter((face) => face.p.length === 4);
+  const cold = bars(signsAt(0, 30, 450));
+  const warm = bars(signsAt(30, 80, 1500));
+  assert.equal(cold.length, 3, "столбиков не три");
+  for (let index = 0; index < 3; index += 1) assert.ok(heightOf(warm[index]) > heightOf(cold[index]), VOLUME_SCALES[index].key + ": столбик не растёт со значением");
+  // CO₂ меняет цвет: свежо — зелёный, душно — красный.
+  assert.deepEqual(warm[2].rgb, volumeCo2Rgb(1500));
+  assert.notDeepEqual(cold[2].rgb, warm[2].rgb);
+  // Дом не идёт — живого состояния нет — столбиков нет.
+  assert.equal(volumeLiveSigns(scene, new Map()).length, 0);
+});
+
+test("ель: стоит на полу, гирлянда и звезда горят порознь", () => {
+  const box = stand();
+  const scene = volumeScene(box.project, box.schemeId, { roofOff: true });
+  const place = volumeMarkPlace(scene, box.marks.tree);
+  assert.equal(place.view.name, "xmasTree");
+  assert.equal(place.frame.bottomMm, 0, "ель не стоит на полу");
+  assert.ok(place.model.parts.some((part) => part.kind === "cone"), "хвоя не конусом");
+  const accessory = markAccessory(box.project, box.marks.tree);
+  assert.deepEqual(accessory.services.map((service) => service.type), ["Lightbulb", "Lightbulb"]);
+  assert.equal(deviceServiceRole(accessory.kind, accessory.services[0]), "Гирлянда");
+  assert.equal(deviceServiceRole(accessory.kind, accessory.services[1]), "Звезда");
+  const lit = (values) => volumeLiveSigns(scene, new Map([[box.marks.tree, liveOf(box, "tree", values)]]));
+  const garlandOnly = lit({ "0.On": true, "1.On": false });
+  const starOnly = lit({ "0.On": false, "1.On": true });
+  const star = (signs) => signs.filter((face) => face.p.length === 10);
+  const bulbs = (signs) => signs.filter((face) => face.p.length !== 10);
+  assert.ok(bulbs(garlandOnly).length > 20 && bulbs(garlandOnly).every((face) => face.led === true), "гирлянда не горит");
+  assert.ok(star(garlandOnly).every((face) => face.led !== true), "звезда горит без своей лампы");
+  assert.ok(star(starOnly).length === 2 && star(starOnly).every((face) => face.led === true), "звезда не горит");
+  assert.ok(bulbs(starOnly).every((face) => face.led !== true), "гирлянда горит без своей лампы");
+  // Звезда модели — тело второй лампы.
+  const light = volumeLiveLight(scene, new Map([[box.marks.tree, liveOf(box, "tree", { "0.On": true, "1.On": false })]]));
+  assert.equal(light.glow.get(box.marks.tree).lamps[1], 0);
+});
+
+test("тёплый пол: на полу, свой термостат; греет — рдеет", () => {
+  const box = stand();
+  const scene = volumeScene(box.project, box.schemeId, { roofOff: true });
+  const place = volumeMarkPlace(scene, box.marks.floor);
+  assert.equal(place.view.name, "warmFloor");
+  assert.equal(place.frame.bottomMm, 0);
+  const accessory = markAccessory(box.project, box.marks.floor);
+  assert.equal(accessory.kind, "warmFloor");
+  assert.equal(accessory.services[0].type, "Thermostat");
+  const heating = liveOf(box, "floor", { "0.TargetHeatingCoolingState": "HEAT", "0.CurrentHeatingCoolingState": "HEAT" });
+  assert.equal(heating.heat, true);
+  const light = volumeLiveLight(scene, new Map([[box.marks.floor, heating]]));
+  assert.deepEqual(light.glow.get(box.marks.floor).rgb, VOLUME_HEAT_GLOW_RGB, "греющий пол не рдеет");
+  const idle = liveOf(box, "floor", { "0.TargetHeatingCoolingState": "HEAT", "0.CurrentHeatingCoolingState": "OFF" });
+  assert.equal(idle.heat, false);
+});

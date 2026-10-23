@@ -2,6 +2,22 @@
 import { viewArc, viewCircle, viewDrop, viewLine, viewParts, viewPoly, viewRect, viewWaves } from "./kit.js";
 
 export const VIEWS_SENSE = {
+  // Датчик климата (правка после сборки сценариев): «3 шкалы вертикальных как
+  // на ртутном градуснике» — корпус, три трубки и шарик под каждой.
+  climateSensor: {
+    // Знак свой у типа (поле `view`), за формой изображение не закрепляется.
+    shapes: [],
+    mm: { width: 80, height: 120 },
+    parts: viewParts(
+      viewRect(-0.5, -0.5, 1, 1, 0.1),
+      viewRect(-0.34, -0.38, 0.12, 0.62, 0.06),
+      viewRect(-0.06, -0.38, 0.12, 0.62, 0.06),
+      viewRect(0.22, -0.38, 0.12, 0.62, 0.06),
+      viewCircle(-0.28, 0.32, 0.08),
+      viewCircle(0, 0.32, 0.08),
+      viewCircle(0.28, 0.32, 0.08),
+    ),
+  },
   // Присутствие: купол с дугами обзора.
   presence: {
     shapes: ["circle-fan"],

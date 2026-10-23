@@ -8,6 +8,15 @@
 import { modelBox, modelCyl, modelParts } from "./kit.js";
 
 export const MODELS_SENSE = {
+  // Датчик климата (правка после сборки сценариев): светлый корпус и три
+  // тёмные трубки «как на ртутном градуснике». Столбики в трубках — значения
+  // его помещения — кладёт кадр (`volumeLiveSigns`), пока дом идёт.
+  climateSensor: modelParts(
+    modelBox("tubeT", { x: -0.34, width: 0.12, y: -0.5, depth: 0.04, z: 0.12, height: 0.76, material: "dark" }),
+    modelBox("tubeH", { x: -0.06, width: 0.12, y: -0.5, depth: 0.04, z: 0.12, height: 0.76, material: "dark" }),
+    modelBox("tubeC", { x: 0.22, width: 0.12, y: -0.5, depth: 0.04, z: 0.12, height: 0.76, material: "dark" }),
+    modelBox("case", { y: -0.46, depth: 0.96, material: "light" }),
+  ),
   // Присутствие: купол на плоском основании — на потолке он и правда купол.
   presence: modelParts(
     modelCyl("dome", { x: -0.38, width: 0.76, y: -0.38, depth: 0.76, z: 0, height: 0.62, material: "light" }),

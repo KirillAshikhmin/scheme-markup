@@ -89,6 +89,18 @@ const PROFILE_BY_CODE = {
     ],
   },
   Б: BREEZER, ВЫТ: FAN, ВЕНТ: FAN,
+  // Правки после сборки сценариев: датчик климата, термостат, тёплый пол, ель.
+  ДК: {
+    kind: "climateFull",
+    services: [
+      ["TemperatureSensor", ["CurrentTemperature"]],
+      ["HumiditySensor", ["CurrentRelativeHumidity"]],
+      ["CarbonDioxideSensor", ["CarbonDioxideLevel", "CarbonDioxideDetected"]],
+    ],
+  },
+  ТМ: { kind: "thermostat", services: [["Thermostat", ["CurrentTemperature", "TargetTemperature", "CurrentHeatingCoolingState", "TargetHeatingCoolingState"]]] },
+  ТП: { kind: "warmFloor", services: [["Thermostat", ["CurrentTemperature", "TargetTemperature", "CurrentHeatingCoolingState", "TargetHeatingCoolingState"]]] },
+  НЕ: { kind: "xmasTree", services: [["Lightbulb", ["On"]], ["Lightbulb", ["On"]]] },
   ОВ: RELAY, СУШ: RELAY, РП: RELAY, ПОС: RELAY, ДЭП: RELAY,
   УК: { kind: "speaker", services: [["Speaker", ["Mute", "Volume"]]] },
   Д: { kind: "doorbell", services: [["Doorbell", ["ProgrammableSwitchEvent"]]] },
@@ -123,9 +135,9 @@ function place(base, code, at = { x: 0.5, y: 0.5 }) {
   return { project: added.project, schemeId: base.schemeId, markId: added.mark.id };
 }
 
-test("каждый из 51 типа стартового справочника получает профиль по таблице спецификации", () => {
+test("каждый из 55 типов стартового справочника получает профиль по таблице спецификации", () => {
   const { project, schemeId } = scene();
-  assert.equal(project.markTypes.length, 51);
+  assert.equal(project.markTypes.length, 55);
   let next = project;
   const marks = new Map();
   for (const type of project.markTypes) {

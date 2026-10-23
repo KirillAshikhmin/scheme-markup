@@ -245,11 +245,25 @@ test("живое состояние светильника, датчиков, ш
   put(box, "tv", "ТВ", { x: 0.5, y: 0.1 });
   put(box, "switch", "ВВ", { x: 0.6, y: 0.1 });
   const of = (name) => markAccessory(box.project, box.marks[name]);
-  const dark = { on: false, level: 0, alert: false, open: 0, pressedAt: null, keys: null, flow: null, locked: false };
+  // `lamps`, `heat`, `climate` — правки после сборки сценариев: яркость каждой
+  // лампы по её сервису, нагрев и показания датчиков климата.
+  const dark = {
+    on: false,
+    level: 0,
+    alert: false,
+    open: 0,
+    pressedAt: null,
+    keys: null,
+    flow: null,
+    locked: false,
+    lamps: null,
+    heat: false,
+    climate: null,
+  };
 
-  assert.deepEqual(simLiveOf(of("lamp"), {}), dark, "дом со старта не тёмный");
-  assert.deepEqual(simLiveOf(of("lamp"), { [simValueKey(0, "On")]: true, "0.Brightness": 40 }), { ...dark, on: true, level: 0.4 });
-  assert.deepEqual(simLiveOf(of("lamp"), new Map([["0.On", true]])), { ...dark, on: true, level: 1 }, "Map не читается");
+  assert.deepEqual(simLiveOf(of("lamp"), {}), { ...dark, lamps: { 0: 0 } }, "дом со старта не тёмный");
+  assert.deepEqual(simLiveOf(of("lamp"), { [simValueKey(0, "On")]: true, "0.Brightness": 40 }), { ...dark, on: true, level: 0.4, lamps: { 0: 0.4 } });
+  assert.deepEqual(simLiveOf(of("lamp"), new Map([["0.On", true]])), { ...dark, on: true, level: 1, lamps: { 0: 1 } }, "Map не читается");
   assert.deepEqual(simLiveOf(of("motion"), { "0.MotionDetected": true }), { ...dark, alert: true });
   // Перечисление читается и кодом: 1 — CONTACT_NOT_DETECTED, «открыто».
   assert.deepEqual(simLiveOf(of("contact"), { "0.ContactSensorState": 1 }), { ...dark, alert: true, open: 1 });

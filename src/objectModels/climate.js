@@ -6,6 +6,17 @@
 import { modelBox, modelCyl, modelParts } from "./kit.js";
 
 export const MODELS_CLIMATE = {
+  // Термостат (правка после сборки сценариев): светлая рамка и тёмный экран,
+  // который загорается, пока термостат греет.
+  thermostat: modelParts(
+    modelBox("screen", { x: -0.3, width: 0.6, y: -0.5, depth: 0.06, z: 0.48, height: 0.34, material: "dark", lit: true }),
+    modelBox("plate", { y: -0.44, depth: 0.94, material: "light" }),
+  ),
+  // Тёплый пол: светлый мат и греющий слой в нём — он рдеет, пока пол греет.
+  warmFloor: modelParts(
+    modelBox("coil", { x: -0.42, width: 0.84, y: -0.42, depth: 0.84, z: 0.4, height: 0.6, lit: true }),
+    modelBox("mat", { z: 0, height: 0.4, material: "light" }),
+  ),
   // Внутренний блок: светлая лицевая панель, тёмная щель жалюзи под ней,
   // корпус за обеими.
   conditioner: modelParts(

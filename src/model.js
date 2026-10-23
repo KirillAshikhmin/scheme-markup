@@ -963,6 +963,26 @@ const TEMPLATE_TYPES = [
   // ходовой полотенцесушитель над раковиной, и ровно от этих 900 отмеряют ему
   // вывод.
   { category: "plumbing", code: "ПОС", name: strings.types.towelDryer, shape: "rect-vertical-ticks", view: "towelDryer", sizes: { length: 500, width: 800, depth: 100, heightAboveFloor: 900 } },
+  // ——— климат и праздник (правки после сборки сценариев) ——————————————————
+  //
+  // **Датчик климата** — «3 шкалы вертикальных как на ртутном градуснике»:
+  // корпус 80 × 120 на стене на уровне глаз, три шкалы — температура, влажность
+  // и CO₂ своего помещения (`volumeLiveSigns`). Знак — круг с чертой: свободен и
+  // в палитре, и у изображений.
+  { category: "sensors", code: "ДК", name: strings.types.climateSensor, shape: "circle-bar", view: "climateSensor", sizes: { length: 80, width: 120, depth: 25, heightAboveFloor: 1500 } },
+  // **Термостат** — настенный регулятор 86 × 86, как рамка выключателя, на
+  // 1500: его уставкой ведётся тёплый пол («через термостат»).
+  { category: "climate", code: "ТМ", name: strings.types.thermostat, shape: "diamond-cross", view: "thermostat", sizes: { length: 86, width: 86, depth: 15, heightAboveFloor: 1500 } },
+  // **Тёплый пол** — мат метр на метр на полу; греет помещение до своей
+  // уставки или до уставки термостата, который им управляет.
+  { category: "climate", code: "ТП", name: strings.types.warmFloor, shape: "trapezoid-dot", view: "warmFloor", sizes: { length: 1000, width: 1000, depth: 5, heightAboveFloor: 0 } },
+  // **Новогодняя ель** — ставится на пол: метр в обхвате, два десять ростом.
+  // У вещи на полу вверх идёт выступ (`volumeMarks`), поэтому рост — `depth`.
+  // Гирлянда и звезда — две лампы, включаются порознь. Знак — трапеция,
+  // силуэт ели: звезда занята категорией «Сеть», и общий знак завёл бы
+  // объекту предупреждение на пустом месте (G145). Категория — «Электроприборы»:
+  // её зелёный цвет и есть хвоя модели.
+  { category: "appliances", code: "НЕ", name: strings.types.xmasTree, shape: "trapezoid", view: "xmasTree", sizes: { length: 1000, width: 1000, depth: 2100, heightAboveFloor: 0 } },
 ];
 
 function newId() {

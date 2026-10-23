@@ -528,7 +528,9 @@ const REDRAWN_G14 = ["switch1", "switch2", "switch3", "switchToggle"];
 // `mirror` — круглое зеркало подсветки, таск 177 (G262).
 // `chandelier` — люстра, таск 216 (G323): до него она делила изображение и
 // тело с плафоном и была в кадре шайбой.
-const ADDED_AFTER = ["vent", "mirror", "chandelier"];
+// `climateSensor`, `thermostat`, `warmFloor`, `xmasTree` — датчик климата,
+// термостат, тёплый пол и новогодняя ель: правки после сборки сценариев.
+const ADDED_AFTER = ["vent", "mirror", "chandelier", "climateSensor", "thermostat", "warmFloor", "xmasTree"];
 
 // Вещи встроенного каталога (таск 154). Они живут в том же реестре, что
 // изображения меток, и отпечатка «до» у них тоже нет и быть не может —

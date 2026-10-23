@@ -45,14 +45,32 @@ function simShare(value, max = 100) {
  *   flow  — что устройство выдувает или звучит: `{kind, level}`, `kind` —
  *           `"air"` (вентиляция, бризер), `"cool"` и `"heat"` (кондиционер по
  *           режиму), `"sound"` (колонка); `null` — ничего;
- *   locked — замок заперт.
+ *   locked — замок заперт;
+ *   lamps — яркость каждой лампы по индексу сервиса (`{индекс: 0…1}`) или
+ *           `null`, если ламп нет; heat — термостат или тёплый пол греют;
+ *   climate — что показывают датчики климата: `{t, rh, co2}` (что есть).
  *
  * Три последних поля — правка после сборки сценариев: «Вентиляция не видно
  * когда работает, розетка тоже, и выключатель… придумай как визуально отличать
  * работающие от отключенных устройств». Их читает «Объём» (`volumeLiveSigns`).
  */
 export function simLiveOf(accessory, values) {
-  const live = { on: false, level: 0, alert: false, open: 0, pressedAt: null, keys: null, flow: null, locked: false };
+  const live = {
+    on: false,
+    level: 0,
+    alert: false,
+    open: 0,
+    pressedAt: null,
+    keys: null,
+    flow: null,
+    locked: false,
+    // Правки после сборки сценариев: яркость каждой лампы устройства по её
+    // сервису (у ели гирлянда и звезда горят порознь), греет ли термостат или
+    // тёплый пол и что показывают датчики климата — `{t, rh, co2}`.
+    lamps: null,
+    heat: false,
+    climate: null,
+  };
   if (!accessory || !Array.isArray(accessory.services)) return live;
   const read = simLiveReader(values);
   const lit = (level) => {
@@ -63,14 +81,25 @@ export function simLiveOf(accessory, values) {
     if (!live.flow || live.flow.level < level) live.flow = { kind, level };
   };
   let warm = false;
+  const sense = (key, value) => {
+    const number = Number(value);
+    if (value === undefined || value === null || !Number.isFinite(number)) return;
+    if (!live.climate) live.climate = {};
+    live.climate[key] = number;
+  };
   for (const service of accessory.services) {
     switch (service.type) {
-      case "Lightbulb":
+      case "Lightbulb": {
+        let level = 0;
         if (read(service, "On")) {
           const brightness = read(service, "Brightness");
-          lit(brightness === undefined ? 1 : simShare(brightness));
+          level = brightness === undefined ? 1 : simShare(brightness);
+          lit(level);
         }
+        if (!live.lamps) live.lamps = {};
+        live.lamps[service.index] = level;
         break;
+      }
       case "Switch":
       case "Outlet": {
         const on = Boolean(read(service, "On"));
@@ -108,6 +137,13 @@ export function simLiveOf(accessory, values) {
         break;
       case "Thermostat":
         if (read(service, "TargetHeatingCoolingState") !== "OFF") lit(1);
+        if (read(service, "CurrentHeatingCoolingState") === "HEAT") live.heat = true;
+        break;
+      case "TemperatureSensor":
+        sense("t", read(service, "CurrentTemperature"));
+        break;
+      case "HumiditySensor":
+        sense("rh", read(service, "CurrentRelativeHumidity"));
         break;
       case "Speaker":
         if (read(service, "Mute") === false) {
@@ -144,6 +180,7 @@ export function simLiveOf(accessory, values) {
         break;
       case "CarbonDioxideSensor":
         if (read(service, "CarbonDioxideDetected") === "CO2_LEVELS_ABNORMAL") live.alert = true;
+        sense("co2", read(service, "CarbonDioxideLevel"));
         break;
       default:
         break;

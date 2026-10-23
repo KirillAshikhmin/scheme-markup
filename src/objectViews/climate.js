@@ -6,6 +6,41 @@
 import { viewCircle, viewDrop, viewLine, viewLouvers, viewParts, viewPoly, viewRect } from "./kit.js";
 
 export const VIEWS_CLIMATE = {
+  // Термостат (правка после сборки сценариев): рамка с экраном и двумя
+  // кнопками под ним.
+  thermostat: {
+    // Знак свой у типа (поле `view`), за формой изображение не закрепляется.
+    shapes: [],
+    mm: { width: 86, height: 86 },
+    parts: viewParts(
+      viewRect(-0.5, -0.5, 1, 1, 0.12),
+      viewRect(-0.3, -0.32, 0.6, 0.34, 0.04),
+      viewCircle(-0.16, 0.24, 0.07),
+      viewCircle(0.16, 0.24, 0.07),
+    ),
+  },
+  // Тёплый пол: мат с греющим кабелем змейкой.
+  warmFloor: {
+    // Знак свой у типа (поле `view`), за формой изображение не закрепляется.
+    shapes: [],
+    mm: { width: 1000, height: 1000 },
+    parts: viewParts(
+      viewRect(-0.5, -0.5, 1, 1, 0.02),
+      viewPoly(
+        [
+          [-0.38, -0.38],
+          [0.38, -0.38],
+          [0.38, -0.13],
+          [-0.38, -0.13],
+          [-0.38, 0.13],
+          [0.38, 0.13],
+          [0.38, 0.38],
+          [-0.38, 0.38],
+        ],
+        false,
+      ),
+    ),
+  },
   // Внутренний блок кондиционера: корпус с решёткой и индикатором.
   conditioner: {
     shapes: ["circle-thermo"],
