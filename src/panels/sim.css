@@ -1,0 +1,412 @@
+/* ——— имитация умного дома в «Схеме» (таск 08 сценариев) ——————————————
+   Три вещи: полоса запуска и часов сверху плана, журнал в нижнем углу и
+   пульт устройства в карточке метки. Все три видны только в «Схеме» и
+   только поверх плана — поле сквозное для мыши, ловят клик сами контролы. */
+
+#sim-bar,
+#sim-journal {
+  position: absolute;
+  z-index: 6;
+}
+
+#sim-bar[hidden],
+#sim-journal[hidden] {
+  display: none;
+}
+
+/* ——— полоса запуска и часов ————————————————————————————————————————
+   Под рядом подсказки и переключателя режимов, по центру. Остановленный дом —
+   одна кнопка; запущенный — вторая строка с часами. */
+#sim-bar {
+  top: 52px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.sim-bar__row,
+.sim-bar__group {
+  pointer-events: auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--canvas-line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.97);
+  color: var(--canvas-text);
+  box-shadow: 0 6px 18px rgba(1, 4, 9, 0.18);
+  font-size: 13px;
+}
+
+.sim-bar__row[hidden],
+.sim-bar__group[hidden],
+.sim-bar [hidden] {
+  display: none;
+}
+
+.sim-bar__start {
+  font-weight: 600;
+}
+
+.sim-bar__status {
+  color: #57606a;
+}
+
+.sim-bar__status.is-running {
+  color: #1a7f37;
+  font-weight: 600;
+}
+
+.sim-bar__warn {
+  color: #9a6700;
+  font-size: 12px;
+}
+
+.sim-bar__date,
+.sim-bar__time {
+  width: auto;
+  flex: none;
+}
+
+.sim-bar__time {
+  width: 11ch;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.sim-bar__speed {
+  max-width: 190px;
+}
+
+.sim-bar .ui-btn.is-on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.sim-bar .ui-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+#app.is-mobile #sim-bar {
+  top: 48px;
+}
+
+/* ——— «Выполнить команду» ————————————————————————————————————————————— */
+.sim-command__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 40vh;
+  overflow: auto;
+}
+
+.sim-command__item {
+  text-align: left;
+}
+
+.sim-command__item.is-inactive {
+  color: #6e7781;
+  font-style: italic;
+}
+
+.sim-command__own {
+  display: flex;
+  gap: 6px;
+}
+
+.sim-command__field {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* ——— журнал —————————————————————————————————————————————————————————
+   Справа, под полосой часов. Свёрнутый — ярлычок с заголовком; развёрнутый —
+   лента с фильтрами. Карточка устройства лежит по центру внизу, и журнал её не
+   закрывает: он висит выше и листает свою ленту сам. */
+#sim-journal {
+  right: 12px;
+  top: 206px;
+  width: min(400px, calc(100% - 24px));
+  max-height: calc(100% - 206px - 12px);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--canvas-line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.97);
+  color: var(--canvas-text);
+  box-shadow: 0 10px 28px rgba(1, 4, 9, 0.28);
+  font-size: 12px;
+  pointer-events: auto;
+}
+
+#sim-journal.is-collapsed {
+  width: auto;
+  max-width: calc(100% - 24px);
+}
+
+.sim-journal__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 8px 2px 2px;
+}
+
+.sim-journal__toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sim-journal__toggle:hover,
+.sim-journal__toggle:focus-visible {
+  color: var(--accent);
+}
+
+/* Галочка свёрнутого журнала смотрит вверх — «развернуть». */
+.sim-journal.is-collapsed .sim-journal__toggle .ui-icon {
+  --ui-icon: 14px;
+  transform: rotate(180deg);
+}
+
+.sim-journal:not(.is-collapsed) .sim-journal__toggle .ui-icon {
+  --ui-icon: 14px;
+}
+
+.sim-journal__count {
+  margin-left: auto;
+  color: #57606a;
+}
+
+.sim-journal__body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-top: 1px solid var(--canvas-line);
+}
+
+.sim-journal__body[hidden] {
+  display: none;
+}
+
+.sim-journal__tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 8px;
+}
+
+.sim-journal__filter {
+  flex: 1 1 120px;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.sim-journal__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow: auto;
+  min-height: 40px;
+  max-height: calc(100vh - 480px);
+}
+
+.sim-journal__row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0 8px;
+  padding: 3px 8px;
+  border-top: 1px solid #eaeef2;
+}
+
+.sim-journal__row.is-link {
+  cursor: pointer;
+}
+
+.sim-journal__row.is-link:hover {
+  background: #f6f8fa;
+}
+
+.sim-journal__time {
+  color: #6e7781;
+  font-variant-numeric: tabular-nums;
+}
+
+.sim-journal__text {
+  overflow-wrap: anywhere;
+}
+
+.sim-journal__chain {
+  grid-column: 2;
+  color: #6e7781;
+  overflow-wrap: anywhere;
+}
+
+.sim-journal__row.is-error .sim-journal__text {
+  color: #cf222e;
+}
+
+.sim-journal__row.is-press .sim-journal__text {
+  color: #0969da;
+}
+
+.sim-journal__row.is-true .sim-journal__text {
+  color: #1a7f37;
+}
+
+.sim-journal__row.is-false .sim-journal__text {
+  color: #9a6700;
+}
+
+.sim-journal__empty {
+  margin: 0;
+  padding: 8px;
+  color: #57606a;
+}
+
+.sim-journal__empty[hidden] {
+  display: none;
+}
+
+/* ——— пульт устройства в карточке метки ———————————————————————————————
+   Карточка на компьютере сквозная для мыши (`.mark-card--compact`); пока дом
+   запущен, в ней управляют — она ловит клик и вырастает. */
+.mark-card--sim {
+  pointer-events: auto;
+  max-height: 38vh;
+}
+
+.mark-card--sim .mark-card__body {
+  flex-direction: column;
+}
+
+.mark-card--sim .mark-card__row {
+  display: grid;
+}
+
+.sim-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--canvas-line);
+}
+
+.sim-card__head {
+  margin: 4px 0 0;
+  color: #57606a;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.sim-card__head.is-aux {
+  font-style: italic;
+}
+
+.sim-card__key {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.sim-card__keyname {
+  min-width: 84px;
+  font-weight: 600;
+}
+
+.sim-card__keystate {
+  color: #57606a;
+  min-width: 24px;
+}
+
+.sim-card__presses {
+  display: flex;
+  gap: 4px;
+}
+
+.sim-card__press:disabled {
+  opacity: 0.45;
+}
+
+.sim-card__char {
+  display: grid;
+  grid-template-columns: minmax(120px, 190px) 1fr;
+  align-items: center;
+  gap: 4px 10px;
+}
+
+.sim-card__charname {
+  color: #57606a;
+}
+
+.sim-card__range {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sim-card__slider {
+  flex: 1 1 auto;
+  min-width: 80px;
+  max-width: 280px;
+}
+
+.sim-card__value {
+  min-width: 56px;
+  font-variant-numeric: tabular-nums;
+}
+
+.sim-card__select {
+  max-width: 240px;
+}
+
+/* ——— правка погашена, пока дом запущен ———————————————————————————————
+   Раздел «Метки» в левой колонке гаснет, а подпись `data-sim-note` (её ставит
+   каркас словами «Остановите дом, чтобы править») встаёт над ним. */
+#app.is-sim-scheme #panel-tools {
+  position: relative;
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+#app.is-sim-scheme #panel-tools::before {
+  content: attr(data-sim-note);
+  display: block;
+  padding: 6px 8px;
+  color: #9a6700;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* Узкое поле: журнал и карточка делят низ — журнал уступает в высоту. */
+@media (max-width: 900px) {
+  #sim-journal {
+    top: auto;
+    right: auto;
+    left: 12px;
+    bottom: 12px;
+    max-height: 34%;
+  }
+
+  .sim-journal__list {
+    max-height: 22vh;
+  }
+}

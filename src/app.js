@@ -18,6 +18,10 @@ import {
 // Каркас хранит выбранный вид в состоянии сеанса и ничего о нём больше не знает.
 import { FONT_DRAFT, FONT_KINDS } from "./render.js";
 import { registerServiceWorker } from "./pwa.js";
+// Имитация умного дома (таск 08 сценариев): каркас зовёт `simSync` на каждую
+// смену объекта и держит в состоянии сеанса одну отметку — запущен ли дом. Само
+// живое состояние сюда не попадает: ни в `project`, ни в историю отмены.
+import { simRunning, simSync, simWatch } from "./simulation.js";
 // Значок кнопки раскладки рисует общий набор — своего рисунка у каркаса нет.
 import { uiIcon } from "./panels/ui.js";
 // Липкие заголовки колонок: верх умеет браузер, низ — рейка (таск 194).
@@ -42,6 +46,10 @@ export const PANEL_IDS = {
   // холста: наложение собирает `canvas.js`, а переключатель живёт в панелях,
   // которые его же и импортируют, — кнопка оттуда замкнула бы сборку в круг.
   canvasModes: "canvas-modes",
+  // Полоса запуска и часов имитации и журнал (таск 08): живут в поле «Схемы»,
+  // каждая в своём углу, и в других режимах гаснут.
+  simBar: "sim-bar",
+  simJournal: "sim-journal",
   // Поверхности основного экрана: чертёж и объём лежат там же, где план, и
   // показывается ровно одна (таск 153). Окон у них больше нет.
   screenDrawing: "screen-drawing",
@@ -104,6 +112,11 @@ const appState = {
   // Схемой» (таск 153) этим и отменено: оно остаётся только для объекта, у
   // которого памяти ещё нет.
   screen: SCREEN_DEFAULT,
+  // Идёт ли имитация дома (таск 08): отражение `simRunning()`, чтобы холст,
+  // карточка и панели узнавали о запуске из `subscribe`, как о любой смене
+  // сеанса. В объект не пишется. Пока дом запущен, «Схема» — пульт, а не
+  // редактор (`canvasEditAllowed`).
+  simRunning: false,
   project: null,
   schemeId: null,
   selectedMarkIds: [],
@@ -696,6 +709,9 @@ export function setState(patch) {
   }
   syncHiddenObjects(changed);
   syncViewMemory(changed);
+  // Дом перестраивается на каждую смену объекта (правка, открытие, другой
+  // объект) — состояние живых устройств он при этом сохраняет.
+  if ("project" in changed) simSync(appState.project);
   // Кто на экране — тот и пишет общее место (дефект D61). Говорится это **до**
   // оповещения: к мигу, когда поверхности узнают о новом режиме, хозяин записи
   // уже новый, и погасшее поле своим кадром места не отнимет.
@@ -805,6 +821,11 @@ function syncScreenClass() {
   const app = document.getElementById("app");
   if (!app) return;
   app.dataset.screen = appState.screen;
+  // «Схема» в режиме пульта: правка погашена, и раздел меток говорит почему.
+  const locked = appState.simRunning === true && appState.screen === SCREEN_DEFAULT;
+  app.classList.toggle("is-sim-scheme", locked);
+  const tools = document.getElementById(PANEL_IDS.tools);
+  if (tools) tools.dataset.simNote = locked ? strings.sim.bar.editLocked : "";
   // Режим меняет состав разделов в обеих колонках — рейке заголовков это
   // переезд всех её строк сразу.
   syncPanelRail();
@@ -1237,6 +1258,12 @@ export function startApp() {
   syncCanvasClass();
   syncScreenClass();
   wireLayout();
+  // Запуск и остановка дома доходят до панелей обычной сменой состояния.
+  simWatch((payload) => {
+    if (payload.running !== appState.simRunning) setState({ simRunning: payload.running });
+  });
+  if (simRunning() !== appState.simRunning) setState({ simRunning: simRunning() });
+  if (appState.project) simSync(appState.project);
   for (const id of appPanels.keys()) mountPanel(id);
   // Рейка завязывается после панелей: разделы в разметке стоят с самого начала,
   // а вот высоты у них появляются, когда панели в них что-то положили.

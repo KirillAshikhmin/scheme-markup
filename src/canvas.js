@@ -139,6 +139,8 @@ import {
   RULER_SIZE,
   planToScreen,
   screenToPlan,
+  drawMarkLive,
+  simLiveKindOf,
   draftSnap,
   visibleMarks,
   visibleOutlines,
@@ -148,6 +150,9 @@ import { canRedo, canUndo, clearHistory, pushCommand, redo, undo } from "./histo
 import { getSetting, setSetting } from "./store.js";
 import { uiConfirm, uiDialogDepth, uiEl, uiFieldTarget, uiIcon, uiPrompt, uiSpaceTarget, uiTypingTarget } from "./panels/ui.js";
 import { createFieldPlate, plateUnseen } from "./panels/plate.js";
+import { deviceClickAct, deviceClickPlan, deviceKeyPresser } from "./panels/deviceCard.js";
+import { homeAccessories, markAccessory } from "./sim/home.js";
+import { simLive, simPress, simWatch } from "./simulation.js";
 import { createElevationStrip, elevationPlace } from "./panels/elevation.js";
 import { screenPlaceOf, screenPlacePlanRead, screenPlacePlanView, screenPlaceSet } from "./screenPlace.js";
 
@@ -225,14 +230,29 @@ export function canvasPanSpeed(heldMs) {
 // ней прячут кнопки, но мышь в суженном окне десктопа никуда не делась, и без
 // этой проверки клик по плану ставил метку, перетаскивание двигало её, а Delete
 // удалял. Своего списка холст не заводит: спрашивает то же умение `editMarks`.
+//
+// **Запущенный дом тоже закрывает правку** (таск 08 сценариев, история 2.1):
+// «Схема» с идущей имитацией — пульт, а не редактор. Дверь та же, что у
+// просмотра, и все её пользователи (`canvasCommit`, отмена, ручки, перенос,
+// постановка) гаснут разом, без второго списка: щелчок по метке в это время —
+// нажатие на устройство, а не выделение для правки.
 export function canvasEditAllowed(state) {
-  return Boolean(state) && layoutAllows("editMarks", state.layout);
+  return Boolean(state) && layoutAllows("editMarks", state.layout) && !canvasSimLocked(state);
+}
+
+/**
+ * Идёт ли имитация на этом плане: дом запущен и поле — «Схема». В «Объёме» и
+ * «Сценариях» дом может идти, а «Схема» там не видна и правку не закрывает.
+ */
+export function canvasSimLocked(state) {
+  return Boolean(state) && state.simRunning === true && canvasOnScreen(state);
 }
 
 // Отказ вслух: правка, которая не случилась, должна быть видна. Молчаливый
-// отказ в этой сборке уже стоил четырёх тасков.
+// отказ в этой сборке уже стоил четырёх тасков. У запущенного дома слова свои:
+// остановить дом — и правка вернётся.
 function canvasViewOnly() {
-  if (canvasApi) canvasApi.notify(strings.mobile.viewOnly);
+  if (canvasApi) canvasApi.notify(canvasSimLocked(canvasState()) ? strings.sim.bar.editLocked : strings.mobile.viewOnly);
   return false;
 }
 
@@ -471,7 +491,7 @@ export function canvasOnScreen(state) {
 export function canvasHintText(state) {
   if (!state || !state.schemeId) return null;
   if (!canvasOnScreen(state)) return null;
-  if (!canvasEditAllowed(state)) return strings.mobile.viewOnly;
+  if (!canvasEditAllowed(state)) return canvasSimLocked(state) ? strings.sim.bar.editLocked : strings.mobile.viewOnly;
   // Правка ломаной — это режим руки, и подсказка обязана сказать, что сейчас
   // делает двойной клик: он здесь занят вершинами, а не выделением.
   if (state.editPathId && state.project) {
@@ -952,6 +972,151 @@ function canvasRedraw() {
   });
 }
 
+// ——— имитация: состояние на плане и щелчки по устройствам ——————————————
+//
+// Таск 08 сценариев (истории 2.1, 2.5–2.7, 2.10, 2.11). Пока дом запущен,
+// «Схема» — пульт: правка закрыта (`canvasSimLocked`), щелчок по метке-
+// устройству нажимает на устройство, метки рисуют состояние. Живое состояние
+// живёт в `simulation.js` и **никогда** не идёт через `canvasCommit` — это
+// не правка объекта.
+
+// Период пульса сработавшего датчика и время вспышки нажатия, мс.
+const CANVAS_SIM_PULSE_MS = 1400;
+const CANVAS_SIM_FLASH_MS = 700;
+// Подсветка метки по щелчку на строку журнала.
+const CANVAS_HIGHLIGHT_MS = 1500;
+
+let canvasLiveCache = null; // {source, project, out}
+let canvasLiveKinds = null; // {project, kinds: Map markId → вид знака}
+const canvasSimFlash = new Map(); // markId → {pressedAt, at}
+const canvasSimPressers = new Map(); // "markId|индекс" → распознаватель нажатий
+let canvasHighlight = null; // {markId, at}
+
+function canvasSimKinds(project) {
+  if (canvasLiveKinds && canvasLiveKinds.project === project) return canvasLiveKinds.kinds;
+  const kinds = new Map(homeAccessories(project).map((accessory) => [accessory.markId, simLiveKindOf(accessory)]));
+  canvasLiveKinds = { project, kinds };
+  return kinds;
+}
+
+/**
+ * Кадр состояния дома для `drawScheme`: `{live, fx, animate}`. `live` — карта
+ * `markId → Live` с видом знака (кэшируется, пока зеркало не изменилось);
+ * `fx` — фаза пульса и затухание вспышек нажатий; `animate` — кадр нужен
+ * снова (идёт пульс или вспышка).
+ */
+function canvasLiveFrame(project, now) {
+  const source = simLive(project);
+  if (!canvasLiveCache || canvasLiveCache.source !== source || canvasLiveCache.project !== project) {
+    const kinds = canvasSimKinds(project);
+    const out = new Map();
+    for (const [markId, live] of source) out.set(markId, { ...live, kind: kinds.get(markId) || "other" });
+    canvasLiveCache = { source, project, out };
+  }
+  const flash = new Map();
+  let animate = false;
+  for (const [markId, live] of canvasLiveCache.out) {
+    if (live.alert) animate = true;
+    if (live.pressedAt === null) continue;
+    const seen = canvasSimFlash.get(markId);
+    if (!seen || seen.pressedAt !== live.pressedAt) canvasSimFlash.set(markId, { pressedAt: live.pressedAt, at: now });
+    const left = 1 - (now - canvasSimFlash.get(markId).at) / CANVAS_SIM_FLASH_MS;
+    if (left > 0) {
+      flash.set(markId, left);
+      animate = true;
+    }
+  }
+  return {
+    live: canvasLiveCache.out,
+    fx: { pulse: (now % CANVAS_SIM_PULSE_MS) / CANVAS_SIM_PULSE_MS, flash },
+    animate,
+  };
+}
+
+/**
+ * Подсветить метку на плане на полторы секунды (щелчок по строке журнала).
+ * Подсвеченная метка выделяется — карточка устройства под рукой.
+ */
+export function canvasHighlightMark(markId) {
+  const state = canvasState();
+  if (!state || !state.project || !markId) return false;
+  const mark = findMark(state.project, markId);
+  if (!mark) return false;
+  canvasHighlight = { markId, at: canvasNow() };
+  canvasApi.setState({ selectedMarkIds: [markId], selectedOutlineId: null, ...(mark.schemeId && mark.schemeId !== state.schemeId ? { schemeId: mark.schemeId } : {}) });
+  canvasRedraw();
+  return true;
+}
+
+// Кольцо вокруг подсвеченной метки; `true`, пока подсветка ещё живёт.
+function canvasHighlightPaint(project, scheme, view, now) {
+  if (!canvasHighlight) return false;
+  const left = 1 - (now - canvasHighlight.at) / CANVAS_HIGHLIGHT_MS;
+  if (left <= 0) {
+    canvasHighlight = null;
+    return false;
+  }
+  const mark = findMark(project, canvasHighlight.markId);
+  if (!mark || mark.schemeId !== scheme.id || !mark.points || mark.points.length === 0) return true;
+  const at = planToScreen(mark.points[0], scheme, view);
+  canvasCtx.save();
+  canvasCtx.strokeStyle = "#bf8700";
+  canvasCtx.lineWidth = 3;
+  canvasCtx.globalAlpha = Math.min(1, left * 1.5);
+  canvasCtx.beginPath();
+  canvasCtx.arc(at.x, at.y, markRadius(view) * (1.8 + 1.2 * (1 - left)), 0, Math.PI * 2);
+  canvasCtx.stroke();
+  canvasCtx.restore();
+  return true;
+}
+
+// Распознаватель нажатий одной клавиши: один на клавишу, пока жив объект.
+function canvasSimPresserOf(markId, index) {
+  const key = markId + "|" + index;
+  if (!canvasSimPressers.has(key)) {
+    canvasSimPressers.set(
+      key,
+      deviceKeyPresser({
+        fire: (press) => simPress(markId, index, press),
+        now: canvasNow,
+        later: (fn, ms) => setTimeout(fn, ms),
+        clear: (id) => clearTimeout(id),
+      }),
+    );
+  }
+  return canvasSimPressers.get(key);
+}
+
+/**
+ * Начало щелчка по метке в запущенном доме: что она делает (`deviceClickPlan`)
+ * и, если это клавиша с нажатиями, — нажатие уже началось. Возвращает жест
+ * `{markId, plan, presser}` для `canvasSimEnd`; метки, на которую нечем
+ * щёлкнуть, — тоже жест (чтобы отпускание знало, что ничего делать не надо).
+ */
+function canvasSimBegin(state, markId) {
+  const plan = deviceClickPlan(markAccessory(state.project, markId));
+  const sim = { markId, plan, presser: null };
+  if (plan.kind === "key" && plan.key.detect) {
+    sim.presser = canvasSimPresserOf(markId, plan.key.index);
+    sim.presser.down();
+  }
+  return sim;
+}
+
+/**
+ * Конец щелчка. `moved` — жест оказался панорамой (или отменён системой):
+ * начатое нажатие бросается, а мгновенные действия не выполняются.
+ */
+function canvasSimEnd(sim, moved) {
+  if (!sim) return;
+  if (sim.presser) {
+    if (moved) sim.presser.abort();
+    else sim.presser.up();
+    return;
+  }
+  if (!moved) deviceClickAct(sim.markId, sim.plan);
+}
+
 function canvasResize() {
   if (!canvasNode || !canvasHost) return;
   const ratio = window.devicePixelRatio || 1;
@@ -994,6 +1159,12 @@ function canvasPaint() {
   // середины поля в миллиметры: дешевле, чем ловить все двери к `view`.
   canvasPushPlace(state, project, view);
   const draftColor = canvasDraftColor(state, project);
+  // Живое состояние: карта метка → ореол/пульс/знак и эффекты кадра.
+  const now = canvasNow();
+  const frame = canvasSimLocked(state) ? canvasLiveFrame(project, now) : null;
+  const live = frame ? frame.live : null;
+  const liveFx = frame ? frame.fx : null;
+  let animate = Boolean(frame && frame.animate);
   drawScheme(canvasCtx, {
     project,
     scheme,
@@ -1024,7 +1195,12 @@ function canvasPaint() {
     // отношения не имеет, а волна вместо прямой мешала бы целиться.
     draftLineStyle:
       state.activeTypeId && state.mode !== CANVAS_MODE_SCALE ? styleOf(project, state.activeTypeId).lineStyle : "solid",
+    // Состояние дома — только экран и только пока дом запущен: выгрузки этого
+    // аргумента не получают, и их кадр не меняется (G68).
+    ...(live ? { live, liveFx } : {}),
   });
+  if (canvasHighlightPaint(project, scheme, view, now)) animate = true;
+  if (animate) canvasRedraw();
   // Метка-призрак — **сразу за метками и до линейки**: поставленная метка
   // ляжет ровно сюда же, и выглядеть призрак обязан так же. В `drawScheme` его
   // нет вовсе — значит, в PNG, в печать и в лист «Схема» он не попадёт ни при
@@ -2959,7 +3135,9 @@ export function canvasTapAction(state, drag, options = {}) {
     // значило бы отбирать их из-под пальца. Мышь там ведёт себя так же: клик
     // по выделенной метке её не снимает.
     const same = selected.length === 1 && selected[0] === markId;
-    if (same && canvasEditAllowed(state)) return null;
+    // Запущенный дом: повторный тап по метке — снова нажатие на устройство, а
+    // не закрытие карточки: пульт обязан оставаться под рукой.
+    if (same && (canvasEditAllowed(state) || canvasSimLocked(state))) return null;
     return { selectedMarkIds: same ? [] : [markId], selectedOutlineId: null };
   }
   if (drag.kind === "pan" && drag.tapSelected && selected.length > 0) return { selectedMarkIds: [] };
@@ -3261,6 +3439,8 @@ function canvasPointerDown(event) {
       canvasDrag.pick = pick;
       // `tap` держит выбор метки: его читает `canvasTapAction` (таск 106).
       canvasDrag.tap = { markId: pick.markId };
+      // Запущенный дом: палец нажимает на устройство так же, как мышь.
+      if (canvasSimLocked(touchState) && pick.markId) canvasDrag.sim = canvasSimBegin(touchState, pick.markId);
       canvasPressStart(at, pick);
     }
     return;
@@ -3462,12 +3642,17 @@ function canvasPointerDown(event) {
       // он снимает выделение и закрывает карточку. Решение принимается здесь,
       // а применяется по отпусканию: с той же метки начинают и панораму, и
       // снимать выделение под рукой было бы нельзя.
+      //
+      // В запущенном доме тот же жест — нажатие на устройство (`sim`): оно
+      // выполняется по отпусканию, а сдвиг превращает его в панораму.
+      const sim = canvasSimLocked(state) ? canvasSimBegin(state, hit.markId) : null;
       canvasDrag = {
         kind: "pan",
         start: point,
         view: { ...state.view },
         moved: false,
-        tapSelected: state.selectedMarkIds.length === 1 && state.selectedMarkIds[0] === hit.markId,
+        tapSelected: !sim && state.selectedMarkIds.length === 1 && state.selectedMarkIds[0] === hit.markId,
+        sim,
       };
       return;
     }
@@ -3855,6 +4040,11 @@ function canvasPointerMove(event) {
     // Повели — значит, это панорама или уже начатый перенос: ждать долгого
     // нажатия больше нечего, и кольцо под пальцем гаснет.
     canvasPressCancel();
+    // Нажатие на устройство, начатое этим жестом, бросается: это панорама.
+    if (canvasDrag.sim) {
+      canvasSimEnd(canvasDrag.sim, true);
+      canvasDrag.sim = null;
+    }
   }
   if (!canvasDrag.moved) return;
 
@@ -3899,6 +4089,8 @@ function canvasPointerUp(event) {
   const drag = canvasDrag;
   canvasDrag = null;
   if (!drag) return;
+  // Нажатие на устройство в запущенном доме доводится до конца первым делом.
+  if (drag.sim) canvasSimEnd(drag.sim, drag.moved || event.type === "pointercancel");
   const point = canvasPointOf(event);
   const state = canvasState();
 
@@ -4506,6 +4698,8 @@ function mountCanvas(host, api) {
     if ("schemeId" in changed || "schemeImage" in changed || "project" in changed) canvasAutoFit(state);
     canvasRedraw();
   });
+  // Дом живёт сам: изменения устройств, запуск и остановка перерисовывают план.
+  simWatch(() => canvasRedraw());
   canvasResize();
   canvasSyncCursor();
   canvasAutoFit(canvasState());
@@ -4636,6 +4830,8 @@ function mountCanvasHint(host, api) {
       // Правка ломаной — такой же режим руки, как «Добавление»: началась или
       // закончилась, и подсказка обязана это сказать.
       "editPathId" in changed ||
+      // Дом запущен или остановлен: «Схема» стала пультом и говорит об этом.
+      "simRunning" in changed ||
       "project" in changed
     ) {
       render();

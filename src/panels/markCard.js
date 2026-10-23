@@ -35,6 +35,7 @@ import { planToScreen, typeIconPlan, typeSignIcon } from "../render.js";
 import { getSetting, setSetting } from "../store.js";
 import { strings } from "../strings.js";
 import { UI_SIGN, UI_SIGN_SMALL, uiButton, uiEl, uiIcon, uiIconButton, uiSignCell } from "./ui.js";
+import { deviceCardView } from "./deviceCard.js";
 import { marksControllerIndex, marksLinkedText, marksLinkedTitle, marksRowModel } from "./marks.js";
 
 // Отступ между меткой и верхним краем карточки: метка должна остаться видна
@@ -86,6 +87,9 @@ export function markCardState(state, collapsed = false) {
   // показывать первую попавшуюся — врать.
   if (!source.project || selected.length !== 1) return MARK_CARD_NONE;
   if (!layoutAllows("editMarks", source.layout)) return MARK_CARD_FULL;
+  // Пока дом запущен, карточка — пульт устройства (таск 08): ярлычком его не
+  // свернуть, иначе клавиши и ползунки пропали бы из-под руки.
+  if (source.simRunning === true) return MARK_CARD_FULL;
   return collapsed ? MARK_CARD_MINI : MARK_CARD_FULL;
 }
 
@@ -227,6 +231,13 @@ function mountMarkCard(host, api) {
   host.replaceChildren(card);
   let shownFor = null;
   let collapsed = false;
+  // Пульт устройства (таск 08): подписка карточки на имитацию живёт, пока
+  // карточка показана.
+  let deviceView = null;
+  const dropDevice = () => {
+    if (deviceView) deviceView.dispose();
+    deviceView = null;
+  };
 
   const flip = (value) => {
     collapsed = value;
@@ -245,6 +256,7 @@ function mountMarkCard(host, api) {
         ? null
         : markCardModel(state.project, state.selectedMarkIds[0]);
     card.hidden = !model;
+    dropDevice();
     // В просмотре карточка показывает метку целиком и стоит колонкой; на
     // компьютере она ужата в ряды и пропускает клик на план под собой.
     const viewing = !layoutAllows("editMarks", state.layout);
@@ -319,7 +331,11 @@ function mountMarkCard(host, api) {
             }),
           ])
         : null;
-    card.replaceChildren(...markCardParts(model, { headButton, extra: commentRow }));
+    // Запущенный дом: под полями метки — пульт её устройства (клавиши,
+    // ползунки, значения), собранный карточкой устройства.
+    if (state.simRunning === true && !model.comment) deviceView = deviceCardView(state.project, model.id);
+    card.classList.toggle("mark-card--sim", Boolean(deviceView));
+    card.replaceChildren(...markCardParts(model, { headButton, extra: deviceView ? deviceView.node : commentRow }));
     // План подвигается только в просмотре: там карточка высокая и метка
     // действительно уходит под неё. На компьютере выделение случается на
     // каждый клик по метке, и сдвиг плана из-под руки — прямая дорога к
@@ -353,7 +369,8 @@ function mountMarkCard(host, api) {
       "project" in changed ||
       "layout" in changed ||
       "schemeId" in changed ||
-      "screen" in changed
+      "screen" in changed ||
+      "simRunning" in changed
     ) {
       render();
     }

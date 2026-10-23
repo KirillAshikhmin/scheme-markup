@@ -4691,6 +4691,161 @@ function drawMarkBody(ctx, project, scheme, mark, view, selected, stacks) {
   ctx.restore();
 }
 
+// ——— состояние дома на «Схеме» (таск 08 сценариев, история 2.11) ———————
+//
+// Пока дом запущен, метка показывает, что с устройством: включённый свет —
+// ореол по яркости, сработавший датчик — красный пульс, открытая штора,
+// включённый телевизор и розетка — свой знак, нажатая клавиша — вспышка.
+// Это **только экран**: рисует всё это один необязательный аргумент
+// `drawScheme({…, live, liveFx})`, и передаёт его только холст. Без него кадр
+// не меняется ни на один вызов `ctx` (G68) — PNG, лист ГОСТ и печать его не
+// получают.
+//
+// `live` — `Map<markId, Live>` (`simLiveOf`) с видом знака: `kind` — один из
+// `SIM_LIVE_KINDS`. `liveFx` — `{pulse: 0…1, flash: Map<markId, 0…1>}`: фаза
+// пульса и затухание вспышки считает холст по своему времени, чтобы здесь
+// кадр оставался чистой функцией аргументов.
+
+/** Виды знака состояния: свет, штора, телевизор, розетка, прочее. */
+export const SIM_LIVE_KINDS = Object.freeze(["light", "curtain", "tv", "outlet", "other"]);
+/** Цвет ореола включённого света. */
+export const SIM_LIVE_GLOW_RGB = "255, 196, 64";
+/** Цвет сработавшего датчика. */
+export const SIM_LIVE_ALERT_COLOR = "#d1242f";
+/** Цвет знака «включено». */
+export const SIM_LIVE_ON_COLOR = "#1a7f37";
+
+/**
+ * Вид знака состояния по аксессуару метки (`markAccessory`): штора, телевизор,
+ * розетка и свет — по сервисам, остальное — «прочее».
+ */
+export function simLiveKindOf(accessory) {
+  const types = new Set(((accessory && accessory.services) || []).map((service) => service.type));
+  if (types.has("WindowCovering")) return "curtain";
+  if (types.has("Television")) return "tv";
+  if (types.has("Outlet")) return "outlet";
+  if (types.has("Lightbulb")) return "light";
+  return "other";
+}
+
+function simLiveShare(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(0, Math.min(1, number)) : 0;
+}
+
+// Ореол под знаком: у точки — радиальный градиент, у линии — мягкая толстая
+// полоса вдоль неё. Сила — от яркости: даже тусклый свет виден.
+function drawLiveGlow(ctx, mark, screen, radius, live) {
+  const level = simLiveShare(live.level);
+  const alpha = 0.16 + 0.5 * level;
+  ctx.save();
+  if (mark.kind === "line" && screen.length > 1) {
+    ctx.strokeStyle = "rgba(" + SIM_LIVE_GLOW_RGB + ", " + (alpha * 0.7).toFixed(3) + ")";
+    ctx.lineWidth = radius * (1.6 + 2.4 * level);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    screen.forEach((point, index) => (index === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y)));
+    if (mark.closed) ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+  const reach = radius * (2.4 + 2.2 * level);
+  for (const point of screen) {
+    const gradient = ctx.createRadialGradient(point.x, point.y, radius * 0.4, point.x, point.y, reach);
+    gradient.addColorStop(0, "rgba(" + SIM_LIVE_GLOW_RGB + ", " + alpha.toFixed(3) + ")");
+    gradient.addColorStop(1, "rgba(" + SIM_LIVE_GLOW_RGB + ", 0)");
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, reach, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+// Знак состояния рядом с меткой — в правом верхнем углу знака.
+function drawLiveBadge(ctx, at, size, kind, live) {
+  ctx.save();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = "#ffffff";
+  if (kind === "curtain") {
+    // Штора: две створки; чем она открытее, тем шире просвет между ними.
+    const open = simLiveShare(live.open);
+    const half = size * 0.55;
+    const gap = size * 0.9 * open;
+    ctx.fillStyle = "#6e7781";
+    ctx.fillRect(at.x - half - gap, at.y - half, half, half * 2);
+    ctx.fillRect(at.x + gap, at.y - half, half, half * 2);
+    ctx.strokeRect(at.x - half - gap, at.y - half, half, half * 2);
+    ctx.strokeRect(at.x + gap, at.y - half, half, half * 2);
+  } else if (kind === "tv") {
+    ctx.fillStyle = "#1f6feb";
+    ctx.fillRect(at.x - size, at.y - size * 0.7, size * 2, size * 1.4);
+    ctx.strokeRect(at.x - size, at.y - size * 0.7, size * 2, size * 1.4);
+  } else {
+    ctx.fillStyle = SIM_LIVE_ON_COLOR;
+    ctx.beginPath();
+    ctx.arc(at.x, at.y, size * 0.75, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/**
+ * Состояние одного устройства на плане. `layer`: `"glow"` — ореол света (до
+ * знаков, чтобы свет лёг под соседей), `"badge"` — знаки, пульс и вспышка
+ * (после знаков). `live` — запись из `Map` для этой метки; нет записи — ничего
+ * не рисуется, и ни одного вызова `ctx`.
+ */
+export function drawMarkLive(ctx, project, scheme, mark, view, live, fx, options = {}) {
+  if (!live || markIsComment(mark) || !mark.points || mark.points.length === 0) return;
+  const layer = options.layer === "glow" ? "glow" : "badge";
+  const kind = SIM_LIVE_KINDS.includes(live.kind) ? live.kind : "other";
+  const radius = markRadius(view);
+  const screen = markStackPoints(mark, options.stacks || null).map((point) => planToScreen(point, scheme, view));
+  if (layer === "glow") {
+    if (live.on && kind === "light") drawLiveGlow(ctx, mark, screen, radius, live);
+    return;
+  }
+  const effects = fx || {};
+  const at = screen[0];
+  if (live.alert) {
+    // Красная метка-пульс: постоянное кольцо и расходящаяся волна.
+    const phase = simLiveShare(effects.pulse);
+    ctx.save();
+    ctx.strokeStyle = SIM_LIVE_ALERT_COLOR;
+    ctx.lineWidth = 2.5;
+    for (const point of screen) {
+      ctx.globalAlpha = 0.95;
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, radius * 1.3, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 0.7 * (1 - phase);
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, radius * (1.3 + 1.6 * phase), 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  const flash = effects.flash && typeof effects.flash.get === "function" ? simLiveShare(effects.flash.get(mark.id)) : 0;
+  if (flash > 0) {
+    ctx.save();
+    ctx.strokeStyle = "#0969da";
+    ctx.lineWidth = 3;
+    ctx.globalAlpha = flash;
+    ctx.beginPath();
+    ctx.arc(at.x, at.y, radius * (1.2 + 1.8 * (1 - flash)), 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+  const shows = kind === "curtain" ? live.open > 0 : live.on && kind !== "light";
+  if (shows) {
+    drawLiveBadge(ctx, { x: at.x + radius * 1.05, y: at.y - radius * 1.05 }, Math.max(4, radius * 0.55), kind, live);
+  }
+}
+
 // ——— стопка совпавших меток: отрисовка ————————————————————————————————
 //
 // Ни одного нового способа рисовать знак: сами знаки рисует тот же
@@ -6744,6 +6899,10 @@ export function drawScheme(ctx, {
   objects,
   hiddenObjectIds,
   selectedWallId,
+  // Состояние дома запущенной имитации (таск 08, история 2.11): `Map<markId,
+  // Live>` и эффекты кадра. Передаёт только холст; без них кадр прежний.
+  live,
+  liveFx,
 }) {
   const state = renderView(view);
   if (image) {
@@ -6797,8 +6956,15 @@ export function drawScheme(ctx, {
   const shown = visibleMarks(project, scheme, filter);
   const stacks = markStacks(project, scheme, filter, state);
   drawMarkStackSpines(ctx, project, scheme, state, shown, stacks);
+  // Ореолы света — под знаками: свет ложится на план, а не поверх соседей.
+  if (live) {
+    for (const mark of shown) drawMarkLive(ctx, project, scheme, mark, state, live.get(mark.id), liveFx, { stacks, layer: "glow" });
+  }
   for (const mark of shown) {
     drawMarkSign(ctx, project, scheme, mark, state, { selected: selected.has(mark.id), stacks });
+  }
+  if (live) {
+    for (const mark of shown) drawMarkLive(ctx, project, scheme, mark, state, live.get(mark.id), liveFx, { stacks, layer: "badge" });
   }
   // Связи — поверх меток и под подписями: обозначение метки читать важнее, чем
   // дугу разбора. `links` — либо готовый кадр (его считает холст из того же
