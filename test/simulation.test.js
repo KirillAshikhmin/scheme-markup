@@ -470,6 +470,37 @@ test("правка объекта при идущей задержке — жу�
   assert.equal(sim.value(box.marks["С3"], 0, "On"), true);
 });
 
+// Слепая приёмка (F2): правка мимо логического сценария его не перезапускает —
+// и таймер, который он поставил, переживает перестройку дома. Сказать
+// «таймеры сброшены правкой» про него значило бы соврать.
+test("правка мимо логического сценария с ждущим таймером: таймер жив, «таймеры сброшены правкой» молчит, trigger не зовётся", async () => {
+  // Блочный сценарий того же нажатия задержек не ставит: идёт только логика.
+  const box = pressHouse();
+  const later = addScript(box, "logic", "Позже", logicSource("Позже", "  setTimeout(function () { " + onSource(box, "С1") + ".setValue(true); }, 60000);"));
+  bindTo(box, later, "В2");
+  const { sim } = session();
+  sim.sync(box.project);
+  sim.start();
+  await settle();
+  sim.press(box.marks["В2"], 0, "single");
+  await settle();
+  // Список сценариев с отметкой «идёт» приходит от дома по его поводу — здесь
+  // повод даёт отметка «Активный» блочного сценария.
+  sim.scenarioActive(box.scenarioId, true);
+  await settle();
+  assert.ok(sim.scenarios().some((scenario) => scenario.id === later && scenario.running), "таймер не поставлен");
+  const triggers = () => sim.journal().filter((entry) => entry.code === "hubTrigger").length;
+  const before = triggers();
+  box.project = addScenario(box.project, { kind: "block", name: "Чужой" }).project;
+  sim.sync(box.project);
+  await settle();
+  assert.deepEqual(sim.journal().filter((entry) => entry.code === "editReset"), [], "сказано про сброс таймера, которого не было");
+  assert.equal(triggers(), before, "чужая правка позвала trigger");
+  assert.equal(sim.step(60 * 1000), true);
+  await settle();
+  assert.equal(sim.value(box.marks["С1"], 0, "On"), true, "таймер логики пропал от чужой правки");
+});
+
 test("шаг часов: задержка на минуту срабатывает ровно шагом в минуту, на паузе — только шагом", async () => {
   const box = pressHouse({ off: true });
   const { sim, clock, timers } = session();

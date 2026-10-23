@@ -1652,6 +1652,10 @@ export function hubWorld(host, { dry = false } = {}) {
     return !instance || (instance.alive !== false && instance.active !== false);
   }
 
+  // `revive` — поднять задачу заново после перестройки дома (F2): движок на
+  // `load` снимает подписки и таймеры хозяина, а сценарий, которого правка не
+  // коснулась, хозяин не перезапускает — его задачи возвращаются сюда же.
+  // `armed` — когда и что сработает у таймера, пока он ждёт.
   function makeRecord(instance, kind) {
     const record = {
       kind,
@@ -1659,6 +1663,8 @@ export function hubWorld(host, { dry = false } = {}) {
       gone: false,
       timer: null,
       off: null,
+      armed: null,
+      revive: null,
       cancel: () => {
         if (record.gone) return;
         record.gone = true;
@@ -1696,25 +1702,36 @@ export function hubWorld(host, { dry = false } = {}) {
       const out = hubList(list).filter((item) => typeof item === "string");
       return out.length > 0 ? out : undefined;
     };
-    record.off = host.subscribe({ serviceTypes: filter ? types(filter.hs) : undefined, charTypes: filter ? types(filter.hc) : undefined }, (event) => {
-      if (record.gone || !alive(owner.instance)) return;
-      const char = charByAddress(event.aid, event.cid);
-      if (!char) return;
-      const entry = byAid.get(event.aid);
-      const found = entry ? entry.byCid.get(event.cid) : null;
-      const value = hubToScript(found ? found.char.meta : null, event.value);
-      if (filter && !hubCompare(value, filter.cond, filter.value)) return;
-      const chain = [causeOf(owner), ...event.chain].filter(Boolean);
-      guard({ instance: owner.instance, binding: owner.binding, chain }, "subscribe", () =>
-        handler.call(owner.instance && owner.instance.self ? owner.instance.self : {}, char, value, ...args),
-      );
-    });
+    const listen = () =>
+      host.subscribe({ serviceTypes: filter ? types(filter.hs) : undefined, charTypes: filter ? types(filter.hc) : undefined }, (event) => {
+        if (record.gone || !alive(owner.instance)) return;
+        const char = charByAddress(event.aid, event.cid);
+        if (!char) return;
+        const entry = byAid.get(event.aid);
+        const found = entry ? entry.byCid.get(event.cid) : null;
+        const value = hubToScript(found ? found.char.meta : null, event.value);
+        if (filter && !hubCompare(value, filter.cond, filter.value)) return;
+        const chain = [causeOf(owner), ...event.chain].filter(Boolean);
+        guard({ instance: owner.instance, binding: owner.binding, chain }, "subscribe", () =>
+          handler.call(owner.instance && owner.instance.self ? owner.instance.self : {}, char, value, ...args),
+        );
+      });
+    record.off = listen();
+    record.revive = () => {
+      if (!record.gone) record.off = listen();
+    };
     return remember(record);
   }
 
   function arm(record, at, fire) {
+    record.armed = { at, fire };
+    record.revive = () => {
+      if (record.gone || !record.armed) return;
+      arm(record, record.armed.at, record.armed.fire);
+    };
     record.timer = host.timer(at, (when) => {
       record.timer = null;
+      record.armed = null;
       if (record.gone) return;
       fire(when);
     }, record.instance ? record.instance.tag : undefined);
@@ -2007,6 +2024,36 @@ function hubScenarioName(scenario) {
   return scenario && scenario.id ? String(scenario.id) : "";
 }
 
+/**
+ * Ключ того, от чего зависит скрипт на доме `spec` (`buildHomeSpec`), — по
+ * нему перестройка дома на ходу решает, перезапускать ли сценарий (F2):
+ * сам сценарий (всё, кроме места в списке) и, у логического, его привязки с
+ * адресами привязанных сервисов. Ключ тот же — правка сценария не коснулась:
+ * хаб его не перезапускает, как не перезапускает логику правка чужого
+ * сценария или устройства. Не скрипт или нет такого — `null`.
+ */
+export function hubScriptKey(spec, scenarioId) {
+  const source = spec && typeof spec === "object" ? spec : {};
+  const scenario = hubList(source.scenarios).find((item) => item && item.id === scenarioId) || null;
+  if (!scenario || !HUB_KINDS.includes(scenario.kind)) return null;
+  const { order: _order, ...own } = scenario;
+  const bindings = [];
+  if (scenario.kind === "logic") {
+    for (const binding of hubList(source.logicBindings)) {
+      if (!binding || binding.scenarioId !== scenarioId) continue;
+      const accessory = hubList(source.accessories).find((item) => item && item.markId === binding.markId) || null;
+      const service = accessory && Number.isInteger(binding.service) ? hubList(accessory.services)[binding.service] || null : null;
+      bindings.push({
+        binding,
+        target: service
+          ? { aid: accessory.aid, sid: service.sid, type: service.type, chars: hubList(service.chars).map((char) => [char.type, char.cid]) }
+          : null,
+      });
+    }
+  }
+  return JSON.stringify([own, bindings]);
+}
+
 function hubIsCondition(kind) {
   return kind === "condition" || kind === "cond" || kind === "if" || kind === "check";
 }
@@ -2083,6 +2130,9 @@ export function createHubOwner() {
   const forms = new Map();
   let computeIndex = new Map();
   let eventsOff = null;
+  // Сценарии, которые перестройка дома на ходу оставила как есть (F2): `load`
+  // откладывает их сюда, `start({reload: true})` возвращает им задачи.
+  let held = new Map();
 
   function worldOf(host) {
     if (!world) world = hubWorld(host);
@@ -2185,10 +2235,13 @@ export function createHubOwner() {
   }
 
   // Привязки логического сценария: опции, переменные, подписка движка.
-  function bind(instance, host) {
+  // `previous` — привязки того же сценария до перестройки дома (F2): их
+  // `variables` и сами записи остаются, о пропавшем устройстве журнал уже знает.
+  function bind(instance, host, previous = null) {
     for (const binding of bindingsOf(instance.id)) {
       const found = serviceOfBinding(host, binding);
       if (!found) {
+        if (previous) continue;
         world.log("error", "hubBindingMissing", { name: instance.name, label: (host.accessory(binding.markId) || {}).label || "" }, {
           scenarioId: instance.id,
           bindingId: binding.id,
@@ -2196,18 +2249,22 @@ export function createHubOwner() {
         });
         continue;
       }
-      const runtime = {
+      const kept = previous ? previous.get(binding.id) || null : null;
+      const runtime = kept || {
         binding,
         instance,
+        variables: hubCopy(instance.info && instance.info.variables && typeof instance.info.variables === "object" ? instance.info.variables : {}),
+      };
+      Object.assign(runtime, {
+        binding,
         accessory: found.accessory,
         service: found.service,
         address: found.service.address,
         active: binding.active !== false,
         options: Object.freeze(hubOptionValues(instance.info, binding.options)),
-        variables: hubCopy(instance.info && instance.info.variables && typeof instance.info.variables === "object" ? instance.info.variables : {}),
         chars: sourceChars(instance.info),
         off: null,
-      };
+      });
       runtime.cause = world.causeOf({ instance, binding: runtime });
       instance.bindings.push(runtime);
       if (!runtime.active) continue;
@@ -2317,6 +2374,7 @@ export function createHubOwner() {
     if (old) kill(old);
     const instance = makeInstance(scenario, scenario.kind);
     instance.active = activeOf(scenario.id);
+    instance.key = hubScriptKey(home, scenario.id);
     instances.set(scenario.id, instance);
     if (!instance.active) {
       instance.alive = false;
@@ -2326,8 +2384,32 @@ export function createHubOwner() {
     return instance;
   }
 
+  // Сценарий, которого перестройка не коснулась, возвращается как был: те же
+  // `self`, `LocalVariables`, `variables` привязок, задачи и подписки — ни
+  // верхний уровень, ни `onStart` заново не исполняются (F2).
+  function revive(instance, scenario, host) {
+    instance.scenario = scenario;
+    for (const record of [...instance.tasks]) if (typeof record.revive === "function") record.revive();
+    const previous = new Map(instance.bindings.map((runtime) => [runtime.binding.id, runtime]));
+    instance.bindings = [];
+    if (instance.alive && instance.kind === "logic") bind(instance, host, previous);
+  }
+
+  // Оставить ли сценарий как есть при перестройке дома на ходу: ключ тот же
+  // (`hubScriptKey`) и он в том же состоянии, в каком его оставил бы
+  // перезапуск: жив, упал с ошибкой или выключен в объекте. Выключенный на
+  // ходу (сторожем, отметкой) перестройка, как и прежде, включает заново.
+  function keepable(instance) {
+    if (instance.key !== hubScriptKey(home, instance.id)) return false;
+    if (instance.active !== activeOf(instance.id)) return false;
+    return instance.alive || instance.fault !== null || !instance.active;
+  }
+
   function startAll(chain, host, fresh) {
-    for (const instance of instances.values()) kill(instance);
+    const keep = fresh ? new Map() : held;
+    held = new Map();
+    for (const instance of instances.values()) if (keep.get(instance.id) !== instance) kill(instance);
+    if (fresh) for (const instance of keep.values()) kill(instance);
     instances.clear();
     computeIndex = new Map();
     if (fresh) {
@@ -2339,10 +2421,17 @@ export function createHubOwner() {
     if (eventsOff) eventsOff();
     eventsOff = host.subscribe({ charTypes: ["ProgrammableSwitchEvent"] }, (event) => world.noteEvent(event.address, event.value));
     for (const kind of ["global", "logic"]) {
-      for (const scenario of scripts()) if (scenario.kind === kind) startOne(scenario, chain, host);
+      for (const scenario of scripts()) {
+        if (scenario.kind !== kind) continue;
+        const old = keep.get(scenario.id);
+        if (old) {
+          instances.set(scenario.id, old);
+          revive(old, scenario, host);
+        } else startOne(scenario, chain, host);
+      }
     }
     postForms(host, instances);
-    for (const instance of instances.values()) if (instance.kind === "logic") onStart(instance, chain, host);
+    for (const instance of instances.values()) if (instance.kind === "logic" && !keep.has(instance.id)) onStart(instance, chain, host);
     host.scenariosChanged();
   }
 
@@ -2382,12 +2471,20 @@ export function createHubOwner() {
     load(spec, host) {
       home = spec && typeof spec === "object" ? spec : { accessories: [], scenarios: [], logicBindings: [] };
       worldOf(host).reindex();
-      for (const instance of instances.values()) kill(instance);
+      activeFlags.clear();
+      for (const scenario of scripts()) activeFlags.set(scenario.id, scenario.active !== false);
+      // Перестройка дома на ходу — как сохранение на хабе (F2): перезапуск
+      // ждёт только сценарий, которого правка коснулась; остальные отложены
+      // и вернутся в `start({reload: true})`.
+      for (const instance of held.values()) kill(instance);
+      held = new Map();
+      for (const instance of instances.values()) {
+        if (host.running() && keepable(instance)) held.set(instance.id, instance);
+        else kill(instance);
+      }
       instances.clear();
       computeIndex = new Map();
       eventsOff = null;
-      activeFlags.clear();
-      for (const scenario of scripts()) activeFlags.set(scenario.id, scenario.active !== false);
       const used = new Set(scripts().map((scenario) => "script\u0000" + (typeof scenario.source === "string" ? scenario.source : "")));
       for (const key of [...cache.keys()]) if (key.startsWith("script\u0000") && !used.has(key)) cache.delete(key);
       if (!host.running()) evaluateDry(host);
@@ -2400,6 +2497,8 @@ export function createHubOwner() {
 
     stop() {
       eventsOff = null;
+      for (const instance of held.values()) kill(instance);
+      held = new Map();
       for (const instance of instances.values()) kill(instance);
       for (const instance of blockInstances.values()) kill(instance);
       instances.clear();

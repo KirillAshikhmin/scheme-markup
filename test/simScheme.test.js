@@ -22,9 +22,11 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { addScenario } from "../src/model.js";
+import { addLogicBinding, addScenario, setTypeDevice, updateMark, updateScenario } from "../src/model.js";
 import { PANEL_IDS } from "../src/app.js";
 import {
+  canvasCommitAllowed,
+  canvasCommitKind,
   canvasEditAllowed,
   canvasHintText,
   canvasSimLocked,
@@ -49,6 +51,7 @@ import {
   simBarKeyAction,
   simBarState,
 } from "../src/panels/simBar.js";
+import { markCardLifts } from "../src/panels/markCard.js";
 import { simHouse } from "./fixtures/simHome.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -214,6 +217,100 @@ test("повторный тап по выделенной метке в запу
   assert.equal(canvasTapAction({ ...selected, simRunning: true }, drag), null);
   // В просмотре на телефоне тот же тап по-прежнему закрывает карточку.
   assert.deepEqual(canvasTapAction({ ...selected, layout: "mobile" }, drag), { selectedMarkIds: [], selectedOutlineId: null });
+});
+
+// ——— последняя дверь различает, что правят (F2) ——————————————————————————
+//
+// Слепая приёмка: при запущенном доме «Привязать» в карточке С1 закрывало
+// окно тостом «Остановите дом, чтобы править» — привязку логики дверь правки
+// считала правкой метки. Привязка — настройка сценария; правка самих меток
+// при запущенном доме по-прежнему закрыта. Телефон — только «Активный».
+
+function logicProject() {
+  const box = simHouse();
+  const added = addScenario(box.project, { kind: "logic", name: "Логика", source: "info = {name: 'Логика'};\nfunction trigger() {}" });
+  return { box, before: added.project, scenarioId: added.scenario.id };
+}
+
+test("дверь правки: привязку логики и сценарии — и при запущенном доме, разметку — нет", () => {
+  const { box, before, scenarioId } = logicProject();
+  const bound = addLogicBinding(before, { scenarioId, markId: box.marks["С1"], service: 0 }).project;
+  const renamed = updateScenario(before, scenarioId, { name: "Другое имя" }).project;
+  const moved = updateMark(before, box.marks["С1"], { location: "у двери" }).project;
+  const running = desktop({ simRunning: true });
+  assert.equal(canvasCommitAllowed(running, before, bound), true, "привязку при запущенном доме не пустили");
+  assert.equal(canvasCommitAllowed(running, bound, before), true, "снять привязку при запущенном доме нельзя");
+  assert.equal(canvasCommitAllowed(running, before, renamed), true);
+  assert.equal(canvasCommitAllowed(running, before, moved), false, "правку метки при запущенном доме пустили");
+  assert.equal(canvasCommitAllowed(desktop(), before, moved), true);
+  assert.equal(canvasCommitKind(before, bound), "scenarios");
+  assert.equal(canvasCommitKind(before, moved), "marks");
+  assert.equal(canvasCommitKind(before, before), "marks", "пустая правка — по прежнему правилу");
+});
+
+test("дверь правки на телефоне — только «Активный», на планшете — все сценарии; разметка — ни там, ни там", () => {
+  const { box, before, scenarioId } = logicProject();
+  const off = updateScenario(before, scenarioId, { active: false }).project;
+  const renamed = updateScenario(before, scenarioId, { name: "Другое имя" }).project;
+  const bound = addLogicBinding(before, { scenarioId, markId: box.marks["С1"], service: 0 }).project;
+  const moved = updateMark(before, box.marks["С1"], { location: "у двери" }).project;
+  const phone = desktop({ layout: "mobile", screen: "scenarios" });
+  assert.equal(canvasCommitKind(before, off), "scenarioActive");
+  assert.equal(canvasCommitAllowed(phone, before, off), true, "«Активный» на телефоне не пустили");
+  for (const [name, after] of [["имя", renamed], ["привязка", bound], ["метка", moved]]) {
+    assert.equal(canvasCommitAllowed(phone, before, after), false, name + " на телефоне");
+  }
+  const tablet = desktop({ layout: "mobile", tablet: true, screen: "scenarios" });
+  assert.equal(canvasCommitAllowed(tablet, before, renamed), true, "планшет не правит сценарий");
+  assert.equal(canvasCommitAllowed(tablet, before, bound), true);
+  assert.equal(canvasCommitAllowed(tablet, before, off), true);
+  assert.equal(canvasCommitAllowed(tablet, before, moved), false, "планшет правит метки");
+  // Вид аксессуара у типа («Типы без аксессуара» в «Сценариях») — планшету
+  // можно, телефону и запущенной «Схеме» — нет.
+  const lamp = before.markTypes.find((type) => type.code === "Р");
+  const typed = setTypeDevice(before, lamp.id, { kind: "light" }).project;
+  assert.notEqual(typed, before, "тип не поменялся — проверять нечего");
+  assert.equal(canvasCommitKind(before, typed), "profiles");
+  assert.equal(canvasCommitAllowed(tablet, before, typed), true);
+  assert.equal(canvasCommitAllowed(phone, before, typed), false);
+  assert.equal(canvasCommitAllowed(desktop({ simRunning: true }), before, typed), false);
+  assert.equal(canvasCommitAllowed(desktop({ simRunning: true, screen: "scenarios" }), before, typed), true);
+});
+
+// ——— двойной щелчок и удержание: карточка не встаёт под второй щелчок (F2) ———
+
+test("тап по клавише в запущенном доме метку сам не выделяет: выделение — по концу нажатия", () => {
+  const drag = { kind: "pan", moved: false, tap: { markId: "m" }, sim: { markId: "m", plan: { kind: "key" }, presser: {} } };
+  // Первый тап двойного выделял метку, карточка вставала под второй тап.
+  assert.equal(canvasTapAction(desktop({ simRunning: true }), drag), null, "тап выделил метку посреди нажатия");
+  assert.equal(canvasTapAction(desktop({ simRunning: true, layout: "mobile" }), drag), null);
+  // Тап мимо меток по-прежнему снимает выделение, без дома — выделяет.
+  assert.deepEqual(canvasTapAction(desktop({ simRunning: true, selectedMarkIds: ["m"] }), { kind: "pan", moved: false, tap: { markId: null } }), {
+    selectedMarkIds: [],
+    selectedOutlineId: null,
+    editPathId: null,
+  });
+  assert.deepEqual(canvasTapAction(desktop({ layout: "mobile" }), { kind: "pan", moved: false, tap: { markId: "m" } }), { selectedMarkIds: ["m"], selectedOutlineId: null });
+});
+
+test("карточка-пульт поднимает план над собой: метка остаётся над карточкой и под следующий щелчок", () => {
+  // Без дома на компьютере план не двигается: сдвиг из-под руки — промах при
+  // переносе метки. В запущенном доме переноса нет, а метка под карточкой —
+  // это второй щелчок двойного, ушедший в карточку.
+  assert.equal(markCardLifts(desktop()), false);
+  assert.equal(markCardLifts(desktop({ simRunning: true })), true, "запущенный дом не поднимает метку над карточкой");
+  assert.equal(markCardLifts(desktop({ layout: "mobile" })), true);
+});
+
+test("мышь в запущенном доме не выделяет метку на нажатии: жест начинает и кончает карточка устройства", () => {
+  const down = bodyOf("function canvasPointerDown(");
+  const begin = down.indexOf("canvasSimBegin(state, hit.markId)");
+  const select = down.indexOf("selectedMarkIds: [hit.markId]");
+  assert.ok(begin > 0 && select > 0, "нет начала нажатия или выделения по мыши");
+  assert.ok(begin < select, "мышь выделяет метку раньше, чем узнала, что это нажатие на устройство");
+  assert.ok(/if \(!sim && /.test(down), "выделение на нажатии не спрашивает, идёт ли нажатие на устройство");
+  assert.ok(bodyOf("function canvasSimBegin(").includes("deviceGestureStart("));
+  assert.ok(bodyOf("function canvasSimEnd(").includes("deviceGestureEnd("));
 });
 
 const canvasSource = read("src/canvas.js");

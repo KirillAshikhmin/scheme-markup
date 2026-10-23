@@ -123,6 +123,10 @@ const appState = {
   // сеанса. В объект не пишется. Пока дом запущен, «Схема» — пульт, а не
   // редактор (`canvasEditAllowed`).
   simRunning: false,
+  // Планшет ли под раскладкой просмотра (`layoutTabletFor`): ему режим
+  // «Сценарии» открыт целиком (F2). Ставит `syncLayout` по экрану; не
+  // знаем — телефон.
+  tablet: false,
   // Открытый в режиме «Сценарии» сценарий (таск 10): сеансовая отметка, в
   // объект и в память вида не пишется. Нет такого сценария в объекте — режим
   // сам берёт первый из списка.
@@ -390,6 +394,11 @@ export const LAYOUT_ABILITIES = {
   // компьютера: в просмотре чинить нечем, как и в остальных режимах.
   viewScenarios: ["desktop", "mobile"],
   editScenarios: ["desktop"],
+  // Отметка «Активный» в списке сценариев — шаг истории, и на телефоне тоже
+  // (F2): это не правка сценария, а «включить и выключить» из того же списка.
+  // Планшет в раскладке просмотра правит сценарии целиком —
+  // `LAYOUT_TABLET_ABILITIES` ниже.
+  toggleScenarios: ["desktop", "mobile"],
   // Мастерская чертежа (таск 153): стены рисуют цепочкой в миллиметрах, и это
   // правка объекта — в просмотре её нет, как нет постановки меток. Своё умение,
   // а не `editSchemes`: тот про список схем (имя, порядок, удаление), и
@@ -430,6 +439,38 @@ export function layoutModeFor(view, override) {
 export function layoutAllows(ability, mode) {
   const modes = LAYOUT_ABILITIES[ability];
   return Array.isArray(modes) && modes.includes(mode);
+}
+
+// ——— планшет в раскладке просмотра (слепая приёмка, F2) ——————————————————
+//
+// Планшет стоймя (820×1180) уже порога окна и получает раскладку просмотра:
+// колонки — листами, разметка не правится. Но режим «Сценарии» заказчик отдал
+// ему целиком (раунд 5: «компьютер и планшет — полностью; телефон — список с
+// «Активный», просмотр сценария, журнал и запуск дома»). Третьей раскладки
+// для этого не заводится: прочие режимы правил не меняют, а планшет от
+// телефона отличает короткая сторона — та же мерка, что держит телефон лёжа в
+// просмотре. Умения, которые планшет сохраняет в раскладке просмотра, —
+// здесь; остальные у него телефонные.
+export const LAYOUT_TABLET_ABILITIES = Object.freeze(["editScenarios"]);
+
+/** Планшет (или окно не уже его): короткая сторона больше телефонной, в любой ориентации. */
+export function layoutTabletFor(view) {
+  const source = view || {};
+  const width = Number(source.width) || 0;
+  const height = Number(source.height) || 0;
+  const shortSide = height > 0 ? Math.min(width, height) : width;
+  return shortSide > LAYOUT_PHONE_SIDE;
+}
+
+/**
+ * Умение по состоянию каркаса: раскладка `state.layout` и, в раскладке
+ * просмотра, планшет `state.tablet` (`LAYOUT_TABLET_ABILITIES`). Не знаем,
+ * планшет ли, — считаем телефоном.
+ */
+export function layoutAllowsState(ability, state) {
+  const source = state || {};
+  if (layoutAllows(ability, source.layout)) return true;
+  return source.layout === "mobile" && source.tablet === true && LAYOUT_TABLET_ABILITIES.includes(ability);
 }
 
 // ——— кадр: один планировщик на три поверхности ————————————————————————
@@ -953,11 +994,12 @@ function syncLayout() {
     toggle.title = toEdit ? strings.mobile.fullHint : strings.mobile.viewHint;
     toggle.setAttribute("aria-label", label);
   }
+  const tablet = layoutTabletFor(layoutViewport());
   if (appState.layout !== mode) {
     // Вход в просмотр снимает режим постановки: в суженном окне мышь никуда не
     // делась, и оставленный «Точка» ставил бы метки там, где их не ждут.
-    setState(mode === "mobile" ? { layout: mode, mode: "select" } : { layout: mode });
-  }
+    setState(mode === "mobile" ? { layout: mode, tablet, mode: "select" } : { layout: mode, tablet });
+  } else if (appState.tablet !== tablet) setState({ tablet });
   // И по той же причине — режим экрана: окно сузили, а человек стоял в
   // чертеже, которого в просмотре нет вовсе (таск 153).
   const screen = screenAfterLayout(appState.screen, mode);

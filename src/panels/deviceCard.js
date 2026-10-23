@@ -147,7 +147,11 @@ export function deviceClickMark(project, markId, io = undefined) {
 export function deviceKeyPresser({ fire, now, later, clear }) {
   let detector = pressDetector();
   let timer = null;
+  let held = false;
+  // Кто ждёт конца жеста (`whenIdle`, F2): нажатие распознано, клавиша отпущена.
+  const waiters = [];
 
+  const idle = () => timer === null && detector.nextDue() === null;
   const stop = () => {
     if (timer !== null) clear(timer);
     timer = null;
@@ -158,28 +162,94 @@ export function deviceKeyPresser({ fire, now, later, clear }) {
     if (at === null) return;
     timer = later(pump, Math.max(0, at - now()));
   };
+  const flush = () => {
+    if (held || !idle()) return;
+    for (const fn of waiters.splice(0)) fn();
+  };
   function pump() {
     timer = null;
     const time = now();
     for (let press = detector.due(time); press !== null; press = detector.due(time)) fire(press);
     schedule();
+    flush();
   }
   return {
     down() {
+      held = true;
       detector.down(now());
       pump();
     },
     up() {
+      held = false;
       detector.up(now());
       pump();
     },
     abort() {
       stop();
+      held = false;
+      waiters.length = 0;
       detector = pressDetector();
     },
     /** Ждать больше нечего — распознаватель свободен. */
-    idle: () => timer === null && detector.nextDue() === null,
+    idle,
+    /**
+     * Позвать `fn`, когда жест кончился: нажатие распознано и клавиша
+     * отпущена (сразу, если уже так). Брошенный жест (`abort`) не зовёт.
+     */
+    whenIdle(fn) {
+      if (typeof fn !== "function") return;
+      waiters.push(fn);
+      flush();
+    },
   };
+}
+
+// ——— щелчок по метке как жест (слепая приёмка, F2) ———————————————————————
+//
+// Двойной щелчок по отвязанной клавише засчитывался одиночным: первый щелчок
+// выделял метку, карточка всплывала поверх неё, и второй щелчок попадал в
+// карточку. Поэтому выделение — а с ним карточка — приходит, когда жест
+// кончился: нажатие распознано и клавиша отпущена. Пока жест идёт, под рукой
+// ничего не меняется, где бы на плане ни стояла метка и где бы ни встала
+// карточка.
+
+/**
+ * Начало жеста по метке-устройству в запущенном доме: план щелчка и, у
+ * клавиши с нажатиями, начатое нажатие. Ответ — `{markId, plan, presser}`
+ * для `deviceGestureEnd`. `io` — `{presserOf(markId, index), select(markId),
+ * press, act}`; метку здесь ещё не выделяют.
+ */
+export function deviceGestureStart(project, markId, io) {
+  const plan = deviceClickPlan(markAccessory(project, markId));
+  const gesture = { markId, plan, presser: null };
+  if (plan.kind === "key" && plan.key.detect) {
+    gesture.presser = io.presserOf(markId, plan.key.index);
+    gesture.presser.down();
+  }
+  return gesture;
+}
+
+/**
+ * Конец жеста. `moved` — это была панорама (или жест отменён): нажатие
+ * брошено, ничего не выполняется и не выделяется. Иначе клавиша с нажатиями
+ * отпускается, и метка выделяется, когда нажатие распознано; мгновенное
+ * действие (переключить, датчик, привязанная клавиша) выполняется сразу, и
+ * метка выделяется следом.
+ */
+export function deviceGestureEnd(gesture, moved, io) {
+  if (!gesture) return;
+  if (gesture.presser) {
+    if (moved) {
+      gesture.presser.abort();
+      return;
+    }
+    gesture.presser.up();
+    gesture.presser.whenIdle(() => io.select(gesture.markId));
+    return;
+  }
+  if (moved) return;
+  deviceClickAct(gesture.markId, gesture.plan, io);
+  io.select(gesture.markId);
 }
 
 // ——— общее «Схеме», мини-плану и «Объёму» (ревью ветки, F1) ——————————————
@@ -348,6 +418,18 @@ export function deviceCardModel(project, markId, read = null, readForms = undefi
   return { markId, label: accessory.label, aid: accessory.aid, running: simRunning(), keys, services, logic };
 }
 
+/**
+ * Что карточка метки показывает об устройстве (F2): `"remote"` — пульт
+ * (`deviceCardView`, дом запущен) с разделом «Логика»; `"logic"` — дом
+ * остановлен, и пульта нет, а к привязкам логики дорога есть
+ * (`deviceLogicEntry`); `null` — метка не аксессуар. Привязка — настройка
+ * сценария, а не правка метки: из карточки до неё доходят при любом доме.
+ */
+export function deviceCardPart(project, markId, running) {
+  if (!project || !markAccessory(project, markId)) return null;
+  return running === true ? "remote" : "logic";
+}
+
 // ——— карточка: узлы ———————————————————————————————————————————————————
 
 function deviceCardSet(markId, service, char, value) {
@@ -500,6 +582,60 @@ export function deviceCardView(project, markId) {
       if (off) off();
       off = null;
       logic.dispose();
+    },
+  };
+}
+
+// ——— «Логика» у остановленного дома (слепая приёмка, F2) ——————————————————
+
+/**
+ * Сколько у метки привязок логики — словами для строки карточки: `{count,
+ * text}`; метка не аксессуар — `null`.
+ */
+export function deviceLogicSummary(project, markId) {
+  const logic = project ? scenarioScriptLogicOf(project, markId, () => null) : null;
+  if (!logic) return null;
+  const count = logic.bindings.length;
+  return { count, text: count === 0 ? strings.sim.card.logic.none : text("sim.card.logic.count", { count }) };
+}
+
+/**
+ * Раздел «Логика» устройства — тот же, что в пульте запущенного дома
+ * (`scenarioScriptLogicView`): привязки, опции, «Активна», «Снять» и
+ * «+ сценарий». Сам перерисовывается на правку объекта. `{node, dispose}`.
+ */
+export function deviceLogicSection(markId) {
+  return scenarioScriptLogicView(markId);
+}
+
+/**
+ * «Логика» в карточке метки при остановленном доме (F2): строка — сколько
+ * привязок, и кнопка, которая раскрывает раздел `deviceLogicSection` прямо в
+ * карточке. Кнопка — `ui-btn`: на компьютере она ловит щелчок сквозь
+ * сквозную карточку. `open` — раздел раскрыт; `section` — уже собранный
+ * раздел (хозяин карточки держит его между перерисовками, чтобы раскрытые
+ * опции не схлопывались от каждой правки); `onToggle()` — нажали кнопку.
+ * Ответ — `{node, dispose}` или `null` (не аксессуар); `dispose` снимает только
+ * раздел, собранный здесь же.
+ */
+export function deviceLogicEntry(project, markId, { open = false, section = null, onToggle = null } = {}) {
+  const summary = deviceLogicSummary(project, markId);
+  if (!summary) return null;
+  const toggle = uiButton(strings.sim.card.logic.title, {
+    class: "ui-btn mark-card__edit",
+    title: open ? strings.sim.card.logic.closeHint : strings.sim.card.logic.openHint,
+    attrs: { "aria-expanded": open ? "true" : "false" },
+    on: { click: () => (typeof onToggle === "function" ? onToggle() : undefined) },
+  });
+  // Раскрытый раздел сам говорит, что привязано, — строка остаётся кнопкой.
+  const row = uiEl("div", { class: "mark-card__row mark-card__row--act" }, open ? [toggle] : [toggle, uiEl("span", { class: "mark-card__value", text: summary.text })]);
+  if (!open) return { node: row, dispose: () => {} };
+  const own = section ? null : deviceLogicSection(markId);
+  const body = section || own;
+  return {
+    node: uiEl("div", { class: "sim-card" }, [row, body.node]),
+    dispose: () => {
+      if (own) own.dispose();
     },
   };
 }

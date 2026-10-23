@@ -13,6 +13,7 @@ import {
   ELEVATION_GROW_SETTING,
   ELEVATION_VIEWS_SETTING,
   layoutAllows,
+  layoutAllowsState,
   PANEL_IDS,
   registerPanel,
   reportAppError,
@@ -151,9 +152,8 @@ import { canRedo, canUndo, clearHistory, pushCommand, redo, undo } from "./histo
 import { getSetting, setSetting } from "./store.js";
 import { uiConfirm, uiDialogDepth, uiEl, uiFieldTarget, uiIcon, uiPrompt, uiSpaceTarget, uiTypingTarget } from "./panels/ui.js";
 import { createFieldPlate, plateUnseen } from "./panels/plate.js";
-import { deviceClickAct, deviceClickPlan, deviceLiveKinds, devicePresserOf } from "./panels/deviceCard.js";
-import { markAccessory } from "./sim/home.js";
-import { simLive, simWatch } from "./simulation.js";
+import { deviceGestureEnd, deviceGestureStart, deviceLiveKinds, devicePresserOf } from "./panels/deviceCard.js";
+import { simAct, simLive, simPress, simWatch } from "./simulation.js";
 import { createElevationStrip, elevationPlace } from "./panels/elevation.js";
 import { screenPlaceOf, screenPlacePlanRead, screenPlacePlanView, screenPlaceSet } from "./screenPlace.js";
 
@@ -1032,34 +1032,44 @@ function canvasHighlightPaint(project, scheme, view, now) {
   return true;
 }
 
+// Выделить метку, когда жест по ней кончился (F2): выделение и карточка
+// приходят после нажатия, а не посреди двойного щелчка. Дом за это время
+// остановили или метку уже выделили — менять нечего.
+function canvasSimSelect(markId) {
+  const state = canvasState();
+  if (!state || !state.project || !canvasSimLocked(state) || !findMark(state.project, markId)) return;
+  const selected = state.selectedMarkIds || [];
+  if (selected.length === 1 && selected[0] === markId && !state.selectedOutlineId) return;
+  canvasApi.setState({ selectedMarkIds: [markId], selectedOutlineId: null, editPathId: null });
+}
+
+// Двери жеста: распознаватель нажатий сеанса и выделение по концу жеста;
+// нажатия и действия уходят в имитацию (умолчания `deviceClickAct`).
+const CANVAS_SIM_IO = Object.freeze({
+  presserOf: (markId, index) => devicePresserOf(markId, index),
+  select: (markId) => canvasSimSelect(markId),
+  press: (markId, index, press) => simPress(markId, index, press),
+  act: (action) => simAct(action),
+});
+
 /**
- * Начало щелчка по метке в запущенном доме: что она делает (`deviceClickPlan`)
- * и, если это клавиша с нажатиями, — нажатие уже началось. Возвращает жест
- * `{markId, plan, presser}` для `canvasSimEnd`; метки, на которую нечем
- * щёлкнуть, — тоже жест (чтобы отпускание знало, что ничего делать не надо).
+ * Начало щелчка по метке в запущенном доме (`deviceGestureStart`): что она
+ * делает и, если это клавиша с нажатиями, — нажатие уже началось. Метка при
+ * этом **не выделяется**: выделение — по концу жеста. Возвращает жест для
+ * `canvasSimEnd`; метки, на которую нечем щёлкнуть, — тоже жест (чтобы
+ * отпускание знало, что ничего делать не надо).
  */
 function canvasSimBegin(state, markId) {
-  const plan = deviceClickPlan(markAccessory(state.project, markId));
-  const sim = { markId, plan, presser: null };
-  if (plan.kind === "key" && plan.key.detect) {
-    sim.presser = devicePresserOf(markId, plan.key.index);
-    sim.presser.down();
-  }
-  return sim;
+  return deviceGestureStart(state.project, markId, CANVAS_SIM_IO);
 }
 
 /**
- * Конец щелчка. `moved` — жест оказался панорамой (или отменён системой):
- * начатое нажатие бросается, а мгновенные действия не выполняются.
+ * Конец щелчка (`deviceGestureEnd`). `moved` — жест оказался панорамой (или
+ * отменён системой): начатое нажатие бросается, мгновенные действия не
+ * выполняются, метка не выделяется.
  */
 function canvasSimEnd(sim, moved) {
-  if (!sim) return;
-  if (sim.presser) {
-    if (moved) sim.presser.abort();
-    else sim.presser.up();
-    return;
-  }
-  if (!moved) deviceClickAct(sim.markId, sim.plan);
+  deviceGestureEnd(sim, moved, CANVAS_SIM_IO);
 }
 
 function canvasResize() {
@@ -1280,6 +1290,70 @@ function canvasOptionError(key, vars) {
   return error;
 }
 
+// ——— что правят: разметку или сценарии (слепая приёмка, F2) ———————————————
+//
+// Дверь правки закрывают просмотр и запущенный дом, но не всё в объекте —
+// разметка. Привязка логики к устройству — настройка сценария, а не правка
+// метки: заказчик привязывает её из карточки аксессуара в «Схеме», и дом при
+// этом идёт. Планшет в раскладке просмотра правит сценарии целиком, телефон —
+// только отметку «Активный». Решает **содержимое** правки, а не слово
+// вызывающего: последняя дверь не верит на слово.
+
+// Поля объекта, правка которых может быть не разметкой: сценарии, привязки
+// логики и — только полем `device`, видом аксессуара, — типы меток.
+const CANVAS_SCENARIO_FIELDS = ["scenarios", "logicBindings", "markTypes"];
+
+// Списки отличаются только полем `field` у одних и тех же записей по местам.
+function canvasOnlyField(before, after, field) {
+  if (!Array.isArray(before) || !Array.isArray(after) || before.length !== after.length) return false;
+  return before.every((item, index) => {
+    const next = after[index];
+    if (item === next) return true;
+    if (!item || !next || typeof item !== "object" || typeof next !== "object" || item.id !== next.id) return false;
+    const { [field]: _was, ...restBefore } = item;
+    const { [field]: _now, ...restAfter } = next;
+    return JSON.stringify(restBefore) === JSON.stringify(restAfter);
+  });
+}
+
+/**
+ * Что правит переход объекта `before → after`: `"scenarioActive"` — только
+ * отметки «Активный» сценариев; `"scenarios"` — сценарии и привязки логики;
+ * `"profiles"` — вид аксессуара у типов (и, может быть, сценарии);
+ * `"marks"` — всё остальное, в том числе пустая правка (решает прежнее
+ * правило двери).
+ */
+export function canvasCommitKind(before, after) {
+  if (!before || !after || typeof before !== "object" || typeof after !== "object" || before === after) return "marks";
+  const changed = [];
+  for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    if (key === "updatedAt" || before[key] === after[key]) continue;
+    if (!CANVAS_SCENARIO_FIELDS.includes(key)) return "marks";
+    changed.push(key);
+  }
+  if (changed.length === 0) return "marks";
+  if (changed.includes("markTypes")) return canvasOnlyField(before.markTypes, after.markTypes, "device") ? "profiles" : "marks";
+  if (changed.length === 1 && changed[0] === "scenarios" && canvasOnlyField(before.scenarios, after.scenarios, "active")) return "scenarioActive";
+  return "scenarios";
+}
+
+/**
+ * Пускает ли последняя дверь переход `before → after` (`canvasCommit`).
+ * Разметка — по `canvasEditAllowed`: закрыта просмотром и запущенным домом.
+ * Сценарии и привязки — умением `editScenarios` (компьютер и планшет) и при
+ * запущенном доме; «Активный» — и на телефоне; вид аксессуара у типа — как
+ * сценарии, но не на запущенной «Схеме».
+ */
+export function canvasCommitAllowed(state, before, after) {
+  if (canvasEditAllowed(state)) return true;
+  if (!state) return false;
+  const kind = canvasCommitKind(before, after);
+  if (kind === "scenarioActive") return layoutAllowsState("toggleScenarios", state);
+  if (kind === "scenarios") return layoutAllowsState("editScenarios", state);
+  if (kind === "profiles") return layoutAllowsState("editScenarios", state) && !canvasSimLocked(state);
+  return false;
+}
+
 export function canvasCommit(before, after, label, options = {}) {
   const { setState } = canvasApi;
   let settings;
@@ -1296,8 +1370,13 @@ export function canvasCommit(before, after, label, options = {}) {
   // холста, но правка приходит и из панелей, и пропустить её здесь — значит
   // сделать режим просмотра украшением.
   if (!canvasEditAllowed(state)) {
-    canvasViewOnly();
-    return;
+    // Разметка закрыта, но правка сценариев — не разметка (F2): привязку
+    // логики пускает и запущенный дом, сценарии — планшет, «Активный» —
+    // телефон (`canvasCommitAllowed`).
+    if (!canvasCommitAllowed(state, before, after)) {
+      canvasViewOnly();
+      return;
+    }
   }
   const selectionBefore = state.selectedMarkIds;
   const schemeBefore = state.schemeId;
@@ -1314,7 +1393,11 @@ export function canvasCommit(before, after, label, options = {}) {
   // любая правка объекта проходит здесь, поэтому и поставленная метка, и
   // перерисованный контур доводят поля «Помещение» до порядка одним шагом
   // истории. Метка с вписанным руками помещением автоматике не достаётся.
-  const binding = after && Array.isArray(after.marks) ? applyRoomOutlines(after) : { project: after, changed: [] };
+  // Правка сценариев разметку не трогает (F2): автоматика мест — только у
+  // правки разметки, иначе привязка логики при запущенном доме двигала бы
+  // помещения меток.
+  const markup = canvasCommitKind(before, after) === "marks";
+  const binding = markup && after && Array.isArray(after.marks) ? applyRoomOutlines(after) : { project: after, changed: [] };
   // Вторая автоматика того же места и по той же причине (таск 128): привязка
   // метки к стене обязана быть следствием её места на плане, а не отдельного
   // действия. Здесь же она переживает и правку стены: подвинули стену —
@@ -1324,7 +1407,7 @@ export function canvasCommit(before, after, label, options = {}) {
   // что их человек правит руками и ждёт увидеть своё; стену же метке никто не
   // назначал, и «+ стены» в списке отмены было бы отчётом о том, чего он не
   // делал.
-  const walls = applyMarkWalls(binding.project);
+  const walls = markup ? applyMarkWalls(binding.project) : { project: binding.project };
   const bound = walls.project;
   // Ярлык шага называет и автопривязку, когда она что-то поменяла: «смена типа»
   // в списке отмены, за которой переехали помещения полудюжины меток, врёт.
@@ -3073,6 +3156,10 @@ export function canvasTapAction(state, drag, options = {}) {
   if (drag.kind === "pan" && drag.tap) {
     const markId = drag.tap.markId;
     if (!markId) return busy ? clear : null;
+    // Тап по устройству в запущенном доме — нажатие: метку выделяет его конец
+    // (`canvasSimEnd`, F2), а не тап — иначе карточка встала бы под второй
+    // тап двойного.
+    if (drag.sim) return null;
     // Повторный тап по выделенной метке снимает выделение — но только в
     // просмотре, где это единственный способ закрыть её карточку. В полной
     // версии выделение — рабочее состояние: за выделенной меткой стоят ручки
@@ -3569,9 +3656,14 @@ function canvasPointerDown(event) {
     }
   }
   if (hit) {
+    // В запущенном доме тот же жест — нажатие на устройство (`sim`): оно
+    // выполняется по отпусканию, а сдвиг превращает его в панораму. Метку оно
+    // выделяет само, когда кончится (F2): выделить её здесь — значит поднять
+    // карточку под второй щелчок двойного.
+    const sim = !editable && canvasSimLocked(state) ? canvasSimBegin(state, hit.markId) : null;
     // Выделили метку — выделение контура снимается: две пары ручек рядом
     // означали бы, что непонятно, чью вершину сейчас потащат.
-    if (state.selectedMarkIds[0] !== hit.markId || state.selectedOutlineId) {
+    if (!sim && (state.selectedMarkIds[0] !== hit.markId || state.selectedOutlineId)) {
       // Выбрали другой объект — правка прежней линии закончена.
       canvasApi.setState({
         selectedMarkIds: [hit.markId],
@@ -3587,10 +3679,6 @@ function canvasPointerDown(event) {
       // он снимает выделение и закрывает карточку. Решение принимается здесь,
       // а применяется по отпусканию: с той же метки начинают и панораму, и
       // снимать выделение под рукой было бы нельзя.
-      //
-      // В запущенном доме тот же жест — нажатие на устройство (`sim`): оно
-      // выполняется по отпусканию, а сдвиг превращает его в панораму.
-      const sim = canvasSimLocked(state) ? canvasSimBegin(state, hit.markId) : null;
       canvasDrag = {
         kind: "pan",
         start: point,

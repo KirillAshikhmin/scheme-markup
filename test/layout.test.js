@@ -11,8 +11,11 @@ import {
   LAYOUT_MODES,
   LAYOUT_NARROW_WIDTH,
   LAYOUT_PHONE_SIDE,
+  LAYOUT_TABLET_ABILITIES,
   layoutAllows,
+  layoutAllowsState,
   layoutModeFor,
+  layoutTabletFor,
 } from "../src/app.js";
 
 const phone = { width: 390, height: 844, coarsePointer: true };
@@ -88,4 +91,44 @@ test("в таблице умений нет выдуманных режимов"
     }
     assert.ok(modes.includes("desktop"), ability + ": на широком экране доступно всё");
   }
+});
+
+// ——— планшет в раскладке просмотра (слепая приёмка, F2) ——————————————————
+//
+// Планшет стоймя 820×1180 с сенсором открывал «Сценарии» как телефон: всё, что
+// уже 860 точек, — раскладка просмотра, и правки там не было. Заказчик (раунд
+// 5): компьютер и планшет — полностью, телефон — список с «Активный»,
+// просмотр и журнал. Раскладка у планшета прежняя — прочие режимы правил не
+// меняют; планшет отличает короткая сторона больше телефонной.
+
+const tabletTall = { width: 820, height: 1180, coarsePointer: true };
+
+test("планшет — короткая сторона больше телефонной, в любой ориентации; раскладка у него прежняя", () => {
+  assert.equal(layoutModeFor(tabletTall), "mobile", "раскладка планшета стоймя поменялась");
+  for (const view of [tabletTall, { width: 1180, height: 820, coarsePointer: true }, tabletPortrait, tabletLandscape]) {
+    assert.equal(layoutTabletFor(view), true, view.width + "×" + view.height + " — планшет");
+  }
+  for (const view of [phone, phoneTurned, { width: LAYOUT_PHONE_SIDE, height: 900, coarsePointer: true }]) {
+    assert.equal(layoutTabletFor(view), false, view.width + "×" + view.height + " — телефон");
+  }
+  assert.equal(layoutTabletFor({ width: LAYOUT_PHONE_SIDE + 1, height: 900, coarsePointer: false }), true);
+  assert.equal(layoutTabletFor(null), false);
+  assert.equal(layoutTabletFor({ width: 0, height: 0 }), false);
+});
+
+test("планшет в просмотре правит сценарии, остальные умения у него — телефонные; «Активный» — и на телефоне", () => {
+  const tablet = { layout: "mobile", tablet: true };
+  const phoneState = { layout: "mobile", tablet: false };
+  assert.equal(layoutAllowsState("editScenarios", tablet), true, "планшет не правит сценарии");
+  assert.equal(layoutAllowsState("editScenarios", phoneState), false);
+  assert.equal(layoutAllowsState("editScenarios", { layout: "mobile" }), false, "неизвестный экран — телефон");
+  assert.equal(layoutAllowsState("editScenarios", { layout: "desktop" }), true);
+  assert.deepEqual([...LAYOUT_TABLET_ABILITIES], ["editScenarios"]);
+  for (const ability of Object.keys(LAYOUT_ABILITIES)) {
+    if (LAYOUT_TABLET_ABILITIES.includes(ability)) continue;
+    assert.equal(layoutAllowsState(ability, tablet), layoutAllows(ability, "mobile"), ability + ": у планшета не телефонное правило");
+  }
+  assert.equal(layoutAllowsState("toggleScenarios", phoneState), true, "телефон не включает сценарии");
+  assert.equal(layoutAllowsState("toggleScenarios", { layout: "desktop" }), true);
+  assert.equal(layoutAllowsState("unknownAbility", tablet), false);
 });

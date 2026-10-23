@@ -31,7 +31,9 @@
 // не переживают — как перезагрузка хаба (история 2.16): значения поднимаются,
 // дом остановлен, в журнале — «Страница перезагружена — таймеры сброшены».
 // Правка объекта на ходу перестраивает дом (`load`), и у хозяев сценариев
-// идущие задержки теряются (таск 05) — журнал говорит и об этом.
+// идущие задержки теряются (таск 05) — журнал говорит и об этом. Логический и
+// глобальный сценарий, которых правка не коснулась, хаб оставляет как были
+// (F2, `simEditDrops`): про них журнал молчит.
 //
 // Коды записей журнала, которые пишет страница (текст — `strings.sim.journal`):
 // `pageReloaded`, `editReset`, `noWorker`, `reset` (сброс остановленного дома),
@@ -44,6 +46,7 @@ import { SIM_BRIDGE_REPLAY, createSimBridge } from "./sim/bridge.js";
 import { blocksCommandTexts, commandKey } from "./sim/blocks.js";
 import { simClamp } from "./sim/catalog.js";
 import { buildHomeSpec, homeAccessories } from "./sim/home.js";
+import { hubScriptKey } from "./sim/hubApi.js";
 import { simLiveOf, simValueKey } from "./sim/live.js";
 import { volumeSiteOf } from "./volume.js";
 
@@ -62,6 +65,18 @@ const SIM_HELD = new Set(["act", "run", "active", "reset"]);
 
 function simList(value) {
   return Array.isArray(value) ? value : [];
+}
+
+/**
+ * Теряет ли сценарий `scenarioId` идущие задержки и таймеры, когда дом на ходу
+ * перестраивается с `before` на `after` (F2). Логический и глобальный — только
+ * если правка коснулась его самого или его привязок (`hubScriptKey`): хаб
+ * оставляет их как были; блочный теряет всегда (таск 05).
+ */
+export function simEditDrops(before, after, scenarioId) {
+  const was = hubScriptKey(before, scenarioId);
+  if (was === null) return true;
+  return was !== hubScriptKey(after, scenarioId);
 }
 
 function simOwn(object, key) {
@@ -210,6 +225,7 @@ export function createSimulation(options = {}) {
   let home = null;
   let accessories = new Map();
   let sentText = null;
+  let sentSpec = null;
 
   const mirror = new Map();
   const pressed = new Map();
@@ -270,6 +286,7 @@ export function createSimulation(options = {}) {
     if (home) {
       const spec = overlay(home);
       sentText = JSON.stringify(spec);
+      sentSpec = spec;
       out.push({ type: "load", spec });
     }
     if (running && startPosted) out.push({ type: "start", values: mirrorValues(), restore: true });
@@ -434,6 +451,7 @@ export function createSimulation(options = {}) {
     const textNow = JSON.stringify(spec);
     if (textNow === sentText) return;
     sentText = textNow;
+    sentSpec = spec;
     post({ type: "load", spec });
   }
 
@@ -592,8 +610,15 @@ export function createSimulation(options = {}) {
     const textNow = JSON.stringify(spec);
     const entries = [];
     if (textNow !== sentText) {
-      const lost = !switching && running && startPosted && scenarios.some((scenario) => scenario && scenario.running);
+      // Сказать «таймеры сброшены правкой» можно только про сценарий, который
+      // их правда теряет: логику, которой правка не коснулась, дом не трогает.
+      const lost =
+        !switching &&
+        running &&
+        startPosted &&
+        scenarios.some((scenario) => scenario && scenario.running && simEditDrops(sentSpec, spec, scenario.id));
       sentText = textNow;
+      sentSpec = spec;
       post({ type: "load", spec });
       if (lost) entries.push(entry("system", "editReset"));
     }

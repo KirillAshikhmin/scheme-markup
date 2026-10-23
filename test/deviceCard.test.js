@@ -20,11 +20,15 @@ import { setMarkDevice, updateMark } from "../src/model.js";
 import { PRESS_DOUBLE_MS, PRESS_LONG_MS } from "../src/sim/presses.js";
 import {
   deviceCardModel,
+  deviceCardPart,
   deviceClickAct,
   deviceClickPlan,
+  deviceGestureEnd,
+  deviceGestureStart,
   deviceKeyPresser,
   deviceKeysOf,
   deviceLiveKinds,
+  deviceLogicSummary,
   devicePresserOf,
   devicePressers,
   deviceValueText,
@@ -311,6 +315,83 @@ test("жест оказался панорамой: начатое нажати�
   assert.equal(rig.presser.idle(), true);
 });
 
+// ——— щелчок по метке в «Схеме» как жест (слепая приёмка, F2) ———————————————
+//
+// Двойной щелчок по В1 засчитывался одиночным: первый щелчок выделял метку,
+// карточка всплывала поверх неё, и второй щелчок попадал уже в карточку.
+// Теперь выделение (а с ним и карточка) приходит, когда нажатие распознано и
+// клавиша отпущена: пока жест идёт, под рукой ничего не меняется — где бы на
+// плане ни стояла метка и где бы ни встала карточка.
+
+function gestureRig() {
+  const rig = presserRig();
+  const selected = [];
+  const acts = [];
+  const io = {
+    presserOf: () => rig.presser,
+    select: (markId) => selected.push([markId, rig.at()]),
+    press: (markId, index, press) => acts.push(["press", markId, index, press]),
+    act: (action) => acts.push(["act", action.kind, action.markId]),
+  };
+  return { rig, selected, acts, io };
+}
+
+const decoupledKey = () => setMarkDevice(box.project, box.marks.В1, { decoupled: [1] }).project;
+
+test("двойной щелчок по отвязанной клавише — «Двойное»: метка выделяется, когда нажатие распознано, а не на первом щелчке", () => {
+  const project = decoupledKey();
+  assert.equal(deviceClickPlan(markAccessory(project, box.marks.В1)).key.detect, true, "клавиша не отвязана — проверять нечего");
+  const { rig, selected, io } = gestureRig();
+  const first = deviceGestureStart(project, box.marks.В1, io);
+  rig.wait(60);
+  deviceGestureEnd(first, false, io);
+  rig.wait(120);
+  assert.deepEqual(selected, [], "метка выделилась между щелчками двойного — карточка встала бы под второй щелчок");
+  const second = deviceGestureStart(project, box.marks.В1, io);
+  rig.wait(60);
+  assert.deepEqual(selected, [], "метка выделилась, пока клавиша зажата");
+  deviceGestureEnd(second, false, io);
+  rig.wait(PRESS_DOUBLE_MS + 100);
+  assert.deepEqual(rig.fired.map((item) => item[0]), ["double"]);
+  assert.ok(selected.length > 0, "после нажатия метка не выделилась — карточки нет");
+  assert.ok(selected.every(([markId, at]) => markId === box.marks.В1 && at >= rig.fired[0][1]));
+});
+
+test("удержание отвязанной клавиши — «Долгое»; одиночное — после окна двойного; выделение — после отпускания", () => {
+  const project = decoupledKey();
+  const held = gestureRig();
+  const hold = deviceGestureStart(project, box.marks.В1, held.io);
+  held.rig.wait(PRESS_LONG_MS + 50);
+  assert.deepEqual(held.rig.fired.map((item) => item[0]), ["long"]);
+  assert.deepEqual(held.selected, [], "метка выделилась, пока клавишу держат");
+  deviceGestureEnd(hold, false, held.io);
+  assert.equal(held.selected.length, 1);
+  const once = gestureRig();
+  const tap = deviceGestureStart(project, box.marks.В1, once.io);
+  once.rig.wait(50);
+  deviceGestureEnd(tap, false, once.io);
+  assert.deepEqual(once.selected, []);
+  once.rig.wait(PRESS_DOUBLE_MS);
+  assert.deepEqual(once.rig.fired.map((item) => item[0]), ["single"]);
+  assert.equal(once.selected.length, 1);
+});
+
+test("жест без распознавателя: светильник переключается и выделяется по отпусканию; панорама — ни того, ни другого", () => {
+  const { selected, acts, io } = gestureRig();
+  const lamp = deviceGestureStart(box.project, box.marks.С1, io);
+  assert.deepEqual(selected, [], "выделение на нажатии");
+  deviceGestureEnd(lamp, false, io);
+  assert.deepEqual(acts, [["act", "toggle", box.marks.С1]]);
+  assert.deepEqual(selected.map((item) => item[0]), [box.marks.С1]);
+  const pan = gestureRig();
+  const moved = deviceGestureStart(box.project, box.marks.С1, pan.io);
+  deviceGestureEnd(moved, true, pan.io);
+  const key = deviceGestureStart(decoupledKey(), box.marks.В1, pan.io);
+  deviceGestureEnd(key, true, pan.io);
+  pan.rig.wait(PRESS_LONG_MS + PRESS_DOUBLE_MS);
+  assert.deepEqual([pan.selected, pan.acts, pan.rig.fired], [[], [], []]);
+});
+
 // ——— раздел «Логика» (таск 12 сценариев; история 5.7) ——————————————————
 
 test("модель карточки: раздел «Логика» — привязки метки и подходящие сервису сценарии", async () => {
@@ -329,6 +410,26 @@ test("модель карточки: раздел «Логика» — прив�
   const sensor = deviceCardModel(bound.project, box.marks.ДД1, null, reader).logic;
   assert.deepEqual(sensor.bindings, []);
   assert.deepEqual(sensor.available, []);
+});
+
+// Слепая приёмка (F2): при остановленном доме в карточке С1 раздела «Логика» не
+// было — привязку из «Схемы» было не добавить. Привязка — настройка сценария,
+// и карточка аксессуара даёт до неё дойти при любом состоянии дома.
+test("карточка аксессуара в «Схеме»: дом запущен — пульт с «Логикой», остановлен — «Логика»; не аксессуар — ничего", () => {
+  assert.equal(deviceCardPart(box.project, box.marks.С1, true), "remote");
+  assert.equal(deviceCardPart(box.project, box.marks.С1, false), "logic", "у остановленного дома в карточке нет «Логики»");
+  assert.equal(deviceCardPart(box.project, box.marks.ДД1, false), "logic");
+  assert.equal(deviceCardPart(box.project, "нет такой метки", false), null);
+  assert.equal(deviceCardPart(null, box.marks.С1, false), null);
+});
+
+test("строка «Логика» у остановленного дома: сколько у метки привязок", async () => {
+  const { addScenario, addLogicBinding } = await import("../src/model.js");
+  const added = addScenario(box.project, { kind: "logic", name: "Свет", source: "info = {name: 'Свет'};\nfunction trigger(){}" });
+  assert.deepEqual(deviceLogicSummary(added.project, box.marks.С1), { count: 0, text: "Привязок нет" });
+  const bound = addLogicBinding(added.project, { scenarioId: added.scenario.id, markId: box.marks.С1, service: 0 }).project;
+  assert.deepEqual(deviceLogicSummary(bound, box.marks.С1), { count: 1, text: "привязок: 1" });
+  assert.equal(deviceLogicSummary(bound, "нет такой метки"), null);
 });
 
 // ——— общие на «Схему», мини-план и «Объём» (ревью ветки, F1) ———————————————

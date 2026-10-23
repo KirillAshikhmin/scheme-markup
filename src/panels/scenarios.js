@@ -18,7 +18,7 @@
 // Живое состояние дома (запущен ли, значения) сюда приходит только из
 // `simulation.js` и в объект не пишется; а всё, что в файле — сценарии и
 // профили типов, — только через `canvasCommit` со своим ярлыком истории.
-import { PANEL_IDS, layoutAllows, registerPanel, reportAppError, scheduleFrame } from "../app.js";
+import { PANEL_IDS, layoutAllowsState, registerPanel, reportAppError, scheduleFrame } from "../app.js";
 import { appClockWatch } from "../appClock.js";
 import { canvasCommit } from "../canvas.js";
 import {
@@ -354,9 +354,20 @@ export function scenariosFiredTracker(ttl = SCENARIO_FIRED_MS) {
   };
 }
 
-/** Может ли человек править сценарии в этой раскладке (компьютер и планшет). */
-export function scenariosCanEdit(layout) {
-  return layoutAllows("editScenarios", layout);
+/**
+ * Может ли человек править сценарии: компьютер и планшет — и в раскладке
+ * просмотра (`tablet`, F2), телефон — нет.
+ */
+export function scenariosCanEdit(layout, tablet = false) {
+  return layoutAllowsState("editScenarios", { layout, tablet });
+}
+
+/**
+ * Может ли человек включать и выключать сценарии отметкой «Активный» — везде,
+ * и на телефоне (история 4.29, F2): это шаг истории, как на компьютере.
+ */
+export function scenariosCanToggle(layout, tablet = false) {
+  return layoutAllowsState("toggleScenarios", { layout, tablet });
 }
 
 // ——— двери для следующих шагов сборки ———————————————————————————————————
@@ -403,7 +414,8 @@ function mountScenariosScreen(host, api) {
   let firedTimer = null;
 
   const state = () => api.getState();
-  const canEdit = () => scenariosCanEdit(state().layout);
+  const canEdit = () => scenariosCanEdit(state().layout, state().tablet);
+  const canToggle = () => scenariosCanToggle(state().layout, state().tablet);
 
   // ——— запись в объект ———
 
@@ -523,16 +535,17 @@ function mountScenariosScreen(host, api) {
 
   function renderRow(row, selected, editable) {
     const now = state();
+    const toggles = canToggle();
     const active = uiEl("input", { type: "checkbox", attrs: { "aria-label": strings.scenarios.list.active } });
     active.checked = row.active;
-    active.disabled = !editable;
+    active.disabled = !toggles;
     active.addEventListener("click", (event) => event.stopPropagation());
     active.addEventListener("change", () => {
       commit(scenariosSetActive(state().project, row.id, active.checked));
       // Повторная активация возвращает остановленный сторожем сценарий.
       if (active.checked && row.hung) simScenarioActive(row.id, true);
     });
-    const activeLabel = uiEl("label", { class: "scn-row__active", title: editable ? strings.scenarios.list.activeHint : strings.scenarios.list.activeReadOnly }, [
+    const activeLabel = uiEl("label", { class: "scn-row__active", title: toggles ? strings.scenarios.list.activeHint : strings.scenarios.list.activeReadOnly }, [
       active,
       uiEl("span", { text: strings.scenarios.list.active }),
     ]);
@@ -1138,6 +1151,7 @@ function mountScenariosScreen(host, api) {
       "project" in changed ||
       "scenarioId" in changed ||
       "layout" in changed ||
+      "tablet" in changed ||
       "simRunning" in changed ||
       "selectedMarkIds" in changed ||
       "schemeId" in changed

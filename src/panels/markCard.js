@@ -35,7 +35,7 @@ import { planToScreen, typeIconPlan, typeSignIcon } from "../render.js";
 import { getSetting, setSetting } from "../store.js";
 import { strings } from "../strings.js";
 import { UI_SIGN, UI_SIGN_SMALL, uiButton, uiEl, uiIcon, uiIconButton, uiSignCell } from "./ui.js";
-import { deviceCardView } from "./deviceCard.js";
+import { deviceCardPart, deviceCardView, deviceLogicEntry, deviceLogicSection } from "./deviceCard.js";
 import { marksControllerIndex, marksLinkedText, marksLinkedTitle, marksRowModel } from "./marks.js";
 
 // Отступ между меткой и верхним краем карточки: метка должна остаться видна
@@ -180,6 +180,18 @@ export function markCardModel(project, markId) {
 }
 
 /**
+ * Подвигать ли план, чтобы метка не ушла под карточку. В просмотре — да:
+ * карточка высокая. На компьютере — нет: выделение там на каждый клик, и
+ * сдвиг из-под руки — промах при переносе. **Кроме запущенного дома** (F2):
+ * переноса в нём нет, а карточка-пульт поверх метки забирала бы следующий
+ * щелчок — второй щелчок двойного уходил в карточку.
+ */
+export function markCardLifts(state) {
+  const source = state || {};
+  return !layoutAllows("editMarks", source.layout) || source.simRunning === true;
+}
+
+/**
  * На сколько подвинуть план, чтобы метка не осталась под карточкой.
  *
  * Ноль — метка и так выше карточки, трогать план незачем: рывок по каждому
@@ -238,6 +250,15 @@ function mountMarkCard(host, api) {
     if (deviceView) deviceView.dispose();
     deviceView = null;
   };
+  // «Логика» остановленного дома (F2): у какой метки раздел раскрыт и сам
+  // раздел — он живёт между перерисовками карточки (правка привязки меняет
+  // объект, и раскрытые опции не должны схлопываться от каждой правки).
+  let logicFor = null;
+  let logicSection = null;
+  const dropLogic = () => {
+    if (logicSection) logicSection.view.dispose();
+    logicSection = null;
+  };
 
   const flip = (value) => {
     collapsed = value;
@@ -264,6 +285,7 @@ function mountMarkCard(host, api) {
     card.classList.toggle("mark-card--mini", mode === MARK_CARD_MINI);
     if (!model) {
       shownFor = null;
+      dropLogic();
       return;
     }
     if (mode === MARK_CARD_MINI) {
@@ -332,16 +354,34 @@ function mountMarkCard(host, api) {
           ])
         : null;
     // Запущенный дом: под полями метки — пульт её устройства (клавиши,
-    // ползунки, значения), собранный карточкой устройства.
-    if (state.simRunning === true && !model.comment) deviceView = deviceCardView(state.project, model.id);
-    card.classList.toggle("mark-card--sim", Boolean(deviceView));
+    // ползунки, значения, «Логика»), собранный карточкой устройства.
+    // Остановленный — строка «Логика», которая раскрывает тот же раздел прямо
+    // в карточке (F2): привязка — настройка сценария, и править её из «Схемы»
+    // можно при любом доме.
+    const part = model.comment ? null : deviceCardPart(state.project, model.id, state.simRunning === true);
+    const logicOpen = part === "logic" && logicFor === model.id;
+    if (!logicOpen || (logicSection && logicSection.markId !== model.id)) dropLogic();
+    if (logicOpen && !logicSection) logicSection = { markId: model.id, view: deviceLogicSection(model.id) };
+    if (part === "remote") deviceView = deviceCardView(state.project, model.id);
+    else if (part === "logic") {
+      deviceView = deviceLogicEntry(state.project, model.id, {
+        open: logicOpen,
+        section: logicSection ? logicSection.view : null,
+        onToggle: () => {
+          logicFor = logicOpen ? null : model.id;
+          render();
+        },
+      });
+    }
+    // Пульт и раскрытая «Логика» ловят щелчки и растут, как карточка
+    // запущенного дома; свёрнутая строка — нет: карточка остаётся сквозной.
+    card.classList.toggle("mark-card--sim", part === "remote" || logicOpen);
     card.replaceChildren(...markCardParts(model, { headButton, extra: deviceView ? deviceView.node : commentRow }));
-    // План подвигается только в просмотре: там карточка высокая и метка
-    // действительно уходит под неё. На компьютере выделение случается на
-    // каждый клик по метке, и сдвиг плана из-под руки — прямая дорога к
-    // промаху при переносе: метка едет вместе с планом между нажатием и
-    // ведением.
-    if (viewing && shownFor !== model.id) {
+    // План подвигается в просмотре и в запущенном доме (`markCardLifts`): там
+    // карточка высокая и метка действительно уходит под неё. На компьютере
+    // без дома выделение случается на каждый клик по метке, и сдвиг плана
+    // из-под руки — прямая дорога к промаху при переносе.
+    if (markCardLifts(state) && shownFor !== model.id) {
       shownFor = model.id;
       liftMark(state, model.id);
     }

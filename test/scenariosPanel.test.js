@@ -13,6 +13,7 @@ import {
   SCENARIO_FIRED_MS,
   scenariosAdd,
   scenariosCanEdit,
+  scenariosCanToggle,
   scenariosCurrent,
   scenariosDeviceGroups,
   scenariosDeviceKinds,
@@ -207,6 +208,24 @@ test("«Активный» и параметры: свои ярлыки, пов�
 test("права: править сценарии можно на компьютере и планшете, не на телефоне", () => {
   assert.equal(scenariosCanEdit("desktop"), true);
   assert.equal(scenariosCanEdit("mobile"), false);
+});
+
+test("планшет стоймя (F2): правую колонку — устройства и мини-план — прячет только просмотр, не узкая раскладка", () => {
+  const css = readFileSync(new URL("../src/panels/scenarios.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const hides = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, , body]) => /display:\s*none/.test(body)).map(([, selector]) => selector.trim());
+  const side = hides.filter((selector) => selector.includes(".scn__side"));
+  assert.ok(side.length > 0, "колонку в просмотре больше никто не прячет — телефон получил бы мини-план");
+  for (const selector of side) {
+    assert.ok(selector.includes(".is-view-only"), "колонку прячет не просмотр, а раскладка: " + selector);
+  }
+});
+
+test("права (F2): планшет в раскладке просмотра правит сценарии; телефон только включает и выключает их", () => {
+  assert.equal(scenariosCanEdit("mobile", true), true, "планшет стоймя открылся как телефон");
+  assert.equal(scenariosCanEdit("mobile", false), false);
+  assert.equal(scenariosCanToggle("mobile"), true, "на телефоне «Активный» неактивен");
+  assert.equal(scenariosCanToggle("mobile", true), true);
+  assert.equal(scenariosCanToggle("desktop"), true);
 });
 
 // ——— свои заготовки ————————————————————————————————————————————————

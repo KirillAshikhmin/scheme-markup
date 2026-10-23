@@ -726,3 +726,61 @@ test("блочный хозяин через дверь движка: услов
   assert.deepEqual(read("return [global.denied, global.runs]"), [1, 2]);
   assert.deepEqual(recorder.log().filter((entry) => entry.code === "hubError" || entry.code === "blockCodeError"), []);
 });
+
+// ——— перестройка дома на ходу: чужая правка логику не трогает (F2) ————————————
+//
+// Слепая приёмка: логический сценарий с `onStart` звал `trigger` с
+// `HUB[OnStart]` на каждую правку объекта — в журнале десять записей «trigger
+// от С1 ← хаб (загрузка)». На хабе правка другого сценария или устройства
+// логику не перезапускает; перезапускает её только сохранение её самой.
+
+function updatedScenario(project, id, patch) {
+  return { ...project, scenarios: project.scenarios.map((item) => (item.id === id ? { ...item, ...patch } : item)) };
+}
+
+test("правка объекта мимо логического сценария: ни trigger, ни onStart, журнал не растёт; подписки, таймеры и variables целы", () => {
+  const later = "  if (value === true) setTimeout(function () { global.later = (global.later || 0) + 1; }, 5000);";
+  const home = hubHome({ scripts: [{ key: "t", source: recorderScript("T", { onStart: true, body: later }) }], bindings: [{ script: "t", mark: "С1" }] });
+  assert.equal(calls(home).length, 1, "onStart при запуске дома");
+  home.set("С1", "On", true);
+  assert.equal(calls(home).length, 2);
+  const before = home.recorder.log().length;
+  // Чужая правка: в объекте появился блочный сценарий, у метки — новое имя помещения.
+  home.box.project = addScenario(home.box.project, { kind: "block", name: "Чужой" }).project;
+  home.reload();
+  home.box.project = { ...home.box.project, rooms: home.box.project.rooms.map((room, index) => (index === 0 ? { ...room, name: room.name + " (правка)" } : room)) };
+  home.reload();
+  assert.equal(calls(home).length, 2, "чужая правка позвала trigger");
+  assert.equal(home.log("hubTrigger").length, 2);
+  assert.deepEqual(home.recorder.log().slice(before).map((entry) => entry.code), [], "журнал вырос от чужой правки");
+  // Сценарий жив: таймер, подписка и variables привязки пережили перестройку.
+  home.engine.advanceTo(T0 + 5000);
+  assert.equal(home.code("return global.later").value, 1, "таймер сценария пропал");
+  home.set("С1", "On", false);
+  const seen = calls(home);
+  assert.equal(seen.length, 3, "подписка привязки пропала");
+  assert.equal(seen[2].count, 3, "variables привязки сброшены");
+});
+
+test("правка самого логического сценария или его привязки — перезапуск с onStart, как сохранение на хабе", () => {
+  const source = recorderScript("T", { onStart: true });
+  const home = hubHome({ scripts: [{ key: "t", source }], bindings: [{ script: "t", mark: "С1" }] });
+  assert.equal(calls(home).length, 1);
+  home.box.project = updatedScenario(home.box.project, home.scenarios.t, { source: source + "\n// правка" });
+  home.reload();
+  assert.equal(calls(home).length, 2, "правка текста сценария его не перезапустила");
+  assert.ok(calls(home)[1].context.endsWith("HUB[OnStart]"));
+  assert.equal(calls(home)[1].count, 1, "перезапуск — со свежими variables");
+  home.box.project = {
+    ...home.box.project,
+    logicBindings: home.box.project.logicBindings.map((binding) => ({ ...binding, options: { level: 4 } })),
+  };
+  home.reload();
+  assert.equal(calls(home).length, 3, "правка привязки сценарий не перезапустила");
+  assert.equal(calls(home)[2].level, 4);
+  // Порядок в списке — не правка сценария: перестановка его не перезапускает.
+  home.box.project = updatedScenario(home.box.project, home.scenarios.t, { order: 5 });
+  home.reload();
+  assert.equal(calls(home).length, 3);
+  assert.equal(home.log("hubTrigger").length, 3);
+});
