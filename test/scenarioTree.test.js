@@ -8,20 +8,26 @@ import assert from "node:assert/strict";
 import {
   SCENARIO_TEMPLATES,
   scenarioBlank,
+  scenarioAddBlock,
   scenarioBlockMarks,
   scenarioDelayNumber,
+  scenarioDelayNumbers,
   scenarioFind,
   scenarioFromTemplate,
   scenarioInsert,
   scenarioIssues,
+  scenarioMenu,
   scenarioMove,
   scenarioNewBlock,
+  scenarioPatch,
   scenarioOps,
   scenarioPhrase,
   scenarioPhraseParts,
   scenarioRemove,
   scenarioReplace,
   scenarioRepeatAllowed,
+  scenarioSetElse,
+  scenarioShift,
   scenarioTemplatesFrom,
   scenarioToTemplate,
 } from "../src/scenarioTree.js";
@@ -468,4 +474,102 @@ test("метки блока: для подсветки на мини-плане"
   assert.deepEqual(scenarioBlockMarks({ type: "notify", id: "n", text: "x" }), []);
   const setFrom = lightOn("a3", [{ char: "Brightness", verb: "setFrom", from: { markId: marks.С2, service: 0, char: "Brightness" } }]);
   assert.deepEqual(scenarioBlockMarks(setFrom).sort(), [marks.С1, marks.С2].sort());
+});
+
+// ——— правка из редактора (таск 11) ————————————————————————————————————
+
+const fresh = () => ({ ...scenarioBlank("block"), targets: [] });
+
+test("меню «+»: условия, действия и верхний уровень — наборы как в Sprut", () => {
+  assert.deepEqual(scenarioMenu("conditions"), ["device", "group", "schedule", "period", "code", "command"]);
+  assert.deepEqual(scenarioMenu("actions"), ["device", "if", "delay", "resetDelay", "scenario", "code", "notify", "http"]);
+  assert.deepEqual(scenarioMenu("root"), ["if", ...scenarioMenu("actions").filter((kind) => kind !== "if")]);
+  assert.deepEqual(scenarioMenu("nonsense"), []);
+});
+
+test("новое «Если» верхнего уровня: условие с триггером, вложенное — без", () => {
+  let scenario = scenarioAddBlock(fresh(), null, "root", "if").scenario;
+  const top = scenario.targets[0];
+  assert.equal(top.type, "if");
+  const made = scenarioAddBlock(scenario, top.if.id, "conditions", "device");
+  assert.equal(made.block.type, "device");
+  assert.equal(made.block.trigger, true, "верхнее «Если» — триггер по умолчанию");
+  scenario = made.scenario;
+  const inner = scenarioAddBlock(scenario, top.id, "then", "if");
+  scenario = inner.scenario;
+  const nested = scenarioAddBlock(scenario, inner.block.if.id, "conditions", "device");
+  assert.equal(nested.block.trigger, false, "вложенное — без триггера");
+  const group = scenarioAddBlock(scenario, top.if.id, "conditions", "group");
+  const inGroup = scenarioAddBlock(group.scenario, group.block.id, "conditions", "device");
+  assert.equal(inGroup.block.trigger, false, "в группе условий — следующий уровень, без триггера");
+  const period = scenarioAddBlock(scenario, top.if.id, "conditions", "period");
+  assert.equal(period.block.trigger, true);
+});
+
+test("новые действия: номер задержки ставится сам, остальное по умолчанию из newBlock", () => {
+  let scenario = scenarioAddBlock(fresh(), null, "root", "delay").scenario;
+  assert.equal(scenario.targets[0].no, 1);
+  const second = scenarioAddBlock(scenario, scenario.targets[0].id, "blocks", "delay");
+  assert.equal(second.block.no, 2, "внутри задержки — следующий номер по всему дереву");
+  scenario = second.scenario;
+  const reset = scenarioAddBlock(scenario, null, "root", "resetDelay");
+  assert.equal(reset.block.no, null, "сброс — все задержки");
+  const action = scenarioAddBlock(scenario, null, "root", "device");
+  assert.deepEqual(action.block.items, [], "действие над устройством несёт items");
+  assert.equal(action.block.trigger, undefined);
+  assert.equal(scenarioDelayNumbers(scenario).join(), "1,2");
+});
+
+test("вставка на место и неверный слот: ничего не меняется", () => {
+  let scenario = scenarioAddBlock(fresh(), null, "root", "notify").scenario;
+  scenario = scenarioAddBlock(scenario, null, "root", "code", 0).scenario;
+  assert.deepEqual(scenario.targets.map((block) => block.type), ["code", "notify"]);
+  const bad = scenarioAddBlock(scenario, scenario.targets[0].id, "then", "notify");
+  assert.equal(bad.scenario, scenario);
+  assert.equal(bad.block, null);
+  assert.equal(scenarioAddBlock(scenario, null, "root", "no-such-kind").scenario, scenario);
+  assert.equal(scenarioAddBlock(scenario, null, "root", "group").scenario, scenario, "группа в корень не кладётся");
+});
+
+test("правка полей блока: слияние, undefined убирает ключ, то же — тот же сценарий", () => {
+  const scenario = { ...fresh(), targets: [{ type: "notify", id: "n1", text: "a" }] };
+  const next = scenarioPatch(scenario, "n1", { text: "b" });
+  assert.equal(scenarioFind(next, "n1").block.text, "b");
+  assert.equal(scenarioFind(scenario, "n1").block.text, "a", "исходный не тронут");
+  assert.equal(scenarioPatch(scenario, "n1", { text: "a" }), scenario);
+  assert.equal(scenarioPatch(scenario, "no-such", { text: "b" }), scenario);
+  const cleared = scenarioPatch(next, "n1", { text: undefined });
+  assert.equal("text" in scenarioFind(cleared, "n1").block, false);
+});
+
+test("правка группы условий «Если» сохраняет её условия", () => {
+  const scenario = { ...fresh(), targets: [ifBlock("i1", [motion("c1")], [])] };
+  const next = scenarioPatch(scenario, "i1g", { mode: "AND" });
+  const block = scenarioFind(next, "i1").block;
+  assert.equal(block.if.mode, "AND");
+  assert.equal(block.if.conditions[0].id, "c1");
+});
+
+test("«Иначе»: добавить и удалить, повтор — то же", () => {
+  const scenario = { ...fresh(), targets: [ifBlock("i1", [motion("c1")], [lightOn("a1")])] };
+  const withElse = scenarioSetElse(scenario, "i1", true);
+  assert.deepEqual(scenarioFind(withElse, "i1").block.else, []);
+  assert.equal(scenarioSetElse(withElse, "i1", true), withElse);
+  const without = scenarioSetElse(withElse, "i1", false);
+  assert.equal(scenarioFind(without, "i1").block.else, null);
+  assert.equal(scenarioSetElse(scenario, "i1", false), scenario);
+  assert.equal(scenarioSetElse(scenario, "c1", true), scenario, "не «Если» — ничего");
+});
+
+test("кнопки ↑↓: сдвиг на место, у края — то же, условия тоже переставляются", () => {
+  const scenario = { ...fresh(), targets: [ifBlock("i1", [motion("c1"), motion("c2"), motion("c3")], [lightOn("a1"), lightOn("a2")])] };
+  const down = scenarioShift(scenario, "a1", 1);
+  assert.deepEqual(scenarioFind(down, "i1").block.then.map((block) => block.id), ["a2", "a1"]);
+  assert.equal(scenarioShift(scenario, "a1", -1), scenario);
+  assert.equal(scenarioShift(down, "a1", 1), down);
+  const conditions = scenarioShift(scenario, "c3", -1);
+  assert.deepEqual(scenarioFind(conditions, "i1").block.if.conditions.map((block) => block.id), ["c1", "c3", "c2"]);
+  assert.equal(scenarioShift(scenario, "i1g", 1), scenario, "группа «Если» не двигается");
+  const roots = { ...fresh(), targets: [ifBlock("i1", [], []), ifBlock("i2", [], [])] };
+  assert.deepEqual(scenarioShift(roots, "i1", 1).targets.map((block) => block.id), ["i2", "i1"]);
 });

@@ -1,0 +1,488 @@
+/* ——— редактор блоков «Если — Тогда — Иначе» (таск 11 сценариев) ———————
+   Вид — по скриншотам вики Sprut.Hub: белые карточки с цветной полосой слева
+   («Если» — серо-синяя, «Тогда» — зелёная, «Иначе» — оранжевая), жёлтый кружок
+   триггера, оранжевая ∞, строка «характеристика · оператор · значение ·
+   единица · ⏱». Вложенное «Если» сдвинуто вправо и стоит в своей рамке.
+   Ряды переносятся: середина режима бывает узкой. */
+
+.sed {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sed-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sed-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sed-list.is-empty {
+  min-height: 8px;
+}
+
+.sed-list.is-drop {
+  outline: 2px dashed var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.sed-dropline {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+/* ——— карточка ——— */
+.sed-card {
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--canvas-line);
+  border-left: 4px solid #8c959f;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.sed-card--if {
+  border-left-color: #57606a;
+  background: #fbfcfd;
+}
+
+.sed-card--condition {
+  border-left-color: #8c959f;
+}
+
+.sed-card--group {
+  border-left-color: #6e7781;
+  border-style: dashed;
+  border-left-style: solid;
+}
+
+.sed-card--action {
+  border-left-color: var(--ok);
+}
+
+.sed-card.is-bad {
+  border-color: var(--danger);
+  border-left-color: var(--danger);
+  background: #fff5f4;
+}
+
+.sed-card.is-warn {
+  border-color: #bf8700;
+  border-left-color: #bf8700;
+  background: #fffbea;
+}
+
+.sed-card.is-dragging {
+  opacity: 0.45;
+}
+
+.sed-card__head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.sed-card__title {
+  flex: 1 1 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sed-card__tools {
+  display: flex;
+  gap: 2px;
+  flex: none;
+}
+
+.sed-card__problem {
+  margin: 4px 0 0;
+  font-size: 12px;
+}
+
+.sed-card__problem.is-bad {
+  color: #82071e;
+  font-weight: 600;
+}
+
+.sed-card__problem.is-warn {
+  color: #7d4e00;
+}
+
+.sed-handle {
+  flex: none;
+  width: 14px;
+  color: #8c959f;
+  text-align: center;
+  cursor: grab;
+  user-select: none;
+  line-height: 1;
+}
+
+.sed-handle:active {
+  cursor: grabbing;
+}
+
+.sed-tool {
+  min-width: 26px;
+  padding: 3px;
+}
+
+.sed-keyword {
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.sed-kind {
+  font-weight: 600;
+}
+
+.sed-always {
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: #fff8c5;
+  color: #7d4e00;
+  font-size: 11px;
+}
+
+/* ——— разделы «Если / Тогда / Иначе» ——— */
+.sed-section {
+  margin-top: 6px;
+  padding-left: 8px;
+  border-left: 3px solid #d0d7de;
+}
+
+.sed-section--then {
+  border-left-color: var(--ok);
+}
+
+.sed-section--else {
+  border-left-color: #d1731f;
+}
+
+.sed-section__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.sed-section__add {
+  margin-top: 4px;
+}
+
+/* ——— ряды полей ——— */
+.sed-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  margin-top: 4px;
+}
+
+.sed-select,
+.sed-input {
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.sed-select--char {
+  max-width: 230px;
+}
+
+.sed-select--wide,
+.sed-input--wide {
+  flex: 1 1 160px;
+}
+
+.sed-input--time {
+  width: 8.5em;
+}
+
+.sed-input--time-part {
+  width: 4.2em;
+}
+
+.sed-input.is-bad {
+  border-color: var(--danger);
+  background: #fff5f4;
+}
+
+.sed-numwrap,
+.sed-duration {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.sed-unit {
+  color: #57606a;
+  font-size: 12px;
+}
+
+.sed-hint {
+  margin: 2px 0 0;
+  color: #6e7781;
+  font-size: 11px;
+}
+
+.sed-sun {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #1f2328;
+}
+
+.sed-sun.is-note {
+  color: #9a6700;
+}
+
+.sed-code {
+  width: 100%;
+  min-height: 3.6em;
+  margin-top: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  tab-size: 2;
+  resize: vertical;
+}
+
+/* ——— устройство ——— */
+.sed-device {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+}
+
+.sed-device__name {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.sed-device__name.is-empty {
+  color: #82071e;
+  border-style: dashed;
+}
+
+.sed-device__name.is-gone {
+  color: #82071e;
+}
+
+.sed-device__plan {
+  padding: 3px 5px;
+}
+
+/* ——— жёлтый кружок и ∞ ——— */
+.sed-trigger {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 2px solid #bf8700;
+  border-radius: 50%;
+  background: #fff;
+  cursor: pointer;
+}
+
+.sed-trigger.is-on {
+  background: #f5c518;
+  border-color: #bf8700;
+}
+
+.sed-infinity {
+  padding: 0 7px;
+  border: 1px solid var(--canvas-line);
+  border-radius: 6px;
+  background: #fff;
+  color: #6e7781;
+  font-size: 16px;
+  line-height: 22px;
+  cursor: pointer;
+}
+
+.sed-infinity.is-on {
+  border-color: #d1731f;
+  background: #fff1e0;
+  color: #b35900;
+  font-weight: 700;
+}
+
+.sed-infinity.is-off,
+.sed-infinity:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ——— дни недели ——— */
+.sed-days {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 4px;
+}
+
+.sed-chip {
+  min-width: 30px;
+  padding: 2px 6px;
+  border: 1px solid var(--canvas-line);
+  border-radius: 12px;
+  background: #fff;
+  color: #57606a;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.sed-chip.is-on {
+  border-color: var(--accent);
+  background: #ddf4ff;
+  color: #0550ae;
+  font-weight: 600;
+}
+
+/* ——— меню «+» ——— */
+.sed-menuwrap {
+  position: relative;
+  display: inline-block;
+}
+
+.sed-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.sed-add--root {
+  font-weight: 600;
+}
+
+.sed-menu {
+  position: absolute;
+  z-index: 30;
+  top: 100%;
+  left: 0;
+  margin-top: 2px;
+  min-width: 230px;
+  padding: 4px;
+  border: 1px solid var(--canvas-line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 6px 20px rgba(31, 35, 40, 0.18);
+}
+
+.sed-menu__item {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--canvas-text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sed-menu__item:hover,
+.sed-menu__item:focus-visible {
+  background: #eaeef2;
+  outline: none;
+}
+
+.sed-menu__item.has-sep {
+  margin-top: 4px;
+  border-top: 1px solid var(--canvas-line);
+  border-radius: 0 0 6px 6px;
+}
+
+.sed-else-remove {
+  font-size: 12px;
+}
+
+.sed-item-add {
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+/* ——— окно выбора устройства ——— */
+.sed-pick__search {
+  width: 100%;
+  margin-bottom: 6px;
+}
+
+.sed-pick__list {
+  max-height: 55vh;
+  overflow: auto;
+}
+
+.sed-pick__room {
+  margin: 8px 0 3px;
+  color: #57606a;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.sed-pick__device {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sed-pick__device:hover,
+.sed-pick__device:focus-visible {
+  background: #eaeef2;
+  outline: none;
+}
+
+.sed-pick__device span {
+  color: #6e7781;
+  font-size: 12px;
+}
+
+.sed-pick__none {
+  color: #6e7781;
+}
+
+/* Узкая середина: вложенность не съедает ширину, ряды переносятся сами. */
+@container (max-width: 560px) {
+  .sed-section {
+    padding-left: 5px;
+  }
+
+  .sed-select--char,
+  .sed-device__name {
+    max-width: 100%;
+  }
+}
+
+/* Середина режима — колонка с прокруткой: редактор не сжимается, а растёт. */
+.scn-center__editor.sed {
+  flex: none;
+}

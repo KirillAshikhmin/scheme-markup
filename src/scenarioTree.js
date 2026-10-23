@@ -268,6 +268,112 @@ export function scenarioDelayNumber(scenario) {
   return top + 1;
 }
 
+// ——— правка из редактора (таск 11) ——————————————————————————————————————
+//
+// Меню «+», добавление блока с умолчаниями Sprut, правка полей, «Иначе»,
+// сдвиг на место. Всё — над значением сценария, как остальное в модуле.
+
+const SCENARIO_MENU_ACTIONS = Object.freeze(["device", "if", "delay", "resetDelay", "scenario", "code", "notify", "http"]);
+const SCENARIO_MENUS = Object.freeze({
+  // «Добавить новый блок условий верхнего уровня» — и действия без «Если»:
+  // сценарий без условий сразу выполняет «Тогда».
+  root: Object.freeze(["if", ...SCENARIO_MENU_ACTIONS.filter((kind) => kind !== "if")]),
+  conditions: Object.freeze(["device", "group", "schedule", "period", "code", "command"]),
+  actions: SCENARIO_MENU_ACTIONS,
+});
+
+/**
+ * Пункты меню «+» по виду списка: `root` (верх сценария), `conditions`
+ * (раздел «Если»), `actions` («Тогда», «Иначе», «Задержка»). Порядок — как в
+ * Sprut. Неизвестный вид — пустой список.
+ */
+export function scenarioMenu(list) {
+  return Object.prototype.hasOwnProperty.call(SCENARIO_MENUS, list) ? [...SCENARIO_MENUS[list]] : [];
+}
+
+// Слот → вид списка меню.
+function menuListOf(slot) {
+  return slot === "root" ? "root" : slot === "conditions" ? "conditions" : "actions";
+}
+
+// Новое условие верхнего уровня — с триггером: оно лежит прямо в группе
+// «Если», которое само стоит в корне сценария. Группа внутри группы и «Если»
+// в «Тогда» — следующий уровень, там триггера нет (вики, «Триггеры»).
+function conditionIsTop(scenario, groupId) {
+  const group = scenarioFind(scenario, groupId);
+  if (!group || group.slot !== "if") return false;
+  const owner = scenarioFind(scenario, group.parentId);
+  return Boolean(owner) && owner.slot === "root";
+}
+
+/**
+ * Добавить блок вида `kind` (пункт меню) в слот родителя. В списке условий
+ * `device` — условие по устройству, в остальных — действие. Возвращает
+ * `{scenario, block}`; нельзя (нет родителя, пункта нет в меню этого списка) —
+ * тот же сценарий и `block: null`.
+ */
+export function scenarioAddBlock(scenario, parentId, slot, kind, index) {
+  if (!treeObject(scenario) || !scenarioMenu(menuListOf(slot)).includes(kind)) return { scenario, block: null };
+  let block;
+  if (slot === "conditions") {
+    block = scenarioNewBlock(kind);
+    const top = conditionIsTop(scenario, parentId);
+    if (kind === "device") block.trigger = top;
+    else if (kind === "period") block.trigger = top;
+  } else if (kind === "device") block = scenarioNewBlock("device", { items: [] });
+  else if (kind === "delay") block = scenarioNewBlock("delay", { no: scenarioDelayNumber(scenario) });
+  else block = scenarioNewBlock(kind);
+  const next = scenarioInsert(scenario, parentId, slot, index, block);
+  return next === scenario ? { scenario, block: null } : { scenario: next, block };
+}
+
+/**
+ * Поправить поля блока: ключи `patch` перекрывают, значение `undefined` ключ
+ * убирает. Блока нет или ничего не изменилось — тот же сценарий.
+ */
+export function scenarioPatch(scenario, blockId, patch) {
+  const found = scenarioFind(scenario, blockId);
+  if (!found || !treeObject(patch)) return scenario;
+  const merged = { ...found.block };
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === undefined) delete merged[key];
+    else merged[key] = value;
+  }
+  if (JSON.stringify(merged) === JSON.stringify(found.block)) return scenario;
+  return scenarioReplace(scenario, blockId, merged);
+}
+
+/** «Добавить блок „Иначе“» (`on`) и «Удалить блок „Иначе“»; не «Если» и повтор — тот же сценарий. */
+export function scenarioSetElse(scenario, ifId, on) {
+  const found = scenarioFind(scenario, ifId);
+  if (!found || found.block.type !== "if") return scenario;
+  const has = Array.isArray(found.block.else);
+  if (on === has) return scenario;
+  return scenarioPatch(scenario, ifId, { else: on ? [] : null });
+}
+
+/** Сдвинуть блок на `delta` мест внутри его списка (кнопки ↑↓); у края — тот же сценарий. */
+export function scenarioShift(scenario, blockId, delta) {
+  const found = scenarioFind(scenario, blockId);
+  if (!found || found.slot === "if" || !Number.isInteger(delta) || delta === 0) return scenario;
+  const owner = found.parentId ? scenarioFind(scenario, found.parentId) : null;
+  const holder = owner ? owner.block : null;
+  const size = found.slot === "root" ? treeList(scenario.targets).length : treeList(holder && holder[found.slot]).length;
+  const at = found.index + delta;
+  if (at < 0 || at >= size) return scenario;
+  return scenarioMove(scenario, blockId, found.parentId, found.slot, at);
+}
+
+/** Номера всех задержек сценария по возрастанию — для «Сбросить задержку №N». */
+export function scenarioDelayNumbers(scenario) {
+  const numbers = new Set();
+  treeRoot(scenario, (block) => {
+    if (block.type === "delay" && Number.isFinite(Number(block.no))) numbers.add(Number(block.no));
+    return false;
+  });
+  return [...numbers].sort((a, b) => a - b);
+}
+
 // ——— устройства блоков ——————————————————————————————————————————————
 
 // Ссылки блока на устройства: условие и действие несут `ref`, «Установить из»
