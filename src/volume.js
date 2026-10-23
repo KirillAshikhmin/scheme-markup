@@ -2636,6 +2636,7 @@ function volumeOpeningFaces(wall, opening, heightMm, out, openDoorIds, rooms = n
   const bottom = Math.max(0, Number(opening.heightAboveFloorMm || 0));
   const top = Math.min(heightMm, bottom + Number(opening.heightMm));
   if (!(to > from) || !(top > bottom)) return out;
+  const reveals = out.length;
   const at = (along, across) => ({
     x: Number(wall.aMm.x) + u.x * along + n.x * across,
     y: Number(wall.aMm.y) + u.y * along + n.y * across,
@@ -2708,6 +2709,13 @@ function volumeOpeningFaces(wall, opening, heightMm, out, openDoorIds, rooms = n
         normal,
       }),
     );
+  }
+  // **Рамка дверного проёма** (правка после сборки сценариев): откосы,
+  // подоконник и перемычка открывающегося проёма помечены его дверью. По ним
+  // прицел узнаёт проём и тогда, когда полотно уехало, — открытую дверь
+  // закрывают, глядя в её проём (`volumeDoorwayAt`).
+  if (opening.id && openingOpens(opening.kind)) {
+    for (let index = reveals; index < out.length; index += 1) out[index].doorway = opening.id;
   }
   if (openingFamilyOf(opening.kind) === "window") {
     volumeWindowFrame(at, from, to, bottom, top, out, openingFaceGrid(opening));
@@ -6619,6 +6627,57 @@ export function volumeDoorAt(polygons, x, y, slack = VOLUME_PICK_SLACK_PX) {
   return near;
 }
 
+/**
+ * **Дверь по её проёму** (правка после сборки сценариев). Слова заказчика:
+ * «Открыл дверь нажатием Е, потом курсор убрал в другую сторону, а нажатие Е
+ * всё равно открывает дверь… открывает и закрывает последнюю дверь, с которой
+ * взаимодействовали».
+ *
+ * Полотно открытой двери уезжает из-под прицела, и закрыть её было бы не во
+ * что целиться. Поэтому дверью считается и **её проём**: точка внутри рамки
+ * его откосов на кадре (прямоугольник, охватывающий их многоугольники). Из
+ * нескольких проёмов под точкой — тот, чьи откосы нарисованы позже, то есть
+ * ближний. Взгляд мимо проёма — двери нет, и E о ней не знает.
+ */
+export function volumeDoorwayAt(polygons, x, y) {
+  const frames = new Map();
+  (polygons || []).forEach((polygon, index) => {
+    // Рамка — откосы проёма и само полотно: у открытой двери оно стоит рядом.
+    const owner = polygon.doorway || polygon.door;
+    if (!owner || polygon.stroke || !polygon.xy) return;
+    let frame = frames.get(owner);
+    if (!frame) {
+      frame = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity, last: index };
+      frames.set(owner, frame);
+    }
+    for (let at = 0; at + 1 < polygon.xy.length; at += 2) {
+      frame.minX = Math.min(frame.minX, polygon.xy[at]);
+      frame.maxX = Math.max(frame.maxX, polygon.xy[at]);
+      frame.minY = Math.min(frame.minY, polygon.xy[at + 1]);
+      frame.maxY = Math.max(frame.maxY, polygon.xy[at + 1]);
+    }
+    frame.last = index;
+  });
+  if (frames.size === 0) return null;
+  // Что под точкой нарисовано последним и не просвечивает: кадр идёт от
+  // дальнего к ближнему, и проём за стеной закрыт гранью, нарисованной позже
+  // его откосов. Своя дверь проём не закрывает — ни полотно, ни откос.
+  let cover = null;
+  for (let index = (polygons || []).length - 1; index >= 0; index -= 1) {
+    const polygon = polygons[index];
+    if (polygon.stroke || polygon.clear || !polygon.xy || !volumePolygonHit(polygon.xy, x, y)) continue;
+    cover = { index, owner: polygon.doorway || polygon.door || null };
+    break;
+  }
+  let best = null;
+  for (const [id, frame] of frames) {
+    if (x < frame.minX || x > frame.maxX || y < frame.minY || y > frame.maxY) continue;
+    if (cover && cover.index > frame.last && cover.owner !== id) continue;
+    if (!best || frame.last > best.last) best = { id, last: frame.last };
+  }
+  return best ? best.id : null;
+}
+
 /** Где в объёме стоит метка — по её месту в сцене. `null` — не размещена. */
 export function volumeMarkAnchor(scene, markId) {
   for (const place of (scene && scene.marks) || []) {
@@ -8009,6 +8068,9 @@ function volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, b
     // выключателя. Своего правила здесь нет — только послушание пометке.
     pick: (mine && face.markId) || null,
     door: (mine && face.doorId) || null,
+    // Рамка дверного проёма (правка после сборки сценариев) — тоже хозяин
+    // только у своего этажа.
+    doorway: (mine && face.doorway) || null,
     // Клавиша выключателя (таск 177): по ней окно отвечает, в какой канал
     // попал щелчок. У остальных многоугольников `null`.
     channel: mine && face.channel !== undefined ? face.channel : null,

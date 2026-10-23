@@ -163,6 +163,12 @@ export const VOLUME_LOOK_INVERT_SETTING = "volumeTouchLookInvert";
 // **положительная**: снятой её делает только записанное `false`.
 export const VOLUME_OBJECTS_CLEAR_SETTING = "volumeObjectsClear";
 
+// «Стрелки связей» (правка после сборки сценариев): «Сделай опцией показ
+// стрелок связей в объёме». Отметка **положительная** и взведённая — стрелки
+// видны, как были; снятой её делает только записанное `false`. Действует только
+// в «Объёме»: на плане связи ведёт переключатель в шапке.
+export const VOLUME_LINK_ARROWS_SETTING = "volumeLinkArrows";
+
 /**
  * Выбор человека. Живёт в области модуля, а не в поверхности объёма: поверхность
  * пересобирается (сменили схему, закрыли объект), а выбор — нет.
@@ -192,6 +198,8 @@ const params = {
   lookInvert: false,
   // Вещи чертежа просвечивают (правка после сборки сценариев): умолчание — да.
   objectsClear: true,
+  // Стрелки связей на кадре (правка после сборки сценариев): умолчание — да.
+  linkArrows: true,
 };
 
 // Настройки читаются асинхронно, как у плашек и слоёв: поле стартует с
@@ -235,6 +243,7 @@ export function volumeParamsLoad() {
     [VOLUME_SIMULATION_SETTING, "simulation"],
     [VOLUME_PHYSICAL_SETTING, "physical"],
     [VOLUME_OBJECTS_CLEAR_SETTING, "objectsClear"],
+    [VOLUME_LINK_ARROWS_SETTING, "linkArrows"],
   ]) {
     waits.push(
       Promise.resolve(getSetting(key))
@@ -309,6 +318,7 @@ export function volumeParamsRead() {
     lookSpeed: params.lookSpeed,
     lookInvert: params.lookInvert,
     objectsClear: params.objectsClear,
+    linkArrows: params.linkArrows,
   };
 }
 
@@ -371,6 +381,7 @@ export function volumeParamsFlag(name, on) {
     physical: VOLUME_PHYSICAL_SETTING,
     lookInvert: VOLUME_LOOK_INVERT_SETTING,
     objectsClear: VOLUME_OBJECTS_CLEAR_SETTING,
+    linkArrows: VOLUME_LINK_ARROWS_SETTING,
   };
   const key = keys[name];
   if (!key) return;
@@ -645,6 +656,11 @@ export function createVolumeParamsFields(options) {
       // вещи чертежа сквозные или плотные.
       checkRow(strings.volume.objectsClear, chosen.objectsClear, strings.volume.objectsClearHint, (on) =>
         volumeParamsFlag("objectsClear", on),
+      ),
+      // Стрелки связей (правка после сборки сценариев) — «что показывать»:
+      // дуги «чем управляет» у выделенной метки на кадре или чистый кадр.
+      checkRow(strings.volume.linkArrows, chosen.linkArrows, strings.volume.linkArrowsHint, (on) =>
+        volumeParamsFlag("linkArrows", on),
       ),
       // Карточка выделенной метки (таск 09 сценариев, G22) — тоже «что
       // показывать»: отметка убирает её из поля «Объёма», и только оттуда.

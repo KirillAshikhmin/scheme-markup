@@ -228,3 +228,26 @@ test("улица и дом в кадре: земля — улица (снег в
   assert.ok(frame.some((polygon) => polygon.inside === false && !polygon.stroke), "в кадре нет улицы");
   assert.ok(frame.some((polygon) => polygon.inside === true), "в кадре нет дома");
 });
+
+test("«Стрелки связей» в «Объёме»: по умолчанию видны, отметка снимает и возвращает", async () => {
+  // «Сделай опцией показ стрелок связей в объёме».
+  const { volumeParamsFlag, volumeParamsRead, VOLUME_LINK_ARROWS_SETTING } = await import("../src/panels/volumeParams.js");
+  assert.equal(VOLUME_LINK_ARROWS_SETTING, "volumeLinkArrows");
+  assert.equal(volumeParamsRead().linkArrows, true, "по умолчанию стрелок нет");
+  volumeParamsFlag("linkArrows", false);
+  assert.equal(volumeParamsRead().linkArrows, false);
+  volumeParamsFlag("linkArrows", true);
+  assert.equal(volumeParamsRead().linkArrows, true);
+});
+
+test("Q — окно метки под прицелом: клавиша своя и ни с ходьбой, ни с дверями не спорит", async () => {
+  // «В объёме по нажатию Q или на сенсоре по дополнительной кнопочке
+  // открывать окно метки, иногда оно нужно».
+  const { VOLUME_CARD_KEY, VOLUME_DOOR_KEY, VOLUME_DOORS_KEY, volumeKeyMove } = await import("../src/panels/volume.js");
+  assert.equal(VOLUME_CARD_KEY, "KeyQ");
+  assert.equal(volumeKeyMove(VOLUME_CARD_KEY), null, "Q снова ходит или вертит");
+  assert.ok(VOLUME_CARD_KEY !== VOLUME_DOOR_KEY && VOLUME_CARD_KEY !== VOLUME_DOORS_KEY);
+  const { strings } = await import("../src/strings.js");
+  assert.match(strings.volume.pickHint, /Q — окно метки/, "про Q нигде не сказано");
+  assert.match(strings.volume.hintTouch, /«i» — окно метки/, "про кнопку «i» нигде не сказано");
+});

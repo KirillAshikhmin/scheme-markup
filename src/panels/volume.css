@@ -265,6 +265,19 @@
   bottom: calc((var(--volume-action-size) - var(--volume-stance-size)) / 2);
 }
 
+/* «i» — окно метки (правка после сборки сценариев): маленькая, в свободной
+   ячейке дуги над «Присесть» и слева от «Прыжка» — палец до неё дотягивается,
+   но с «Действием» её не спутать. */
+.volume__stanceBtn.volume__cardBtn {
+  --volume-card-size: calc(var(--volume-stance-size) * 0.72);
+  /* Поля кнопки-значка в маленьком круге съели бы значок до полоски. */
+  padding: 0;
+  width: var(--volume-card-size);
+  height: var(--volume-card-size);
+  right: calc(var(--volume-action-size) + var(--volume-stance-gap) + (var(--volume-stance-size) - var(--volume-card-size)) / 2);
+  bottom: calc(var(--volume-action-size) + var(--volume-stance-gap) + (var(--volume-stance-size) - var(--volume-card-size)) / 2);
+}
+
 /* ——— смена вида: вторая ячейка правого верхнего угла (таск 166, G245) ————
    «кнопка От первого лица слишком большая, сделай её небольшой и под кнопкой
    полноэкранного режима».
@@ -552,6 +565,13 @@
 
 .volume__stanceBtn .ui-icon {
   --ui-icon: 20px;
+}
+
+/* У «i» значок — кружок с буквой, и в двадцати точках буква читается точкой:
+   он крупнее, чем у соседей, хоть кнопка и меньше. */
+.volume__cardBtn .ui-icon {
+  --ui-icon: 26px;
+  flex: none;
 }
 
 /* Присед, включённый кнопкой (правка после сборки сценариев: «присед сделай

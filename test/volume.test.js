@@ -1850,6 +1850,31 @@ test("дверь ловится кликом по полотну и по руч�
   assert.equal(volumeDoorAt(frame, 2, 2), null);
 });
 
+test("открытая дверь ловится по проёму, взгляд мимо проёма — не дверь (E действует только на то, куда смотришь)", async () => {
+  // Правка после сборки сценариев: «Открыл дверь нажатием Е, потом курсор
+  // убрал в другую сторону, а нажатие Е всё равно открывает дверь».
+  const { volumeDoorwayAt } = await import("../src/volume.js");
+  const scene = doorScene();
+  const open = volumeScene(scene.project, scene.schemeId, { openDoorIds: new Set([scene.doorId]) });
+  const box = { width: 1200, height: 700 };
+  const camera = { at: { x: -50, y: 0, z: VOLUME_EYE_MM }, yaw: -Math.PI / 2, pitch: 0 };
+  const frame = volumeFrame(open, camera, box);
+  // Полотно ушло в сторону — в середине проёма его нет, а проём есть.
+  assert.equal(volumeDoorwayAt(frame, box.width / 2, box.height / 2), scene.doorId, "в проём открытой двери не прицелиться");
+  // Отвернулись — ни полотна, ни проёма.
+  const away = volumeFrame(open, { ...camera, yaw: Math.PI / 2 }, box);
+  assert.equal(volumeDoorAt(away, box.width / 2, box.height / 2), null);
+  assert.equal(volumeDoorwayAt(away, box.width / 2, box.height / 2), null, "дверь за спиной под прицелом");
+  // Проём за стеной не берётся: поверх него нарисована стена.
+  const xy = [0, 0, 10, 0, 10, 10, 0, 10];
+  const hidden = [
+    { xy, doorway: "far", fill: "#000" },
+    { xy, fill: "#000" },
+  ];
+  assert.equal(volumeDoorwayAt(hidden, 5, 5), null, "дверь за стеной открывается сквозь неё");
+  assert.equal(volumeDoorwayAt([{ xy, fill: "#000" }, { xy, doorway: "near", fill: "#000" }], 5, 5), "near");
+});
+
 test("Alt он же Option: узнаётся и по имени клавиши, и по её коду", () => {
   assert.equal(volumeAltKey({ key: "Alt", code: "AltLeft" }), true);
   assert.equal(volumeAltKey({ key: "Dead", code: "AltRight" }), true, "на Mac Option правит ввод, но код у него свой");

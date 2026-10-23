@@ -95,6 +95,7 @@ import {
   volumeChannelLines,
   volumeChannelLinks,
   volumeDoorAt,
+  volumeDoorwayAt,
   volumeDraw,
   volumeDrawBackdrop,
   volumeDrawBackdropNear,
@@ -207,6 +208,12 @@ export function volumeKeyMove(code) {
  */
 export const VOLUME_DOOR_KEY = "KeyE";
 export const VOLUME_DOORS_KEY = "KeyR";
+/**
+ * Окно метки под прицелом (правка после сборки сценариев): «по нажатию Q или
+ * на сенсоре по дополнительной кнопочке открывать окно метки, иногда оно
+ * нужно». Q освободилась ещё с G207 — поворот ушёл стрелкам.
+ */
+export const VOLUME_CARD_KEY = "KeyQ";
 
 // ——— клавиши стойки (G234) ——————————————————————————————————————————————
 //
@@ -1240,9 +1247,15 @@ function createVolume({ api, hosts }) {
   let homeGesture = null;
   // Карточка устройства в карточке метки — та же, что в «Схеме».
   let homeCard = null;
+  // Окно метки, открытое по Q или «i»: показывается и тогда, когда карточку
+  // сняли отметкой. Держится, пока выделена та же метка.
+  let cardForced = null;
   // Что было в окне параметров: отметки дома и карточки сверяются по переходу,
   // а не на каждый перевод часов.
   let homeParams = { simulation: null, hideCard: null };
+  // Последнее, что кадр знал о «Стрелках связей»: правка окна параметров
+  // пересобирает накладку, только когда отметка сменилась.
+  let linkArrowsShown = null;
   // Открытые шторы, поднятые из памяти показа, — до того как дом их тронул.
   const homeMemory = new Set();
   // Подписка на зеркало дома; снимается вместе с поверхностью.
@@ -1367,10 +1380,13 @@ function createVolume({ api, hosts }) {
   let locked = false;
   // Где рука: точка поля под курсором (без захвата) — ею целятся в дверь.
   let pointer = null;
-  // Дверь под рукой и дверь, по которой щёлкнули. Заказчик назвал оба способа:
-  // «по клику на них или когда наведён курсор».
+  // Дверь под рукой: полотно или её проём (`volumeDoorwayAt`). Заказчик назвал
+  // оба способа: «по клику на них или когда наведён курсор». «Последней двери»
+  // больше нет (правка после сборки сценариев): «Не важно куда курсор —
+  // открывает и закрывает последнюю дверь, с которой взаимодействовали». Её
+  // держали, потому что полотно открытой двери уезжает из-под прицела; теперь
+  // дверь узнаётся и по проёму, и E действует только на то, куда смотришь.
   let aimedDoor = null;
-  let heldDoor = null;
   // Метка под прицелом — только ради строки про штору (G332), и считается она
   // лишь на схемах со шторами.
   let aimedMark = null;
@@ -1559,7 +1575,26 @@ function createVolume({ api, hosts }) {
   // Кнопки под правым пальцем (правка после сборки сценариев, «как стандарт в
   // отрасли»): «Действие» крупно в углу, над ним «Прыжок», слева «Присесть» —
   // дугой, до каждой большой палец дотягивается, не отрываясь от взгляда.
-  const stanceBox = uiEl("div", { class: "volume__stance", attrs: { hidden: "hidden" } }, [actionButton, jumpButton, crouchButton]);
+  // «i» — окно метки под прицелом (правка после сборки сценариев): пальцем
+  // вещь, которой есть что делать, только работает и не выделяется, а окно
+  // иногда нужно. Маленькая кнопка в свободной ячейке дуги — над «Присесть».
+  const cardButton = uiIconButton("info", {
+    class: "ui-btn volume__stanceBtn volume__cardBtn",
+    label: strings.volume.cardOpen,
+    title: strings.volume.cardOpenHint,
+    on: {
+      click: (event) => {
+        event.preventDefault();
+        openCardAt(fieldMiddle());
+      },
+    },
+  });
+  const stanceBox = uiEl("div", { class: "volume__stance", attrs: { hidden: "hidden" } }, [
+    actionButton,
+    jumpButton,
+    crouchButton,
+    cardButton,
+  ]);
   // Смена вида кнопкой прямо на поле (таск 165, G244), значком под кнопкой
   // полного экрана (таск 166, G245).
   //
@@ -2305,6 +2340,11 @@ function createVolume({ api, hosts }) {
     // переводят часто, а пересобирать карточку-пульт на каждый перевод нельзя
     // — под пальцем ползунок.
     const chosen = volumeParamsRead();
+    if (chosen.linkArrows !== linkArrowsShown) {
+      linkArrowsShown = chosen.linkArrows;
+      rebuildOverlay();
+      redraw();
+    }
     if (chosen.simulation !== homeParams.simulation || chosen.hideCard !== homeParams.hideCard) {
       const home = chosen.simulation !== homeParams.simulation;
       homeParams = { simulation: chosen.simulation, hideCard: chosen.hideCard };
@@ -2601,7 +2641,8 @@ function createVolume({ api, hosts }) {
     const links = all ? volumeChannelLinks(all, channelPick, keysOf(found.markId)) : null;
     const empty = !links || links.lines.length === 0;
     if (!empty) {
-      notify(text("volume.channelPicked", { channel: found.channel }), "info");
+      // Слово про стрелки канала — только когда стрелки на кадре есть.
+      if (volumeParamsRead().linkArrows !== false) notify(text("volume.channelPicked", { channel: found.channel }), "info");
       return;
     }
     // Клавиша пуста — но пуста ли она **по данным**? У многоклавишной метки
@@ -2635,6 +2676,9 @@ function createVolume({ api, hosts }) {
     }
     const scheme = findScheme(state.project, schemeId);
     if (!scheme) return;
+    // «Стрелки связей» сняты (правка после сборки сценариев) — кадр без дуг,
+    // рамка выделения остаётся.
+    if (volumeParamsRead().linkArrows === false) return;
     // Правила, какие связи бывают, — плановые целиком; канал только сужает их
     // до одной клавиши (таск 177, G274), а у одноклавишной метки берёт себе и
     // связи без номера (таск 191, D50).
@@ -2654,8 +2698,9 @@ function createVolume({ api, hosts }) {
     //
     // «Не показывать карточку метки» (таск 09 сценариев, G22) убирает её из
     // поля: выделение остаётся — рамкой на самой вещи и строкой в списке.
-    const model =
-      selected.length === 1 && volumeParamsRead().hideCard !== true ? markCardModel(state.project, selected[0]) : null;
+    if (cardForced && !(selected.length === 1 && selected[0] === cardForced)) cardForced = null;
+    const shown = selected.length === 1 && (volumeParamsRead().hideCard !== true || cardForced === selected[0]);
+    const model = shown ? markCardModel(state.project, selected[0]) : null;
     if (homeCard) homeCard.dispose();
     homeCard = null;
     card.hidden = !model;
@@ -2749,11 +2794,17 @@ function createVolume({ api, hosts }) {
     aimNode.style.top = at.y + "px";
   }
 
+  /** Дверь в точке кадра: её полотно, а мимо полотна — её проём. */
+  function doorUnder(at) {
+    if (!at || scene.empty) return null;
+    return volumeDoorAt(shown, at.x, at.y) || volumeDoorwayAt(shown, at.x, at.y);
+  }
+
   /** Дверь под рукой — по последнему нарисованному кадру. */
   function syncAim() {
     syncAimNode();
     const at = aimPoint();
-    const found = at && !scene.empty ? volumeDoorAt(shown, at.x, at.y) : null;
+    const found = doorUnder(at);
     // Штора под прицелом (G332) спрашивается **только там, где шторы есть**: на
     // схеме без них это был бы лишний проход по кадру на каждое движение
     // взгляда, а сказать о ней всё равно нечего.
@@ -2848,9 +2899,30 @@ function createVolume({ api, hosts }) {
    */
   function actOnAim(how = "click", given = null) {
     const at = given || aimPoint();
-    const door = given ? (scene.empty ? null : volumeDoorAt(shown, given.x, given.y)) : aimedDoor || heldDoor;
+    const door = given ? (scene.empty ? null : doorUnder(given)) : aimedDoor;
     const choice = aimChoiceAt(at, door);
     if (!actOnChoice(choice, at, how)) notify(strings.volume.aimless, "info");
+  }
+
+  /**
+   * Окно метки под прицелом (Q и «i»): выделить её и показать карточку, даже
+   * снятую отметкой. Под прицелом пусто — окно выделенной метки; нет и её —
+   * словом.
+   */
+  function openCardAt(at) {
+    const choice =
+      at && !scene.empty
+        ? volumeAimChoice({ markExact: volumeSightAt(shown, at.x, at.y), door: null, markNear: volumePickAt(shown, at.x, at.y) })
+        : { kind: "none", id: null };
+    const selected = selectedIds();
+    const markId = choice.kind === "mark" ? choice.id : selected.length === 1 ? selected[0] : null;
+    if (!markId) {
+      notify(strings.volume.cardNone, "info");
+      return;
+    }
+    cardForced = markId;
+    if (!(selected.length === 1 && selected[0] === markId)) select(markId);
+    syncCard();
   }
 
   /** Открыть или задвинуть штору. `false` — эта метка не штора. */
@@ -2869,7 +2941,6 @@ function createVolume({ api, hosts }) {
     if (openDoors.has(doorId)) openDoors.delete(doorId);
     else openDoors.add(doorId);
     openRev += 1;
-    heldDoor = doorId;
     rebuildScene();
     // Датчик открытия ходит вместе с дверью (история 2.9): связь дверь — датчик
     // считает дом (`markDoorOf`), «Объём» только говорит, что дверь сделала.
@@ -3825,14 +3896,9 @@ function createVolume({ api, hosts }) {
           return;
         }
       }
-      const door = volumeDoorAt(shown, at.x, at.y);
+      const door = doorUnder(at);
       const choice = aimChoiceAt(at, door);
-      // Дверь, по которой щёлкнули, остаётся под рукой: E распоряжается ею и
-      // после того, как мышь съехала с полотна (G207).
-      if (choice.kind === "door") {
-        heldDoor = choice.id;
-        aimedDoor = choice.id;
-      }
+      if (choice.kind === "door") aimedDoor = choice.id;
       // Захват мыши после попадания не просится: человек целился в розетку или
       // в дверь, а не в поле.
       const acted = actOnChoice(choice, at, "click");
@@ -4538,6 +4604,11 @@ function createVolume({ api, hosts }) {
       toggleAllDoors();
       return;
     }
+    if (event.code === VOLUME_CARD_KEY) {
+      event.preventDefault();
+      openCardAt(aimPoint());
+      return;
+    }
     const known = volumeKeyMove(event.code) || event.code === "ShiftLeft" || event.code === "ShiftRight";
     if (!known) return;
     event.preventDefault();
@@ -4722,7 +4793,7 @@ function createVolume({ api, hosts }) {
       aim: !aimNode.hidden && !touching,
       doors: scene.doors,
       open: openDoors,
-      aimedDoor: aimedDoor || heldDoor,
+      aimedDoor,
       sheers: scene.sheers,
       openSheers: openCurtains,
       aimedSheer: aimedSheer(),
