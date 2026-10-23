@@ -70,6 +70,7 @@ import {
 } from "./model.js";
 import { strings, text } from "./strings.js";
 import { markBoxMm } from "./markBox.js";
+import { lightFadeLive, lightFadeMemo, lightFadeOf } from "./lightFade.js";
 import { markSpareLine } from "./markSpare.js";
 import { drawObjectView, objectViewByName, objectViewForShape } from "./objectViews/registry.js";
 
@@ -4739,7 +4740,7 @@ export const SIM_LIVE_FLASH_MS = 700;
  * когда сменилось зеркало или виды знаков).
  */
 export function simLiveMemo() {
-  return { flash: new Map(), source: null, kinds: null, live: null };
+  return { flash: new Map(), source: null, kinds: null, live: null, fade: lightFadeMemo() };
 }
 
 /**
@@ -4747,8 +4748,9 @@ export function simLiveMemo() {
  * мини-план): `{live, fx, animate}`. `source` — `simLive(project)`; `kinds` —
  * `Map<markId, {kind}>` (`deviceLiveKinds`), метка без записи — «прочее»;
  * `memo` — `simLiveMemo()` поверхности; `now` — её часы, мс. `fx` — фаза
- * пульса и угасание вспышек; `animate` — кадр нужен снова (идёт пульс или
- * вспышка).
+ * пульса и угасание вспышек; `animate` — кадр нужен снова (идёт пульс,
+ * вспышка или свет разгорается и гаснет — `lightFadeLive`, правка после
+ * сборки сценариев: «для всего света сделаем плавное включение и отключение»).
  */
 export function simLiveFrame(source, kinds, memo, now) {
   const own = memo || simLiveMemo();
@@ -4775,7 +4777,9 @@ export function simLiveFrame(source, kinds, memo, now) {
       animate = true;
     }
   }
-  return { live: own.live, fx: { pulse: (now % SIM_LIVE_PULSE_MS) / SIM_LIVE_PULSE_MS, flash }, animate };
+  const faded = lightFadeLive(own.live, own.fade || (own.fade = lightFadeMemo()), now);
+  if (faded.busy) animate = true;
+  return { live: faded.live, fx: { pulse: (now % SIM_LIVE_PULSE_MS) / SIM_LIVE_PULSE_MS, flash }, animate };
 }
 
 function simLiveShare(value) {
@@ -4784,10 +4788,12 @@ function simLiveShare(value) {
 }
 
 // Ореол под знаком: у точки — радиальный градиент, у линии — мягкая толстая
-// полоса вдоль неё. Сила — от яркости: даже тусклый свет виден.
+// полоса вдоль неё. Сила — от яркости: даже тусклый свет виден. Разгорается и
+// гаснет он плавно (`fade`, `lightFadeLive`): прозрачность идёт за долей
+// включённости, а не прыгает от нуля к шестнадцати процентам.
 function drawLiveGlow(ctx, mark, screen, radius, live) {
   const level = simLiveShare(live.level);
-  const alpha = 0.16 + 0.5 * level;
+  const alpha = (0.16 + 0.5 * level) * lightFadeOf(live);
   ctx.save();
   if (mark.kind === "line" && screen.length > 1) {
     ctx.strokeStyle = "rgba(" + SIM_LIVE_GLOW_RGB + ", " + (alpha * 0.7).toFixed(3) + ")";

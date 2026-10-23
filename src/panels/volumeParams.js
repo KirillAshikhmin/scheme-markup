@@ -135,6 +135,14 @@ export const VOLUME_SIMULATION_SETTING = "volumeSimulation";
 // видна; читается правилом отметок таска 192 (`saved !== true` — не ставили).
 // Действует только в «Объёме»: у «Схемы» и «Чертежа» карточка своя.
 export const VOLUME_HIDE_CARD_SETTING = "volumeHideCard";
+// ——— «Физический свет» (правка после сборки сценариев) ——————————————————————
+//
+// Слова заказчика: «опциональный, включенный по умолчанию физический свет, что
+// бы светил и в проёмах и чуть передавал в соседнюю комнату», и следом: «что бы
+// не заполнял всю комнату сразу, а светил в своей области». Отметка
+// **положительная**, умолчание взведённое — то же правило, что у имитации:
+// `saved !== false` значит «не трогали». Снята — свет комнатой, как до правки.
+export const VOLUME_PHYSICAL_SETTING = "volumePhysicalLight";
 
 /**
  * Выбор человека. Живёт в области модуля, а не в поверхности объёма: поверхность
@@ -157,6 +165,8 @@ const params = {
   simulation: true,
   // Карточка выделенной метки в «Объёме» (G22): умолчание — видна.
   hideCard: false,
+  // Физический свет ламп (правка после сборки сценариев): умолчание — включён.
+  physical: true,
 };
 
 // Настройки читаются асинхронно, как у плашек и слоёв: поле стартует с
@@ -198,6 +208,7 @@ export function volumeParamsLoad() {
     [VOLUME_MINIMAP_SETTING, "minimap"],
     [VOLUME_ROOF_SETTING, "roofOff"],
     [VOLUME_SIMULATION_SETTING, "simulation"],
+    [VOLUME_PHYSICAL_SETTING, "physical"],
   ]) {
     waits.push(
       Promise.resolve(getSetting(key))
@@ -257,6 +268,7 @@ export function volumeParamsRead() {
     ghost: params.ghost,
     simulation: params.simulation,
     hideCard: params.hideCard,
+    physical: params.physical,
   };
 }
 
@@ -303,7 +315,8 @@ export function volumeParamsMinimap(shown) {
  * `smooth` — «Плавные светила» (фон в 30 кадров в секунду вместо раза в
  * секунду), `ghost` — «Проходить сквозь стены», `floorsAll` — «Все этажи»
  * (таск 202), `simulation` — «Имитация умного дома» и `hideCard` — «Не
- * показывать карточку метки» (таск 09 сценариев). Дверь одна на все, потому что устроены они одинаково до буквы:
+ * показывать карточку метки» (таск 09 сценариев), `physical` — «Физический
+ * свет» (правка после сборки сценариев). Дверь одна на все, потому что устроены они одинаково до буквы:
  * прочесть, записать, сказать полю. Три близнеца-функции разошлись бы на
  * первой же правке.
  */
@@ -315,6 +328,7 @@ export function volumeParamsFlag(name, on) {
     ghost: VOLUME_GHOST_SETTING,
     simulation: VOLUME_SIMULATION_SETTING,
     hideCard: VOLUME_HIDE_CARD_SETTING,
+    physical: VOLUME_PHYSICAL_SETTING,
   };
   const key = keys[name];
   if (!key) return;
@@ -567,6 +581,12 @@ export function createVolumeParamsFields(options) {
       // пять, и шестая подпись ради одной галки заняла бы строку колонки.
       checkRow(strings.volume.simulation, chosen.simulation, strings.volume.simulationHint, (on) =>
         volumeParamsFlag("simulation", on),
+      ),
+      // Физический свет (правка после сборки сценариев) — рядом с имитацией:
+      // без запущенного дома ламп не включает никто, и отметка про то, как
+      // светит дом.
+      checkRow(strings.volume.physicalLight, chosen.physical, strings.volume.physicalLightHint, (on) =>
+        volumeParamsFlag("physical", on),
       ),
       // Карточка выделенной метки (таск 09 сценариев, G22) — тоже «что
       // показывать»: отметка убирает её из поля «Объёма», и только оттуда.

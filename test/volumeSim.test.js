@@ -443,13 +443,16 @@ test("2.12: что светится и где горит свет — по со�
   );
   const light = volumeLiveLight(scene, live);
   assert.ok(light, "включённый свет не дал свечения");
-  assert.deepEqual(light.glow.get(stand.marks.lamp), { level: 0.4, rgb: VOLUME_GLOW_RGB }, "лампа светится не по яркости");
-  assert.deepEqual(light.glow.get(stand.marks.tv), { level: 1, rgb: VOLUME_SCREEN_RGB }, "экран ТВ светится не своим цветом");
+  assert.deepEqual(light.glow.get(stand.marks.lamp), { level: 0.4, rgb: VOLUME_GLOW_RGB, fade: 1 }, "лампа светится не по яркости");
+  assert.deepEqual(light.glow.get(stand.marks.tv), { level: 1, rgb: VOLUME_SCREEN_RGB, fade: 1 }, "экран ТВ светится не своим цветом");
   assert.equal(light.glow.has(stand.marks.switch), false, "светится выключатель");
   // Свет комнаты — от светильников, не от телевизора: комната светлеет по
   // яркости лампы.
-  assert.equal(light.rooms.get(stand.roomId), 0.4);
-  // Две лампы складываются, но светлее «полной» комната не бывает.
+  const one = light.rooms.get(stand.roomId);
+  assert.ok(one > 0 && one < 0.4, "одна лампа на 40 % залила комнату: " + one);
+  // «Чем больше света включено, тем ярче в комнате» (правка после сборки
+  // сценариев): яркость лампы и вторая лампа добавляют, а светлее полной
+  // комната не бывает.
   const both = volumeSimLive(
     stand.project,
     liveOf(stand, {
@@ -457,7 +460,8 @@ test("2.12: что светится и где горит свет — по со�
       [stand.marks.night]: { "0.On": true, "0.Brightness": 70 },
     }),
   );
-  assert.equal(volumeLiveLight(scene, both).rooms.get(stand.roomId), 1);
+  const two = volumeLiveLight(scene, both).rooms.get(stand.roomId);
+  assert.ok(two > one && two < 1, "две лампы не светлее одной: " + one + " → " + two);
 });
 
 test("2.12: позиции штор — у штор, что в доме шторы; прежняя память без дома не трогается", () => {

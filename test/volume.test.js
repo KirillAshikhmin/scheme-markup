@@ -297,9 +297,8 @@ import {
   volumeMinimapView,
   volumeNotes,
   volumeStackLine,
-  volumeFieldBottom,
-  VOLUME_FIELD_EDGE,
   volumePadVector,
+  volumeLookVector,
   volumeFloorAction,
   volumeFloorName,
   volumeFloorWord,
@@ -3988,8 +3987,6 @@ test("миникарта живёт в левом нижнем углу и ух�
   // отступ столбика стойки, иначе столбик встал бы над картой, которой нет.
   assert.equal(volumeMinimapView(box, bounds, false), null);
   assert.equal(volumeMinimapAt(box, bounds, { x: place.x + 10, y: place.y + 10 }, false), null);
-  assert.equal(volumeFieldBottom(box, bounds, false), VOLUME_FIELD_EDGE);
-  assert.ok(volumeFieldBottom(box, bounds, true) > VOLUME_FIELD_EDGE);
 });
 
 test("окно параметров: подписи ускорения и строка состояния часов (таск 181)", () => {
@@ -4233,25 +4230,33 @@ test("перенос по миникарте не ставит в стену: р
   assert.ok(Math.hypot(moved.x - spot.x, moved.y - spot.y) < 1000, "ушли далеко от показанного места");
 });
 
-// Кнопки поля — стойка (таск 163, G242) и смена вида (таск 165, G244).
-// Заказчик назвал условие сам: кнопки не должны спорить с площадкой ходьбы и
-// миникартой. С площадкой они разведены по сторонам поля (она справа, они
-// слева), а с миникартой — по высоте, и вот это считается, а не ставится на
-// глаз: миникарта то есть, то нет, и высота у неё своя на каждом поле.
-test("столбик кнопок встаёт над миникартой, а без неё — в самый угол", () => {
+// Левый нижний угол пальцем — джойстику взгляда (правка после сборки
+// сценариев): «слева снизу добавить джойстик поворота камеры». Миникарта
+// уходит из угла наверх, под угловые кнопки, и встаёт только в свой зазор.
+test("при сенсорной оснастке миникарта встаёт в левый верх и только туда, где помещается", () => {
   const bounds = { minX: -2000, minY: -1500, maxX: 2000, maxY: 1500, widthMm: 4000, heightMm: 3000 };
-  const box = { width: 1432, height: 580 };
-  const place = volumeMinimapBox(box, bounds);
-  const bottom = volumeFieldBottom(box, bounds);
-  // Низ столбика выше верхней кромки миникарты: перекрытия нет ни точкой.
-  assert.ok(bottom > box.height - place.y, "столбик налез на миникарту");
-  assert.ok(bottom < box.height - place.y + 40, "и не улетел от неё к потолку");
-  // Телефон: миникарты на узком поле нет вовсе, и столбик опускается в угол.
-  const phone = { width: 360, height: 620 };
-  assert.equal(volumeMinimapBox(phone, bounds), null);
-  assert.equal(volumeFieldBottom(phone, bounds), 18);
-  // Чертежа нет — миникарты нет, и считать нечего.
-  assert.equal(volumeFieldBottom(box, null), 18);
+  const box = { width: 1280, height: 720 };
+  const corner = volumeMinimapBox(box, bounds);
+  // Без оснастки — прежний угол, слово в слово.
+  assert.deepEqual(volumeMinimapBox(box, bounds, true, null), corner);
+  // Планшет лёжа: зазор от 90 до 530 точек — карта под кнопками угла.
+  const room = { top: 90, bottom: 530 };
+  const up = volumeMinimapBox(box, bounds, true, room);
+  assert.equal(up.y, 90, "карта начинается под угловыми кнопками");
+  assert.ok(up.y + up.height <= room.bottom, "и не налезает на кнопки стойки");
+  assert.equal(up.width, corner.width, "ширина карты от места не зависит");
+  // Щелчок по ней и рисование спрашивают то же место.
+  const view = volumeMinimapView(box, bounds, true, room);
+  assert.deepEqual(view.place, up);
+  assert.ok(volumeMinimapAt(box, bounds, { x: up.x + up.width / 2, y: up.y + up.height / 2 }, true, room));
+  assert.equal(volumeMinimapAt(box, bounds, { x: corner.x + 5, y: corner.y + corner.height - 5 }, true, room), null);
+  // Зазор тесный (телефон лёжа) — карты нет, на кнопки она не ложится.
+  assert.equal(volumeMinimapBox({ width: 844, height: 340 }, bounds, true, { top: 90, bottom: 120 }), null);
+  // Узкое поле по-прежнему без карты — правило размера оснастка не отменяет.
+  assert.equal(volumeMinimapBox({ width: 360, height: 620 }, bounds, true, room), null);
+  // Зазор уже карты — карта ужимается в него, если высоты хватает на мерку.
+  const tight = volumeMinimapBox(box, bounds, true, { top: 90, bottom: 180 });
+  assert.equal(tight.height, 90);
 });
 
 // Смена вида кнопкой на поле (таск 165, G244): «а как перейти в режим от 1 лица
@@ -6050,27 +6055,51 @@ test("заголовок окна называет этаж, когда он з�
 
 // ——— сенсорное управление ———————————————————————————————————————————————
 
-test("площадка ходьбы: вверх — вперёд, в сторону — поворот, середина — покой", () => {
+test("площадка ходьбы: вверх — вперёд, в сторону — шаг вбок, середина — покой", () => {
   const radius = 64;
-  assert.deepEqual(volumePadVector(0, 0, radius), { forward: 0, turn: 0 }, "палец в середине не идёт");
+  assert.deepEqual(volumePadVector(0, 0, radius), { forward: 0, side: 0 }, "палец в середине не идёт");
   // Мёртвая зона: дрожание пальца ходьбой не считается.
-  assert.deepEqual(volumePadVector(5, 5, radius), { forward: 0, turn: 0 });
+  assert.deepEqual(volumePadVector(5, 5, radius), { forward: 0, side: 0 });
   const up = volumePadVector(0, -radius, radius);
   assert.equal(up.forward, 1, "палец вверх — полный шаг вперёд");
-  assert.equal(Math.abs(up.turn), 0);
+  assert.equal(Math.abs(up.side), 0);
   const down = volumePadVector(0, radius, radius);
   assert.equal(down.forward, -1);
+  // Вбок — шаг, а не поворот (правка после сборки сценариев): поворачивает
+  // джойстик взгляда, и правая площадка вторым рулём не стала.
   const right = volumePadVector(radius, 0, radius);
-  assert.equal(right.turn, 1, "палец вправо — поворот вправо");
+  assert.equal(right.side, 1, "палец вправо — шаг вправо");
   assert.equal(Math.abs(right.forward), 0);
-  assert.equal(volumePadVector(-radius, 0, radius).turn, -1);
+  assert.equal(volumePadVector(-radius, 0, radius).side, -1);
+  assert.equal("turn" in right, false, "поворота у площадки ходьбы больше нет");
   // Полпути — полшага: иначе пальцем нельзя было бы идти медленно.
   const half = volumePadVector(0, -radius * 0.6, radius);
   assert.ok(half.forward > 0.4 && half.forward < 0.65, "полшага остаётся полушагом: " + half.forward);
   // За краем площадки — то же, что на краю: больше единицы не бывает.
   const far = volumePadVector(0, -radius * 4, radius);
   assert.equal(far.forward, 1);
-  assert.ok(Math.hypot(far.forward, far.turn) <= 1.0000001);
+  assert.ok(Math.hypot(far.forward, far.side) <= 1.0000001);
+});
+
+// Слова заказчика: «слева снизу добавить джойстик поворота камеры что ты можно
+// было одновременно двумя управлять для движения».
+test("джойстик взгляда: вправо — направо, вверх — взгляд вверх, у середины — тонко", () => {
+  const radius = 64;
+  assert.deepEqual(volumeLookVector(0, 0, radius), { yaw: 0, pitch: 0 }, "палец в середине не вертит");
+  assert.deepEqual(volumeLookVector(5, -5, radius), { yaw: 0, pitch: 0 }, "дрожание пальца — не поворот");
+  const right = volumeLookVector(radius, 0, radius);
+  assert.equal(right.yaw, 1, "у края — полная скорость");
+  assert.equal(Math.abs(right.pitch), 0);
+  assert.equal(volumeLookVector(-radius, 0, radius).yaw, -1);
+  assert.equal(volumeLookVector(0, -radius, radius).pitch, 1, "палец вверх — взгляд вверх");
+  assert.equal(volumeLookVector(0, radius, radius).pitch, -1);
+  // Отклик квадратный: на полпути от мёртвой зоны — четверть скорости, и
+  // прицел доводится, а не прыгает.
+  const dead = radius * 0.18;
+  const mid = volumeLookVector(dead + (radius - dead) / 2, 0, radius);
+  assert.ok(Math.abs(mid.yaw - 0.25) < 1e-9, "полпути — четверть: " + mid.yaw);
+  const far = volumeLookVector(radius * 3, radius * 3, radius);
+  assert.ok(Math.hypot(far.yaw, far.pitch) <= 1.0000001, "за краем — как на краю");
 });
 
 // ——— подсказка плашкой (G218) ————————————————————————————————————————————

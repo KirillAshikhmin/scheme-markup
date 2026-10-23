@@ -57,6 +57,7 @@ import {
   schemeObjectsOnScheme,
 } from "../model.js";
 import { drawDrawing, drawingUnitBridge, visibleMarks } from "../render.js";
+import { lightFadeLive, lightFadeMemo } from "../lightFade.js";
 import { screenPlaceOf, screenPlacePlanRead, screenPlaceSet } from "../screenPlace.js";
 import { volumeClockStamp, volumeClockText, volumeDateShort, volumeDayDateOf, volumeDayTimes } from "../clockMath.js";
 import { strings, text } from "../strings.js";
@@ -425,14 +426,26 @@ export function volumeWhere(project, scene, at) {
  * отвечает «есть ли карта» — её же спрашивают и рисование, и щелчок по карте, и
  * отступ столбика стойки. Заведи её в поле отдельно — и столбик встал бы над
  * картой, которой нет.
+ *
+ * `room` — **место под карту при сенсорной оснастке** (правка после сборки
+ * сценариев): `{top, bottom}` в точках поля. Слова заказчика: «слева снизу
+ * добавить джойстик поворота камеры». Левый нижний угол с этой правки отдан
+ * джойстику взгляда, и карта поднимается в левый верхний — под угловые кнопки
+ * (`top`) и не ниже кнопок стойки над джойстиком (`bottom`). Не влезает в
+ * зазор — её нет: лёжа на телефоне поле низкое, и карта легла бы на кнопки.
+ * `null` — мышь, и карта стоит, где стояла.
  */
-export function volumeMinimapBox(box, bounds, shown = true) {
+export function volumeMinimapBox(box, bounds, shown = true, room = null) {
   if (shown === false) return null;
   if (!bounds || !(bounds.widthMm > 0) || !(bounds.heightMm > 0)) return null;
   if (box.width < 520 || box.height < 320) return null;
   const width = Math.max(110, Math.min(220, box.width * 0.2));
   const height = Math.max(70, Math.min(box.height * 0.3, (width * bounds.heightMm) / bounds.widthMm));
-  return { x: 14, y: box.height - height - 14, width, height };
+  if (!room) return { x: 14, y: box.height - height - 14, width, height };
+  const top = Math.max(14, Number(room.top) || 0);
+  const free = (Number.isFinite(room.bottom) ? room.bottom : box.height - 14) - top;
+  if (free < 70) return null;
+  return { x: 14, y: top, width, height: Math.min(height, free) };
 }
 
 /** Поля внутри миникарты: чертёж не прижимается к её кромке. */
@@ -446,8 +459,8 @@ const VOLUME_MINIMAP_PAD = 8;
  * Считай их врозь, и щелчок однажды поедет мимо того места, которое человек
  * видел под курсором.
  */
-export function volumeMinimapView(box, bounds, shown = true) {
-  const place = volumeMinimapBox(box, bounds, shown);
+export function volumeMinimapView(box, bounds, shown = true, room = null) {
+  const place = volumeMinimapBox(box, bounds, shown, room);
   if (!place) return null;
   const zoom = Math.min(
     (place.width - VOLUME_MINIMAP_PAD * 2) / bounds.widthMm,
@@ -513,8 +526,8 @@ export function volumePlanCentre(project, schemeId, box, view) {
  * Чистая и вынесена наружу ради теста: промах здесь — это «ткнул в кухню, а
  * оказался в ванной», и ловить его глазами дорого.
  */
-export function volumeMinimapAt(box, bounds, at, shown = true) {
-  const view = volumeMinimapView(box, bounds, shown);
+export function volumeMinimapAt(box, bounds, at, shown = true, room = null) {
+  const view = volumeMinimapView(box, bounds, shown, room);
   if (!view || !at) return null;
   const { place, zoom } = view;
   if (!(zoom > 0)) return null;
@@ -523,44 +536,29 @@ export function volumeMinimapAt(box, bounds, at, shown = true) {
   return { x: (at.x - view.offsetX) / zoom, y: (at.y - view.offsetY) / zoom };
 }
 
-// ——— присед и прыжок пальцем (таск 163, G242) ——————————————————————————
+// ——— сенсорная оснастка: два джойстика и кнопки над ними ——————————————————
 //
-// «на интерфейсе для планшетов и смартфонов добавь кнопки прыжкак и присяда».
+// Таск 163 (G242): «на интерфейсе для планшетов и смартфонов добавь кнопки
+// прыжкак и присяда» — столбик стоял слева внизу, над миникартой.
 //
-// Кнопки стоят **слева внизу**, а не рядом с площадкой ходьбы, и это не выбор
-// места, а условие работы. Присед держат (таск 159, G234), а приседают затем,
-// чтобы пройти под низким, — то есть присед и ход обязаны идти **вместе**.
-// Один палец этого не умеет: уйдя с площадки на кнопку, он останавливает ход.
-// Площадка отдана правому большому пальцу (G212 отдал левый угол миникарте),
-// значит стойка достаётся левому, и держать присед, шагая, можно двумя руками,
-// как на планшете её и держат.
+// Правка после сборки сценариев переставила угол целиком. Слова заказчика:
+// «слева снизу добавить джойстик поворота камеры что ты можно было
+// одновременно двумя управлять для движения, а кнопку действия сделай не
+// буквой Е, а иконкой и расположи справа сверху над джойстиком движения, и
+// прыжок и присяд в таком порядке в строку над джойстиком поворота взгляда».
 //
-// С миникартой кнопки не спорят: в углу лежит она, и столбик встаёт **над**
-// ней — отступ считается от её же прямоугольника, а не на глаз. Миникарты в
-// поле нет (телефон, узкое или низкое поле) — столбик опускается в сам угол.
-
-/** Поля поверх кадра: отступ кнопок и площадки от края поля, в точках. */
-export const VOLUME_FIELD_EDGE = 18;
-
-/**
- * Насколько столбик кнопок поля поднят над низом поля.
- *
- * Чистая и вынесена наружу: «не спорит с миникартой» — вся суть расположения,
- * а проверить её на глаз можно только подобрав поле нужного размера. Миникарта
- * появляется и исчезает от размера поля и от самой схемы, и считать её границу
- * второй раз на глаз в стилях нельзя — отступ берётся у того же
- * `volumeMinimapBox`, что её и рисует.
- *
- * Столбик снова один и весь стойкин: кнопка смены вида стояла в нём нижней
- * ячейкой один таск (165) и ушла в правый верхний угол, под полный экран (таск
- * 166, G245). Имя осталось прежним нарочно — отступ принадлежит низу столбика,
- * а не той или иной кнопке в нём, и переименование ничего бы не уточнило.
- */
-export function volumeFieldBottom(box, bounds, shown = true) {
-  const place = volumeMinimapBox(box, bounds, shown);
-  if (!place) return VOLUME_FIELD_EDGE;
-  return Math.round(box.height - place.y + 12);
-}
+//   слева внизу  — джойстик взгляда, над ним строкой «Прыжок» и «Присесть»;
+//   справа внизу — джойстик хода, над ним «Действие».
+//
+// Два джойстика — две руки: правый ведёт ноги (вперёд, назад, вбок), левый —
+// голову. Поворачивал с таска 149 и правый (вбок значило «повернуться»), но с
+// головой на левом это стало бы вторым рулём того же поворота, и правый
+// отдал вбок шагу — как в играх на два стика.
+//
+// Места кнопок считает `volume.css` от мер площадки, а не этот файл: прежде
+// столбик поднимался над миникартой (`volumeFieldBottom`), теперь карта
+// уходит из угла сама (`volumeMinimapBox`, довод `room`), и считать на поле
+// остаётся только её зазор.
 
 // ——— смена вида кнопкой на поле (таски 165 и 166, G244 и G245) ——————————
 //
@@ -603,12 +601,14 @@ export function volumeViewSwitch(view) {
 // Разложено так: **палец по полю вертит головой** (это уже умеет перетаскивание
 // мыши — события указателя одни и те же, и трогать его не пришлось), а ходит
 // **площадка в углу поля**: вверх-вниз — шаг вперёд и назад, влево-вправо —
-// поворот.
+// шаг вбок. Поворотом влево-вправо было до правки после сборки сценариев, а
+// поворачивает теперь вторая площадка — джойстик взгляда в левом углу.
 //
-// Почему поворот, а не шаг боком, как у A и D: одного пальца должно хватать на
-// всё. Ходьба без поворота — это ходьба в стену; боковой шаг, наоборот,
-// удобство, и на планшете его просто нет. Поворот есть в критериях приёмки
-// («ходьба и поворот пальцем»), шаг боком — нет.
+// Почему было «поворот», а не шаг боком, как у A и D: одного пальца должно было
+// хватать на всё — ходьба без поворота это ходьба в стену. С джойстиком
+// взгляда пальцев стало два, и довод кончился: поворот («ходьба и поворот
+// пальцем» в критериях приёмки) остался — левой площадкой и пальцем по полю, —
+// а правая получила шаг вбок, как A и D.
 //
 // Площадка стоит **справа внизу**, хотя в играх ход обычно под левым большим
 // пальцем. Причина простая: левый нижний угол отдан миникарте прямым словом
@@ -626,7 +626,9 @@ export function volumeViewSwitch(view) {
 export const VOLUME_PAD_DEAD = 0.18;
 
 /**
- * Куда ведёт палец на площадке: `{forward, turn}` от −1 до 1.
+ * Куда ведёт палец на площадке ходьбы: `{forward, side}` от −1 до 1 — вперёд
+ * и вбок. Вбок с правки после сборки сценариев значит шаг, а не поворот:
+ * поворачивает джойстик взгляда (`volumeLookVector`).
  *
  * Величина растёт от края мёртвой зоны к краю площадки: тронул слегка — идёшь
  * шагом, увёл до края — бежишь. Дальше края не считается — палец, уехавший за
@@ -636,9 +638,33 @@ export function volumePadVector(dx, dy, radius) {
   const reach = radius > 0 ? radius : 1;
   const dead = reach * VOLUME_PAD_DEAD;
   const length = Math.hypot(dx, dy);
-  if (!(length > dead)) return { forward: 0, turn: 0 };
+  if (!(length > dead)) return { forward: 0, side: 0 };
   const power = Math.min(1, (length - dead) / (reach - dead)) / length;
-  return { forward: -dy * power, turn: dx * power };
+  return { forward: -dy * power, side: dx * power };
+}
+
+/** Как быстро вертит голову джойстик взгляда, увёденный до края: градусы в секунду. */
+export const VOLUME_LOOK_PAD_YAW_DEG_S = 150;
+export const VOLUME_LOOK_PAD_PITCH_DEG_S = 90;
+
+/**
+ * Куда ведёт палец на джойстике взгляда: `{yaw, pitch}` от −1 до 1 — доля
+ * полной скорости поворота (`VOLUME_LOOK_PAD_*_DEG_S`). Вверх — взгляд
+ * поднимается.
+ *
+ * Мёртвая зона та же, что у ходьбы, а отклик **квадратный**: у края — полный
+ * разворот, у середины — тонкая доводка прицела. Линейный отклик на 150° в
+ * секунду не давал навести прицел на клавишу выключателя: малейший сдвиг
+ * пальца уводил взгляд на полметра.
+ */
+export function volumeLookVector(dx, dy, radius) {
+  const reach = radius > 0 ? radius : 1;
+  const dead = reach * VOLUME_PAD_DEAD;
+  const length = Math.hypot(dx, dy);
+  if (!(length > dead)) return { yaw: 0, pitch: 0 };
+  const share = Math.min(1, (length - dead) / (reach - dead));
+  const power = (share * share) / length;
+  return { yaw: dx * power, pitch: -dy * power };
 }
 
 /**
@@ -773,7 +799,9 @@ export function volumeHintText(state) {
   if (state.view === "person") {
     parts.push(strings.volume.hintStance);
     parts.push(state.ghost ? strings.volume.hintGhost : strings.volume.hintWalls);
-    parts.push(strings.volume.hintMinimap);
+    // Пальцем миникарта уходит из левого нижнего угла наверх — угол занял
+    // джойстик взгляда (правка после сборки сценариев).
+    parts.push(state.touching ? strings.volume.hintMinimapTouch : strings.volume.hintMinimap);
   } else {
     // Про отметку «Проходить сквозь стены» в обзоре не говорится вовсе: там
     // сквозь стены летают всегда, и галка ничего не меняет (таск 200, G304).
@@ -1139,10 +1167,13 @@ function createVolume({ api, hosts }) {
   // Был ли дом включён для поля при прошлой сверке: по переходу поле встаёт
   // в дом (двери, датчики, человек) или выходит из него.
   let homeWas = false;
-  // Свет дома для кадра (`volumeLiveLight`) и позиции штор, по которым
+  // Состояние дома для света кадра (`volumeSimLive`) и позиции штор, по которым
   // собрана сцена. Позиции меняются шагами по 10 % хода — сцена пересобирается
-  // только на сдвиг шторы, свет идёт в кадр без пересборки.
-  let homeLight = null;
+  // только на сдвиг шторы, свет идёт в кадр без пересборки. Свет кадр берёт
+  // плавным (`lightFadeLive`, правка после сборки сценариев: «для всего света
+  // сделаем плавное включение и отключение») — память плавности у поля своя.
+  let homeTarget = null;
+  const homeFade = lightFadeMemo();
   let homeShares = new Map();
   // Поле погасло, а дом жил: свет и шторы сверяются на возвращении.
   let homeStale = false;
@@ -1289,8 +1320,13 @@ function createVolume({ api, hosts }) {
   // Зашли пальцем (таск 149). Догадка по виду указателя — сразу, точный ответ —
   // по первому касанию: мышь площадку ходьбы не увидит никогда.
   let touching = volumeTouchLikely();
-  // Палец на площадке ходьбы: `{id, forward, turn}`.
+  // Палец на площадке ходьбы: `{id, forward, side}`.
   let pad = null;
+  // Палец на джойстике взгляда: `{id, yaw, pitch}` (`volumeLookVector`).
+  let lookPad = null;
+  // Где на поле есть место миникарте при сенсорной оснастке — `{top, bottom}`
+  // или `null` (`volumeMinimapBox`). Меряется вместе с местом кнопок.
+  let minimapRoom = null;
   // Два пальца на поле: `{distance, center}` от общего `gesturePinchStep` —
   // прошлый разведённый промежуток и прошлая середина между пальцами.
   let pinch = null;
@@ -1334,10 +1370,15 @@ function createVolume({ api, hosts }) {
   // перестал, и встанет он сам, как только выйдет.
   let crouchHeld = false;
   let crouchStuck = false;
-  // Палец на кнопке приседа (таск 163, G242): `null` — кнопку не держат.
-  // Отпускание ищут по нему, иначе присед, начатый кнопкой, снимался бы любым
-  // касанием поля.
+  // Палец на кнопке «Ниже» в обзоре (таск 163, G242): `null` — кнопку не
+  // держат. Отпускание ищут по нему, иначе спуск, начатый кнопкой, снимался бы
+  // любым касанием поля.
   let crouchFinger = null;
+  // Присед, включённый кнопкой (правка после сборки сценариев: «присед сделай
+  // не удержанием, а переключением»). Отдельно от Control: клавишу держат,
+  // кнопку нажимают раз, и отпущенный Control не поднимает того, кто присел
+  // кнопкой.
+  let crouchLatched = false;
   // Держат ли пробел — и палец на той же кнопке (таск 192, G292; таск 200,
   // G304). **В обзоре** пробел не прыгает, а поднимает камеру, пока его
   // держат, и у этого «держат» своя пара переменных: прыжок разовый, и ему
@@ -1421,10 +1462,24 @@ function createVolume({ api, hosts }) {
     },
     [padKnob],
   );
+  // Джойстик взгляда (правка после сборки сценариев): «слева снизу добавить
+  // джойстик поворота камеры». Та же площадка, что у ходьбы, зеркально в
+  // левом углу, — две руки и две площадки одного вида.
+  const lookKnob = uiEl("span", { class: "volume__padKnob" });
+  const lookNode = uiEl(
+    "div",
+    {
+      class: "volume__pad volume__pad--look",
+      attrs: { hidden: "hidden", "aria-hidden": "true", title: strings.volume.lookPadLabel },
+    },
+    [lookKnob],
+  );
   // Присед и прыжок пальцем (таск 163, G242). Своих правил у кнопок нет: они
   // зовут ровно то, что зовут Control и пробел, — `crouchStart`/`crouchStop` и
   // `jump`. Числа стойки (550 мм приседа, 300 мм прыжка, полсекунды дуги)
-  // живут в `volume.js` и про то, какой рукой их позвали, не знают.
+  // живут в `volume.js` и про то, какой рукой их позвали, не знают. Присед
+  // пальцем с правки после сборки сценариев не держат, а переключают
+  // (`crouchLatch`): «присед сделай не удержанием, а переключением».
   const jumpButton = uiIconButton("jump", {
     class: "ui-btn volume__stanceBtn",
     label: strings.volume.jump,
@@ -1441,20 +1496,18 @@ function createVolume({ api, hosts }) {
   // ровно то, что E: дверь и штора под прицелом, при запущенном доме —
   // устройство и клавиша, и у отвязанной клавиши удержание кнопки — то же
   // удержание E (одиночное, двойное, долгое по одному распознавателю).
-  // Значка «рука» в наборе нет, и на кнопке буква той клавиши, которую она
-  // повторяет; слово — в подсказке и в `aria-label`.
-  const actionButton = uiButton(strings.volume.actionShort, {
+  // Значок — рука с касанием (`tap`), не буква: «кнопку действия сделай не
+  // буквой Е, а иконкой». Стоит она отдельно от стойки — над джойстиком хода,
+  // под правым пальцем: целятся головой, жмут ногами.
+  const actionButton = uiIconButton("tap", {
     class: "ui-btn volume__stanceBtn volume__actionBtn",
+    label: strings.volume.action,
     title: strings.volume.actionHint,
-    attrs: { "aria-label": strings.volume.action },
+    attrs: { hidden: "hidden" },
   });
-  // Столбик стойки слева внизу. Положение — у столбика, а не у кнопок: отступ
-  // от низа поля один на все (`placeStance`).
-  const stanceBox = uiEl("div", { class: "volume__stance", attrs: { hidden: "hidden" } }, [
-    jumpButton,
-    crouchButton,
-    actionButton,
-  ]);
+  // Строка стойки над джойстиком взгляда: «прыжок и присяд в таком порядке в
+  // строку». Место — у строки, а не у кнопок (`volume.css`).
+  const stanceBox = uiEl("div", { class: "volume__stance", attrs: { hidden: "hidden" } }, [jumpButton, crouchButton]);
   // Смена вида кнопкой прямо на поле (таск 165, G244), значком под кнопкой
   // полного экрана (таск 166, G245).
   //
@@ -1581,7 +1634,9 @@ function createVolume({ api, hosts }) {
     card,
     stairButton,
     padNode,
+    lookNode,
     stanceBox,
+    actionButton,
     viewButton,
     paramsButton.node,
     aimNode,
@@ -1742,6 +1797,9 @@ function createVolume({ api, hosts }) {
     // обзоре пробел поднимает камеру, от первого лица он прыгает. Сменили вид
     // — отпустили: иначе вернувшийся в обзор поднимался бы без нажатия.
     riseStop();
+    // Присед кнопкой — тоже: в обзоре та же кнопка значит «ниже», и
+    // включённый присед повёз бы камеру к земле сам.
+    crouchLatch(false);
     view = next;
     sync();
   }
@@ -2000,23 +2058,38 @@ function createVolume({ api, hosts }) {
   }
 
   /**
-   * Куда встал столбик стойки — считается здесь, а не однажды при показе.
+   * Сенсорная оснастка встала или сдвинулась — считается здесь, а не однажды
+   * при показе: планшет повернули, страницу развернули во весь экран, окно
+   * потянули. Поэтому место пересчитывается там же, где меряется поле, — в
+   * `resize()`, и ещё раз в `sync()`, когда оснастку только показывают.
    *
-   * Отступ берётся у миникарты (`volumeFieldBottom`), а миникарта живёт от
-   * размера поля: планшет повернули, страницу развернули во весь экран, окно
-   * потянули — кромка миникарты уехала, и отступ, поставленный один раз в
-   * `sync()`, указывал бы на прежнюю. Поэтому место пересчитывается там же, где
-   * меряется поле, — в `resize()`, и ещё раз в `sync()`, когда столбик только
-   * показывают.
+   * Сами кнопки стоят по мерам `volume.css`; здесь меряется **зазор миникарты**
+   * (`volumeMinimapBox`, довод `room`): от низа угловых кнопок слева сверху до
+   * строки стойки над джойстиком взгляда.
    */
   function placeStance() {
-    // Миникарта рисуется только от первого лица (`paint`), и уступать ей место
-    // в обзоре нечему: кнопки стойки стоят там же, где стоят всегда, но ниже.
-    const minimap = view === "person" && volumeParamsRead().minimap;
-    stanceBox.style.bottom = volumeFieldBottom(viewport(), scene.boundsMm, minimap) + "px";
-    // Карточка метки уступает столбику и площадке (G21): их место только что
+    minimapRoom = stanceBox.hidden ? null : touchMinimapRoom();
+    // Карточка метки уступает кнопкам и площадкам (G21): их место только что
     // сменилось — сменилось и её.
     placeCard();
+  }
+
+  /** Зазор под миникарту в левой части поля при сенсорной оснастке. */
+  function touchMinimapRoom() {
+    const box = viewport();
+    const origin = stage.getBoundingClientRect ? stage.getBoundingClientRect() : { left: 0, top: 0 };
+    const rectOf = (element) => {
+      if (!element || element.hidden || !element.getBoundingClientRect) return null;
+      const rect = element.getBoundingClientRect();
+      return { left: rect.left - origin.left, top: rect.top - origin.top, bottom: rect.bottom - origin.top };
+    };
+    const gap = 10;
+    let top = 0;
+    for (const rect of [rectOf(paramsButton.node), rectOf(hintPlate.node)]) {
+      if (rect && rect.left < box.width / 2) top = Math.max(top, rect.bottom + gap);
+    }
+    const row = rectOf(stanceBox);
+    return { top, bottom: row ? row.top - gap : box.height };
   }
 
   // ——— час суток: один снимок на секунду ———
@@ -2191,6 +2264,10 @@ function createVolume({ api, hosts }) {
     jumpButton.setAttribute("aria-label", up);
     crouchButton.title = fly ? strings.volume.flyDownHint : strings.volume.crouchHint;
     crouchButton.setAttribute("aria-label", down);
+    // Нажата ли — вопрос только приседа: «Ниже» в обзоре держат, а не
+    // переключают, и сказать «нажата» про неё нечего.
+    if (fly) crouchButton.removeAttribute("aria-pressed");
+    else crouchButton.setAttribute("aria-pressed", crouchLatched ? "true" : "false");
   }
 
   function paint() {
@@ -2226,7 +2303,8 @@ function createVolume({ api, hosts }) {
     // у них `VOLUME_LAYER_SUN` — выше полов, ниже тел.
     // Свет дома (таск 09 сценариев): свечение тел и свет комнаты — доводом
     // кадра, без пересборки сцены. Дом не идёт — довода нет, и кадр тот же.
-    shown = volumeFrame(scene, spot, box, [...shadow, ...spots, ...overlay, ...marker], at.tint, homeLight);
+    const lights = homeLights();
+    shown = volumeFrame(scene, spot, box, [...shadow, ...spots, ...overlay, ...marker], at.tint, lights.light);
     volumeDraw(ctx, shown);
     // Второй проход фона: вещи, которые ближе кромки плиты, дом закрыть не
     // может — они перед ним (таск 199, разбор у `volumeDrawBackdrop`). Внутри
@@ -2235,6 +2313,20 @@ function createVolume({ api, hosts }) {
     // Миникарта — поверх кадра и после него: это накладка, а не часть сцены.
     if (view === "person") paintMinimap(box);
     syncAim();
+    // Лампа ещё разгорается или гаснет — нужен следующий кадр. Улеглось —
+    // кадров больше не заказывается, и поле снова молчит до события.
+    if (lights.busy) redraw();
+  }
+
+  /**
+   * Свет дома на этот кадр: плавный (`lightFadeLive`) и — по отметке
+   * «Физический свет» — пятнами (`volumeLiveLight`). `busy` — свет ещё в пути.
+   */
+  function homeLights() {
+    if (!homeTarget) return { light: null, busy: false };
+    const faded = lightFadeLive(homeTarget, homeFade, now());
+    const physical = volumeParamsRead().physical !== false;
+    return { light: volumeLiveLight(scene, faded.live, { physical }), busy: faded.busy };
   }
 
   // ——— миникарта (G212) ———
@@ -2251,7 +2343,7 @@ function createVolume({ api, hosts }) {
 
   function paintMinimap(box) {
     const bounds = scene.boundsMm;
-    const spot = volumeMinimapView(box, bounds, volumeParamsRead().minimap);
+    const spot = volumeMinimapView(box, bounds, volumeParamsRead().minimap, minimapRoom);
     if (!spot) return;
     const place = spot.place;
     const state = getState();
@@ -2582,6 +2674,15 @@ function createVolume({ api, hosts }) {
    */
   function actOnChoice(choice, at, how = "click") {
     if (choice.kind === "mark") {
+      // Пальцем при запущенном доме вещь, которой есть что делать, **только
+      // работает** и не выделяется (правка после сборки сценариев). Слова
+      // заказчика: «взаимодействие с выключателем открывает его окно, хотя
+      // перед этим нажатие проходит и состояние меняется». Окно — карточка
+      // метки: на телефоне она встаёт поверх поля, и каждое касание клавиши
+      // закрывало бы комнату пультом. Мышью карточка остаётся — она прижата
+      // к краю и кадра не закрывает. Вещь без дела (`none`) выделяется, как
+      // прежде: карточка — единственное, что касание по ней может показать.
+      if (homeOn() && touching && homeActs(choice.id, at)) return homeAct(choice.id, at, how);
       select(choice.id);
       // Запущенный дом (таск 09 сценариев): вещь не только выделяется, а
       // работает — как щелчок по метке в «Схеме».
@@ -2667,8 +2768,7 @@ function createVolume({ api, hosts }) {
    * `"click"` — щелчок мышью или касание (нажатие уже начато на `pointerdown`).
    */
   function homeAct(markId, at, how) {
-    const found = channelAt(at);
-    const mine = found && found.markId === markId ? found : null;
+    const mine = homeKeyAt(markId, at);
     pickChannel(mine, true);
     const action = volumeSimAction(markAccessory(getState().project, markId), mine ? mine.channel : null);
     if (action.kind === "hold") {
@@ -2690,6 +2790,18 @@ function createVolume({ api, hosts }) {
     // Штора без аксессуара открывается, как до имитации, — своей памятью.
     else toggleCurtain(markId);
     return true;
+  }
+
+  /** Клавиша этой метки под точкой кадра — или `null`, если рука мимо клавиш. */
+  function homeKeyAt(markId, at) {
+    const found = channelAt(at);
+    return found && found.markId === markId ? found : null;
+  }
+
+  /** Есть ли у метки дело для руки в этой точке — то же правило, что у `homeAct`. */
+  function homeActs(markId, at) {
+    const mine = homeKeyAt(markId, at);
+    return volumeSimAction(markAccessory(getState().project, markId), mine ? mine.channel : null).kind !== "none";
   }
 
   /** Отпустили E или «Действие»: нажатие клавиши кончилось (или брошено). */
@@ -2757,7 +2869,7 @@ function createVolume({ api, hosts }) {
     homeStale = false;
     const state = getState();
     const live = volumeSimLive(state.project, simLive(state.project));
-    homeLight = volumeLiveLight(scene, live);
+    homeTarget = live;
     const shares = volumeSimCurtains(scene, live);
     for (const [id, share] of shares) {
       const open = share >= VOLUME_SHEER_SHARE;
@@ -2807,7 +2919,7 @@ function createVolume({ api, hosts }) {
     if (homeGesture) homeGesture.presser.abort();
     homeGesture = null;
     homePresenceGone();
-    homeLight = null;
+    homeTarget = null;
     if (homeShares.size > 0) {
       homeShares = new Map();
       rebuildScene();
@@ -2863,7 +2975,7 @@ function createVolume({ api, hosts }) {
     };
     // Без сенсорной оснастки карточка стоит, как стояла, — и у лестницы тоже:
     // «Этаж» посреди низа ей не мешал никогда (она прижата влево).
-    const touch = [rectOf(stanceBox), rectOf(padNode)].filter(Boolean);
+    const touch = [rectOf(stanceBox), rectOf(lookNode), rectOf(padNode), rectOf(actionButton)].filter(Boolean);
     const controls = touch.length > 0 ? [...touch, rectOf(stairButton)].filter(Boolean) : [];
     // Сверху — угловые кнопки и развёрнутые плашки подсказки и сводки: плашка
     // лежит слоем выше карточки и закрыла бы её голову с кнопкой «закрыть».
@@ -2914,7 +3026,7 @@ function createVolume({ api, hosts }) {
   // есть куда ехать (G234). Прыжок без ходьбы иначе замер бы в воздухе: часы в
   // объёме идут только пока их держат, и присед с прыжком — третий повод.
   function moving() {
-    if (keys.size > 0 || Boolean(pad)) return true;
+    if (keys.size > 0 || Boolean(pad) || Boolean(lookPad)) return true;
     // Обзор летит, пока держат клавишу высоты: висящая камера никуда не едет,
     // и крутить ей кадры незачем (таск 200, G304).
     if (view === "around" && (riseHeld || crouchHeld)) return true;
@@ -2946,7 +3058,7 @@ function createVolume({ api, hosts }) {
    * от первого лица — присед, в обзоре — спуск камеры (таск 200, G304).
    */
   function crouching() {
-    return crouchHeld && view === "person";
+    return (crouchHeld || crouchLatched) && view === "person";
   }
 
   /**
@@ -3239,7 +3351,18 @@ function createVolume({ api, hosts }) {
     homeRelease(Boolean(event && event.type === "pointercancel"));
   }
 
+  /**
+   * Кнопка приседа. От первого лица она **переключает** (правка после сборки
+   * сценариев: «присед сделай не удержанием, а переключением»): нажал —
+   * присел, нажал ещё раз — встал, и идти пригнувшись можно, не держа её. В
+   * обзоре та же кнопка — «Ниже», и её держат, как Control (таск 200).
+   */
   function crouchPress(event) {
+    if (view === "person") {
+      event.preventDefault();
+      crouchLatch(!crouchLatched);
+      return;
+    }
     if (crouchFinger !== null) return;
     event.preventDefault();
     crouchFinger = event.pointerId;
@@ -3251,6 +3374,18 @@ function createVolume({ api, hosts }) {
       }
     }
     crouchStart();
+  }
+
+  /**
+   * Включить или снять присед кнопкой. Встать негде — `stanceTick` оставит
+   * присед и скажет об этом той же строкой, что отпущенному Control.
+   */
+  function crouchLatch(value) {
+    if (crouchLatched === value) return;
+    crouchLatched = value;
+    crouchButton.classList.toggle("is-on", value);
+    syncStanceWords();
+    walkSchedule();
   }
 
   // Отпустили палец, увели его за край, потеряли захват, ушли из вида от
@@ -3332,7 +3467,16 @@ function createVolume({ api, hosts }) {
     // в одном окне бывают и мышь с клавиатурой, и палец.
     if (pad) {
       forward += pad.forward;
-      turn += pad.turn;
+      side += pad.side;
+    }
+    // Джойстик взгляда вертит голову, пока его держат: скорость — от того,
+    // насколько увели палец (`volumeLookVector`), поворот — тем же счётом, что
+    // у мыши (`lookTurn`).
+    if (lookPad) {
+      lookTurn(
+        lookPad.yaw * VOLUME_LOOK_PAD_YAW_DEG_S * (Math.PI / 180) * step,
+        lookPad.pitch * VOLUME_LOOK_PAD_PITCH_DEG_S * (Math.PI / 180) * step,
+      );
     }
     // ——— скорость (таск 207, G311) ———
     //
@@ -3417,16 +3561,21 @@ function createVolume({ api, hosts }) {
    */
   function lookBy(dx, dy) {
     const perPixel = (VOLUME_LOOK_DEG_PX * Math.PI) / 180;
+    lookTurn(dx * perPixel, -dy * perPixel);
+    redraw();
+  }
+
+  /** Повернуть взгляд на угол — в радианах, вверх положительно. Кадр заказывает зовущий. */
+  function lookTurn(yawBy, pitchBy) {
     const aim = view === "person" ? person : around;
-    const yaw = aim.yaw + dx * perPixel;
-    const pitch = volumeClampPitch(aim.pitch - dy * perPixel);
+    const yaw = aim.yaw + yawBy;
+    const pitch = volumeClampPitch(aim.pitch + pitchBy);
     if (view === "person") {
       person.yaw = yaw;
       person.pitch = pitch;
     } else {
       aroundTurn(yaw, pitch);
     }
-    redraw();
   }
 
   function onPointerDown(event) {
@@ -3462,6 +3611,10 @@ function createVolume({ api, hosts }) {
     // взгляда его движений не видит вовсе (таск 149).
     if (pad && event.pointerId === pad.id) {
       padMove(event);
+      return;
+    }
+    if (lookPad && event.pointerId === lookPad.id) {
+      lookMove(event);
       return;
     }
     if (locked) {
@@ -3519,6 +3672,7 @@ function createVolume({ api, hosts }) {
       if (touches.size < 2) pinch = null;
     }
     padEnd(event);
+    lookEnd(event);
     // Захвата указателя кнопка могла и не получить — тогда отпускание придёт
     // сюда, и присед обязан сняться здесь же: палец свой она узнает сама.
     crouchRelease(event);
@@ -3565,7 +3719,7 @@ function createVolume({ api, hosts }) {
       // вплотную к ней, а место теснее тела меняет на ближайшее свободное
       // (D39). Второго правила «куда можно встать» в сборке нет.
       if (view === "person" && !locked) {
-        const spot = volumeMinimapAt(viewport(), scene.boundsMm, at, volumeParamsRead().minimap);
+        const spot = volumeMinimapAt(viewport(), scene.boundsMm, at, volumeParamsRead().minimap, minimapRoom);
         if (spot) {
           const moved = volumeMoveTo(scene, spot, volumeStanceHead(stance));
           person.x = moved.x;
@@ -3697,21 +3851,27 @@ function createVolume({ api, hosts }) {
     sync();
   }
 
-  function padAt(event) {
-    const rect = padNode.getBoundingClientRect
-      ? padNode.getBoundingClientRect()
-      : { left: 0, top: 0, width: 0, height: 0 };
+  /**
+   * Где палец на площадке — `{dx, dy, radius}` от её середины, — и кружок
+   * за ним. Одна мерка на обе площадки: ходьбы и взгляда.
+   */
+  function knobAt(area, knob, event) {
+    const rect = area.getBoundingClientRect ? area.getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 };
     const cx = rect.left + rect.width / 2;
     const cy = rect.top + rect.height / 2;
     const radius = Math.max(1, Math.min(rect.width, rect.height) / 2);
     const dx = event.clientX - cx;
     const dy = event.clientY - cy;
-    const move = volumePadVector(dx, dy, radius);
     // Кружок показывает палец, но из площадки не выезжает.
     const length = Math.hypot(dx, dy) || 1;
     const reach = Math.min(1, length / radius) * radius * 0.62;
-    padKnob.style.transform = "translate(" + (dx / length) * reach + "px, " + (dy / length) * reach + "px)";
-    return move;
+    knob.style.transform = "translate(" + (dx / length) * reach + "px, " + (dy / length) * reach + "px)";
+    return { dx, dy, radius };
+  }
+
+  function padAt(event) {
+    const at = knobAt(padNode, padKnob, event);
+    return volumePadVector(at.dx, at.dy, at.radius);
   }
 
   function padStart(event) {
@@ -3726,7 +3886,7 @@ function createVolume({ api, hosts }) {
       }
     }
     const move = padAt(event);
-    pad = { id: event.pointerId, forward: move.forward, turn: move.turn };
+    pad = { id: event.pointerId, forward: move.forward, side: move.side };
     padNode.classList.add("is-on");
     walkSchedule();
   }
@@ -3735,7 +3895,7 @@ function createVolume({ api, hosts }) {
     if (!pad || event.pointerId !== pad.id) return;
     event.preventDefault();
     const move = padAt(event);
-    pad = { id: pad.id, forward: move.forward, turn: move.turn };
+    pad = { id: pad.id, forward: move.forward, side: move.side };
     walkSchedule();
   }
 
@@ -3744,6 +3904,50 @@ function createVolume({ api, hosts }) {
     pad = null;
     padNode.classList.remove("is-on");
     padKnob.style.transform = "";
+    walkStop();
+  }
+
+  // ——— джойстик взгляда (правка после сборки сценариев) ———
+  //
+  // Держат его, как площадку ходьбы: палец лёг — голова вертится, пока он
+  // уведён от середины; снят — встала. Ходьба и взгляд — разные пальцы, и
+  // каждый узнаёт свой по `pointerId`.
+
+  function lookAt(event) {
+    const at = knobAt(lookNode, lookKnob, event);
+    return volumeLookVector(at.dx, at.dy, at.radius);
+  }
+
+  function lookStart(event) {
+    if (lookPad || closed) return;
+    setTouch(true);
+    event.preventDefault();
+    if (lookNode.setPointerCapture) {
+      try {
+        lookNode.setPointerCapture(event.pointerId);
+      } catch (error) {
+        // захват указателя джойстиком не дали — обойдёмся событиями окна
+      }
+    }
+    const turn = lookAt(event);
+    lookPad = { id: event.pointerId, yaw: turn.yaw, pitch: turn.pitch };
+    lookNode.classList.add("is-on");
+    walkSchedule();
+  }
+
+  function lookMove(event) {
+    if (!lookPad || event.pointerId !== lookPad.id) return;
+    event.preventDefault();
+    const turn = lookAt(event);
+    lookPad = { id: lookPad.id, yaw: turn.yaw, pitch: turn.pitch };
+    walkSchedule();
+  }
+
+  function lookEnd(event) {
+    if (!lookPad || (event && event.pointerId !== undefined && event.pointerId !== lookPad.id)) return;
+    lookPad = null;
+    lookNode.classList.remove("is-on");
+    lookKnob.style.transform = "";
     walkStop();
   }
 
@@ -3858,6 +4062,7 @@ function createVolume({ api, hosts }) {
     // Вопрос забирает клавиатуру и отпускает мышь: по курсору в нём и щёлкают.
     keyStop(null);
     padEnd(null);
+    lookEnd(null);
     askWasLocked = locked;
     if (locked && typeof document.exitPointerLock === "function") document.exitPointerLock();
     ask = { stair, options };
@@ -4412,6 +4617,9 @@ function createVolume({ api, hosts }) {
     // (`syncStanceWords`). Второй оснастки для полёта камеры не заведено.
     const noWalk = !touching || scene.empty;
     padNode.hidden = noWalk;
+    lookNode.hidden = noWalk;
+    actionButton.hidden = noWalk;
+    if (noWalk) lookEnd(null);
     // Полоса часов стоит в том же углу, что площадка ходьбы, и уступает ей:
     // площадкой ходят не глядя, и накрывать её строкой нельзя. Подъём — ровно
     // на площадку, мерой самой площадки (`volume.css`), без своих чисел.
@@ -4421,10 +4629,12 @@ function createVolume({ api, hosts }) {
     stanceBox.hidden = noWalk;
     if (stanceBox.hidden) {
       crouchRelease(null);
+      crouchLatch(false);
       riseRelease(null);
       actionRelease(null);
     }
-    else placeStance();
+    // Ушла оснастка — ушёл и зазор миникарты: карта возвращается в свой угол.
+    placeStance();
     // Кнопка вида — не сенсорная оснастка, а вторая ячейка угла поля (таск 166,
     // G245): она есть и пальцем, и мышью, и в обоих видах. Уходит она только
     // там, где смотреть не на что: в пустом поле смена вида ничего не меняет,
@@ -4621,6 +4831,7 @@ function createVolume({ api, hosts }) {
   stage.addEventListener("pointerdown", onPointerDown);
   stage.addEventListener("wheel", onWheel, { passive: false });
   padNode.addEventListener("pointerdown", padStart);
+  lookNode.addEventListener("pointerdown", lookStart);
   jumpButton.addEventListener("pointerdown", risePress);
   jumpButton.addEventListener("pointerup", riseRelease);
   jumpButton.addEventListener("pointercancel", riseRelease);

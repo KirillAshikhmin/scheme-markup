@@ -105,6 +105,7 @@ import {
   volumeWrapMinutes,
 } from "./clockMath.js";
 import { objectViewByName, objectViewForShape } from "./objectViews/registry.js";
+import { lightFadeOf } from "./lightFade.js";
 import { MODEL_CYL_SIDES } from "./objectModels/kit.js";
 import { objectLineModel, objectModelByKey, objectModelChannels } from "./objectModels/registry.js";
 
@@ -450,13 +451,23 @@ export const VOLUME_CEILING_RGB = [238, 238, 236];
 //     ночи слабее — пропорционально яркости. Днём тона ночи нет, и сводить
 //     нечего: комната почти не меняется.
 //
+// Правка после сборки сценариев это слово заказчик сменил сам: «опциональный,
+// включенный по умолчанию физический свет, что бы светил и в проёмах и чуть
+// передавал в соседнюю комнату». Свет комнаты стал суммой ламп, а у
+// физического света появились пятна — разбор у `volumeLiveLight`.
+//
 // Цвет свечения лампы — тёплый белый; экран телевизора — холодный.
 export const VOLUME_GLOW_RGB = [255, 240, 196];
 export const VOLUME_SCREEN_RGB = [168, 206, 246];
 /** Доля цвета свечения у самой тусклой лампы: даже 1 % виден. */
 export const VOLUME_GLOW_MIN = 0.35;
-/** Насколько свет комнаты снимает тон ночи при полной яркости. */
-export const VOLUME_ROOM_LIGHT = 0.72;
+/**
+ * Насколько свет комнаты снимает тон ночи при полной яркости. С правки после
+ * сборки сценариев «полная» — это не одна лампа, а сумма многих
+ * (`volumeRoomShare`), и предел поднят: комната, где горит всё, светлее, чем
+ * прежде светила одна лампа.
+ */
+export const VOLUME_ROOM_LIGHT = 0.85;
 /** Тёплый тон, к которому тянется ночь в освещённой комнате, и его доля. */
 export const VOLUME_ROOM_WARM_RGB = [120, 96, 60];
 export const VOLUME_ROOM_WARM = 0.5;
@@ -2396,9 +2407,37 @@ export function volumeWallFaces(wall, openings, heightMm, out = [], openDoorIds 
     ),
   );
   for (const opening of openings || []) {
+    const from = out.length;
     volumeOpeningFaces(wall, opening, heightMm, out, openDoorIds, rooms);
+    if (rooms && rooms.length > 0) volumeTagSides(wall, opening, out, from, rooms);
   }
   return out;
+}
+
+/**
+ * Откосы, перемычка, подоконник, рама и полотно проёма — **между** двумя
+ * помещениями (правка после сборки сценариев: «что бы светил и в проёмах»).
+ * Своего помещения у них нет, и свет комнаты их не светлил: между двумя
+ * освещёнными комнатами дверной проём стоял тёмной рамкой. Теперь у них обе
+ * стороны (`sides`), и при физическом свете они светлеют по более светлой.
+ * Щуп тот же, что у стороны стены (`VOLUME_SUN_PROBE_MM`); улица — ничья.
+ */
+function volumeTagSides(wall, opening, faces, from, rooms) {
+  const vectors = wallVectors(wall);
+  if (!vectors) return;
+  const half = Number(wall.thicknessMm) / 2;
+  const middle = Number(opening.atMm) + Number(opening.widthMm) / 2;
+  const probe = (sign) => ({
+    x: Number(wall.aMm.x) + vectors.u.x * middle + vectors.n.x * sign * (half + VOLUME_SUN_PROBE_MM),
+    y: Number(wall.aMm.y) + vectors.u.y * middle + vectors.n.y * sign * (half + VOLUME_SUN_PROBE_MM),
+  });
+  const a = volumeRoomKeyAt(rooms, probe(1));
+  const b = volumeRoomKeyAt(rooms, probe(-1));
+  if (!a && !b) return;
+  const sides = { a: a || b, b: b || a, key: (a || "") + "|" + (b || "") };
+  for (let index = from; index < faces.length; index += 1) {
+    if (!faces[index].line && !faces[index].room) faces[index].sides = sides;
+  }
 }
 
 /**
@@ -7396,8 +7435,20 @@ export function volumeFrame(scene, camera, box, extra = null, tint = null, live 
   const ownFloor = scene.ownFloor;
   const stacked = ownFloor !== undefined && ownFloor !== null;
   // Тон освещённой комнаты считается **раз на комнату и кадр**, а не на грань:
-  // граней в комнате сотни, а тон у них один.
-  const lit = live ? { glow: live.glow || null, rooms: live.rooms || null, tints: new Map() } : null;
+  // граней в комнате сотни, а тон у них один. `full` — тон полной лампы: им
+  // красятся кольца пятен (правка после сборки сценариев).
+  const lit = live
+    ? {
+        glow: live.glow || null,
+        rooms: live.rooms || null,
+        physical: live.physical === true,
+        tints: new Map(),
+        full: volumeRoomTint(tint, 1),
+      }
+    : null;
+  // Пятна ламп — только ночью и в сумерках: днём тона ночи нет, и кольцо
+  // легло бы на грань её же цветом — работа без картинки.
+  const decals = live && live.decals && tint && tint.share > VOLUME_LAMP_DUSK ? live.decals : null;
   const take = (face, order) =>
     volumeFacePolygons(
       face,
@@ -7418,6 +7469,18 @@ export function volumeFrame(scene, camera, box, extra = null, tint = null, live 
   let rank = 0;
   for (const face of volumeOrderWalk(tree, camera.at)) {
     take(face, rank);
+    // Кольца пятен ламп — **сразу за своим куском** и с его местом в очереди:
+    // то, что ближе куска, рисуется позже и закрывает пятно (правка после
+    // сборки сценариев).
+    const rings = decals ? decals.get(face) : null;
+    if (rings) {
+      for (const ring of rings) {
+        const strength = live.lamps ? live.lamps.get(ring.markId) : 0;
+        const alpha = ring.alpha * (strength || 0);
+        if (!(alpha > VOLUME_LAMP_INVISIBLE)) continue;
+        take({ p: ring.p, n: face.n, rgb: face.rgb, layer: face.layer, flat: face.flat, decal: alpha }, rank);
+      }
+    }
     rank += 1;
   }
   for (const face of scene.faces) {
@@ -7573,34 +7636,505 @@ function volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, b
 }
 
 /**
- * **Свет дома для кадра** (таск 09 сценариев, история 2.12): `{glow, rooms}`
- * для `volumeFrame(…, live)` — или `null`, если не горит ничего.
+ * **Свет дома для кадра** (таск 09 сценариев, история 2.12; правка после
+ * сборки сценариев): `{glow, rooms, physical, lamps, decals}` для
+ * `volumeFrame(…, live)` — или `null`, если не горит ничего.
  *
- * `live` — состояние дома по меткам: `Map<markId, {on, level, kind, roomId}>`
- * (`simLiveOf` и вид знака `simLiveKindOf`, одно правило со «Схемой»).
- * Светится включённый свет — по яркости — и экран включённого телевизора.
- * Комнату светлит только свет: лампы помещения складываются, но светлее
- * полной комната не бывает. Помещение лампы — её помещение в объекте, а у
- * метки без него — контур, в котором она висит.
+ * `live` — состояние дома по меткам: `Map<markId, {on, level, kind, roomId,
+ * fade}>` (`simLiveOf` и вид знака `simLiveKindOf`, одно правило со «Схемой»;
+ * `fade` — доля включённости, пока лампа разгорается или гаснет,
+ * `lightFadeLive`). Светится включённый свет — по яркости — и экран
+ * включённого телевизора.
+ *
+ * **Комната светлеет от суммы ламп** — слова заказчика: «чем больше света
+ * включено, тем ярче в комнате». Сумма — сила лампы (`volumeLampPower`) на её
+ * яркость, а светлота комнаты — `volumeRoomShare`: одна лампа в гостиной даёт
+ * полутьму, три — свет, и светлее полного не бывает. Помещение лампы — её
+ * помещение в объекте, а у метки без него — контур, в котором она висит.
+ *
+ * `options.physical` — **физический свет** (отметка «Физический свет», по
+ * умолчанию взведена). Слова заказчика: «что бы светил и в проёмах и чуть
+ * передавал в соседнюю комнату» и «что бы не заполнял всю комнату сразу, а
+ * светил в своей области». Тогда комната от ламп светлеет только отражённым
+ * светом (`VOLUME_LAMP_BOUNCE`), остальное — пятна каждой лампы на полу, стенах
+ * и потолке (`decals`, `volumeLampDecals`); соседняя комната за открытым
+ * проёмом получает долю отражённого (`VOLUME_LAMP_SPILL`) и клин пятна сквозь
+ * проём; откосы и полотна проёмов светлеют по более светлой стороне.
  */
-export function volumeLiveLight(scene, live) {
+export function volumeLiveLight(scene, live, options = {}) {
   if (!live || live.size === 0) return null;
+  const physical = options.physical === true;
   const glow = new Map();
-  const rooms = new Map();
+  const lamps = new Map();
+  const sums = new Map();
   for (const [markId, item] of live) {
     if (!item || item.on !== true) continue;
+    const fade = lightFadeOf(item);
     if (item.kind === "tv") {
-      glow.set(markId, { level: 1, rgb: VOLUME_SCREEN_RGB });
+      glow.set(markId, { level: 1, rgb: VOLUME_SCREEN_RGB, fade });
       continue;
     }
     if (item.kind !== "light") continue;
     const level = volumeShare01(item.level);
-    glow.set(markId, { level, rgb: VOLUME_GLOW_RGB });
-    const key = item.roomId || volumeRoomKeyAt(scene && scene.rooms, volumeMarkProbe(scene ? volumeMarkPlace(scene, markId) : null));
-    if (key) rooms.set(key, Math.min(1, (rooms.get(key) || 0) + level));
+    glow.set(markId, { level, rgb: VOLUME_GLOW_RGB, fade });
+    const place = scene ? volumeMarkPlace(scene, markId) : null;
+    const strength = level * fade;
+    lamps.set(markId, strength);
+    const key = item.roomId || volumeRoomKeyAt(scene && scene.rooms, volumeMarkProbe(place));
+    if (key) sums.set(key, (sums.get(key) || 0) + volumeLampPower(place) * strength);
   }
-  if (glow.size === 0 && rooms.size === 0) return null;
-  return { glow, rooms };
+  if (glow.size === 0) return null;
+  const areas = volumeRoomAreas(scene);
+  const rooms = new Map();
+  for (const [key, sum] of sums) rooms.set(key, volumeRoomShare(sum * (physical ? VOLUME_LAMP_BOUNCE : 1), areas.get(key)));
+  if (physical) volumeLampSpill(scene, rooms);
+  return {
+    glow,
+    rooms,
+    physical,
+    lamps,
+    decals: physical ? volumeLampDecals(scene, live) : null,
+  };
+}
+
+// ——— свет ламп: сила, комната, пятна (правка после сборки сценариев) ————————
+//
+// Света от ламп в сцене по-прежнему нет как вычисления: ни лучей, ни теней от
+// вещей. Есть три приёма, и все три живут в кадре, а не в сцене:
+//
+//   — **свет комнаты** — тон ночи, сведённый слабее (`volumeRoomTint`) по сумме
+//     ламп помещения (`volumeRoomShare`);
+//   — **пятно лампы** — кольца поверх пола, стен и потолка, каждое шире и
+//     тусклее предыдущего, — так край пятна плавный. Слова заказчика: «границы
+//     что бы плавные были, с переходом. Можно несколько пятен, каждое из
+//     который больше и менее яркое». Кольцо лежит **на куске своей грани** и
+//     рисуется сразу за ним (`volumeFrame`), поэтому всё, что стоит ближе, —
+//     диван, стена, дверь — закрывает пятно, как закрывало пол;
+//   — **проём**: пятно лампы ложится и в соседнюю комнату — клином, срезанным
+//     проёмом так, как его срезал бы свет из точки, где висит лампа.
+//
+// Днём ночного тона нет — нет и света от ламп: пятна не рисуются вовсе.
+
+/** Сила лампы — от и до: самая слабая подсветка и люстра. */
+export const VOLUME_LAMP_POWER_MIN = 0.15;
+export const VOLUME_LAMP_POWER_MAX = 1.6;
+/**
+ * Площадь, которую лампа силы 1 на полной яркости светит **на долю 1 − 1/e**
+ * (`volumeRoomShare`): обычный светильник в гостиной 16 м² даёт чуть больше
+ * трети, три — три четверти.
+ */
+export const VOLUME_LAMP_AREA_MM2 = 8e6;
+/** Комната без своей площади (контур не обведён) — средняя комната. */
+const VOLUME_LAMP_ROOM_MM2 = 15e6;
+/** Доля света комнаты, которая при физическом свете остаётся отражённой. */
+export const VOLUME_LAMP_BOUNCE = 0.45;
+/** Доля отражённого света, которую открытый дверной проём отдаёт соседке. */
+export const VOLUME_LAMP_SPILL = 0.3;
+/** Площадь проёма, при которой соседке отдаётся вся эта доля, — дверь 900 × 2100. */
+const VOLUME_LAMP_SPILL_MM2 = 1.9e6;
+
+/**
+ * **Сила лампы** по её размеру: подсветка картины в сорок миллиметров слабее
+ * плафона, а люстра сильнее его. Своего поля силы у типа нет, и выдумывать его
+ * незачем — размер лица в справочнике есть у каждого светильника.
+ *
+ * Точечная — по площади лица, на логарифмической шкале: плафон 200 × 120 —
+ * около единицы, точечный 90 × 90 — 0,4, люстра 500 × 400 — потолок шкалы,
+ * подсветка 40 × 40 — её пол. Линия (лента, трек) — по длине: 0,3 на метр у
+ * ленты в сантиметр, больше у широкого трека.
+ */
+export function volumeLampPower(place) {
+  if (!place) return 0.8;
+  if (place.kind === "line") {
+    let sum = 0;
+    for (const piece of volumeLampPieces(place)) sum += piece.power;
+    return Math.max(VOLUME_LAMP_POWER_MIN, sum);
+  }
+  const size = volumeLampFace(place);
+  const m2 = (size.widthMm * size.heightMm) / 1e6;
+  const power = 0.5 + 0.35 * Math.log2(Math.max(1e-6, m2) / 0.01);
+  return Math.max(VOLUME_LAMP_POWER_MIN, Math.min(VOLUME_LAMP_POWER_MAX, power));
+}
+
+/** Лицо точечной лампы: у вещи без лица — её коробка в плане. */
+function volumeLampFace(place) {
+  if (place.face && place.face.widthMm > 0 && place.face.heightMm > 0) {
+    return { widthMm: place.face.widthMm, heightMm: place.face.heightMm };
+  }
+  const corners = place.prisms && place.prisms[0] ? place.prisms[0].corners : null;
+  if (!corners || corners.length < 3) return { widthMm: 120, heightMm: 120 };
+  const a = Math.hypot(corners[1].x - corners[0].x, corners[1].y - corners[0].y);
+  const b = Math.hypot(corners[2].x - corners[1].x, corners[2].y - corners[1].y);
+  return { widthMm: Math.max(a, b), heightMm: Math.min(a, b) };
+}
+
+/** Кусок линейной лампы — не длиннее метра: столько и светит одна точка ленты. */
+const VOLUME_LAMP_PIECE_MM = 1000;
+
+/** Куски линейной лампы: середина, длина и сила каждого. */
+function volumeLampPieces(place) {
+  const out = [];
+  for (const prism of place.prisms || []) {
+    const c = prism.corners;
+    if (!c || c.length < 4) continue;
+    const a = Math.hypot(c[1].x - c[0].x, c[1].y - c[0].y);
+    const b = Math.hypot(c[2].x - c[1].x, c[2].y - c[1].y);
+    // Длина — длинная сторона коробки звена, поперечник — короткая.
+    const along = a >= b ? { from: c[0], to: c[1], back: c[3] } : { from: c[1], to: c[2], back: c[0] };
+    const length = Math.max(a, b);
+    const across = Math.min(a, b);
+    const perMeter = 0.25 + Math.min(across, 100) / 200;
+    const count = Math.max(1, Math.ceil(length / VOLUME_LAMP_PIECE_MM));
+    const half = { x: (along.back.x - along.from.x) / 2, y: (along.back.y - along.from.y) / 2 };
+    const z = (Number(prism.bottomMm) + Number(prism.topMm)) / 2;
+    for (let index = 0; index < count; index += 1) {
+      const t = (index + 0.5) / count;
+      out.push({
+        at: {
+          x: along.from.x + (along.to.x - along.from.x) * t + half.x,
+          y: along.from.y + (along.to.y - along.from.y) * t + half.y,
+          z,
+        },
+        power: (perMeter * length) / count / 1000,
+      });
+    }
+  }
+  return out;
+}
+
+/** Вынос точки света от стены у лампы на стене: свет выходит из лица, а не из стены. */
+const VOLUME_LAMP_WALL_OUT_MM = 30;
+
+/**
+ * Откуда лампа светит: `[{at, power, dir, wall, beam}]` — точка, сила, куда
+ * смотрит (`null` — во все стороны), нормаль своей стены у лампы на стене и
+ * ширина пятна. Линия даёт точку на каждый метр.
+ *
+ * Куда смотрит, решает посадка (`place.mode`): потолочная — вниз, на стене —
+ * от стены, висящая в воздухе выше человека — вниз, ниже — во все стороны
+ * (подсветка пола, ночник у кровати).
+ */
+export function volumeLampSources(place) {
+  if (!place || !place.anchor) return [];
+  const down = { x: 0, y: 0, z: -1 };
+  const wall = place.mode === VOLUME_MARK_WALL && place.face && place.face.normal ? place.face.normal : null;
+  const out = (z) => (wall ? wall : place.mode === VOLUME_MARK_CEILING || z >= 1400 ? down : null);
+  const lift = (point) =>
+    wall
+      ? { x: point.x + wall.x * VOLUME_LAMP_WALL_OUT_MM, y: point.y + wall.y * VOLUME_LAMP_WALL_OUT_MM, z: point.z }
+      : point;
+  if (place.kind === "line") {
+    return volumeLampPieces(place).map((piece) => ({
+      at: lift(piece.at),
+      power: piece.power,
+      dir: out(piece.at.z),
+      wall,
+      beam: 1,
+    }));
+  }
+  const size = volumeLampFace(place);
+  const most = Math.max(size.widthMm, size.heightMm);
+  // Точечный и подсветка светят узко, люстра — широко.
+  const beam = most <= 120 ? 0.6 : most >= 400 ? 1.15 : 1;
+  return [{ at: lift(place.anchor), power: volumeLampPower(place), dir: out(place.anchor.z), wall, beam }];
+}
+
+/**
+ * Светлота комнаты от суммы ламп: `1 − e^(−сумма · S₀ / S)` (`S₀` —
+ * `VOLUME_LAMP_AREA_MM2`, `S` — площадь помещения). Растёт с каждой лампой и
+ * не переходит единицы; маленькая комната светлеет быстрее большой.
+ */
+export function volumeRoomShare(sum, areaMm2) {
+  const area = Math.max(2e6, Number(areaMm2) > 0 ? Number(areaMm2) : VOLUME_LAMP_ROOM_MM2);
+  const power = Math.max(0, Number(sum) || 0);
+  return 1 - Math.exp(-(power * VOLUME_LAMP_AREA_MM2) / area);
+}
+
+const volumeAreaMemo = new WeakMap();
+
+/** Площади помещений сцены по ключу (`volumeRoomKey`) — раз на сцену. */
+function volumeRoomAreas(scene) {
+  if (!scene) return new Map();
+  const held = volumeAreaMemo.get(scene);
+  if (held) return held;
+  const areas = new Map();
+  for (const room of scene.rooms || []) {
+    const key = volumeRoomKey(room);
+    if (key && room.pointsMm) areas.set(key, (areas.get(key) || 0) + volumeArea(room.pointsMm));
+  }
+  volumeAreaMemo.set(scene, areas);
+  return areas;
+}
+
+/**
+ * Проёмы своего этажа между двумя помещениями — для света ламп. Берутся у
+ * солнца (`scene.sunSpots`): те же проёмы с теми же сторонами, шторами и
+ * дверями, второго обхода стен нет. Помещение стороны узнаётся по контуру
+ * (`pointsMm` — тот же массив, что у `scene.rooms`), и потому проёмы чужих
+ * этажей стопки сюда не попадают: их контуры — другие массивы.
+ */
+function volumeLampOpenings(scene) {
+  const held = volumeOpeningMemo.get(scene);
+  if (held) return held;
+  const byPoints = new Map();
+  for (const room of (scene && scene.rooms) || []) byPoints.set(room.pointsMm, volumeRoomKey(room));
+  const out = [];
+  for (const spot of (scene && scene.sunSpots) || []) {
+    const left = spot.left ? byPoints.get(spot.left.pointsMm) : undefined;
+    const right = spot.right ? byPoints.get(spot.right.pointsMm) : undefined;
+    if (!left || !right || left === right) continue;
+    const base = Number(spot.baseMm) || 0;
+    const side = (sign) =>
+      spot.faceMm.map((point) => ({
+        x: spot.aMm.x + spot.u.x * point.alongMm + spot.n.x * spot.halfMm * sign,
+        y: spot.aMm.y + spot.u.y * point.alongMm + spot.n.y * spot.halfMm * sign,
+        z: base + point.zMm,
+      }));
+    out.push({
+      left,
+      right,
+      // Сторона `left` — та, куда смотрит нормаль стены (`volumeSunOpenings`).
+      plus: side(1),
+      minus: side(-1),
+      areaMm2: (spot.toMm - spot.fromMm) * (spot.topMm - spot.bottomMm),
+      shut: Boolean(spot.shut || spot.sheerMarkId),
+    });
+  }
+  volumeOpeningMemo.set(scene, out);
+  return out;
+}
+
+const volumeOpeningMemo = new WeakMap();
+
+/** Отражённый свет через открытые проёмы — один шаг, «чуть»: доля соседки. */
+function volumeLampSpill(scene, rooms) {
+  if (rooms.size === 0) return;
+  const base = new Map(rooms);
+  for (const way of volumeLampOpenings(scene)) {
+    if (way.shut) continue;
+    const share = VOLUME_LAMP_SPILL * Math.min(1, way.areaMm2 / VOLUME_LAMP_SPILL_MM2);
+    for (const [from, to] of [
+      [way.left, way.right],
+      [way.right, way.left],
+    ]) {
+      const light = base.get(from);
+      if (!(light > 0)) continue;
+      const was = rooms.get(to) || 0;
+      rooms.set(to, 1 - (1 - was) * (1 - light * share));
+    }
+  }
+}
+
+// ——— пятна ламп ———
+
+/**
+ * Доли пятна по кольцам — от края к середине: на краю кольца свет падает до
+ * этой доли от середины. Шесть колец и шаг между ними растёт к середине: у
+ * края, где глаз видит ступень яснее всего на тёмном, ступени мельче. Четыре
+ * кольца живой прогон отверг — на потолке читались круги.
+ */
+export const VOLUME_LAMP_RINGS = Object.freeze([0.05, 0.13, 0.25, 0.41, 0.6, 0.82]);
+/** Самое яркое место пятна: даже под лампой стена остаётся стеной. */
+const VOLUME_LAMP_PEAK = 0.85;
+/** Сила пятна: доля на мм² — середина пятна плафона на полу под ним около половины. */
+const VOLUME_LAMP_GAIN = 4e6;
+/** Размытие точки света: лампа не точка, и пятно у самой стены не сходится в иглу. */
+const VOLUME_LAMP_SOFT_MM = 300;
+/** Дальше этого пятно не растёт: весь пол квартиры одной лампой не светится. */
+const VOLUME_LAMP_REACH_MM = 6000;
+/** Пятно тусклее этого не рисуется вовсе. */
+const VOLUME_LAMP_FAINT = 0.03;
+/** Сколько сторон у кольца пятна: углов у края шестнадцатиугольника не видно. */
+const VOLUME_LAMP_SIDES = 16;
+/** Доля ночи, с которой пятна ламп видны: днём их не рисуют. */
+const VOLUME_LAMP_DUSK = 0.02;
+/** Кольцо прозрачнее этого в кадр не идёт: его не видно. */
+const VOLUME_LAMP_INVISIBLE = 0.004;
+
+const volumeDecalMemo = new WeakMap();
+
+/**
+ * **Пятна ламп сцены**: `Map<кусок грани, [{markId, p, alpha}]>` — кольца
+ * каждой лампы на кусках пола, стен и потолка, на которые она светит. Кусок —
+ * ровно тот, что лежит в дереве порядка (`scene.order`): кольцо обрезано им и
+ * рисуется сразу за ним.
+ *
+ * От включённости это не зависит: геометрия считается **на все лампы сцены
+ * разом** и раз на сцену, а кадр берёт кольца горящих и красит их по яркости.
+ * Сцена пересобирается на открытую дверь — и клин сквозь проём вместе с ней.
+ */
+export function volumeLampDecals(scene, live) {
+  if (!scene || !scene.order) return null;
+  const ids = [];
+  for (const [markId, item] of live || []) if (item && item.kind === "light") ids.push(markId);
+  ids.sort();
+  const sign = ids.join(" ");
+  const held = volumeDecalMemo.get(scene);
+  if (held && held.sign === sign) return held.decals;
+  const decals = volumeLampDecalsBuild(scene, ids, live);
+  volumeDecalMemo.set(scene, { sign, decals });
+  return decals;
+}
+
+function volumeLampDecalsBuild(scene, ids, live) {
+  const decals = new Map();
+  const byRoom = new Map();
+  for (const face of volumeOrderAll(scene.order, [])) {
+    if (!face.room || face.line) continue;
+    if (face.rgb !== VOLUME_FLOOR_RGB && face.rgb !== VOLUME_WALL_RGB && face.rgb !== VOLUME_CEILING_RGB) continue;
+    let list = byRoom.get(face.room);
+    if (!list) byRoom.set(face.room, (list = []));
+    list.push(face);
+  }
+  const ways = volumeLampOpenings(scene).filter((way) => !way.shut);
+  for (const markId of ids) {
+    const place = volumeMarkPlace(scene, markId);
+    if (!place) continue;
+    const item = live.get(markId);
+    const key = (item && item.roomId) || volumeRoomKeyAt(scene.rooms, volumeMarkProbe(place));
+    if (!key) continue;
+    for (const source of volumeLampSources(place)) {
+      for (const host of byRoom.get(key) || []) volumeLampPool(decals, host, markId, source, null);
+      for (const way of ways) {
+        const into = way.left === key ? way.right : way.right === key ? way.left : null;
+        if (!into) continue;
+        // Ближняя к лампе сторона проёма и дальняя: пучок срезают обе, как
+        // срезают его косяки.
+        const near = way.left === key ? way.plus : way.minus;
+        const far = way.left === key ? way.minus : way.plus;
+        for (const host of byRoom.get(into) || []) volumeLampPool(decals, host, markId, source, { near, far });
+      }
+    }
+  }
+  return decals;
+}
+
+/** Все грани дерева порядка — куски, как они лежат в узлах. */
+function volumeOrderAll(node, out) {
+  if (!node) return out;
+  for (const face of node.same) out.push(face);
+  volumeOrderAll(node.front, out);
+  volumeOrderAll(node.back, out);
+  return out;
+}
+
+/**
+ * Насколько лампа светит на плоскость с нормалью `n`: потолочная — в пол
+ * целиком, в стены наполовину, в свой потолок едва; на стене — свою стену
+ * целиком (подсветка картины светит картину); во все стороны — поровну.
+ */
+function volumeLampFacing(n, source, distanceMm) {
+  if (source.wall && n.x * source.wall.x + n.y * source.wall.y > 0.9 && distanceMm < 300) return 1;
+  if (!source.dir) return 0.6;
+  const k = -(n.x * source.dir.x + n.y * source.dir.y + n.z * source.dir.z);
+  return 0.15 + (0.85 * (k + 1)) / 2;
+}
+
+/**
+ * Кольца одной лампы на одном куске грани. `way` — проём, сквозь который свет
+ * идёт в соседнюю комнату: тогда кольца срезаются ещё и тенью его краёв —
+ * проекцией проёма из точки света на плоскость куска.
+ *
+ * Плоскость куска — его собственная, кольцо считается в ней: середина — точка
+ * под лампой, радиусы — где свет падает до доли кольца (`VOLUME_LAMP_RINGS`)
+ * по закону `1 / (d² + ρ² + s²)`. Доля середины — `VOLUME_LAMP_GAIN · сила /
+ * (d² + s²)`, не больше `VOLUME_LAMP_PEAK`, и на направление лампы.
+ * Прозрачность кольца — приращение: наложенные друг на друга кольца дают ровно
+ * долю своего кольца.
+ */
+function volumeLampPool(decals, host, markId, source, way) {
+  const n = host.n;
+  const o = host.p[0];
+  const L = source.at;
+  const d = n.x * (L.x - o.x) + n.y * (L.y - o.y) + n.z * (L.z - o.z);
+  if (!(d > 1)) return;
+  const soft2 = d * d + VOLUME_LAMP_SOFT_MM * VOLUME_LAMP_SOFT_MM;
+  const peak = Math.min(VOLUME_LAMP_PEAK, (VOLUME_LAMP_GAIN * source.power) / soft2) * volumeLampFacing(n, source, d);
+  if (peak < VOLUME_LAMP_FAINT) return;
+  const radii = VOLUME_LAMP_RINGS.map((q) => Math.min(VOLUME_LAMP_REACH_MM, source.beam * Math.sqrt(soft2 * (1 / q - 1))));
+  // Оси плоскости: у пола и потолка — оси плана, у стены — вдоль неё и вверх.
+  const flat = Math.abs(n.z) > 0.9;
+  const e1 = flat ? { x: 1, y: 0, z: 0 } : volumeNormalize({ x: -n.y, y: n.x, z: 0 });
+  const e2 = flat ? { x: 0, y: 1, z: 0 } : { x: 0, y: 0, z: 1 };
+  const to2 = (X) => {
+    const dx = X.x - o.x;
+    const dy = X.y - o.y;
+    const dz = X.z - o.z;
+    return { x: dx * e1.x + dy * e1.y + dz * e1.z, y: dx * e2.x + dy * e2.y + dz * e2.z };
+  };
+  const centre = to2({ x: L.x - n.x * d, y: L.y - n.y * d, z: L.z - n.z * d });
+  let shape = host.p.map(to2);
+  // Кусок дальше внешнего кольца — мимо.
+  const reach = radii[0];
+  let near = Infinity;
+  for (const point of shape) near = Math.min(near, Math.hypot(point.x - centre.x, point.y - centre.y));
+  if (near > reach) {
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const point of shape) {
+      minX = Math.min(minX, point.x);
+      maxX = Math.max(maxX, point.x);
+      minY = Math.min(minY, point.y);
+      maxY = Math.max(maxY, point.y);
+    }
+    const gapX = Math.max(minX - centre.x, 0, centre.x - maxX);
+    const gapY = Math.max(minY - centre.y, 0, centre.y - maxY);
+    if (Math.hypot(gapX, gapY) > reach) return;
+  }
+  if (way) {
+    for (const edge of [way.near, way.far]) {
+      const beam = volumeLampBeam(edge, L, n, o);
+      if (!beam) return;
+      shape = volumeClipPolygon(shape, beam.map(to2));
+      if (shape.length < 3) return;
+    }
+  }
+  const from2 = (point) => ({
+    x: o.x + e1.x * point.x + e2.x * point.y,
+    y: o.y + e1.y * point.x + e2.y * point.y,
+    z: o.z + e1.z * point.x + e2.z * point.y,
+  });
+  let list = decals.get(host);
+  let before = 0;
+  for (let index = 0; index < radii.length; index += 1) {
+    const ring = [];
+    for (let side = 0; side < VOLUME_LAMP_SIDES; side += 1) {
+      const angle = (side / VOLUME_LAMP_SIDES) * Math.PI * 2;
+      ring.push({ x: centre.x + Math.cos(angle) * radii[index], y: centre.y + Math.sin(angle) * radii[index] });
+    }
+    const piece = volumeClipPolygon(shape, ring);
+    const target = peak * VOLUME_LAMP_RINGS[index];
+    const alpha = 1 - (1 - target) / (1 - before);
+    before = target;
+    if (piece.length < 3) continue;
+    if (!list) decals.set(host, (list = []));
+    list.push({ markId, p: piece.map(from2), alpha });
+  }
+}
+
+/**
+ * Тень края проёма: проём (`edge`, точки в трёх осях), спроецированный из
+ * точки света `L` на плоскость `(n, o)`. `null` — хоть один луч уходит мимо
+ * плоскости: проём над лампой (свет снизу вверх) или плоскость за спиной.
+ * Луч, не дошедший до проёма, — тоже мимо: плоскость между лампой и проёмом
+ * светит не сквозь него.
+ */
+function volumeLampBeam(edge, L, n, o) {
+  const out = [];
+  const plane = n.x * (o.x - L.x) + n.y * (o.y - L.y) + n.z * (o.z - L.z);
+  for (const P of edge) {
+    const dx = P.x - L.x;
+    const dy = P.y - L.y;
+    const dz = P.z - L.z;
+    const toward = n.x * dx + n.y * dy + n.z * dz;
+    if (!(toward < -1e-6)) return null;
+    const s = plane / toward;
+    if (!(s >= 1)) return null;
+    out.push({ x: L.x + dx * s, y: L.y + dy * s, z: L.z + dz * s });
+  }
+  return out.length >= 3 ? out : null;
 }
 
 /**
@@ -7608,24 +8142,32 @@ export function volumeLiveLight(scene, live) {
  *
  * Тело, которое может светиться, у включённого устройства берёт цвет
  * свечения (`volumeGlowFill`) — без тона часа и без светлоты лампы сцены:
- * светится, значит не темнеет. Грань помещения, где горит свет, сводится к
- * ночи слабее (`volumeRoomTint`). Остальное — как без имитации.
+ * светится, значит не темнеет; разгорается и гаснет оно от тёмного к светлому
+ * плавно (`fade`). Грань помещения, где горит свет, сводится к ночи слабее
+ * (`volumeRoomTint`); при физическом свете так же — откос и полотно проёма, по
+ * более светлой из двух сторон (`sides`). Кольцо пятна (`decal`) — свет полной
+ * лампы поверх своей грани, прозрачностью кольца. Остальное — как без
+ * имитации.
  */
 function volumeLiveFill(face, normal, tint, live) {
   const alpha = face.alpha === undefined ? 1 : face.alpha;
+  const shade = face.flat ? 1 : volumeShade(normal);
+  if (face.decal !== undefined) return volumeFill(face.rgb, shade, face.decal, live.full);
   if (face.lit && face.markId && live.glow) {
     const glow = live.glow.get(face.markId);
-    if (glow) return volumeGlowFill(face.rgb, glow, alpha);
+    if (glow) return volumeGlowFill(face.rgb, glow, alpha, tint, shade);
   }
-  const shade = face.flat ? 1 : volumeShade(normal);
-  if (face.room && live.rooms) {
-    let own = live.tints ? live.tints.get(face.room) : undefined;
-    if (own === undefined) {
-      const level = live.rooms.get(face.room);
-      own = level > 0 ? volumeRoomTint(tint, level) : null;
-      if (live.tints) live.tints.set(face.room, own);
+  if (live.rooms) {
+    const key = face.room || (live.physical && face.sides ? face.sides.key : null);
+    if (key) {
+      let own = live.tints ? live.tints.get(key) : undefined;
+      if (own === undefined) {
+        const level = face.room ? live.rooms.get(key) : Math.max(live.rooms.get(face.sides.a) || 0, live.rooms.get(face.sides.b) || 0);
+        own = level > 0 ? volumeRoomTint(tint, level) : null;
+        if (live.tints) live.tints.set(key, own);
+      }
+      if (own) return volumeFill(face.rgb, shade, alpha, own);
     }
-    if (own) return volumeFill(face.rgb, shade, alpha, own);
   }
   return volumeFill(face.rgb, shade, alpha, tint);
 }
@@ -7638,12 +8180,20 @@ function volumeShare01(value) {
 /**
  * Цвет светящегося тела: материал, сведённый к цвету свечения по яркости.
  * Даже самая тусклая лампа светится заметно (`VOLUME_GLOW_MIN`).
+ *
+ * Пока лампа разгорается или гаснет (`glow.fade` меньше единицы), цвет идёт от
+ * тёмного тела — материал в тоне часа и светлоте лампы сцены (`tint`,
+ * `shade`) — к светящемуся: свет не вспыхивает и не обрывается.
  */
-export function volumeGlowFill(rgb, glow, alpha = 1) {
+export function volumeGlowFill(rgb, glow, alpha = 1, tint = null, shade = 1) {
   const level = volumeShare01(glow && glow.level);
   const to = (glow && glow.rgb) || VOLUME_GLOW_RGB;
   const share = VOLUME_GLOW_MIN + (1 - VOLUME_GLOW_MIN) * level;
-  return volumeFill(volumeMix(rgb, to, share), 1, alpha, null);
+  const lit = volumeMix(rgb, to, share);
+  const fade = glow && glow.fade !== undefined ? volumeShare01(glow.fade) : 1;
+  if (!(fade < 1)) return volumeFill(lit, 1, alpha, null);
+  const dark = volumeTintRgb(rgb, tint).map((value) => Math.max(0, Math.min(255, value * shade)));
+  return volumeFill(volumeMix(dark, lit, fade), 1, alpha, null);
 }
 
 /**

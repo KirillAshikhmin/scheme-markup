@@ -1059,9 +1059,23 @@ const CANVAS_SIM_IO = Object.freeze({
  * `canvasSimEnd`; метки, на которую нечем щёлкнуть, — тоже жест (чтобы
  * отпускание знало, что ничего делать не надо).
  */
-function canvasSimBegin(state, markId) {
-  return deviceGestureStart(state.project, markId, CANVAS_SIM_IO);
+function canvasSimBegin(state, markId, touch = false) {
+  const gesture = deviceGestureStart(state.project, markId, CANVAS_SIM_IO);
+  gesture.touch = touch;
+  return gesture;
 }
+
+// Пальцем устройство, которому есть что делать, после нажатия **не
+// выделяется** (правка после сборки сценариев). Слова заказчика: «В мобильном
+// интерфейсе обе взаимодействие с выключателем открывает его окно, хотя перед
+// этим нажатие проходит и состояние меняется». Окно — карточка метки: на
+// телефоне она встаёт листом поверх плана, и каждое касание клавиши закрывало
+// бы план пультом. Мышью выделение остаётся, как в F2. Пальцем выделяются,
+// как прежде, метка без дела (`none`) — карточка единственное, что тап по ней
+// даёт, — и многоклавишный выключатель (`keys`): клавишу у него выбирают в
+// карточке, и без неё тап не сделал бы ничего.
+const CANVAS_SIM_TOUCH_IO = Object.freeze({ ...CANVAS_SIM_IO, select: () => {} });
+const CANVAS_SIM_QUIET = new Set(["key", "sensor", "toggle"]);
 
 /**
  * Конец щелчка (`deviceGestureEnd`). `moved` — жест оказался панорамой (или
@@ -1069,7 +1083,8 @@ function canvasSimBegin(state, markId) {
  * выполняются, метка не выделяется.
  */
 function canvasSimEnd(sim, moved) {
-  deviceGestureEnd(sim, moved, CANVAS_SIM_IO);
+  const quiet = Boolean(sim && sim.touch && sim.plan && CANVAS_SIM_QUIET.has(sim.plan.kind));
+  deviceGestureEnd(sim, moved, quiet ? CANVAS_SIM_TOUCH_IO : CANVAS_SIM_IO);
 }
 
 function canvasResize() {
@@ -3472,7 +3487,7 @@ function canvasPointerDown(event) {
       // `tap` держит выбор метки: его читает `canvasTapAction` (таск 106).
       canvasDrag.tap = { markId: pick.markId };
       // Запущенный дом: палец нажимает на устройство так же, как мышь.
-      if (canvasSimLocked(touchState) && pick.markId) canvasDrag.sim = canvasSimBegin(touchState, pick.markId);
+      if (canvasSimLocked(touchState) && pick.markId) canvasDrag.sim = canvasSimBegin(touchState, pick.markId, true);
       canvasPressStart(at, pick);
     }
     return;
