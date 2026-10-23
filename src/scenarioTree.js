@@ -758,7 +758,7 @@ function issueTriggers(scenario) {
  */
 export function scenarioIssues(project, given, accessories = null) {
   if (!treeObject(given) || given.kind !== "block") return [];
-  // Ведомая метка группы — устройство ведущей: проверка видит сценарий так же,
+  // Ведомая метка (то же обозначение) — устройство ведущей: проверка видит сценарий так же,
   // как дом (`homeLeadScenario`).
   const scenario = homeLeadScenario(project, given);
   const issues = blocksPrepare(scenario, { accessories: accessories || homeAccessories(project) }).issues.map((item) => ({ blockId: item.blockId, code: item.code }));

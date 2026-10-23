@@ -195,10 +195,28 @@ test("своего разбора жеста у поверхностей не о
   // Правило одно, и держит это сверка исходников: вернись разбор в панель
   // второй раз — и план с чертежом снова разойдутся, а глазами такое ловится
   // только жестом на живой странице.
+  // Ход по плану — один механизм (`planNav.js`, правка после сборки
+  // сценариев: «Переиспользуй везде один механизм»): план, чертёж, мини-план
+  // «Сценариев» и схема в окне зовут его, а колесо и щипок в нём разбирает эта
+  // дверь. Окно загрузки плана и объём применяют ответ двери по-своему — у них
+  // прокрутка и камера, а не вид плана.
+  const read = (path) => readFileSync(new URL("../" + path, import.meta.url), "utf8");
+  const bare = (source) =>
+    source
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("//") && !line.trim().startsWith("*"))
+      .join("\n");
+  for (const name of ["src/canvas.js", "src/panels/workshop.js", "src/panels/planView.js"]) {
+    const code = bare(read(name));
+    assert.ok(/createPlanNav\(/.test(code), name + ": поле плана ходит не общим механизмом");
+    assert.ok(!/gestureWheel\(|gesturePinchStep\(|gesturePinchOf\(/.test(code), name + ": у поля свой разбор колеса или щипка");
+    assert.ok(!/deltaY|deltaMode|Math\.exp/.test(code), name + ": поле читает колесо само");
+  }
+  const nav = bare(read("src/planNav.js"));
+  assert.ok(/gestureWheel\(/.test(nav) && /gesturePinchStep\(/.test(nav), "общий ход не зовёт дверь колеса и щипка");
   const sources = {
-    "src/canvas.js": readFileSync(new URL("../src/canvas.js", import.meta.url), "utf8"),
-    "src/panels/workshop.js": readFileSync(new URL("../src/panels/workshop.js", import.meta.url), "utf8"),
-    "src/panels/schemes.js": readFileSync(new URL("../src/panels/schemes.js", import.meta.url), "utf8"),
+    "src/planNav.js": read("src/planNav.js"),
+    "src/panels/schemes.js": read("src/panels/schemes.js"),
     // Объём — четвёртая поверхность с таска 195: колесо и трекпад в обзоре
     // разбирает та же дверь, своего `deltaY` у него не осталось (G299).
     "src/panels/volume.js": readFileSync(new URL("../src/panels/volume.js", import.meta.url), "utf8"),

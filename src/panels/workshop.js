@@ -163,26 +163,15 @@ import {
 } from "../model.js";
 import {
   CANVAS_FRESH_VERTEX_MS,
-  CANVAS_PAN_FRAME_MS,
-  CANVAS_PAN_STEP_PX,
   CANVAS_WALL_PICK_PX,
   canvasDragSlop,
-  canvasPanSpeed,
-  canvasPanVector,
-  canvasZoomKey,
   canvasRedoStep,
   canvasStartScale,
   canvasUndoStep,
   canvasCommit,
 } from "../canvas.js";
-import {
-  GESTURE_CLOSE_MIN,
-  gestureDraftClick,
-  gestureDraftEnd,
-  gesturePinchOf,
-  gesturePinchStep,
-  gestureWheel,
-} from "../gestures.js";
+import { GESTURE_CLOSE_MIN, gestureDraftClick, gestureDraftEnd } from "../gestures.js";
+import { createPlanNav } from "../planNav.js";
 import {
   DRAWING_ACTIVE,
   DRAWING_EDGE,
@@ -521,15 +510,10 @@ export function workshopHandMoved(gesture, at) {
 // дальше — отрывается от неё и читается как чужая.
 const WORKSHOP_LENGTH_GAP_PX = 13;
 
-// Сдвиг вида стрелками (дефект D23, «навигация должна быть как и у схемы»).
-// Направление и кривую разгона даёт сам холст — `canvasPanVector` и
-// `canvasPanSpeed` вывезены оттуда наружу, и второй такой арифметики здесь
-// нет. Повторить пришлось только ход кадров: холстовый прибит к его
-// синглтон-виду (`canvasPanBy` пишет в `getState().view`), а у окна вид свой.
-// Шаг короткого нажатия и потолок шага кадра — те же, что у холста: теперь
-// они оттуда и берутся (таск 173).
-const WORKSHOP_PAN_STEP_PX = CANVAS_PAN_STEP_PX;
-const WORKSHOP_PAN_FRAME_MS = CANVAS_PAN_FRAME_MS;
+// Ход по чертежу (дефект D23, «навигация должна быть как и у схемы») — тот же
+// механизм, что у холста: `planNav.js` (правка после сборки сценариев:
+// «Переиспользуй везде один механизм»). Своего у чертежа только вид — в
+// миллиметрах, а не в точках плана, — и потолок масштаба.
 
 // ——— чистая половина: что показать и что записать ——————————————————————
 
@@ -2176,15 +2160,23 @@ function createWorkshop({ api, hosts }) {
   // для того же, для чего холсту (`canvasFreshVertex`) — чтобы двойной клик по
   // ручке разбивки не убирал ту вершину, которую сам только что и поставил.
   let freshVertex = null;
-  let streak = null;
   let frame = 0;
-  // Зажатые стрелки и часы непрерывного хода.
-  const panKeys = new Map();
-  let panFrame = 0;
-  let panClock = 0;
   let closed = false;
   const fingers = new Map();
-  let pinch = null;
+  // Ход по полю — общий механизм (`planNav.js`): стрелки с разгоном, колесо и
+  // трекпад, щипок, «+» и «−». После сдвига кадр только перерисовывается,
+  // после масштаба — ещё и пересобирается колонка (`sync`).
+  const nav = createPlanNav({
+    getView: () => view,
+    setView: (next, how) => {
+      view = { zoom: next.zoom, offsetX: next.offsetX, offsetY: next.offsetY };
+      if (how === "zoom") sync();
+      else paint();
+    },
+    clampZoom: (zoom) => workshopClampZoom(zoom, zoomCeiling()),
+    box: () => viewport(),
+    frames: { schedule: (fn) => (closed ? 0 : scheduleFrame(fn)), cancel: (id) => cancelFrame(id) },
+  });
 
   // Полоса развёртки — тот же кирпич, что над основным холстом: сторона у них
   // общая (живёт в состоянии сеанса), и переключение в окне помнится, когда
@@ -2617,24 +2609,21 @@ function createWorkshop({ api, hosts }) {
   }
 
   function zoomAt(point, factor) {
-    const zoom = workshopClampZoom(view.zoom * factor, zoomCeiling());
-    const ratio = zoom / view.zoom;
-    view = {
-      zoom,
-      offsetX: point.x - (point.x - view.offsetX) * ratio,
-      offsetY: point.y - (point.y - view.offsetY) * ratio,
-    };
-    sync();
+    nav.zoomAt(point, factor);
   }
 
   function zoomBy(factor) {
-    const box = viewport();
-    zoomAt({ x: box.width / 2, y: box.height / 2 }, factor);
+    nav.zoomBy(factor);
   }
 
   function panBy(dx, dy) {
-    view = { ...view, offsetX: view.offsetX + dx, offsetY: view.offsetY + dy };
-    paint();
+    nav.panBy(dx, dy);
+  }
+
+  // Пальцы помнятся в точках окна, а ход считает в точках поля.
+  function fingersOnField() {
+    const rect = node.getBoundingClientRect();
+    return [...fingers.values()].map((point) => ({ x: point.x - rect.left, y: point.y - rect.top }));
   }
 
   function pointOf(event) {
@@ -3663,7 +3652,7 @@ function createWorkshop({ api, hosts }) {
         // пальца пришли возить и приближать. Без этого щипок оставлял за
         // собой вершину, поставленную первым касанием.
         press = null;
-        pinch = gesturePinchOf(fingers.values());
+        nav.pinchStart(fingersOnField());
         event.preventDefault();
         return;
       }
@@ -3897,14 +3886,9 @@ function createWorkshop({ api, hosts }) {
     if (closed) return;
     if (fingers.has(event.pointerId)) {
       fingers.set(event.pointerId, { x: event.clientX, y: event.clientY });
-      if (pinch && fingers.size >= 2) {
-        // Тот же `gestures.js`, что у колеса, и тот же порядок, что на плане:
-        // масштаб вокруг новой середины, затем сдвиг на её ход.
-        const step = gesturePinchStep(pinch, fingers.values());
-        const rect = node.getBoundingClientRect();
-        zoomAt({ x: step.pinch.center.x - rect.left, y: step.pinch.center.y - rect.top }, step.factor);
-        panBy(step.panX, step.panY);
-        pinch = step.pinch;
+      if (nav.pinching() && fingers.size >= 2) {
+        // Щипок — общий ход полей (`planNav.js`), тот же, что на плане.
+        nav.pinchMove(fingersOnField());
         return;
       }
     }
@@ -4148,7 +4132,7 @@ function createWorkshop({ api, hosts }) {
   function onPointerEnd(event) {
     if (fingers.has(event.pointerId)) {
       fingers.delete(event.pointerId);
-      if (fingers.size < 2) pinch = null;
+      if (fingers.size < 2) nav.pinchEnd();
     }
     pan = null;
     syncCursor();
@@ -4215,15 +4199,8 @@ function createWorkshop({ api, hosts }) {
       // Прежде здесь `pan` молча отбрасывался, и двухпальцевый скролл трекпада
       // чертёж не листал: «На виде Схема можно двигать полоно 2 пальцами, а на
       // Чертеже нет» (G241). Теперь листает — тем же ходом и в ту же сторону.
-      const move = gestureWheel(event, streak);
-      streak = move.streak;
-      event.preventDefault();
-      if (move.kind === "pan") {
-        panBy(move.panX, move.panY);
-        return;
-      }
       const rect = node.getBoundingClientRect();
-      zoomAt({ x: event.clientX - rect.left, y: event.clientY - rect.top }, move.factor);
+      nav.wheel(event, { x: event.clientX - rect.left, y: event.clientY - rect.top });
     },
     { passive: false },
   );
@@ -4268,13 +4245,11 @@ function createWorkshop({ api, hosts }) {
     // клавиатурного масштаба у чертежа не было вовсе: кнопки «−»/«+» в
     // «Интерфейсе» работали, а те же клавиши не делали ничего — при том что на
     // плане они работают и обещаны подсказкой. Набор клавиш и шаг взяты у
-    // холста (`canvasZoomKey`), своих здесь нет; приближается середина поля —
+    // хода полей (`planNav.js`), своих здесь нет; приближается середина поля —
     // та же `zoomBy`, которую зовут кнопки, и тот же потолок `WORKSHOP_ZOOM_MAX`.
-    const zoom = canvasZoomKey(event);
-    if (zoom) {
+    if (nav.zoomKey(event)) {
       event.preventDefault();
       event.stopPropagation();
-      zoomBy(zoom);
       return;
     }
     if (event.key === "Escape") {
@@ -4387,59 +4362,19 @@ function createWorkshop({ api, hosts }) {
 
   // ——— стрелки: сдвиг вида с разгоном ————————————————————————————————
   //
-  // Направление и скорость — холстовые (`canvasPanVector`, `canvasPanSpeed`):
-  // короткое нажатие даёт шаг, удержание после задержки переходит в
-  // непрерывный ход с разгоном. Повторы от системы пропускаются — ход ведут
-  // кадры, а не автоповтор. Своего здесь только ход кадров: холстовый прибит к
-  // его синглтон-виду, а у окна вид свой.
+  // Шаг, задержка и разгон — общий ход полей (`planNav.js`).
 
   function panKeyDown(code) {
-    const direction = canvasPanVector(code);
-    if (!direction) return false;
-    if (!panKeys.has(code)) {
-      panKeys.set(code, panNow());
-      panClock = panNow();
-      panBy(direction.x * WORKSHOP_PAN_STEP_PX, direction.y * WORKSHOP_PAN_STEP_PX);
-      panSchedule();
-    }
-    return true;
+    return nav.panKeyDown(code);
   }
 
   // Клавишу отпустили — или её отпустили за нас: окно увели, открылся диалог.
-  // Без этого зажатая стрелка уезжает вместе с фокусом и не останавливается.
   function panKeyUp(code) {
-    if (code) panKeys.delete(code);
-    else panKeys.clear();
-    if (panKeys.size > 0 || !panFrame) return;
-    cancelFrame(panFrame);
-    panFrame = 0;
+    nav.panKeyUp(code || null);
   }
 
   function panNow() {
     return typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
-  }
-
-  function panSchedule() {
-    if (panFrame || panKeys.size === 0 || closed) return;
-    panFrame = scheduleFrame(panTick);
-  }
-
-  function panTick() {
-    panFrame = 0;
-    if (panKeys.size === 0 || closed) return;
-    const time = panNow();
-    const step = Math.min(WORKSHOP_PAN_FRAME_MS, time - panClock) / 1000;
-    panClock = time;
-    let dx = 0;
-    let dy = 0;
-    for (const [code, since] of panKeys) {
-      const speed = canvasPanSpeed(time - since) * step;
-      const direction = canvasPanVector(code);
-      dx += direction.x * speed;
-      dy += direction.y * speed;
-    }
-    if (dx !== 0 || dy !== 0) panBy(dx, dy);
-    panSchedule();
   }
 
   function onKeyUp(event) {

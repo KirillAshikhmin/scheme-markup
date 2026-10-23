@@ -27,6 +27,7 @@ import {
   markControlledBy,
   markDeviceLeader,
   markDeviceOwn,
+  markDeviceShared,
   markDeviceProfile,
   markControlsByChannel,
   markCurtainSide,
@@ -752,6 +753,19 @@ function mountMarksPanel(host, api) {
     setState({ selectedMarkIds: [markId], view: marksCenteredView(scheme, mark, state.view) });
   }
 
+  // К метке, где бы она ни была: на своей схеме — как выбор в списке, на
+  // другой — сначала её схема (ведущая Т1 может стоять на другом этаже).
+  function focusMark(markId) {
+    const state = getState();
+    const mark = state.project ? findMark(state.project, markId) : null;
+    if (!mark) return;
+    if (mark.schemeId && mark.schemeId !== state.schemeId) {
+      setState({ schemeId: mark.schemeId, selectedMarkIds: [markId] });
+      return;
+    }
+    selectMark(markId);
+  }
+
   // Уплотнение по всему объекту. Считает и применяет модель
   // (`compactAllNumbers`) — одним вызовом, поэтому и шаг истории один: отмена
   // возвращает весь набор замен целиком, а не тип за типом.
@@ -961,11 +975,14 @@ function mountMarksPanel(host, api) {
     const state = getState();
     if (!state.project || !findMark(state.project, markId)) return;
     const mark = findMark(state.project, markId);
-    // Ведомая метка группы (правка после сборки сценариев): аксессуар у неё
-    // ведущей — окно его показывает, а правят его у ведущей.
+    // Ведомая метка (правка после сборки сценариев): аксессуар у меток с одним
+    // обозначением один — окно его показывает, а правят его у первой.
     const leader = markDeviceLeader(state.project, markId);
     const editable = layoutAllows("editMarks", state.layout) && !leader;
-    const leaderSaid = leader ? text("deviceWindow.follower", { label: labelOf(state.project, leader) }) : null;
+    const label = labelOf(state.project, markId);
+    const leaderSaid = leader
+      ? text("deviceWindow.follower", { label, count: markDeviceShared(state.project, markId) })
+      : null;
     const answer = await openDeviceWindow({
       title: deviceWindowTitle(state.project, { markId }),
       // У ведомой о группе говорит строка «только смотрят» — второй раз то же
@@ -976,6 +993,9 @@ function mountMarksPanel(host, api) {
       aid: deviceMarkAid(state.project, leader || markId),
       readOnly: !editable,
       readOnlyNote: leaderSaid,
+      readOnlyAction: leader
+        ? { label: text("deviceWindow.followerOpen", { label }), run: () => focusMark(leader) }
+        : null,
       own: markDeviceOwn(state.project, markId),
       resetable: true,
     });
@@ -1233,7 +1253,7 @@ function mountMarksPanel(host, api) {
           uiButton(strings.deviceWindow.open + ": " + view.fields.device.summary, {
             class: "ui-btn ui-btn--wide mark-row__device" + (view.fields.device.own ? " is-set" : ""),
             title: view.fields.device.leader
-              ? text("deviceWindow.follower", { label: labelOf(state.project, view.fields.device.leader) })
+              ? text("deviceWindow.follower", { label: labelOf(state.project, mark.id), count: markDeviceShared(state.project, mark.id) })
               : view.fields.device.own
                 ? strings.deviceWindow.ownTitle
                 : strings.deviceWindow.markHint,

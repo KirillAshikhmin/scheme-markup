@@ -41,6 +41,7 @@ import {
   labelOf,
   markDeviceLeader,
   markDeviceOwn,
+  markDeviceShared,
   markDeviceProfile,
   markIsComment,
   typeChannels,
@@ -256,11 +257,14 @@ export function deviceMarkField(project, markId) {
   if (!mark) return { summary: strings.deviceWindow.none, own: false };
   const profile = markDeviceProfile(project, markId);
   const summary = deviceSummary(profile, typeChannels(project, mark.typeId));
-  // Ведомая метка группы (правка после сборки сценариев): аксессуар — ведущей,
-  // и сводка говорит чей.
+  // Метки с одним обозначением — одно устройство (правка после сборки
+  // сценариев): сводка говорит, на сколько меток аксессуар общий; у ведомой —
+  // ещё и кто ведёт.
   const leader = markDeviceLeader(project, markId);
-  if (!leader) return { summary, own: markDeviceOwn(project, markId) };
-  return { summary: text("deviceWindow.followerSummary", { summary, label: labelOf(project, leader) }), own: false, leader };
+  const count = markDeviceShared(project, markId);
+  const shared = count > 1 ? text("deviceWindow.followerSummary", { summary, label: labelOf(project, markId), count }) : summary;
+  if (!leader) return { summary: shared, own: markDeviceOwn(project, markId) };
+  return { summary: shared, own: false, leader };
 }
 
 /** Сводка профиля типа для кнопки справочника. */
@@ -417,6 +421,7 @@ export function openDeviceWindow({
   aid = null,
   readOnly = false,
   readOnlyNote = null,
+  readOnlyAction = null,
   own = false,
   resetable = false,
 }) {
@@ -614,6 +619,20 @@ export function openDeviceWindow({
           class: "ui-btn device__reset",
           title: strings.deviceWindow.resetTitle,
           on: { click: () => done({ reset: true }) },
+        }),
+      );
+    }
+    // Своё действие окна «только смотрят» — у ведомой метки «К первой Т1».
+    if (readOnly && readOnlyAction) {
+      actions.push(
+        uiButton(readOnlyAction.label, {
+          class: "ui-btn",
+          on: {
+            click: () => {
+              done(null);
+              readOnlyAction.run();
+            },
+          },
         }),
       );
     }

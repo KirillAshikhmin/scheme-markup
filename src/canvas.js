@@ -22,13 +22,19 @@ import {
   setScreen,
 } from "./app.js";
 import { strings, text } from "./strings.js";
+import { gestureDraftClick, gestureDraftEnd } from "./gestures.js";
 import {
-  gestureDraftClick,
-  gestureDraftEnd,
-  gesturePinchOf,
-  gesturePinchStep,
-  gestureWheel,
-} from "./gestures.js";
+  PLAN_NAV_PAN_FRAME_MS,
+  PLAN_NAV_PAN_STEP_PX,
+  createPlanNav,
+  planNavClampZoom,
+  planNavDragView,
+  planNavFitDrawing,
+  planNavPanSpeed,
+  planNavPanVector,
+  planNavSlop,
+  planNavZoomKey,
+} from "./planNav.js";
 import {
   DEFAULT_MARK_SIZE,
   DEFAULT_VIEW,
@@ -159,62 +165,25 @@ import { screenPlaceOf, screenPlacePlanRead, screenPlacePlanView, screenPlaceSet
 
 // ——— клавиатура: ход и масштаб ————————————————————————————————————————
 //
-// Стрелки листают план, как прокрутка: камера едет в сторону стрелки, а не
-// план. «Вниз» показывает то, что ниже, «вправо» — то, что правее. Рука при
-// перетаскивании двигает сам план, и это другое движение: там план держат
-// пальцем, здесь — ведут окно по плану.
-//
-// Короткое нажатие — один шаг: план подвинуть на чуть-чуть. Удержание после
-// небольшой задержки переходит в непрерывный ход с разгоном — мягко в начале
-// (чтобы не проскочить) и быстро дальше (чтобы одним нажатием дотащить план
-// через весь экран).
+// Ход по плану — стрелки с разгоном, «+» и «−», колесо и трекпад, щипок,
+// перетаскивание — живёт одним механизмом в `planNav.js` (правка после сборки
+// сценариев: «Переиспользуй везде один механизм»): его же зовут чертёж,
+// мини-план «Сценариев» и схема в окне. Имена ниже — прежние двери холста к
+// тем же меркам: по ним их читают чертёж и тесты, и второго числа здесь нет.
 
-// Шаг короткого нажатия, экранные пиксели. Отдан наружу: чертёж листает вид
-// теми же стрелками и тем же шагом (`workshop.js`), и второго числа тут быть
-// не должно — разойдись они, одна и та же клавиша ходила бы по-разному на
-// плане и в чертеже.
-export const CANVAS_PAN_STEP_PX = 24;
-// Сколько клавишу держат, прежде чем начнётся непрерывный ход.
-const CANVAS_PAN_HOLD_MS = 180;
-// Скорость непрерывного хода в начале и на потолке, пикселей в секунду.
-const CANVAS_PAN_SPEED_MIN = 240;
-const CANVAS_PAN_SPEED_MAX = 2400;
-// За столько разгон доходит до потолка.
-const CANVAS_PAN_RAMP_MS = 1300;
-// Потолок шага кадра: вкладку свернули на минуту — план не должен улететь.
-// Тоже отдан наружу — у чертежа свой цикл кадров, но мерка общая.
-export const CANVAS_PAN_FRAME_MS = 64;
-// Во сколько раз «+» и «−» меняют масштаб за нажатие. Мерка одна на план и на
-// чертёж — читают её обе поверхности через `canvasZoomKey` (дефект D68).
-const CANVAS_ZOOM_KEY_STEP = 1.2;
+/** Шаг короткого нажатия стрелки, экранные пиксели (`planNav.js`). */
+export const CANVAS_PAN_STEP_PX = PLAN_NAV_PAN_STEP_PX;
+/** Потолок шага кадра хода (`planNav.js`). */
+export const CANVAS_PAN_FRAME_MS = PLAN_NAV_PAN_FRAME_MS;
 
-// Куда едет вид по каждой стрелке. Числа — знак прибавки к смещению холста,
-// а смещение сдвигает содержимое: чтобы показать то, что правее, содержимое
-// обязано уехать влево. Отсюда знаки, обратные наивным.
-const CANVAS_PAN_KEYS = {
-  ArrowLeft: { x: 1, y: 0 },
-  ArrowRight: { x: -1, y: 0 },
-  ArrowUp: { x: 0, y: 1 },
-  ArrowDown: { x: 0, y: -1 },
-};
-
-// Направление хода по клавише: прибавка к `view.offsetX/offsetY` на единицу
-// пути. Не своя клавиша — `null`.
+/** Направление хода по стрелке (`planNavPanVector`). */
 export function canvasPanVector(code) {
-  const direction = CANVAS_PAN_KEYS[code];
-  return direction ? { x: direction.x, y: direction.y } : null;
+  return planNavPanVector(code);
 }
 
-// Скорость непрерывного хода по времени удержания клавиши, пикселей в секунду.
-// До конца задержки — ноль: там работает шаг короткого нажатия. Дальше квадрат
-// доли разгона: прибавка скорости со временем растёт, поэтому начало мягкое,
-// а конец быстрый. Потолок обязателен — без него удержание на секунду уносит
-// план в другой конец схемы, и обратно его уже не поймать.
+/** Скорость непрерывного хода по времени удержания (`planNavPanSpeed`). */
 export function canvasPanSpeed(heldMs) {
-  const running = heldMs - CANVAS_PAN_HOLD_MS;
-  if (!(running > 0)) return 0;
-  const ramp = Math.min(1, running / CANVAS_PAN_RAMP_MS);
-  return CANVAS_PAN_SPEED_MIN + (CANVAS_PAN_SPEED_MAX - CANVAS_PAN_SPEED_MIN) * ramp * ramp;
+  return planNavPanSpeed(heldMs);
 }
 
 // ——— колесо, трекпад и щипок ——————————————————————————————————————————
@@ -675,18 +644,9 @@ const CANVAS_SUMMARY_SETTING = "canvasSummaryCollapsed";
 let canvasHintCollapsed = false;
 let canvasHintSeen = null;
 
-const CANVAS_ZOOM_MIN = 0.04;
-const CANVAS_ZOOM_MAX = 24;
-// Смещение курсора, после которого клик считается перетаскиванием.
-const CANVAS_DRAG_SLOP = 3;
 // Запас к радиусу метки, по которому клик считается попавшим в концевую вершину
 // черновика: по кружку в самый его край целиться незачем.
 const CANVAS_DRAFT_END_PAD_PX = 6;
-// То же для пальца, и мера у него своя. Палец не стоит на месте: тап по метке
-// на планшете уезжает на несколько точек, и по мышиной мерке в три точки он
-// почти всегда оказывался бы панорамой, а не выбором метки. Десять точек —
-// столько же, сколько отдают на «тап» системные жесты.
-const CANVAS_TOUCH_SLOP = 10;
 // Запас попадания пальца сверх мышиного. Подушечка накрывает вчетверо больше
 // экрана, чем остриё курсора, а ручка вершины — квадратик в семь пикселей:
 // без запаса за неё не взяться, и человек решит, что ручки не нажимаются.
@@ -721,18 +681,22 @@ let canvasDraft = null; // черновик ломаной: {points, cursor}
 let canvasDrag = null;
 let canvasPreview = null; // объект во время перетаскивания — в состояние не пишется
 let canvasPointers = new Map();
-let canvasPinch = null;
 let canvasSpace = false;
 let canvasFrame = 0;
 let canvasFitted = null;
 let canvasProjectId = null;
-// Зажатые стрелки: клавиша → время нажатия. Их может быть две сразу — тогда
-// план едет по диагонали, как и должен.
-// Последнее событие колеса: по нему тянется решение внутри одного жеста.
-let canvasWheelStreak = null;
-let canvasPanHeld = new Map();
-let canvasPanFrame = 0;
-let canvasPanClock = 0;
+// Ход по плану — общий механизм полей (`planNav.js`): зажатые стрелки, серия
+// колеса, щипок. Вид — в состоянии сеанса, как и был.
+const canvasNav = createPlanNav({
+  getView: () => {
+    const state = canvasState();
+    return state ? state.view : null;
+  },
+  setView: (view) => canvasApi.setState({ view: { zoom: view.zoom, offsetX: view.offsetX, offsetY: view.offsetY } }),
+  clampZoom: canvasClampZoom,
+  box: () => ({ width: canvasNode ? canvasNode.clientWidth : 1, height: canvasNode ? canvasNode.clientHeight : 1 }),
+  frames: { schedule: (fn) => scheduleFrame(fn), cancel: (id) => cancelFrame(id) },
+});
 // Буфер метки: снимок из `markSnapshot` плюс имя исходной метки — по нему
 // вставка находит, рядом с чем встать, когда курсора над планом нет.
 let canvasClipboard = null;
@@ -772,11 +736,7 @@ function canvasNow() {
 
 
 function canvasPanBy(dx, dy) {
-  const state = canvasState();
-  if (!state) return;
-  canvasApi.setState({
-    view: { ...state.view, offsetX: state.view.offsetX + dx, offsetY: state.view.offsetY + dy },
-  });
+  canvasNav.panBy(dx, dy);
 }
 
 // Ход и масштаб холста: есть ли по чему ходить.
@@ -805,51 +765,14 @@ function canvasHasPlan() {
   return Boolean(state && state.schemeId);
 }
 
-// Первое нажатие стрелки: один шаг сразу и завод непрерывного хода. Повторы
-// нажатия от системы пропускаются — ход ведут кадры, а не автоповтор.
+// Стрелки: шаг сразу и непрерывный ход с разгоном — `planNav.js`.
 function canvasPanKeyDown(code) {
-  const direction = CANVAS_PAN_KEYS[code];
-  if (!direction) return false;
-  if (!canvasPanHeld.has(code)) {
-    canvasPanHeld.set(code, canvasNow());
-    canvasPanClock = canvasNow();
-    canvasPanBy(direction.x * CANVAS_PAN_STEP_PX, direction.y * CANVAS_PAN_STEP_PX);
-    canvasPanSchedule();
-  }
-  return true;
-}
-
-function canvasPanSchedule() {
-  if (canvasPanFrame || canvasPanHeld.size === 0) return;
-  canvasPanFrame = scheduleFrame(canvasPanTick);
-}
-
-function canvasPanTick() {
-  canvasPanFrame = 0;
-  if (canvasPanHeld.size === 0) return;
-  const time = canvasNow();
-  const step = Math.min(CANVAS_PAN_FRAME_MS, time - canvasPanClock) / 1000;
-  canvasPanClock = time;
-  let dx = 0;
-  let dy = 0;
-  for (const [code, since] of canvasPanHeld) {
-    const speed = canvasPanSpeed(time - since) * step;
-    const direction = CANVAS_PAN_KEYS[code];
-    dx += direction.x * speed;
-    dy += direction.y * speed;
-  }
-  if (dx !== 0 || dy !== 0) canvasPanBy(dx, dy);
-  canvasPanSchedule();
+  return canvasNav.panKeyDown(code);
 }
 
 // Клавишу отпустили — или её отпустили за нас: окно увели, открылся диалог.
-// Без этого зажатая стрелка уезжает вместе с фокусом и не останавливается.
 function canvasPanRelease(code) {
-  if (code) canvasPanHeld.delete(code);
-  else canvasPanHeld.clear();
-  if (canvasPanHeld.size > 0 || !canvasPanFrame) return;
-  cancelFrame(canvasPanFrame);
-  canvasPanFrame = 0;
+  canvasNav.panKeyUp(code || null);
 }
 
 /**
@@ -862,13 +785,7 @@ function canvasPanRelease(code) {
  * кодов разошёлся бы с этим на `NumpadAdd` в тот же день, когда его написали.
  */
 export function canvasZoomKey(event) {
-  if (event.code === "Equal" || event.code === "NumpadAdd" || event.key === "+" || event.key === "=") {
-    return CANVAS_ZOOM_KEY_STEP;
-  }
-  if (event.code === "Minus" || event.code === "NumpadSubtract" || event.key === "-" || event.key === "_") {
-    return 1 / CANVAS_ZOOM_KEY_STEP;
-  }
-  return 0;
+  return planNavZoomKey(event);
 }
 
 function canvasState() {
@@ -2919,22 +2836,12 @@ export function canvasRedoStep() {
 // ——— масштаб —————————————————————————————————————————————————————————
 
 function canvasClampZoom(zoom) {
-  return Math.min(CANVAS_ZOOM_MAX, Math.max(CANVAS_ZOOM_MIN, zoom));
+  return planNavClampZoom(zoom);
 }
 
 // Приближение к точке: точка плана под курсором остаётся под курсором.
 function canvasZoomAt(point, factor) {
-  const state = canvasState();
-  const view = state.view;
-  const zoom = canvasClampZoom(view.zoom * factor);
-  const ratio = zoom / view.zoom;
-  canvasApi.setState({
-    view: {
-      zoom,
-      offsetX: point.x - (point.x - view.offsetX) * ratio,
-      offsetY: point.y - (point.y - view.offsetY) * ratio,
-    },
-  });
+  canvasNav.zoomAt(point, factor);
 }
 
 export function canvasZoomBy(factor) {
@@ -3133,7 +3040,7 @@ export function canvasPressProgress(elapsed) {
 // Мерка «это был тап или перенос»: у пальца своя. Отдельной функцией, чтобы
 // разница была видна тесту: мышиные три точки пальцу не годятся.
 export function canvasDragSlop(drag) {
-  return drag && drag.touch ? CANVAS_TOUCH_SLOP : CANVAS_DRAG_SLOP;
+  return planNavSlop(Boolean(drag && drag.touch));
 }
 
 /**
@@ -3454,7 +3361,7 @@ function canvasPointerDown(event) {
   // (этот таск).
   if (event.pointerType === "touch") {
     if (canvasPointers.size === 2) {
-      canvasPinch = gesturePinchOf(canvasPointers.values());
+      canvasNav.pinchStart(canvasPointers.values());
       canvasPressCancel();
       canvasDrag = null;
       return;
@@ -4047,21 +3954,10 @@ function canvasPointerMove(event) {
   canvasCursor = point;
   if (canvasPointers.has(event.pointerId)) canvasPointers.set(event.pointerId, point);
 
-  if (canvasPinch && canvasPointers.size === 2) {
-    // Щипок разбирает `gestures.js` — то же правило, что в чертеже и в окне
-    // загрузки плана. Порядок применения оттуда же: сперва масштаб вокруг
-    // новой середины, потом сдвиг на её ход.
-    const step = gesturePinchStep(canvasPinch, canvasPointers.values());
-    canvasZoomAt(step.pinch.center, step.factor);
-    const state = canvasState();
-    canvasApi.setState({
-      view: {
-        ...state.view,
-        offsetX: state.view.offsetX + step.panX,
-        offsetY: state.view.offsetY + step.panY,
-      },
-    });
-    canvasPinch = step.pinch;
+  if (canvasNav.pinching() && canvasPointers.size === 2) {
+    // Щипок — общий ход полей (`planNav.js`): масштаб вокруг новой середины,
+    // потом сдвиг на её ход.
+    canvasNav.pinchMove(canvasPointers.values());
     return;
   }
 
@@ -4120,20 +4016,15 @@ function canvasPointerMove(event) {
   // «scale» в этом списке не для красоты: отрезок калибровки берут во всю
   // стену, и между первой и второй точкой план приходится возить.
   if (["pan", "empty", "place", "line", "room", "outline", "scale", "roomTrace"].includes(canvasDrag.kind)) {
-    canvasApi.setState({
-      view: {
-        ...state.view,
-        offsetX: canvasDrag.view.offsetX + (point.x - canvasDrag.start.x),
-        offsetY: canvasDrag.view.offsetY + (point.y - canvasDrag.start.y),
-      },
-    });
+    const dragged = planNavDragView(canvasDrag.view, canvasDrag.start, point);
+    canvasApi.setState({ view: { ...state.view, offsetX: dragged.offsetX, offsetY: dragged.offsetY } });
   }
 }
 
 function canvasPointerUp(event) {
   canvasPressCancel();
   canvasPointers.delete(event.pointerId);
-  if (canvasPointers.size < 2) canvasPinch = null;
+  if (canvasPointers.size < 2) canvasNav.pinchEnd();
   const drag = canvasDrag;
   canvasDrag = null;
   if (!drag) return;
@@ -4393,14 +4284,7 @@ function canvasDoubleAt(at, slack = 0) {
 
 function canvasWheel(event) {
   if (uiDialogDepth() > 0) return;
-  event.preventDefault();
-  const move = gestureWheel(event, canvasWheelStreak);
-  canvasWheelStreak = move.streak;
-  if (move.kind === "pan") {
-    canvasPanBy(move.panX, move.panY);
-    return;
-  }
-  canvasZoomAt(canvasPointOf(event), move.factor);
+  canvasNav.wheel(event, canvasPointOf(event));
 }
 
 // ——— клавиатура ——————————————————————————————————————————————————————
@@ -4779,30 +4663,7 @@ function canvasAutoFit(state) {
  * пусто», и ловить его глазами дорого.
  */
 export function canvasFitDrawing(project, scheme, box) {
-  const bounds = drawingBoundsMm(project, scheme.id);
-  const corners = bounds
-    ? [
-        planMmToFraction(project, scheme.id, { x: bounds.minX, y: bounds.minY }),
-        planMmToFraction(project, scheme.id, { x: bounds.maxX, y: bounds.minY }),
-        planMmToFraction(project, scheme.id, { x: bounds.minX, y: bounds.maxY }),
-        planMmToFraction(project, scheme.id, { x: bounds.maxX, y: bounds.maxY }),
-      ].filter(Boolean)
-    : [];
-  if (corners.length < 4) return fitView(scheme, box);
-  const width = Math.max(1, schemeWidthPx(scheme));
-  const height = Math.max(1, schemeHeightPx(scheme));
-  const xs = corners.map((point) => point.x * width);
-  const ys = corners.map((point) => point.y * height);
-  const left = Math.min(...xs);
-  const top = Math.min(...ys);
-  const spanX = Math.max(1, Math.max(...xs) - left);
-  const spanY = Math.max(1, Math.max(...ys) - top);
-  const zoom = Math.min(Math.max(1, box.width) / spanX, Math.max(1, box.height) / spanY) * 0.92;
-  return {
-    zoom,
-    offsetX: Math.max(1, box.width) / 2 - (left + spanX / 2) * zoom,
-    offsetY: Math.max(1, box.height) / 2 - (top + spanY / 2) * zoom,
-  };
+  return planNavFitDrawing(project, scheme, box);
 }
 
 // Подсказка поверх холста: что сейчас ставим и чем это закончить. Сворачивается

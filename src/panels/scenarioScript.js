@@ -38,7 +38,6 @@ import { hubCompatWarnings, hubFits, hubScriptCompile, hubScriptInfoName, hubScr
 import { simOptionForms, simScenarios, simWatch } from "../simulation.js";
 import { strings, text } from "../strings.js";
 import { uiButton, uiCheckRow, uiEl, uiIconButton, uiModal } from "./ui.js";
-import { openPlanPicker } from "./planPicker.js";
 
 /** Отступ по Tab: два пробела. */
 export const SCENARIO_SCRIPT_INDENT = "  ";
@@ -265,7 +264,7 @@ export function scenarioScriptFaultText(fault, scope = "list") {
  * умолчанию — формы имитации сеанса.
  */
 export function scenarioScriptLogicOf(project, given, read = simOptionForms) {
-  // Ведомая метка группы — аксессуар ведущей: и привязки её.
+  // Ведомая метка (то же обозначение) — аксессуар ведущей: и привязки её.
   const markId = project ? deviceFollowers(project).get(given) || given : given;
   const accessory = project ? homeAccessories(project).find((item) => item.markId === markId) : null;
   if (!accessory) return null;
@@ -372,6 +371,11 @@ export function scenarioScriptFieldMarks(project, field) {
     if (!out.has(markId)) out.set(markId, []);
     out.get(markId).push({ index, label: item.label });
   });
+  // Метки с тем же обозначением — то же устройство (четыре Т1): на схеме
+  // щёлкнуть можно по любой из них.
+  for (const [follower, leader] of deviceFollowers(project)) {
+    if (out.has(leader) && !out.has(follower)) out.set(follower, out.get(leader));
+  }
   return out;
 }
 
@@ -391,6 +395,15 @@ export function scenarioScriptUnbind(project, bindingId) {
 // ——— запись в объект: функцию отдаёт режим «Сценарии» ————————————————————
 
 let scenarioScriptCommit = null;
+// Схема в окне (`planPicker.js`) — дверью от режима «Сценарии», как запись в
+// объект: окно рисует поле плана, поле — карточку устройства, а карточка сама
+// открывает этот раздел, и прямой импорт замкнул бы их в кольцо.
+let scenarioScriptPicker = null;
+
+/** Подключить `openPlanPicker(api, options)` — схему в окне для выбора устройства на ней. */
+export function scenarioScriptPlanPicker(fn) {
+  scenarioScriptPicker = typeof fn === "function" ? fn : null;
+}
 
 /** Подключить `canvasCommit(before, after, label, options)` — ему одному можно писать в объект. */
 export function scenarioScriptCommitter(fn) {
@@ -460,7 +473,7 @@ export function scenarioScriptFields(fields, { readOnly = false, onChange = () =
       // Список устройств — и на схеме (правка после сборки сценариев): «рядом
       // с полем добавь кнопку, которая тоже откроет эту карту — схему в окне,
       // но только с теми метками, которые можно выбрать».
-      const marks = readOnly ? new Map() : scenarioScriptFieldMarks(getState().project, field);
+      const marks = readOnly || !scenarioScriptPicker ? new Map() : scenarioScriptFieldMarks(getState().project, field);
       if (marks.size > 0) {
         const select = input;
         const choose = (index) => {
@@ -475,8 +488,8 @@ export function scenarioScriptFields(fields, { readOnly = false, onChange = () =
           on: {
             click: (event) => {
               event.preventDefault();
-              openPlanPicker(
-                { getState },
+              scenarioScriptPicker(
+                { getState, subscribe },
                 {
                   title: text("planPicker.fieldTitle", { label: field.label }),
                   hint: strings.planPicker.fieldHint,

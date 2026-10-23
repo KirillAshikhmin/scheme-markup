@@ -473,7 +473,9 @@ test("кадр пульса и вспышки — один на «Схему» �
 });
 
 test("распознаватели нажатий, вид знака и кадр пульса — по одному хозяину; «Схема», мини-план и «Объём» зовут его", () => {
-  const surfaces = ["src/canvas.js", "src/panels/miniPlan.js", "src/panels/volume.js"];
+  // Живое поле мини-плана — `planView.js` (правка после сборки сценариев:
+  // мини-план и схема в окне — одно поле); у `miniPlan.js` — чистая половина.
+  const surfaces = ["src/canvas.js", "src/panels/planView.js", "src/panels/volume.js"];
   for (const file of surfaces) {
     const code = read(file);
     assert.ok(!code.includes("deviceKeyPresser("), file + ": свой реестр распознавателей нажатий");
@@ -482,12 +484,12 @@ test("распознаватели нажатий, вид знака и кадр
     assert.ok(code.includes("deviceLiveKinds("), file + ": не зовёт общий вид знака");
     assert.ok(!/_(?:PULSE|FLASH)_MS\s*=/.test(code), file + ": свои мерки пульса и вспышки");
   }
-  for (const file of ["src/canvas.js", "src/panels/miniPlan.js"]) {
+  for (const file of ["src/canvas.js", "src/panels/planView.js"]) {
     assert.ok(read(file).includes("simLiveFrame("), file + ": свой кадр пульса и вспышки");
   }
   // Мерки пульса и вспышки объявлены один раз — в `render.js`.
   const declared = [];
-  for (const file of ["src/canvas.js", "src/render.js", "src/panels/miniPlan.js", "src/panels/volume.js", "src/panels/deviceCard.js"]) {
+  for (const file of ["src/canvas.js", "src/render.js", "src/panels/miniPlan.js", "src/panels/planView.js", "src/panels/volume.js", "src/panels/deviceCard.js"]) {
     for (const match of read(file).matchAll(/const\s+(\w*(?:PULSE|FLASH)_MS)\s*=/g)) declared.push(file + ":" + match[1]);
   }
   assert.deepEqual(declared, ["src/render.js:SIM_LIVE_PULSE_MS", "src/render.js:SIM_LIVE_FLASH_MS"]);

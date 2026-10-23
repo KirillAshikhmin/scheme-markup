@@ -55,12 +55,14 @@ import { homeAccessories, markAccessory } from "../sim/home.js";
 import { simRunning, simScenarioActive, simScenarioRun, simWatch } from "../simulation.js";
 import { getSetting, setSetting } from "../store.js";
 import { strings, text } from "../strings.js";
-import { deviceCardView, deviceLiveKinds } from "./deviceCard.js";
+import { deviceCardView } from "./deviceCard.js";
 import { deviceDraftKind, deviceTypeRecord } from "./deviceSettings.js";
-import { createMiniPlan, miniPlanSchemeFor, miniPlanSchemes } from "./miniPlan.js";
+import { miniPlanSchemeFor, miniPlanSchemes } from "./miniPlan.js";
+import { createMiniPlan } from "./planView.js";
 import { openPlanPicker } from "./planPicker.js";
 import {
   scenarioScriptCommitter,
+  scenarioScriptPlanPicker,
   scenarioScriptDownload,
   scenarioScriptEdit,
   scenarioScriptFaultText,
@@ -1170,7 +1172,6 @@ function mountScenariosScreen(host, api) {
             openPlanPicker(api, {
               hint: strings.planPicker.hint,
               pickable: (markId) => Boolean(markAccessory(state().project, markId)),
-              liveKinds: deviceLiveKinds,
               selected: state().selectedMarkIds,
               onPick: pick,
             }),
@@ -1241,6 +1242,7 @@ function mountScenariosScreen(host, api) {
 
 // Загрузка JS и вставка текста — через двери; запись в объект — `canvasCommit`.
 scenarioScriptCommitter(canvasCommit);
+scenarioScriptPlanPicker(openPlanPicker);
 scenariosHook("loadScript", scenarioScriptLoad);
 scenariosHook("pasteScript", scenarioScriptPaste);
 

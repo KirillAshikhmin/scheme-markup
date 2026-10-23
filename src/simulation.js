@@ -753,7 +753,7 @@ export function createSimulation(options = {}) {
     return true;
   }
 
-  // Ведомая метка группы — аксессуар ведущей (правка после сборки
+  // Ведомая метка (то же обозначение, что у ведущей) — аксессуар ведущей (правка после сборки
   // сценариев): щелчок, клавиша и вопрос о значении уходят ведущей.
   const leadOf = (markId) => (project && typeof markId === "string" ? deviceFollowers(project).get(markId) || markId : markId);
 
@@ -789,7 +789,7 @@ export function createSimulation(options = {}) {
       const values = mirror.get(markId) || {};
       map.set(markId, simLiveOf(accessory, pressed.has(markId) ? { ...values, pressedAt: pressed.get(markId) } : values));
     }
-    // Состояние ведущей — на всех метках группы: вся группа ламп горит разом.
+    // Состояние ведущей — на всех метках её обозначения: четыре Т1 горят разом.
     for (const [follower, leader] of deviceFollowers(of || project)) {
       if (map.has(leader)) map.set(follower, map.get(leader));
     }

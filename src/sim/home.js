@@ -183,8 +183,8 @@ function deviceAccessory(project, mark, aid) {
  * клавиши — сам номер).
  */
 export function markAccessory(project, markId) {
-  // Ведомая метка группы — аксессуар ведущей (правка после сборки сценариев):
-  // щелчок по любой лампе группы переключает её общий аксессуар.
+  // Ведомая метка (то же обозначение) — аксессуар ведущей (правка после сборки сценариев):
+  // щелчок по любой из четырёх Т1 переключает их общий аксессуар.
   const leader = project ? deviceFollowers(project).get(markId) : null;
   if (leader) return markAccessory(project, leader);
   const cache = deviceHomeCache(project);
@@ -218,7 +218,7 @@ export function homeAccessories(project) {
   const followers = deviceFollowers(project);
   const out = [];
   for (const mark of project.marks) {
-    // Ведомая метка группы своего аксессуара не имеет: сценарию — одна.
+    // Ведомая метка своего аксессуара не имеет: четыре Т1 для сценария — одна.
     if (markIsComment(mark) || followers.has(mark.id)) continue;
     const accessory = deviceAccessory(project, mark, aids.get(mark.id) || deviceAid(mark.id));
     if (accessory) out.push(accessory);
@@ -282,7 +282,7 @@ export function buildHomeSpec(project) {
   for (const accessory of accessories) {
     if (accessory.services.some((service) => service.type === "StatelessProgrammableSwitch")) {
       // Связи ведущей — вместе со связями её ведомых, а подопечные — ведущие
-      // своих групп: клавиша, которая управляет второй лампой группы,
+      // своих обозначений: клавиша, которая управляет второй Т1,
       // управляет её общим аксессуаром.
       const members = [accessory.markId, ...[...followers].filter(([, leader]) => leader === accessory.markId).map(([id]) => id)];
       const byChannel = new Map();
@@ -312,7 +312,7 @@ export function buildHomeSpec(project) {
 }
 
 /**
- * Сценарий так, как его увидит дом: ссылки на ведомые метки групп — ведущим.
+ * Сценарий так, как его увидит дом: ссылки на ведомые метки — ведущим.
  * Копия, если подменять есть что, иначе тот же объект. Нужна проверке
  * сценария в редакторе — иначе она назвала бы пропавшим устройство, на
  * котором дом его исполнит.

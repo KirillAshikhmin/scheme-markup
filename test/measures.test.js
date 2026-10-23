@@ -37,10 +37,13 @@ test("чертёж берёт мерки у холста и отрисовки, 
 });
 
 test("панорама стрелками: шаг нажатия и потолок кадра — те же, что у плана", () => {
-  // Наружу чертёж их не отдаёт (это его внутренние имена), поэтому сверяется
-  // текст: мерка обязана быть **взята**, а не написана числом заново.
-  assert.match(WORKSHOP_SRC, /WORKSHOP_PAN_STEP_PX = CANVAS_PAN_STEP_PX;/, "шаг панорамы написан числом");
-  assert.match(WORKSHOP_SRC, /WORKSHOP_PAN_FRAME_MS = CANVAS_PAN_FRAME_MS;/, "потолок кадра написан числом");
+  // С правки после сборки сценариев («Переиспользуй везде один механизм»)
+  // чертёж не держит ни мерок хода, ни его кадров: ход у него — общий механизм
+  // полей (`planNav.js`), тот же, что у плана. Сверяется текст: своего шага и
+  // своего цикла кадров у чертежа нет.
+  assert.match(WORKSHOP_SRC, /createPlanNav\(/, "чертёж ходит не общим механизмом");
+  assert.doesNotMatch(WORKSHOP_SRC, /PAN_STEP_PX|PAN_FRAME_MS/, "у чертежа снова свой шаг или потолок кадра");
+  assert.doesNotMatch(WORKSHOP_SRC, /function panTick|function panSchedule/, "у чертежа снова свой цикл хода");
   assert.ok(CANVAS_PAN_STEP_PX > 0 && CANVAS_PAN_FRAME_MS > 0);
 });
 

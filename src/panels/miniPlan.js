@@ -10,12 +10,14 @@
 // Состояние дома сюда приходит только из `simulation.js` и только на экран:
 // ни в объект, ни в историю оно не пишется. Выбор устройства — сеанс панели,
 // не объект.
-import { cancelFrame, scheduleFrame } from "../app.js";
+//
+// Здесь — **чистая половина**: вписать, найти метку под рукой, нарисовать
+// кадр. Живое поле — холст, ход по плану, щелчок и нажатия — собрано в
+// `planView.js`: оно одно на мини-план и на схему в окне (правка после сборки
+// сценариев: «Переиспользуй везде один механизм»).
 import { findMark, findScheme, projectViewSizes, schemesInOrder } from "../model.js";
-import { drawScheme, fitView, markRadius, markStackPoints, markStacks, planToScreen, simLiveFrame, simLiveMemo, visibleMarks } from "../render.js";
+import { drawScheme, fitView, markRadius, markStackPoints, markStacks, planToScreen, visibleMarks } from "../render.js";
 import { markAccessory } from "../sim/home.js";
-import { simLive, simRunning, simWatch } from "../simulation.js";
-import { deviceClickAct, deviceClickPlan, deviceLiveKinds, devicePresserOf } from "./deviceCard.js";
 
 /** Меньше этого радиуса (в точках экрана) метка на мини-плане не рисуется. */
 export const MINI_PLAN_MARK_PX = 7;
@@ -47,12 +49,22 @@ export function miniPlanSchemes(project) {
  * два пикселя. Возвращает `view` для `drawScheme` и `hitTest`.
  */
 export function miniPlanView(project, scheme, box) {
-  const fit = fitView(scheme, { width: Math.max(1, box.width), height: Math.max(1, box.height) });
+  return miniPlanSized(project, fitView(scheme, { width: Math.max(1, box.width), height: Math.max(1, box.height) }));
+}
+
+/**
+ * Размеры знака и подписи у вида поля плана: не мельче читаемых. Вид любой —
+ * вписанный или тот, куда его увели рукой (`planView.js`): приблизили — знак
+ * растёт до своего размера из объекта.
+ */
+export function miniPlanSized(project, view) {
   const sizes = projectViewSizes(project);
   return {
-    ...fit,
-    markSize: Math.max(sizes.markSize, MINI_PLAN_MARK_PX / fit.zoom),
-    labelSize: Math.max(sizes.labelSize, MINI_PLAN_LABEL_PX / fit.zoom),
+    zoom: view.zoom,
+    offsetX: view.offsetX,
+    offsetY: view.offsetY,
+    markSize: Math.max(sizes.markSize, MINI_PLAN_MARK_PX / view.zoom),
+    labelSize: Math.max(sizes.labelSize, MINI_PLAN_LABEL_PX / view.zoom),
   };
 }
 
@@ -63,7 +75,7 @@ export function miniPlanView(project, scheme, box) {
  * `hitTest`) выбирала бы соседа, а не ту, в которую целились. Подпись,
  * комментарий и метка без аксессуара не выбираются.
  */
-export function miniPlanMarkAt(project, scheme, point, view, filter) {
+export function miniPlanMarkAt(project, scheme, point, view, filter, pickable = null) {
   if (!project || !scheme) return null;
   const reach = markRadius(view) + MINI_PLAN_HIT_SLACK;
   const stacks = markStacks(project, scheme, filter, view);
@@ -79,7 +91,10 @@ export function miniPlanMarkAt(project, scheme, point, view, filter) {
     if (distance <= reach) near.push({ markId: mark.id, distance });
   }
   near.sort((first, second) => first.distance - second.distance);
-  const found = near.find((item) => markAccessory(project, item.markId));
+  // Что можно выбрать — решает поле (`pickable`); по умолчанию — метка с
+  // аксессуаром.
+  const can = typeof pickable === "function" ? pickable : (markId) => Boolean(markAccessory(project, markId));
+  const found = near.find((item) => can(item.markId));
   return found ? found.markId : null;
 }
 
@@ -109,10 +124,12 @@ function miniPlanRing(ctx, project, scheme, view, markId, filter) {
  * над которым стоит курсор. Возвращает число подсвеченных меток, найденных на
  * этом этаже.
  */
-export function miniPlanPaint(ctx, { project, scheme, image, filter, box, drawing, objects, live, liveFx, selected, highlight, fontKind }) {
+export function miniPlanPaint(ctx, { project, scheme, image, filter, box, view: given, drawing, objects, live, liveFx, selected, highlight, fontKind }) {
   ctx.clearRect(0, 0, box.width, box.height);
   if (!project || !scheme) return 0;
-  const view = { ...miniPlanView(project, scheme, box), ...(fontKind ? { fontKind } : {}) };
+  // Вид — тот, куда поле увели (`planView.js`); не дали — вписанный.
+  const fitted = given ? miniPlanSized(project, given) : miniPlanView(project, scheme, box);
+  const view = { ...fitted, ...(fontKind ? { fontKind } : {}) };
   drawScheme(ctx, {
     project,
     scheme,
@@ -127,156 +144,4 @@ export function miniPlanPaint(ctx, { project, scheme, image, filter, box, drawin
   let rings = 0;
   for (const markId of Array.isArray(highlight) ? highlight : []) if (miniPlanRing(ctx, project, scheme, view, markId, filter)) rings += 1;
   return rings;
-}
-
-/**
- * Мини-план в узле `host`: холст на всю рамку, перерисовка по событиям дома и
- * состояния. `api` — `panelApi()` панели; `on.pick(markId)` — щелчок по метке
- * (выбор устройства). Возвращает `{redraw, setHighlight, dispose}`.
- *
- * Щелчок по метке всегда выбирает её; пока дом запущен, он ещё и нажимает на
- * устройство по правилам «Схемы» (`deviceClickPlan`): клавиша — одиночное,
- * двойное, долгое по времени нажатия, датчик срабатывает, свет переключается.
- * Многоклавишный выключатель только выбирается — клавишу выбирают в карточке.
- */
-export function createMiniPlan(host, api, on = {}) {
-  const canvas = document.createElement("canvas");
-  canvas.className = "mini-plan__canvas";
-  host.append(canvas);
-  const ctx = canvas.getContext("2d");
-  // Кадр пульса и вспышки, вид знака и распознаватели нажатий — общие со
-  // «Схемой» и «Объёмом»; своя здесь только память кадров.
-  const memo = simLiveMemo();
-  let highlight = [];
-  let frame = 0;
-  let press = null;
-  let box = { width: 1, height: 1 };
-
-  function paint() {
-    frame = 0;
-    if (!ctx) return;
-    const state = api.getState();
-    const ratio = window.devicePixelRatio || 1;
-    const width = Math.max(1, host.clientWidth);
-    const height = Math.max(1, host.clientHeight);
-    if (canvas.width !== Math.round(width * ratio) || canvas.height !== Math.round(height * ratio)) {
-      canvas.width = Math.round(width * ratio);
-      canvas.height = Math.round(height * ratio);
-      canvas.style.width = width + "px";
-      canvas.style.height = height + "px";
-    }
-    box = { width, height };
-    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-    const scheme = state.project && state.schemeId ? findScheme(state.project, state.schemeId) : null;
-    if (!scheme) {
-      ctx.clearRect(0, 0, width, height);
-      return;
-    }
-    let live = null;
-    let liveFx = null;
-    let animate = false;
-    if (simRunning()) {
-      const made = simLiveFrame(simLive(state.project), deviceLiveKinds(state.project), memo, Date.now());
-      live = made.live;
-      liveFx = made.fx;
-      animate = made.animate;
-    }
-    const loaded = state.schemeImage;
-    miniPlanPaint(ctx, {
-      project: state.project,
-      scheme,
-      image: state.planShown === false ? null : loaded && loaded.schemeId === scheme.id ? loaded.image : null,
-      filter: state.filter,
-      box,
-      drawing: state.drawingShown !== false,
-      objects: state.objectsShown !== false,
-      live,
-      liveFx,
-      selected: state.selectedMarkIds,
-      highlight,
-      fontKind: state.schemeFont,
-    });
-    if (animate) redraw();
-  }
-
-  function redraw() {
-    if (frame) return;
-    frame = scheduleFrame(paint);
-  }
-
-  function pointOf(event) {
-    const rect = canvas.getBoundingClientRect();
-    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
-  }
-
-  function markUnder(event) {
-    const state = api.getState();
-    const scheme = state.project && state.schemeId ? findScheme(state.project, state.schemeId) : null;
-    if (!scheme) return null;
-    return miniPlanMarkAt(state.project, scheme, pointOf(event), miniPlanView(state.project, scheme, box), state.filter);
-  }
-
-  canvas.addEventListener("pointerdown", (event) => {
-    if (event.button !== undefined && event.button !== 0) return;
-    const markId = markUnder(event);
-    if (!markId) return;
-    const state = api.getState();
-    if (typeof canvas.setPointerCapture === "function" && event.pointerId !== undefined) canvas.setPointerCapture(event.pointerId);
-    if (on.pick) on.pick(markId);
-    if (!simRunning()) return;
-    const plan = deviceClickPlan(markAccessory(state.project, markId));
-    press = { markId, plan, presser: null };
-    if (plan.kind === "key" && plan.key.detect) {
-      press.presser = devicePresserOf(markId, plan.key.index);
-      press.presser.down();
-    }
-  });
-  const release = (event) => {
-    const current = press;
-    press = null;
-    if (!current) return;
-    const cancelled = event.type === "pointercancel";
-    if (current.presser) {
-      if (cancelled) current.presser.abort();
-      else current.presser.up();
-    } else if (!cancelled) deviceClickAct(current.markId, current.plan);
-  };
-  canvas.addEventListener("pointerup", release);
-  canvas.addEventListener("pointercancel", release);
-
-  const unsubscribe = api.subscribe((state, changed) => {
-    if (
-      "project" in changed ||
-      "schemeId" in changed ||
-      "schemeImage" in changed ||
-      "selectedMarkIds" in changed ||
-      "simRunning" in changed ||
-      "filter" in changed ||
-      "screen" in changed ||
-      "layout" in changed
-    )
-      redraw();
-  });
-  const unwatch = simWatch(() => redraw());
-  const observer = typeof ResizeObserver === "function" ? new ResizeObserver(() => redraw()) : null;
-  if (observer) observer.observe(host);
-  redraw();
-
-  return {
-    redraw,
-    setHighlight(markIds) {
-      const next = Array.isArray(markIds) ? markIds.filter((id) => typeof id === "string") : [];
-      if (next.length === highlight.length && next.every((id, at) => id === highlight[at])) return;
-      highlight = next;
-      redraw();
-    },
-    dispose() {
-      if (frame) cancelFrame(frame);
-      frame = 0;
-      unsubscribe();
-      unwatch();
-      if (observer) observer.disconnect();
-      canvas.remove();
-    },
-  };
 }

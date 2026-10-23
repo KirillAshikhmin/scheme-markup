@@ -310,8 +310,8 @@ export function deviceLiveKinds(project) {
   let kinds = DEVICE_LIVE_KINDS.get(project);
   if (!kinds) {
     kinds = new Map(homeAccessories(project).map((accessory) => [accessory.markId, { kind: simLiveKindOf(accessory), roomId: accessory.roomId || null }]));
-    // Ведомая метка группы (правка после сборки сценариев) рисуется знаком
-    // ведущей, а светит **своё** помещение: лампа группы в соседней комнате
+    // Ведомая метка (то же обозначение, правка после сборки сценариев) рисуется знаком
+    // ведущей, а светит **своё** помещение: вторая Т1 в соседней комнате
     // светлит соседнюю.
     for (const [follower, leader] of deviceFollowers(project)) {
       const own = kinds.get(leader);

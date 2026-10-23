@@ -289,8 +289,10 @@ test("D68: набор клавиш масштаба и шаг — один на 
   );
   assert.equal(canvasZoomKey({ code: "KeyA", key: "a" }), 0, "буква стала масштабом");
 
+  // Клавиши масштаба чертёж берёт у общего хода полей (`planNav.js`, правка
+  // после сборки сценариев) — тем же разбором, что `canvasZoomKey` плана.
   const workshop = read(join("panels", "workshop.js"));
-  assert.ok(workshop.includes("canvasZoomKey(event)"), "чертёж снова не знает про клавиши масштаба");
+  assert.ok(workshop.includes("nav.zoomKey(event)"), "чертёж снова не знает про клавиши масштаба");
   for (const own of ["NumpadAdd", "NumpadSubtract", "ZOOM_KEY_STEP"]) {
     assert.ok(!workshop.includes(own), "у чертежа завёлся свой список клавиш масштаба: " + own);
   }
@@ -305,7 +307,7 @@ test("D68: масштаб чертежа идёт после отсечения 
   const down = text.slice(text.indexOf("function onKeyDown"), text.indexOf("function panKeyDown"));
   const field = down.indexOf("uiFieldTarget(event.target)");
   const pan = down.indexOf("panKeyDown(event.code)");
-  const zoom = down.indexOf("canvasZoomKey(event)");
+  const zoom = down.indexOf("nav.zoomKey(event)");
   assert.ok(field > 0 && pan > field, "ход идёт раньше, чем отсечены поля");
   assert.ok(zoom > pan, "масштаб стоит раньше хода — порядок обеих поверхностей один");
   // Сама ветка, без строк пояснений: закомментированный зов — это тот же
@@ -315,7 +317,9 @@ test("D68: масштаб чертежа идёт после отсечения 
     .split("\n")
     .filter((line) => !line.trim().startsWith("//"))
     .join("\n");
-  assert.match(branch, /zoomBy\(zoom\)/, "клавиша масштаба ничего не делает — ровно дефект D68");
+  // Масштабирует сам общий ход (`zoomKey` приближает середину поля); ветке
+  // остаётся снять клавишу у браузера.
+  assert.match(down.slice(zoom), /^nav\.zoomKey\(event\)\) \{/, "клавиша масштаба ничего не делает — ровно дефект D68");
   assert.match(branch, /preventDefault\(\)/, "браузер уведёт «+» себе (масштаб страницы)");
 });
 

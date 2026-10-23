@@ -4494,8 +4494,8 @@ export function deviceExpand(profile, channels) {
 export function markDeviceProfile(project, markId) {
   const mark = findMark(project, markId);
   if (!mark || markIsComment(mark)) return null;
-  // Ведомая метка группы — аксессуар ведущей (правка после сборки
-  // сценариев); `leader` говорит окну, у кого его править.
+  // Ведомая метка — аксессуар ведущей с тем же обозначением (правка после
+  // сборки сценариев); `leader` говорит окну, у кого его править.
   const leader = markDeviceLeader(project, markId);
   if (leader) {
     const shared = markDeviceProfile(project, leader);
@@ -4504,49 +4504,62 @@ export function markDeviceProfile(project, markId) {
   return markProfileFrom(typeDeviceOf(project, mark.typeId), markDeviceRecord(mark.device));
 }
 
-// ——— общий аксессуар группы (правка после сборки сценариев) ——————————————
+// ——— одно обозначение — один аксессуар (правка после сборки сценариев) ————
 //
 // Слова заказчика: «Если в группе несколько светильников или других меток, то
 // аксессуар пусть задаётся у первой, а у других нельзя менять — берётся от
-// первой, что бы и сценарию на одну делать, а распространяется на все метки в
-// группе».
+// первой, что бы и сценарию на одну делать»; и уточнение: «Речь была не про
+// группы меток, например розеток, а именно метки с одним идентификатором,
+// например 4 точечных светильника с идентификатором Т1, в сценариях они
+// должны быть одной сущностью».
 //
-// **Ведущая** — первая в группе (`group.markIds`, порядок постановки) метка
-// **того же типа**: в одной рамке бывают розетка и выключатель, и делить им
-// один аксессуар нельзя — у каждого типа группы ведущая своя. Ведомая своего
+// Повтор номера в этой сборке — приём, а не ошибка (`setMarkNumber`): четыре
+// точечных светильника одной линии носят на плане одно обозначение Т1. Это и
+// есть одно устройство умного дома — одна линия на одном реле. Поэтому
+// **ведущая** — первая из меток с тем же типом и номером в порядке объекта (та
+// же, что отдаёт `markByCode`), остальные — **ведомые**. Ведомая своего
 // аксессуара не имеет: в доме имитации её нет (`sim/home.js`), сценарий,
 // связь и щелчок по ней достаются ведущей, а состояние ведущей видно на всех
-// метках группы.
+// метках с этим обозначением.
+//
+// Группа-блок (рамка из розеток) здесь ни при чём: у каждой розетки блока свой
+// номер и свой аксессуар.
 //
 // **Своя настройка ведомой не стирается** (G68): она лежит в объекте как
-// лежала и вернётся, если метку вынуть из группы. Пока метка ведомая, запись
+// лежала и вернётся, если метке дать свой номер. Пока метка ведомая, запись
 // просто не читается.
 
 const DEVICE_LEADER_CACHE = new WeakMap();
 
-/** Ведущие меток объекта: `Map<ведомая, ведущая>`; метки вне групп и ведущие в ней не стоят. */
+/** Ведущие меток объекта: `Map<ведомая, ведущая>`; метки с неповторённым обозначением в ней не стоят. */
 export function deviceFollowers(project) {
   if (!project || typeof project !== "object") return new Map();
   const held = DEVICE_LEADER_CACHE.get(project);
   if (held) return held;
   const out = new Map();
-  const marks = new Map((Array.isArray(project.marks) ? project.marks : []).map((mark) => [mark.id, mark]));
-  for (const group of Array.isArray(project.groups) ? project.groups : []) {
-    const leaders = new Map();
-    for (const id of Array.isArray(group.markIds) ? group.markIds : []) {
-      const mark = marks.get(id);
-      if (!mark || mark.groupId !== group.id || markIsComment(mark)) continue;
-      if (!leaders.has(mark.typeId)) leaders.set(mark.typeId, id);
-      else out.set(id, leaders.get(mark.typeId));
-    }
+  const leaders = new Map();
+  for (const mark of Array.isArray(project.marks) ? project.marks : []) {
+    if (!mark || markIsComment(mark) || !Number.isInteger(mark.number)) continue;
+    const key = mark.typeId + "#" + mark.number;
+    if (!leaders.has(key)) leaders.set(key, mark.id);
+    else out.set(mark.id, leaders.get(key));
   }
   DEVICE_LEADER_CACHE.set(project, out);
   return out;
 }
 
-/** Ведущая метка группы для этой (`null` — метка ведёт сама или вне группы). */
+/** Ведущая метка для этой (`null` — метка ведёт сама: её обозначение первое или не повторено). */
 export function markDeviceLeader(project, markId) {
   return deviceFollowers(project).get(markId) || null;
+}
+
+/** Сколько меток делят аксессуар с этой (вместе с ней самой); 1 — она одна. */
+export function markDeviceShared(project, markId) {
+  const followers = deviceFollowers(project);
+  const leader = followers.get(markId) || markId;
+  let count = 1;
+  for (const [, lead] of followers) if (lead === leader) count += 1;
+  return count;
 }
 
 // Профиль метки из профиля типа `base` и своей записи `own` (приведённой
