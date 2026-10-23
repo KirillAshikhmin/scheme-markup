@@ -9,6 +9,8 @@ import assert from "node:assert/strict";
 
 import {
   LAYOUT_ABILITIES,
+  layoutAllows,
+  PANEL_IDS,
   SCREEN_ABILITIES,
   SCREEN_DEFAULT,
   SCREEN_MODES,
@@ -17,6 +19,7 @@ import {
   screensFor,
   SECTION_IDS,
   sectionListFrom,
+  viewMemoryFrom,
 } from "../src/app.js";
 import { canvasHintInset, canvasHintText, canvasOnScreen, canvasSummaryLines } from "../src/canvas.js";
 import { plateUnseen } from "../src/panels/plate.js";
@@ -25,8 +28,8 @@ import { RULER_SIZE } from "../src/render.js";
 import { addScheme, createProject } from "../src/model.js";
 import { strings } from "../src/strings.js";
 
-test("режимов три, порядок — порядок переключателя, умолчание — схема", () => {
-  assert.deepEqual(SCREEN_MODES, ["drawing", "scheme", "volume"]);
+test("режимов четыре, порядок — порядок переключателя, умолчание — схема", () => {
+  assert.deepEqual(SCREEN_MODES, ["drawing", "scheme", "volume", "scenarios"]);
   assert.equal(SCREEN_DEFAULT, "scheme");
   // Схема посередине: из неё одинаково близко в обе стороны.
   assert.equal(SCREEN_MODES[1], SCREEN_DEFAULT);
@@ -43,9 +46,9 @@ test("у каждого режима есть своё умение раскла
   }
 });
 
-test("на узком экране чертежа нет, а схема и объём остаются", () => {
-  assert.deepEqual(screensFor("desktop"), ["drawing", "scheme", "volume"]);
-  assert.deepEqual(screensFor("mobile"), ["scheme", "volume"]);
+test("на узком экране чертежа нет, а схема, объём и сценарии остаются", () => {
+  assert.deepEqual(screensFor("desktop"), ["drawing", "scheme", "volume", "scenarios"]);
+  assert.deepEqual(screensFor("mobile"), ["scheme", "volume", "scenarios"]);
   assert.equal(screenAllowed("drawing", "mobile"), false);
   assert.equal(screenAllowed("volume", "mobile"), true);
   // Неизвестный режим недоступен нигде: опечатка не должна открыть пустой экран.
@@ -79,6 +82,26 @@ test("у переключателя есть слово для каждого р
   assert.equal(strings.screens.drawing, "Чертёж");
   assert.equal(strings.screens.scheme, "Схема");
   assert.equal(strings.screens.volume, "Объём");
+  // Четвёртое слово — «Сценарии» (G05): «давай конструктор четвёртым режимом».
+  assert.equal(strings.screens.scenarios, "Сценарии");
+});
+
+test("«Сценарии»: смотреть можно везде, править — только на компьютере и планшете (история 4.29)", () => {
+  assert.equal(SCREEN_ABILITIES.scenarios, "viewScenarios");
+  assert.deepEqual(LAYOUT_ABILITIES.viewScenarios, ["desktop", "mobile"]);
+  assert.equal(layoutAllows("viewScenarios", "mobile"), true);
+  assert.equal(layoutAllows("editScenarios", "desktop"), true);
+  assert.equal(layoutAllows("editScenarios", "mobile"), false);
+  assert.equal(screenAllowed("scenarios", "mobile"), true);
+  // Окно сузили — человек остаётся в «Сценариях»: на телефоне они только смотрят.
+  assert.equal(screenAfterLayout("scenarios", "mobile"), "scenarios");
+  assert.equal(PANEL_IDS.screenScenarios, "screen-scenarios");
+});
+
+test("память вида помнит режим «Сценарии»", () => {
+  // Память — по объектам: `{идентификатор объекта: {screen, schemeId, place}}`.
+  assert.equal(viewMemoryFrom({ p1: { screen: "scenarios" } }).p1.screen, "scenarios");
+  assert.equal(viewMemoryFrom({ p1: { screen: "чужой" } }).p1, undefined);
 });
 
 test("раздел «Интерфейс» переименован дважды, а ключ остался прежним", () => {

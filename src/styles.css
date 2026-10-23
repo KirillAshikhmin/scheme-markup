@@ -523,7 +523,8 @@ body {
 }
 
 #app.has-scheme[data-screen="drawing"] #screen-drawing,
-#app.has-scheme[data-screen="volume"] #screen-volume {
+#app.has-scheme[data-screen="volume"] #screen-volume,
+#app.has-scheme[data-screen="scenarios"] #screen-scenarios {
   visibility: visible;
 }
 
@@ -583,6 +584,19 @@ body {
 
 #app[data-screen="volume"]:not(.is-mobile) #panel-right,
 #app[data-screen="volume"]:not(.is-mobile) .panel-handle--right {
+  display: none;
+}
+
+/* «Сценарии» (таск 10) отдают правую колонку тому же, что и «Объём»: поле
+   нужно списку, редактору, мини-плану и журналу, а своего содержимого у
+   колонки в этом режиме нет — список меток живёт в «Схеме». Правила те же,
+   но отдельные: правила «Объёма» выше сторожит `volumeColumn.test.js` по тексту. */
+#app[data-screen="scenarios"]:not(.is-mobile) {
+  --right-column: 0px;
+}
+
+#app[data-screen="scenarios"]:not(.is-mobile) #panel-right,
+#app[data-screen="scenarios"]:not(.is-mobile) .panel-handle--right {
   display: none;
 }
 
@@ -921,5 +935,11 @@ body {
    поверх сцены, а закрыть его было бы нечем: нижний ряд уже ушёл. */
 #app.is-field-bare.is-mobile #panel-left,
 #app.is-field-bare.is-mobile #panel-right {
+  display: none;
+}
+
+/* «Сценарии» на телефоне: списка меток в этом режиме нет, и кнопка листа
+   «Метки» открывала бы пустоту (таск 10). */
+#app.is-mobile[data-screen="scenarios"] [data-sheet-button="marks"] {
   display: none;
 }

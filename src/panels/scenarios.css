@@ -1,0 +1,823 @@
+/* ——— режим «Сценарии» (таск 10 сценариев) ————————————————————————————
+   Поле целиком принадлежит режиму: сверху полоса запуска дома, под ней три
+   колонки — список, сценарий, устройства с мини-планом — и журнал снизу.
+   Верхние 52 точки оставлены переключателю режимов (`#canvas-modes`): он лежит
+   поверх поля по центру и ловит клики сам.
+
+   Раскладку решает **ширина самого поля**, а не окна: правая колонка
+   приложения в этом режиме скрыта, левая — на месте, и планшет в 900 точек
+   оставляет полю шестьсот с небольшим. Поэтому — контейнерные запросы. */
+
+#screen-scenarios {
+  container-type: inline-size;
+  padding: 52px 8px 8px;
+  overflow: hidden;
+  background: var(--canvas-bg);
+  color: var(--canvas-text);
+  font-size: 13px;
+}
+
+/* Страница режима: полоса, три колонки, журнал. Просторное поле держит их
+   одним экраном (каждая колонка листает себя сама); узкое — одной
+   прокручиваемой стопкой (контейнерные запросы ниже). */
+.scn__page {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ——— полоса запуска дома и часов ——— */
+.scn-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  flex: none;
+}
+
+.scn-bar__group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 1px solid var(--canvas-line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.scn-bar__start {
+  font-weight: 600;
+}
+
+.scn-bar__status {
+  color: #57606a;
+}
+
+.scn-bar__status.is-running {
+  color: #1a7f37;
+  font-weight: 600;
+}
+
+.scn-bar__warn {
+  color: #9a6700;
+  font-size: 12px;
+}
+
+.scn-bar__date,
+.scn-bar__time {
+  width: auto;
+  flex: none;
+}
+
+.scn-bar__time {
+  width: 11ch;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.scn-bar__speed {
+  max-width: 190px;
+}
+
+.scn-bar .ui-btn.is-on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.scn-bar .ui-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ——— три колонки ——— */
+.scn__grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(190px, 270px) minmax(0, 1fr) minmax(210px, 300px);
+  gap: 8px;
+}
+
+.scn__list,
+.scn__center,
+.scn__side {
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--canvas-line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.scn__list {
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+}
+
+.scn__center {
+  gap: 10px;
+}
+
+.scn-list__head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: none;
+  padding: 8px;
+  border-bottom: 1px solid var(--canvas-line);
+}
+
+.scn-list__scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.scn-list__title,
+.scn-side__title,
+.scn-types__title,
+.scn-center__label {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #57606a;
+}
+
+.scn-list__creates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.scn-list__create {
+  flex: 1 1 auto;
+  padding: 3px 8px;
+}
+
+.scn-list__filters {
+  display: flex;
+  gap: 4px;
+}
+
+.scn-list__search {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.scn-list__kind {
+  flex: 0 1 120px;
+  min-width: 0;
+}
+
+.scn-list__rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.scn-list__empty {
+  margin: 8px;
+  color: #6e7781;
+}
+
+/* ——— строка списка ——— */
+.scn-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 8px;
+  border-bottom: 1px solid #eaeef2;
+  cursor: pointer;
+}
+
+.scn-row:hover {
+  background: #f6f8fa;
+}
+
+.scn-row.is-selected {
+  background: #ddf4ff;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.scn-row.is-inactive .scn-row__name,
+.scn-row.is-inactive .scn-row__phrase {
+  color: #8c959f;
+}
+
+.scn-row__head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.scn-row__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.scn-row__kind {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: #eaeef2;
+  color: #57606a;
+  font-size: 11px;
+}
+
+.scn-row__kind.is-logic {
+  background: #fff8c5;
+  color: #7d4e00;
+}
+
+.scn-row__kind.is-global {
+  background: #ffeff7;
+  color: #99286a;
+}
+
+.scn-row__phrase {
+  margin: 0;
+  color: #57606a;
+  font-size: 12px;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.scn-row__active {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.scn-row__issues {
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.scn-row__tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding-top: 3px;
+}
+
+.scn-row__tools .ui-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ——— «Типы без аксессуара» ——— */
+.scn-types {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-height: 40%;
+  overflow: auto;
+  padding: 8px;
+  border-top: 2px solid #eaeef2;
+  background: #fff8c5;
+}
+
+.scn-types__hint {
+  margin: 0;
+  font-size: 12px;
+  color: #57606a;
+}
+
+.scn-types__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.scn-types__name {
+  flex: 1 1 100%;
+  font-weight: 600;
+}
+
+.scn-types__marks {
+  color: #57606a;
+  font-size: 12px;
+}
+
+.scn-types__pick {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
+/* ——— середина ——— */
+.scn-center__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.scn-center__name {
+  margin: 0;
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+
+.scn-center__issues {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.scn-center__issue {
+  padding: 5px 8px;
+  border-left: 3px solid var(--danger);
+  border-radius: 0 4px 4px 0;
+  background: #ffebe9;
+  color: #82071e;
+  font-size: 12px;
+}
+
+.scn-center__phrase,
+.scn-center__params {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.scn-line {
+  margin: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--canvas-line);
+  border-radius: 6px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.scn-line:hover {
+  border-color: var(--accent);
+}
+
+.scn-line.is-empty {
+  color: #6e7781;
+  border-style: dashed;
+}
+
+/* Блок только что сработал — горит полторы секунды (история 4.23). */
+.scn-line.is-fired {
+  border-color: #bf8700;
+  background: #fff8c5;
+  box-shadow: 0 0 0 2px rgba(191, 135, 0, 0.35);
+}
+
+/* Пустое место заготовки: красная рамка, как у неполного блока. */
+.scn-slot {
+  padding: 0 4px;
+  border: 1px solid var(--danger);
+  border-radius: 4px;
+  background: #ffebe9;
+  color: #82071e;
+}
+
+.scn-center__note,
+.scn-center__slot {
+  margin: 0;
+  color: #6e7781;
+  font-size: 12px;
+}
+
+.scn-center__editor {
+  min-height: 24px;
+}
+
+.scn-center__slot {
+  padding: 10px;
+  border: 1px dashed var(--canvas-line);
+  border-radius: 6px;
+  text-align: center;
+}
+
+.scn-center__checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+.scn-center__field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  color: #57606a;
+}
+
+.scn-center__description {
+  width: 100%;
+  resize: vertical;
+}
+
+/* Приглашение пустого режима (история 4.27). */
+.scn-center__invite {
+  margin: auto;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 24px 12px;
+  text-align: center;
+}
+
+.scn-invite__title {
+  margin: 0;
+  font-size: 18px;
+}
+
+.scn-invite__text {
+  margin: 0;
+  color: #57606a;
+}
+
+.scn-invite__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+
+/* ——— справа ——— */
+.scn-side__devices {
+  flex: 1 1 140px;
+  min-height: 90px;
+  overflow: auto;
+  border: 1px solid #eaeef2;
+  border-radius: 6px;
+}
+
+.scn-room__name {
+  position: sticky;
+  top: 0;
+  margin: 0;
+  padding: 3px 8px;
+  background: #f6f8fa;
+  font-size: 11px;
+  font-weight: 600;
+  color: #57606a;
+}
+
+.scn-device {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 8px;
+  border: 0;
+  border-bottom: 1px solid #f0f2f4;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.scn-device span {
+  color: #6e7781;
+  font-size: 12px;
+}
+
+.scn-device:hover {
+  background: #f6f8fa;
+}
+
+.scn-device.is-picked {
+  background: #ddf4ff;
+}
+
+.scn-device__services {
+  margin: 0;
+  padding: 3px 8px 5px 24px;
+  background: #f6fbff;
+  color: #57606a;
+  font-size: 12px;
+  list-style: none;
+}
+
+.scn-side__empty {
+  margin: 8px;
+  color: #6e7781;
+  font-size: 12px;
+}
+
+.scn-side__floors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.scn-side__floor.is-on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.scn-side__plan {
+  position: relative;
+  flex: 0 0 auto;
+  height: 220px;
+  border: 1px solid var(--canvas-line);
+  border-radius: 6px;
+  background: var(--canvas-bg);
+  overflow: hidden;
+}
+
+.mini-plan__canvas {
+  display: block;
+  touch-action: none;
+  cursor: pointer;
+}
+
+.scn-side__card {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.scn-side__card-title {
+  margin: 0 0 4px;
+  font-size: 12px;
+}
+
+/* ——— журнал внизу ——— */
+.scn__journal {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--canvas-line);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 12px;
+}
+
+.scn-journal__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 8px 2px 2px;
+}
+
+.scn-journal__toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.scn-journal__toggle:hover,
+.scn-journal__toggle:focus-visible {
+  color: var(--accent);
+}
+
+.scn__journal.is-collapsed .scn-journal__toggle .ui-icon {
+  --ui-icon: 14px;
+  transform: rotate(180deg);
+}
+
+.scn__journal:not(.is-collapsed) .scn-journal__toggle .ui-icon {
+  --ui-icon: 14px;
+}
+
+.scn-journal__count {
+  margin-left: auto;
+  color: #57606a;
+}
+
+.scn-journal__body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-top: 1px solid var(--canvas-line);
+}
+
+.scn-journal__tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 8px;
+}
+
+.scn-journal__filter {
+  flex: 0 1 220px;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.scn-journal__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow: auto;
+  height: 110px;
+}
+
+.scn-journal__row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0 8px;
+  padding: 3px 8px;
+  border-top: 1px solid #eaeef2;
+}
+
+.scn-journal__row.is-link {
+  cursor: pointer;
+}
+
+.scn-journal__row.is-link:hover {
+  background: #f6f8fa;
+}
+
+.scn-journal__time {
+  color: #6e7781;
+  font-variant-numeric: tabular-nums;
+}
+
+.scn-journal__text {
+  overflow-wrap: anywhere;
+}
+
+.scn-journal__chain {
+  grid-column: 2;
+  color: #6e7781;
+  overflow-wrap: anywhere;
+}
+
+.scn-journal__row.is-error .scn-journal__text {
+  color: var(--danger);
+}
+
+.scn-journal__row.is-true .scn-journal__text {
+  color: #1a7f37;
+}
+
+.scn-journal__row.is-false .scn-journal__text {
+  color: #6e7781;
+}
+
+.scn-journal__empty {
+  margin: 0;
+  padding: 8px;
+  color: #6e7781;
+}
+
+/* ——— окно заготовок ——— */
+.scn-templates {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: min(520px, 80vw);
+  max-height: 60vh;
+  overflow: auto;
+}
+
+.scn-templates__head {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: #57606a;
+  text-transform: uppercase;
+}
+
+.scn-templates__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--canvas-line);
+  border-radius: 6px;
+}
+
+.scn-templates__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.scn-templates__desc,
+.scn-templates__slots,
+.scn-templates__empty {
+  color: #57606a;
+  font-size: 12px;
+}
+
+.scn-templates__slots {
+  color: #82071e;
+}
+
+/* ——— поле уже тысячи точек: список и сценарий рядом, устройства под ними ——— */
+@container (max-width: 1000px) {
+  .scn__grid {
+    grid-template-columns: minmax(190px, 270px) minmax(0, 1fr);
+    grid-auto-rows: min-content;
+    flex: none;
+    overflow: visible;
+  }
+
+  .scn__list {
+    max-height: 520px;
+  }
+
+  .scn__side {
+    grid-column: 1 / -1;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    overflow: visible;
+  }
+
+  .scn-side__title,
+  .scn-side__search,
+  .scn-side__floors,
+  .scn-side__card {
+    flex: 1 1 100%;
+  }
+
+  .scn-side__devices {
+    flex: 1 1 220px;
+    max-height: 240px;
+  }
+
+  .scn-side__plan {
+    flex: 1 1 280px;
+  }
+
+  .scn__page {
+    overflow: auto;
+  }
+
+  .scn__journal {
+    flex: none;
+  }
+}
+
+/* ——— поле уже 760 точек: всё одной стопкой, прокручивается страница режима ——— */
+@container (max-width: 760px) {
+  .scn__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .scn__list {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .scn-list__scroll {
+    flex: none;
+    max-height: 320px;
+  }
+
+  .scn-types {
+    max-height: none;
+  }
+
+  .scn__center {
+    overflow: visible;
+  }
+}
+
+/* Телефон: только просмотр — устройств с мини-планом нет, журнал короче. */
+#app.is-mobile #screen-scenarios {
+  padding: 48px 6px 6px;
+}
+
+#app.is-mobile .scn__side {
+  display: none;
+}
+
+#app.is-mobile .scn-journal__list {
+  height: 110px;
+}
+
+.scn.is-view-only .scn-list__creates {
+  display: none;
+}

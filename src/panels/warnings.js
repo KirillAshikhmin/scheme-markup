@@ -17,7 +17,7 @@
 // простыня на полтора десятка строк поверх плана; строкой панели тот же вопрос
 // ждёт, пока до него дойдут руки. Отметка «разобрано» как была в объекте
 // (`type.kindGuessed`), так и осталась: она уезжает вместе с файлом.
-import { layoutAllows, PANEL_IDS, registerPanel, reportAppError, SCREEN_DEFAULT, setScreen } from "../app.js";
+import { layoutAllows, PANEL_IDS, registerPanel, reportAppError, setScreen } from "../app.js";
 import {
   acceptProblem,
   acceptedProblems,
@@ -99,14 +99,25 @@ export const WARNING_TARGETS = {
   // (таск 205).
   schemeAnchorMissing: "scheme",
   // Сценарий со ссылкой на удалённую метку ведёт к самому сценарию (таск 01
-  // сценариев). Пока режима «Сценарии» нет, переход открывает «Схему» без
-  // выделения; к сценарию в его списке подведёт таск 10.
+  // сценариев): переход открывает режим «Сценарии» на этом сценарии (таск 10,
+  // `warningScreenPatch`).
   scenarioDeviceMissing: "scenario",
 };
 
 // Ошибки сверху, вопросы о виде снизу: сперва то, что сломано, потом то, что
 // сделано намеренно, и только потом то, о чём спрашивают.
 export const WARNING_LEVELS = ["error", "warning", "ask"];
+
+/**
+ * Куда переключить экран при переходе к виновнику: у сценария — режим
+ * «Сценарии» с открытым этим сценарием, у остальных — ничего (`null`, режим не
+ * меняется, как и раньше). Чистая — по ней проверяется, что переход ведёт куда
+ * надо.
+ */
+export function warningScreenPatch(place) {
+  if (!place || !place.scenarioId) return null;
+  return { screen: "scenarios", scenarioId: place.scenarioId };
+}
 
 function warningMarkPlace(project, markId) {
   const mark = markId ? findMark(project, markId) : null;
@@ -324,11 +335,12 @@ function mountWarningsPanel(host, api) {
     const state = getState();
     if (!state.project) return;
     const patch = {};
-    if (place.scenarioId) {
-      // Сценарий: пока — «Схема» без выделения (см. `WARNING_TARGETS`).
-      setScreen(SCREEN_DEFAULT);
-      patch.selectedMarkIds = [];
-      patch.selectedOutlineId = null;
+    const screenPatch = warningScreenPatch(place);
+    if (screenPatch) {
+      // Сценарий: режим «Сценарии», на нём открыт этот сценарий. Правка
+      // сценария на узком экране закрыта, но просмотр доступен везде.
+      setScreen(screenPatch.screen);
+      patch.scenarioId = screenPatch.scenarioId;
     } else if (place.markId) {
       patch.selectedMarkIds = [place.markId];
       patch.selectedOutlineId = null;

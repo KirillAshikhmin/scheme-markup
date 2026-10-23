@@ -1,5 +1,5 @@
-// Переключатель режимов основного экрана: Чертёж · Схема · Объём (таск 153,
-// G219).
+// Переключатель режимов основного экрана: Чертёж · Схема · Объём · Сценарии
+// (таск 153, G219; четвёртый режим — таск 10 сценариев, G05).
 //
 // Слова заказчика: «На основном экране на схеме уже есть кнопки сверху по
 // углам, надо на их уровне по центру добавить переключатель — Чертёж, Схема,
@@ -28,7 +28,7 @@ function mountScreens(host, api) {
     attrs: { role: "group", "aria-label": strings.screens.label },
   });
   const buttons = new Map();
-  for (const screen of ["drawing", "scheme", "volume"]) {
+  for (const screen of ["drawing", "scheme", "volume", "scenarios"]) {
     buttons.set(
       screen,
       uiButton(strings.screens[screen], {
