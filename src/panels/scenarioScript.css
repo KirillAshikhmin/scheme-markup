@@ -149,6 +149,22 @@
   gap: 4px;
 }
 
+/* Раздел сервиса (правка после сборки сценариев): у аксессуара с несколькими
+   подходящими сервисами у каждого свои привязки и свои «+ сценарий». */
+.scr-logic__service {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--canvas-line, #d0d7de);
+}
+
+.scr-logic__serviceName {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .scr-bind {
   display: flex;
   flex-direction: column;

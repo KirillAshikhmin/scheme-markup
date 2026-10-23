@@ -23,6 +23,7 @@ import {
   storeMode,
 } from "../store.js";
 import { strings, text } from "../strings.js";
+import { migrateDevices } from "../deviceMigrate.js";
 import { formatMegabytes, uiButton, uiConfirm, uiEl, uiIconButton, uiModal } from "./ui.js";
 import { projectPropsDialog } from "./projectProps.js";
 import { TYPE_TEMPLATE_KEY, typesTemplateFrom } from "./types.js";
@@ -40,8 +41,9 @@ const SAVE_DELAY_MS = 400;
  */
 export function projectsMigrateStored(stored) {
   const migrated = fillTypeSizes(migrateCommentType(migrateTypeKinds(stored).project).project).project;
-  // Сценарии и привязки логики (таск 01 сценариев): терпимое чтение.
-  return migrateScenarios(migrated).project;
+  // Сценарии и привязки логики (таск 01 сценариев): терпимое чтение. Затем
+  // аксессуары (правка после сборки сценариев) — тем же порядком, что у файла.
+  return migrateDevices(migrateScenarios(migrated).project).project;
 }
 
 function uniqueProjectName(list) {
@@ -224,7 +226,9 @@ function mountProjectsPanel(host, api) {
   async function createAndOpen() {
     const saved = await getSetting(TYPE_TEMPLATE_KEY);
     const template = typesTemplateFrom(saved);
-    const project = createProject({ name: uniqueProjectName(known || []), ...(template || {}) });
+    // Шаблон мог быть сохранён до перевода аксессуаров — он доходит до
+    // нынешних видов сразу, а не при следующем открытии.
+    const project = migrateDevices(createProject({ name: uniqueProjectName(known || []), ...(template || {}) })).project;
     await saveProject(project);
     await refreshList();
     setState({ project, schemeId: null, selectedMarkIds: [], activeTypeId: null });

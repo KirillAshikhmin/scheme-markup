@@ -135,10 +135,23 @@ export function simLiveOf(accessory, values) {
       case "Valve":
         if (read(service, "Active") === "ACTIVE") lit(1);
         break;
-      case "Thermostat":
-        if (read(service, "TargetHeatingCoolingState") !== "OFF") lit(1);
+      case "Thermostat": {
+        const mode = read(service, "TargetHeatingCoolingState");
+        // Кондиционер — термостат (правка после сборки сценариев): дует, пока
+        // не выключен, — тёплым, холодным или просто воздухом, как прежде.
+        if (accessory.kind === "conditioner") {
+          if (mode !== "OFF" && mode !== undefined) {
+            lit(1);
+            const now = read(service, "CurrentHeatingCoolingState");
+            const way = mode === "HEAT" || mode === "COOL" ? mode : now;
+            blow(way === "HEAT" ? "heat" : way === "COOL" ? "cool" : "air", 1);
+          }
+          break;
+        }
+        if (mode !== "OFF") lit(1);
         if (read(service, "CurrentHeatingCoolingState") === "HEAT") live.heat = true;
         break;
+      }
       case "TemperatureSensor":
         sense("t", read(service, "CurrentTemperature"));
         break;

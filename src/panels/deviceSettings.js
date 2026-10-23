@@ -336,7 +336,12 @@ export function deviceServiceRole(kind, service) {
 export function deviceWindowModel(draft, channels = 1, { aid = null } = {}) {
   const kinds = [
     { key: DEVICE_KIND_NONE, label: strings.deviceWindow.kindNone },
-    ...DEVICE_KINDS.map((kind) => ({ key: kind.key, label: strings.sim.kinds[kind.key] || kind.key })),
+    // Вид только для чтения в список не входит — кроме того, что уже выбран:
+    // окно обязано показать, что записано.
+    ...DEVICE_KINDS.filter((kind) => !kind.legacy || kind.key === draft.kind).map((kind) => ({
+      key: kind.key,
+      label: strings.sim.kinds[kind.key] || kind.key,
+    })),
   ];
   const added = deviceAddedFlags(draft);
   const sids = deviceDraftSids(draft, channels);

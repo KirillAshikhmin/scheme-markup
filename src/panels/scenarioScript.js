@@ -295,7 +295,18 @@ export function scenarioScriptLogicOf(project, given, read = simOptionForms) {
     const services = accessory.services.filter((service) => hubFits(form, service)).map((service) => ({ index: service.index, name: scenarioScriptServiceName(accessory, service) }));
     if (services.length > 0) available.push({ scenarioId: scenario.id, name: scenario.name, services, form, fault: answer.fault || null });
   }
-  return { markId, bindings, available, scripts: logic.length };
+  // Сервисы, у которых есть что показать (правка после сборки сценариев: «если
+  // у аксессуара несколько сервисов, логика привязывается к каждому
+  // отдельно»): привязанные и те, которым подходит сценарий, — в порядке
+  // аксессуара; привязка к сервису, которого больше нет, — следом.
+  const shown = new Set([...bindings.map((item) => item.service), ...available.flatMap((entry) => entry.services.map((item) => item.index))]);
+  const services = accessory.services
+    .filter((service) => shown.has(service.index))
+    .map((service) => ({ index: service.index, name: scenarioScriptServiceName(accessory, service) }));
+  for (const binding of bindings) {
+    if (!services.some((item) => item.index === binding.service)) services.push({ index: binding.service, name: binding.serviceName });
+  }
+  return { markId, bindings, available, services, scripts: logic.length };
 }
 
 /**
@@ -612,13 +623,16 @@ function scenarioScriptOptionsWindow(binding, editable) {
   return modal;
 }
 
-function scenarioScriptAddWindow(project, markId, entry) {
+function scenarioScriptAddWindow(project, markId, entry, service = null) {
   const draft = {};
-  const state = { service: entry.services[0].index };
+  // Сервис задан разделом, из которого добавляют, — выбирать его в окне нечего.
+  const fixed = entry.services.find((item) => item.index === service) || null;
+  const state = { service: fixed ? fixed.index : entry.services[0].index };
   const fields = uiEl("div", { class: "scr-add__fields" });
   fields.append(scenarioScriptFields(entry.form.fields, { onChange: (key, value) => (draft[key] = value) }));
   const body = [];
-  if (entry.services.length > 1) {
+  if (fixed) body.push(uiEl("p", { class: "scr-add__desc", text: text("sim.card.logic.service", { name: fixed.name }) }));
+  else if (entry.services.length > 1) {
     const select = uiEl(
       "select",
       { class: "ui-select", attrs: { "aria-label": strings.sim.card.logic.addService } },
@@ -670,12 +684,34 @@ export function scenarioScriptLogicView(markId) {
     const editable = scenarioScriptCanEdit();
     node.replaceChildren(uiEl("p", { class: "sim-card__head scr-logic__title", title: strings.sim.card.logic.hint, text: strings.sim.card.logic.title }));
     if (!model) return;
-    if (model.bindings.length === 0) node.append(uiEl("p", { class: "scr-logic__empty", text: strings.sim.card.logic.none }));
-    for (const binding of model.bindings) {
+    // Раздел на каждый сервис (правка после сборки сценариев): «если у
+    // аксессуара несколько сервисов, логика привязывается к каждому отдельно».
+    // У одного сервиса заголовка нет — раздел тот же, что был.
+    const grouped = model.services.length > 1;
+    if (!grouped) {
+      const service = model.services[0] ? model.services[0].index : null;
+      appendBindings(node, model.bindings, editable, true);
+      appendAdd(node, model, editable, model.available, service, true);
+      return;
+    }
+    for (const service of model.services) {
+      const part = uiEl("div", { class: "scr-logic__service", attrs: { "data-service": String(service.index) } }, [
+        uiEl("p", { class: "scr-logic__serviceName", text: service.name }),
+      ]);
+      appendBindings(part, model.bindings.filter((binding) => binding.service === service.index), editable, false);
+      appendAdd(part, model, editable, model.available.filter((entry) => entry.services.some((item) => item.index === service.index)), service.index, false);
+      node.append(part);
+    }
+    if (!editable) node.append(uiEl("p", { class: "scr-logic__empty", text: strings.sim.card.logic.readOnly }));
+  }
+
+  function appendBindings(host, bindings, editable, withService) {
+    if (bindings.length === 0) host.append(uiEl("p", { class: "scr-logic__empty", text: strings.sim.card.logic.none }));
+    for (const binding of bindings) {
       const fault = scenarioScriptFaultText(binding.fault, "card");
       const head = uiEl("div", { class: "scr-bind__head" }, [
         uiEl("strong", { class: "scr-bind__name", text: binding.name }),
-        uiEl("span", { class: "scr-bind__service", text: text("sim.card.logic.service", { name: binding.serviceName }) }),
+        withService ? uiEl("span", { class: "scr-bind__service", text: text("sim.card.logic.service", { name: binding.serviceName }) }) : null,
       ]);
       const check = uiEl("input", { type: "checkbox", attrs: { "aria-label": strings.sim.card.logic.active } });
       check.checked = binding.active;
@@ -706,28 +742,33 @@ export function scenarioScriptLogicView(markId) {
           }),
         );
       }
-      node.append(uiEl("div", { class: "scr-bind" + (binding.active && !fault ? "" : " is-off") + (fault ? " is-fault" : ""), attrs: { "data-binding": binding.id } }, parts));
+      host.append(uiEl("div", { class: "scr-bind" + (binding.active && !fault ? "" : " is-off") + (fault ? " is-fault" : ""), attrs: { "data-binding": binding.id } }, parts));
     }
+  }
+
+  // «+ сценарий» раздела: подходящие этому сервису (`service`) или, у раздела
+  // без сервисов, — пояснение, почему добавить нечего.
+  function appendAdd(host, model, editable, entries, service, alone) {
     if (!editable) {
-      node.append(uiEl("p", { class: "scr-logic__empty", text: strings.sim.card.logic.readOnly }));
+      if (alone) host.append(uiEl("p", { class: "scr-logic__empty", text: strings.sim.card.logic.readOnly }));
       return;
     }
-    if (model.available.length === 0) {
-      node.append(uiEl("p", { class: "scr-logic__empty", text: model.scripts === 0 ? strings.sim.card.logic.noScripts : strings.sim.card.logic.nothingFits }));
+    if (entries.length === 0) {
+      if (alone) host.append(uiEl("p", { class: "scr-logic__empty", text: model.scripts === 0 ? strings.sim.card.logic.noScripts : strings.sim.card.logic.nothingFits }));
       return;
     }
     const row = uiEl("div", { class: "scr-logic__add" });
-    for (const entry of model.available) {
+    for (const entry of entries) {
       row.append(
         uiButton("+ " + entry.name, {
           class: "ui-btn",
           title: strings.sim.card.logic.addHint,
           attrs: { "data-scenario": entry.scenarioId },
-          on: { click: () => scenarioScriptAddWindow(getState().project, markId, entry) },
+          on: { click: () => scenarioScriptAddWindow(getState().project, markId, entry, service) },
         }),
       );
     }
-    node.append(row);
+    host.append(row);
   }
 
   function later() {

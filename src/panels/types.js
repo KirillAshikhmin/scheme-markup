@@ -7,6 +7,7 @@
 // созданные остаются как были.
 import { PANEL_IDS, layoutAllows, registerPanel, reportAppError } from "../app.js";
 import { strings, text } from "../strings.js";
+import { migrateDevices } from "../deviceMigrate.js";
 import { markSizesSummary, openTypeSizesPicker } from "./markSizes.js";
 import {
   deviceTypeField,
@@ -1303,7 +1304,8 @@ export function openTypesDictionary(api) {
     try {
       const result = addTypesFromCatalog(project(), template, keys);
       if (result.types.length > 0) {
-        canvasCommit(project(), result.project, strings.history.addFromCatalog);
+        // Общая база могла быть сохранена до перевода аксессуаров.
+        canvasCommit(project(), migrateDevices(result.project).project, strings.history.addFromCatalog);
         api.notify(text("dictionary.catalogAdded", { count: result.types.length }), "success");
       }
       // Пропущенное называется вслух: строка, которую справочник не принял,

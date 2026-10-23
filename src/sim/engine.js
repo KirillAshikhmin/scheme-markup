@@ -372,6 +372,10 @@ export function createSimEngine({ emit, owners = [] } = {}) {
         channel: Number.isInteger(service.channel) ? service.channel : null,
         decoupled: service.decoupled === true,
         aux: service.aux === true,
+        // Термостат кондиционера — нагрузка (правка после сборки сценариев):
+        // кондиционер стал термостатом, а выключатель и «выключить всё» им
+        // управляли и управляют — режимом «Выкл» и прежним режимом.
+        modeLoad: accessory.kind === "conditioner" && service.type === "Thermostat",
         chars,
       };
     });
@@ -940,8 +944,13 @@ export function createSimEngine({ emit, owners = [] } = {}) {
     if (SIM_ENGINE_ON.has(service.type) && service.chars.has("On")) return "on";
     if (SIM_ENGINE_ACTIVE.has(service.type) && service.chars.has("Active")) return "active";
     if (service.type === "WindowCovering" && service.chars.has("TargetPosition")) return "curtain";
+    if (service.modeLoad && service.chars.has("TargetHeatingCoolingState")) return "mode";
     return null;
   }
+
+  // Режим, к которому вернётся включённый кондиционер: тот, с которым его
+  // выключили, а впервые — «Авто».
+  const lastModes = new Map();
 
   function loadIsOn(device, service) {
     switch (loadRole(service)) {
@@ -951,6 +960,8 @@ export function createSimEngine({ emit, owners = [] } = {}) {
         return read(device, service, "Active") === "ACTIVE";
       case "curtain":
         return Number(read(device, service, "TargetPosition")) > 0;
+      case "mode":
+        return read(device, service, "TargetHeatingCoolingState") !== "OFF";
       default:
         return false;
     }
@@ -964,6 +975,14 @@ export function createSimEngine({ emit, owners = [] } = {}) {
         return apply(device.markId, service.index, "Active", on ? "ACTIVE" : "INACTIVE", chain);
       case "curtain":
         return apply(device.markId, service.index, "TargetPosition", on ? 100 : 0, chain);
+      case "mode": {
+        const key = device.markId + "|" + service.index;
+        const mode = read(device, service, "TargetHeatingCoolingState");
+        // Уже работает — включать нечего: режим, который выбрали, остаётся.
+        if (on && mode !== "OFF" && mode !== undefined) return false;
+        if (!on && mode !== "OFF" && mode !== undefined) lastModes.set(key, mode);
+        return apply(device.markId, service.index, "TargetHeatingCoolingState", on ? lastModes.get(key) || "AUTO" : "OFF", chain);
+      }
       default:
         return false;
     }

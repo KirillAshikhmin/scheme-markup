@@ -306,3 +306,19 @@ test("зависла одна привязка — сценарий в спис�
   assert.deepEqual(rows.map((row) => row.fault), ["остановлен: завис", "остановлен: завис"]);
   assert.equal(scenarioScriptFaults(bound.project, { scenarios: () => [], forms: () => ({ fault: null }) }).size, 0);
 });
+
+test("логика по сервисам: у двухклавишного выключателя свой раздел на каждый «Выключатель», привязка — в разделе своего сервиса", () => {
+  // Правка после сборки сценариев: «если у аксессуара несколько сервисов,
+  // логика привязывается к каждому отдельно».
+  const box = simHouse();
+  const motion = loaded(box.project, "MotionLightAutomation.js");
+  const read = formsOf(motion.project);
+  const duo = scenarioScriptLogicOf(motion.project, box.marks.ВВ1, read);
+  assert.deepEqual(duo.services.map((item) => [item.index, item.name]), [[0, "Выключатель 1"], [1, "Выключатель 2"]]);
+  const bound = scenarioScriptBind(motion.project, { scenarioId: motion.scenarioId, markId: box.marks.ВВ1, service: 1, options: {} }).project;
+  const after = scenarioScriptLogicOf(bound, box.marks.ВВ1, formsOf(bound));
+  assert.deepEqual(after.bindings.map((item) => item.service), [1]);
+  assert.deepEqual(after.services.map((item) => item.index), [0, 1], "привязка увела раздел или добавила лишний");
+  // У лампы сервис один — раздел один, без заголовка сервиса.
+  assert.equal(scenarioScriptLogicOf(motion.project, box.marks.С1, read).services.length, 1);
+});

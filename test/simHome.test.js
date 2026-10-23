@@ -289,9 +289,13 @@ test("живое состояние: что дует, что звучит, чт�
   assert.equal(simLiveOf(of("breezer"), {}).flow, null, "выключенный бризер дует");
   const fan = simLiveOf(of("breezer"), { "0.Active": "ACTIVE", "0.RotationSpeed": 50 });
   assert.deepEqual(fan.flow, { kind: "air", level: 0.5 });
-  assert.deepEqual(simLiveOf(of("ac"), { "0.Active": "ACTIVE", "0.TargetHeaterCoolerState": "COOL" }).flow, { kind: "cool", level: 1 });
-  assert.deepEqual(simLiveOf(of("ac"), { "0.Active": "ACTIVE", "0.TargetHeaterCoolerState": "HEAT" }).flow, { kind: "heat", level: 1 });
-  assert.equal(simLiveOf(of("ac"), { "0.Active": "INACTIVE" }).flow, null);
+  // Кондиционер — термостат (правка после сборки сценариев): дует, пока режим
+  // не «Выкл»; в «Авто» — тем, что делает сейчас.
+  assert.deepEqual(simLiveOf(of("ac"), { "0.TargetHeatingCoolingState": "COOL" }).flow, { kind: "cool", level: 1 });
+  assert.deepEqual(simLiveOf(of("ac"), { "0.TargetHeatingCoolingState": "HEAT" }).flow, { kind: "heat", level: 1 });
+  assert.deepEqual(simLiveOf(of("ac"), { "0.TargetHeatingCoolingState": "AUTO", "0.CurrentHeatingCoolingState": "COOL" }).flow, { kind: "cool", level: 1 });
+  assert.deepEqual(simLiveOf(of("ac"), { "0.TargetHeatingCoolingState": "AUTO", "0.CurrentHeatingCoolingState": "OFF" }).flow, { kind: "air", level: 1 });
+  assert.equal(simLiveOf(of("ac"), { "0.TargetHeatingCoolingState": "OFF" }).flow, null);
   const speaker = of("speaker");
   const index = speaker.services.find((service) => service.type === "Speaker").index;
   assert.equal(simLiveOf(speaker, { [index + ".Mute"]: false }).flow.kind, "sound");

@@ -2,6 +2,7 @@
 // Zip пишется и читается здесь же, без библиотек: CompressionStream("deflate-raw")
 // там, где он есть, и «stored» (без сжатия) там, где его нет. Читаются оба варианта.
 import { strings, text } from "./strings.js";
+import { migrateDevices } from "./deviceMigrate.js";
 import {
   FORMAT_VERSION,
   FORMAT_VERSION_MAX,
@@ -389,7 +390,11 @@ function migrateProject(loaded) {
   // у типа без размеров они проставляются по шаблону. Трогается только
   // справочник — метки новых полей не получают.
   // Сценарии (таск 01): терпимое чтение, у объекта без них — тот же объект.
-  const migrated = migrateScenarios(fillTypeSizes(migrateCommentType(migrateTypeKinds(filled).project).project).project).project;
+  // Аксессуары (правка после сборки сценариев): выключатель без реле — с
+  // реле, кондиционер — термостат; ссылки сценариев переезжают вслед.
+  const migrated = migrateDevices(
+    migrateScenarios(fillTypeSizes(migrateCommentType(migrateTypeKinds(filled).project).project).project).project,
+  ).project;
   // Миграция могла убрать нечитаемые записи — версия считается по итогу.
   const current = projectFormatVersion(migrated);
   return migrated.formatVersion === current ? migrated : { ...migrated, formatVersion: current };

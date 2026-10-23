@@ -393,6 +393,10 @@ function simKind(key, services, options = {}) {
     // Что предложить в «Добавить сервис» первым делом: служебные и частые
     // спутники (§7, колонка «Доп. сервисы»).
     extras: Object.freeze(options.extras || []),
+    // Вид, который только читается (правка после сборки сценариев): в окне
+    // аксессуара его не выбрать, а старый объект с ним переводит миграция
+    // (`deviceMigrate.js`).
+    ...(options.legacy ? { legacy: true } : {}),
   });
 }
 
@@ -419,9 +423,12 @@ export const DEVICE_KINDS = Object.freeze([
     ["StatelessProgrammableSwitch", KEY_CHARS, true],
   ]),
   // Выключатель без реле — одни кнопки. Так стартовые выключатели выглядели
-  // до G11, и профиль, сохранённый тогда (`kind: "switch"`), обязан читаться
-  // и работать как прежде (G68): щелчок переключает нагрузки и шлёт нажатие.
-  simKind("switch", [["StatelessProgrammableSwitch", KEY_CHARS, true]]),
+  // до G11. Заказчик (правка после сборки сценариев): «У всех выключателей
+  // считаем что есть реле на каждую клавишу. По факту это может быть как умный
+  // выключатель, так и реле в подрозетнике». Вид остался только для чтения:
+  // объект, где он записан, переводит на `switchRelay` миграция
+  // (`deviceMigrate.js`) — с переносом ссылок сценариев на новые номера.
+  simKind("switch", [["StatelessProgrammableSwitch", KEY_CHARS, true]], { legacy: true }),
   simKind("button", [
     ["StatelessProgrammableSwitch", KEY_CHARS, true],
     ["BatteryService", BATTERY_CHARS],
@@ -436,22 +443,15 @@ export const DEVICE_KINDS = Object.freeze([
     params: { travelSec: 20 },
     extras: ["BatteryService"],
   }),
-  simKind(
-    "conditioner",
-    [
-      [
-        "HeaterCooler",
-        [
-          "Active",
-          "CurrentTemperature",
-          "CurrentHeaterCoolerState",
-          "TargetHeaterCoolerState",
-          "CoolingThresholdTemperature",
-          "HeatingThresholdTemperature",
-        ],
-      ],
-    ],
-  ),
+  // Кондиционер — термостат (правка после сборки сценариев): «У термостатов в
+  // режиме Авто есть не пороги нагрева и охлаждения, а одна характеристика —
+  // целевая температура», и выбор заказчика — перевести кондиционер на сервис
+  // «Термостат». Режим «Выкл» — выключенный кондиционер. Прежний профиль
+  // («Нагреватель-охладитель» с двумя порогами) переводит миграция
+  // (`deviceMigrate.js`).
+  simKind("conditioner", [
+    ["Thermostat", ["CurrentTemperature", "TargetTemperature", "CurrentHeatingCoolingState", "TargetHeatingCoolingState"]],
+  ]),
   simKind(
     "thermostat",
     [["Thermostat", ["CurrentTemperature", "TargetTemperature", "CurrentHeatingCoolingState", "TargetHeatingCoolingState"]]],

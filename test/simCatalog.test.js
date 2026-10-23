@@ -101,21 +101,16 @@ const TABLE = [
   },
   {
     row: "Кондиционер",
+    // Правка после сборки сценариев: кондиционер — термостат с одной целевой
+    // температурой; обдув и ступени — необязательные термостата.
     kind: "conditioner",
     services: [
       [
-        "HeaterCooler",
-        [
-          "Active",
-          "CurrentTemperature",
-          "CurrentHeaterCoolerState",
-          "TargetHeaterCoolerState",
-          "CoolingThresholdTemperature",
-          "HeatingThresholdTemperature",
-        ],
+        "Thermostat",
+        ["CurrentTemperature", "TargetTemperature", "CurrentHeatingCoolingState", "TargetHeatingCoolingState", "TemperatureDisplayUnits"],
       ],
     ],
-    optional: { HeaterCooler: ["RotationSpeed", "SwingMode"] },
+    optional: { Thermostat: ["C_FanSpeed", "SwingMode"] },
   },
   {
     row: "Вентиляция / вентилятор",

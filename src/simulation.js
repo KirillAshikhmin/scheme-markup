@@ -134,7 +134,7 @@ export function simClimateOf(project, accessories) {
     else if (code === "ОВ") role = "dry";
     const thermostat = accessory.services.some((service) => service.type === "Thermostat");
     const controls =
-      thermostat && accessory.kind !== "warmFloor"
+      thermostat && accessory.kind !== "warmFloor" && accessory.kind !== "conditioner"
         ? markControlsByChannel(project, accessory.markId).flatMap((group) => group.marks.map((item) => item.id))
         : [];
     devices.push({ markId: accessory.markId, roomId, role, controls });

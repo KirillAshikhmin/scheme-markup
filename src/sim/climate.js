@@ -330,6 +330,14 @@ export function climateOwner() {
           const stateNow = value("CurrentHeaterCoolerState");
           if (stateNow === "COOLING") of(roomId).cool = climateNumber(value("CoolingThresholdTemperature"), 24);
           if (stateNow === "HEATING") of(roomId).warm = climateNumber(value("HeatingThresholdTemperature"), 20);
+        } else if (service.type === "Thermostat" && accessory.kind === "conditioner") {
+          // Кондиционер — термостат (правка после сборки сценариев): греет и
+          // охлаждает воздухом, как прежний «Нагреватель-охладитель», к одной
+          // целевой температуре.
+          const stateNow = value("CurrentHeatingCoolingState");
+          const target = climateNumber(value("TargetTemperature"), 22);
+          if (stateNow === "COOL") of(roomId).cool = target;
+          if (stateNow === "HEAT") of(roomId).warm = target;
         } else if (service.type === "Thermostat") {
           // Термостат греет сам — как тёплый пол или батарея с головкой, — если
           // ничем не управляет; управляет — греют те, кем он управляет.

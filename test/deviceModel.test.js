@@ -73,21 +73,14 @@ const PROFILE_BY_CODE = {
   Р: OUTLET,
   // Вторая буква «РC» — латинская C, как в справочнике заказчика.
   ["РC"]: OUTLET,
-  // «Active, CurrentTemperature, TargetHeaterCoolerState, пороги» таблицы плюс
-  // обязательное у HeaterCooler текущее состояние (HAP, §7 исследования).
+  // Кондиционер — термостат (правка после сборки сценариев): одна целевая
+  // температура вместо двух порогов; единицы — обязательные у хаба.
   К: {
     kind: "conditioner",
     services: [
       [
-        "HeaterCooler",
-        [
-          "Active",
-          "CurrentTemperature",
-          "CurrentHeaterCoolerState",
-          "TargetHeaterCoolerState",
-          "CoolingThresholdTemperature",
-          "HeatingThresholdTemperature",
-        ],
+        "Thermostat",
+        ["CurrentTemperature", "TargetTemperature", "CurrentHeatingCoolingState", "TargetHeatingCoolingState", "TemperatureDisplayUnits"],
       ],
     ],
   },
@@ -562,32 +555,41 @@ for (const [name, print] of LEGACY) {
 
 // ——— G68 (G11): профиль выключателя, сохранённый до G11 ————————————————————
 
-test("G68: объект с профилем выключателя до G11 (одни кнопки) открывается байт в байт и читает те же кнопки", async () => {
+test("G68: объект с профилем выключателя до G11 (одни кнопки) открывается с реле на каждой клавише, кнопки и отвязка — прежние", async () => {
+  // Правка после сборки сценариев: «У всех выключателей считаем что есть реле
+  // на каждую клавишу» — вид «без реле» переводится миграцией при открытии
+  // (`deviceMigrate.js`), и из файла, и из базы одинаково.
   const legacy = simLegacySwitchProject();
   const blob = await packProject(legacy.project, new Map(), { date: new Date("2026-10-22T10:00:00Z") });
-  const packed = new TextDecoder().decode((await readZip(blob)).get(PROJECT_ENTRY));
-  assert.equal(packed, legacy.text, "project.json объекта до G11 стал другим текстом");
   const restored = (await unpackProject(blob)).project;
-  for (const key of ["marks", "markTypes", "counters"]) {
-    assert.equal(JSON.stringify(restored[key]), JSON.stringify(legacy.project[key]), key + " после файла");
-  }
   const stored = projectsMigrateStored(legacy.project);
-  assert.equal(stored, legacy.project, "открытие из базы переписало объект");
-  const KEY_ONLY = ["StatelessProgrammableSwitch", ["ProgrammableSwitchEvent", "ServiceLabelIndex"]];
+  assert.equal(JSON.stringify(restored.markTypes), JSON.stringify(stored.markTypes), "файл и база перевели справочник по-разному");
+  assert.equal(JSON.stringify(restored.marks), JSON.stringify(stored.marks), "файл и база перевели метки по-разному");
+  assert.equal(projectsMigrateStored(stored), stored, "второе открытие снова что-то переводит");
+  const KEY = ["StatelessProgrammableSwitch", ["ProgrammableSwitchEvent", "ServiceLabelIndex"]];
+  const RELAY = ["Switch", ["On"]];
   for (const project of [restored, stored]) {
     for (const code of ["В", "ВВ"]) {
       const profile = typeDeviceOf(project, legacy.types[code]);
-      assert.equal(profile.kind, "switch", code + ": вид профиля до G11");
+      assert.equal(profile.kind, "switchRelay", code + ": вид остался без реле");
       assert.equal(profile.derived, false);
-      assert.deepEqual(profile.services.map((service) => [service.type, service.chars]), [KEY_ONLY], code + ": к кнопкам добавился сервис");
+      assert.deepEqual(profile.services.map((service) => [service.type, service.chars]), [RELAY, KEY], code + ": реле на клавишу не встало");
     }
     const shape = (label) =>
       markDeviceOf(project, legacy.marks[label]).services.map((service) => [service.type, service.channel, service.decoupled]);
-    assert.deepEqual(shape("В1"), [["StatelessProgrammableSwitch", 1, false]]);
+    assert.deepEqual(shape("В1"), [["Switch", 1, false], ["StatelessProgrammableSwitch", 1, false]]);
     assert.deepEqual(shape("ВВ1"), [
+      ["Switch", 1, false],
+      ["Switch", 2, false],
       ["StatelessProgrammableSwitch", 1, false],
       ["StatelessProgrammableSwitch", 2, true],
     ]);
-    assert.deepEqual(shape("В2"), [["StatelessProgrammableSwitch", 1, true]]);
+    assert.deepEqual(shape("В2"), [["Switch", 1, false], ["StatelessProgrammableSwitch", 1, true]]);
+    // Связи «чем управляет» и прочее у меток не тронуты.
+    for (const label of ["В1", "ВВ1", "В2"]) {
+      const before = legacy.project.marks.find((mark) => mark.id === legacy.marks[label]);
+      const after = project.marks.find((mark) => mark.id === legacy.marks[label]);
+      assert.deepEqual(after.controls, before.controls, label + ": связи");
+    }
   }
 });
