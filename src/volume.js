@@ -7269,22 +7269,48 @@ function volumeTagIndoor(faces, rooms) {
     // Земля и плита под домом — улица всегда: её видно в окно и в дверь, и
     // снег на ней обязан идти.
     if (face.rgb === VOLUME_LAND_RGB || face.layer !== VOLUME_LAYER_BODY) continue;
-    // Пол бывает только в доме: порог в проёме лежит между контурами
-    // помещений, но это всё равно пол.
-    if (face.rgb === VOLUME_FLOOR_RGB) {
+    const middle = volumeMiddleOf(face.p);
+    const floor = face.rgb === VOLUME_FLOOR_RGB;
+    if (middle.z < 0 && !floor) continue;
+    const n = face.n || { x: 0, y: 0, z: 0 };
+    const roomAt = (dx, dy) => {
+      const probe = { x: middle.x + dx, y: middle.y + dy };
+      const found = rooms.find((item) => volumePointInside(probe, item.pointsMm));
+      return found && middle.z + n.z * VOLUME_ROOM_PROBE_MM <= (Number(found.heightMm) || 0) + 1 ? found : null;
+    };
+    // Грань смотрит в комнату — свет комнаты её и светлит (правка «как будто
+    // прозрачные»): торец перегородки, кромка, у которых не было помещения,
+    // красились улицей и в освещённой комнате читались дырой.
+    const ahead = Math.abs(n.z) < 0.9 ? roomAt(n.x * VOLUME_ROOM_PROBE_MM * 2, n.y * VOLUME_ROOM_PROBE_MM * 2) : null;
+    if (ahead) {
       face.indoor = true;
+      face.room = volumeRoomKey(ahead);
       continue;
     }
-    const middle = volumeMiddleOf(face.p);
-    const n = face.n || { x: 0, y: 0, z: 0 };
-    const probe = { x: middle.x + n.x * VOLUME_ROOM_PROBE_MM * 2, y: middle.y + n.y * VOLUME_ROOM_PROBE_MM * 2 };
-    const room = rooms.find((item) => volumePointInside(probe, item.pointsMm));
-    if (!room || middle.z < 0 || middle.z + n.z * VOLUME_ROOM_PROBE_MM > (Number(room.heightMm) || 0) + 1) continue;
+    // Впереди проход между контурами (торец перегородки в проёме, порог):
+    // грань — одна из смежных комнат — «Торец перегородки не как отдельная
+    // комната, а как одна из смежных», — и светлеет по более светлой, как
+    // откосы проёма (`sides`). Щупы — в стороны от грани, на полстены и ещё.
+    const across = Math.abs(n.z) < 0.9 ? [{ x: -n.y, y: n.x }] : [{ x: 1, y: 0 }, { x: 0, y: 1 }];
+    let width = 0;
+    for (const point of face.p) width = Math.max(width, Math.hypot(point.x - middle.x, point.y - middle.y));
+    const reach = width + VOLUME_SUN_PROBE_MM;
+    const found = [];
+    for (const dir of across) {
+      for (const sign of [1, -1]) {
+        const room = roomAt(dir.x * reach * sign, dir.y * reach * sign);
+        const key = room ? volumeRoomKey(room) : null;
+        if (key && !found.includes(key)) found.push(key);
+      }
+    }
+    if (found.length === 0) {
+      // Пол бывает только в доме — даже без соседей это пол, а не улица.
+      if (floor) face.indoor = true;
+      continue;
+    }
     face.indoor = true;
-    // Грань смотрит в комнату — свет комнаты её и светлит (правка «как будто
-    // прозрачные»): торец перегородки посреди гостиной, кромка, у которой не
-    // было помещения, красились улицей и в освещённой комнате читались дырой.
-    face.room = volumeRoomKey(room);
+    if (found.length === 1) face.room = found[0];
+    else face.sides = { a: found[0], b: found[1], key: found[0] + "|" + found[1], out: false };
   }
 }
 
