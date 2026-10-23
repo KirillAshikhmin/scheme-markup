@@ -760,6 +760,9 @@ export function createSimEngine({ emit, owners = [] } = {}) {
         // «Выключатель» клавиши ведёт нагрузки канала — кто бы его ни поставил.
         if (event.char === "On" && service.key) followLoads(device, service, event.value === true, event.chain);
         break;
+      case "Lightbulb":
+        lampFollow(device, service, event);
+        break;
       case "MotionSensor":
         if (event.char !== "MotionDetected") break;
         if (event.value === true) armReset(device, service, event.chain, false);
@@ -879,6 +882,30 @@ export function createSimEngine({ emit, owners = [] } = {}) {
     else if (command === "CLOSE") apply(device.markId, service.index, "TargetPosition", 0, chain);
     else if (command === "STOP") {
       apply(device.markId, service.index, "TargetPosition", read(device, service, "CurrentPosition"), chain);
+    }
+  }
+
+  // Лампа (правка после сборки сценариев): «если у лампочки поставили яркость
+  // 0 %, то она выключается, а, если была выключена и поставили яркость больше
+  // 0, то включается». Включили лампу с нулевой яркостью — она вспоминает
+  // прежнюю (впервые — полную). Режим цвета (`C_ColorMode`) — то, что меняли
+  // последним: оттенок и насыщенность или цветовую температуру.
+  const lampBright = new Map();
+
+  function lampFollow(device, service, event) {
+    const key = device.markId + "|" + service.index;
+    const chain = event.chain;
+    if (event.char === "Brightness") {
+      const level = Number(event.value);
+      if (level > 0) lampBright.set(key, level);
+      const on = read(device, service, "On") === true;
+      if (!(level > 0) && on) apply(device.markId, service.index, "On", false, chain);
+      else if (level > 0 && !on && service.chars.has("On")) apply(device.markId, service.index, "On", true, chain);
+    } else if (event.char === "On" && event.value === true && service.chars.has("Brightness")) {
+      if (!(Number(read(device, service, "Brightness")) > 0)) apply(device.markId, service.index, "Brightness", lampBright.get(key) || 100, chain);
+    } else if (service.chars.has("C_ColorMode")) {
+      const mode = event.char === "Hue" || event.char === "Saturation" ? "HUE" : event.char === "ColorTemperature" ? "TEMPERATURE" : null;
+      if (mode && read(device, service, "C_ColorMode") !== mode) apply(device.markId, service.index, "C_ColorMode", mode, chain);
     }
   }
 

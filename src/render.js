@@ -4798,9 +4798,12 @@ function simLiveShare(value) {
 function drawLiveGlow(ctx, mark, screen, radius, live) {
   const level = simLiveShare(live.level);
   const alpha = (0.16 + 0.5 * level) * lightFadeOf(live);
+  // Цвет лампы (правка после сборки сценариев) — оттенок или цветовая
+  // температура; у лампы без цвета — прежний тёплый.
+  const glowRgb = Array.isArray(live.color) && live.color.length >= 3 ? live.color.slice(0, 3).map((value) => Math.round(Number(value) || 0)).join(", ") : SIM_LIVE_GLOW_RGB;
   ctx.save();
   if (mark.kind === "line" && screen.length > 1) {
-    ctx.strokeStyle = "rgba(" + SIM_LIVE_GLOW_RGB + ", " + (alpha * 0.7).toFixed(3) + ")";
+    ctx.strokeStyle = "rgba(" + glowRgb + ", " + (alpha * 0.7).toFixed(3) + ")";
     ctx.lineWidth = radius * (1.6 + 2.4 * level);
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
@@ -4814,8 +4817,8 @@ function drawLiveGlow(ctx, mark, screen, radius, live) {
   const reach = radius * (2.4 + 2.2 * level);
   for (const point of screen) {
     const gradient = ctx.createRadialGradient(point.x, point.y, radius * 0.4, point.x, point.y, reach);
-    gradient.addColorStop(0, "rgba(" + SIM_LIVE_GLOW_RGB + ", " + alpha.toFixed(3) + ")");
-    gradient.addColorStop(1, "rgba(" + SIM_LIVE_GLOW_RGB + ", 0)");
+    gradient.addColorStop(0, "rgba(" + glowRgb + ", " + alpha.toFixed(3) + ")");
+    gradient.addColorStop(1, "rgba(" + glowRgb + ", 0)");
     ctx.fillStyle = gradient;
     ctx.beginPath();
     ctx.arc(point.x, point.y, reach, 0, Math.PI * 2);

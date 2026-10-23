@@ -143,7 +143,8 @@ const CHARS = {
   On: { format: "bool" },
   Brightness: { format: "int", min: 0, max: 100, step: 1 },
   // Предложение для имитации (§7, примечание): 153–370 миред ≈ 6500–2700 K.
-  ColorTemperature: { format: "int", min: 153, max: 370 },
+  // Правка после сборки сценариев: «по умолчанию регулируется в диапазоне 50–400 миред».
+  ColorTemperature: { format: "int", min: 50, max: 400 },
   Hue: { format: "float", min: 0, max: 360 },
   Saturation: { format: "float", min: 0, max: 100 },
   C_ColorMode: { format: "enum", values: { UNKNOWN: 0, HUE: 1, TEMPERATURE: 2 } },

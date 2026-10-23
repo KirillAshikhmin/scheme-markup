@@ -67,7 +67,9 @@ const SIM_CHARS_OWN = Object.freeze({
   // — свет и реле —
   On: simChar("bool", { initial: false }),
   Brightness: simChar("int", { min: 0, max: 100, step: 1, unit: "percent", initial: 100 }),
-  ColorTemperature: simChar("int", { min: 153, max: 370, step: 1, unit: "mired", initial: 250 }),
+  // Цветовая температура (правка после сборки сценариев): «по умолчанию
+  // регулируется в диапазоне 50–400 миред» — как в словаре хаба.
+  ColorTemperature: simChar("int", { min: 50, max: 400, step: 1, unit: "mired", initial: 250 }),
   Hue: simChar("float", { min: 0, max: 360, step: 1, unit: "degree", initial: 0 }),
   Saturation: simChar("float", { min: 0, max: 100, step: 1, unit: "percent", initial: 0 }),
   C_ColorMode: simChar("enum", {

@@ -274,7 +274,9 @@ test("изоляция: global.x глобального виден логиче�
 
 test("цикл: trigger после записи sourceCharacteristics — source, value, variables, options, context", () => {
   const home = hubHome({ scripts: [{ key: "t", name: "Свет в коридоре", source: recorderScript("T") }], bindings: [{ script: "t", mark: "С1", options: { level: 99 } }] });
-  home.set("С1", "Brightness", 40);
+  // Яркость выключенной лампы в ноль: «Вкл» она не трогает (правка после сборки
+  // сценариев — яркость больше нуля включила бы лампу).
+  home.set("С1", "Brightness", 0);
   assert.deepEqual(calls(home), [], "trigger на чужую характеристику");
   home.set("С1", "On", true);
   home.set("С1", "On", false);

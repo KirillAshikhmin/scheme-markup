@@ -259,6 +259,7 @@ test("живое состояние светильника, датчиков, ш
     lamps: null,
     heat: false,
     climate: null,
+    color: null,
   };
 
   assert.deepEqual(simLiveOf(of("lamp"), {}), { ...dark, lamps: { 0: 0 } }, "дом со старта не тёмный");

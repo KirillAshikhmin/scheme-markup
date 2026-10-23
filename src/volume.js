@@ -8080,7 +8080,10 @@ export function volumeFrame(scene, camera, box, extra = null, tint = null, live 
         day,
         physical: live.physical === true,
         tints: new Map(),
+        roomRgb: live.roomRgb || null,
         full: volumeRoomTint(day ? volumeIndoorTint(tint, 0) : tint, 1),
+        // Тон полной лампы своего цвета — для колец цветных ламп, раз на цвет.
+        fullOf: volumeFullMemo(day ? volumeIndoorTint(tint, 0) : tint),
         sky: tint || VOLUME_NOON_TINT,
       }
     : null;
@@ -8118,7 +8121,8 @@ export function volumeFrame(scene, camera, box, extra = null, tint = null, live 
         const strength = live.lamps ? live.lamps.get(ring.markId) : 0;
         const alpha = ring.alpha * (strength || 0);
         if (!(alpha > VOLUME_LAMP_INVISIBLE)) continue;
-        take({ p: ring.p, n: ring.n || face.n, rgb: face.rgb, layer: face.layer, flat: face.flat, decal: alpha, lamp: true }, rank);
+        const color = live.colors ? live.colors.get(ring.markId) : null;
+        take({ p: ring.p, n: ring.n || face.n, rgb: face.rgb, layer: face.layer, flat: face.flat, decal: alpha, lamp: true, ...(color ? { lampRgb: color } : {}) }, rank);
       }
     }
     // Кольца окон — тем же правилом; сила окна — доля неба на штору.
@@ -8353,6 +8357,8 @@ export function volumeLiveLight(scene, live, options = {}) {
   const glow = new Map();
   const lamps = new Map();
   const sums = new Map();
+  const colors = new Map();
+  const paints = new Map();
   for (const [markId, item] of live || []) {
     if (!item || item.on !== true) continue;
     const fade = lightFadeOf(item);
@@ -8375,23 +8381,45 @@ export function volumeLiveLight(scene, live, options = {}) {
     // Ламп у устройства несколько (ель) — свечение знает каждую: тело своей
     // лампы горит, только пока она горит (`bulb`).
     const many = Boolean(item.lamps && Object.keys(item.lamps).length > 1);
-    glow.set(markId, { level, rgb: tree ? VOLUME_STAR_RGB : VOLUME_GLOW_RGB, fade, ...(many ? { lamps: item.lamps } : {}) });
+    // Цвет лампы (правка после сборки сценариев: «свечение всегда одно, надо
+    // поправить») — её оттенок или цветовая температура (`simLightRgb`); у
+    // лампы без цвета — тёплый белый, как было.
+    const color = !tree && volumeColorOf(item.color);
+    glow.set(markId, { level, rgb: tree ? VOLUME_STAR_RGB : color || VOLUME_GLOW_RGB, fade, ...(many ? { lamps: item.lamps } : {}) });
     const strength = level * fade * (tree ? VOLUME_TREE_LIGHT : 1);
     lamps.set(markId, strength);
+    if (color) colors.set(markId, color);
     const key = item.roomId || volumeRoomKeyAt(scene && scene.rooms, volumeMarkProbe(place));
-    if (key) sums.set(key, (sums.get(key) || 0) + volumeLampPower(place) * strength);
+    if (key) {
+      const power = volumeLampPower(place) * strength;
+      sums.set(key, (sums.get(key) || 0) + power);
+      // Свет комнаты — смесь цветов её ламп по их силе.
+      const mix = paints.get(key) || [0, 0, 0, 0, false];
+      const rgb = color || VOLUME_LAMP_LIGHT_RGB;
+      paints.set(key, [mix[0] + rgb[0] * power, mix[1] + rgb[1] * power, mix[2] + rgb[2] * power, mix[3] + power, mix[4] || Boolean(color)]);
+    }
   }
   if (glow.size === 0 && !sky) return null;
   const areas = volumeRoomAreas(scene);
   const rooms = new Map();
   for (const [key, sum] of sums) rooms.set(key, volumeRoomShare(sum * (physical ? VOLUME_LAMP_BOUNCE : 1), areas.get(key)));
   if (physical) volumeLampSpill(scene, rooms);
+  // Цвет света комнаты — только у комнат, где горит цветная лампа: у
+  // остальных свет тот же тёплый белый, и карта о них молчит.
+  let roomRgb = null;
+  for (const [key, mix] of paints) {
+    if (!mix[4] || !(mix[3] > 0)) continue;
+    if (!roomRgb) roomRgb = new Map();
+    roomRgb.set(key, [mix[0] / mix[3], mix[1] / mix[3], mix[2] / mix[3]]);
+  }
   const out = {
     glow,
     rooms,
     physical,
     lamps,
     decals: physical && live && lamps.size > 0 ? volumeLampDecals(scene, live) : null,
+    ...(colors.size > 0 ? { colors } : {}),
+    ...(roomRgb ? { roomRgb } : {}),
   };
   if (sky) {
     const share = volumeSkyShare(options.tint);
@@ -9108,7 +9136,8 @@ function volumeLiveFill(face, normal, tint, live) {
     // Под лампой и у окна грань светлее, чем просто без тьмы: светлота
     // поднимается к единице (`VOLUME_LAMP_LIFT`, `VOLUME_WINDOW_LIFT`).
     const lift = face.lamp === false ? VOLUME_WINDOW_LIFT : VOLUME_LAMP_LIFT;
-    return volumeFill(face.rgb, shade + (1 - shade) * lift, face.decal, face.lamp === false ? live.sky : live.full);
+    const full = face.lampRgb && live.fullOf ? live.fullOf(face.lampRgb) : live.full;
+    return volumeFill(face.rgb, shade + (1 - shade) * lift, face.decal, face.lamp === false ? live.sky : full);
   }
   if (face.led) return volumeFill(face.rgb, 1, 1, null);
   if (face.lit && face.markId && live.glow) {
@@ -9146,7 +9175,7 @@ function volumeRoomTintOf(key, tint, live) {
   if (held !== undefined) return held;
   const base = live.day && live.day.has(key) ? volumeIndoorTint(tint, live.day.get(key)) : tint;
   const level = live.rooms ? live.rooms.get(key) || 0 : 0;
-  const own = level > 0 ? volumeRoomTint(base, level) : base;
+  const own = level > 0 ? volumeRoomTint(base, level, live.roomRgb ? live.roomRgb.get(key) || null : null) : base;
   if (live.tints) live.tints.set(key, own);
   return own;
 }
@@ -9180,7 +9209,7 @@ export function volumeGlowFill(rgb, glow, alpha = 1, tint = null, shade = 1) {
  * яркости, а сама ночь теплее — к цвету лампы. Днём доли ночи нет, и комната
  * остаётся какой была.
  */
-export function volumeRoomTint(tint, level) {
+export function volumeRoomTint(tint, level, lamp = null) {
   const share = tint ? volumeShare01(tint.share) : 0;
   const light = volumeShare01(level);
   if (!(light > 0)) return tint;
@@ -9189,9 +9218,30 @@ export function volumeRoomTint(tint, level) {
   // с суммой долей: `материал·(1 − a − b) + тьма·a + свет·b`.
   const dark = share * (1 - VOLUME_ROOM_LIGHT * light);
   const glow = VOLUME_LAMP_LIGHT_SHARE * light;
-  const night = volumeMix((tint && tint.rgb) || VOLUME_NIGHT_RGB, VOLUME_ROOM_WARM_RGB, VOLUME_ROOM_WARM * light);
+  // Цветная лампа (правка после сборки сценариев) тянет ночь к своему цвету
+  // той же долей, что тёплая — к тёплому.
+  const rgb = lamp || VOLUME_LAMP_LIGHT_RGB;
+  const warm = lamp ? lamp.map((value, index) => (value * VOLUME_ROOM_WARM_RGB[index]) / VOLUME_LAMP_LIGHT_RGB[index]) : VOLUME_ROOM_WARM_RGB;
+  const night = volumeMix((tint && tint.rgb) || VOLUME_NIGHT_RGB, warm, VOLUME_ROOM_WARM * light);
   const sum = dark + glow;
-  return { rgb: volumeMix(night, VOLUME_LAMP_LIGHT_RGB, glow / sum), share: sum };
+  return { rgb: volumeMix(night, rgb, glow / sum), share: sum };
+}
+
+/** Тон полной лампы по её цвету — один раз на цвет за кадр. */
+function volumeFullMemo(base) {
+  const held = new Map();
+  return (rgb) => {
+    const key = rgb.join(",");
+    if (!held.has(key)) held.set(key, volumeRoomTint(base, 1, rgb));
+    return held.get(key);
+  };
+}
+
+/** Цвет лампы из состояния дома: три числа 0…255 или `null`. */
+function volumeColorOf(rgb) {
+  if (!Array.isArray(rgb) || rgb.length < 3) return null;
+  const out = rgb.slice(0, 3).map((value) => Math.max(0, Math.min(255, Number(value) || 0)));
+  return out;
 }
 
 // ——— видно, что работает (правка после сборки сценариев) ————————————————————

@@ -81,7 +81,9 @@ test("значение вне диапазона зажимается по ме�
   assert.equal(home.value("ДО1", "ContactSensorState"), "CONTACT_NOT_DETECTED");
 
   home.recorder.clear();
-  assert.equal(home.set("С1", "On", false), false, "запись того же значения — изменение");
+  // Яркость больше нуля включила лампу (правка после сборки сценариев), и «Вкл»
+  // уже стоит.
+  assert.equal(home.set("С1", "On", true), false, "запись того же значения — изменение");
   assert.equal(home.set("С1", "Brightness", 33), false);
   assert.deepEqual(home.recorder.changes(), [], "то же значение ушло в изменения");
   assert.deepEqual(home.recorder.log(), [], "то же значение попало в журнал");

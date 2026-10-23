@@ -54,6 +54,51 @@ function simShare(value, max = 100) {
  * когда работает, розетка тоже, и выключатель… придумай как визуально отличать
  * работающие от отключенных устройств». Их читает «Объём» (`volumeLiveSigns`).
  */
+// ——— цвет лампы (правка после сборки сценариев) ——————————————————————————
+//
+// Слова заказчика: «добавь что бы у света можно было менять цветовую
+// температуру и оттенок/насыщенность… свечение всегда одно, надо поправить» и
+// «по умолчанию светильники умеют всё, если у сервиса включили нужную
+// характеристику». Цвет — по характеристикам сервиса, а не по виду: оттенок с
+// насыщенностью, цветовая температура или ничего (тёплое свечение, как было).
+
+/** Цвет цветовой температуры в миредах: `[r, g, b]` (приближение Таннера Хелланда). */
+export function simMiredRgb(mired) {
+  const kelvin = 1e6 / Math.max(1, Number(mired) || 1);
+  const t = Math.max(1000, Math.min(40000, kelvin)) / 100;
+  const clamp = (value) => Math.round(Math.max(0, Math.min(255, value)));
+  const red = t <= 66 ? 255 : 329.698727446 * Math.pow(t - 60, -0.1332047592);
+  const green = t <= 66 ? 99.4708025861 * Math.log(t) - 161.1195681661 : 288.1221695283 * Math.pow(t - 60, -0.0755148492);
+  const blue = t >= 66 ? 255 : t <= 19 ? 0 : 138.5177312231 * Math.log(t - 10) - 305.0447927307;
+  return [clamp(red), clamp(green), clamp(blue)];
+}
+
+/** Цвет по оттенку (градусы) и насыщенности (проценты) при полной светлоте: `[r, g, b]`. */
+export function simHueRgb(hue, saturation) {
+  const h = ((((Number(hue) || 0) % 360) + 360) % 360) / 60;
+  const s = Math.max(0, Math.min(100, Number(saturation) || 0)) / 100;
+  const x = 1 - Math.abs((h % 2) - 1);
+  const [r, g, b] = h < 1 ? [1, x, 0] : h < 2 ? [x, 1, 0] : h < 3 ? [0, 1, x] : h < 4 ? [0, x, 1] : h < 5 ? [x, 0, 1] : [1, 0, x];
+  const mix = (value) => Math.round(255 * (1 - s + s * value));
+  return [mix(r), mix(g), mix(b)];
+}
+
+/**
+ * Цвет лампы по её сервису: `[r, g, b]` или `null` — цвета у лампы нет. Режим
+ * (`C_ColorMode`) решает, что светит: оттенок или температура. Без режима —
+ * оттенок, если он есть и насыщенность не ноль, иначе температура.
+ */
+export function simLightRgb(service, read) {
+  const has = (type) => Array.isArray(service.chars) && service.chars.some((item) => item.type === type);
+  const hs = has("Hue") && has("Saturation");
+  const ct = has("ColorTemperature");
+  if (!hs && !ct) return null;
+  const mode = has("C_ColorMode") ? read(service, "C_ColorMode") : null;
+  const useHs = hs && (mode === "HUE" || (!ct && mode !== "TEMPERATURE") || (mode === null && Number(read(service, "Saturation")) > 0));
+  if (useHs) return simHueRgb(read(service, "Hue"), read(service, "Saturation"));
+  return ct ? simMiredRgb(read(service, "ColorTemperature")) : null;
+}
+
 export function simLiveOf(accessory, values) {
   const live = {
     on: false,
@@ -70,6 +115,9 @@ export function simLiveOf(accessory, values) {
     lamps: null,
     heat: false,
     climate: null,
+    // Цвет горящей лампы `[r, g, b]` (правка после сборки сценариев) — или
+    // `null`: свечение тёплое, как было.
+    color: null,
   };
   if (!accessory || !Array.isArray(accessory.services)) return live;
   const read = simLiveReader(values);
@@ -95,6 +143,7 @@ export function simLiveOf(accessory, values) {
           const brightness = read(service, "Brightness");
           level = brightness === undefined ? 1 : simShare(brightness);
           lit(level);
+          if (!live.color) live.color = simLightRgb(service, read);
         }
         if (!live.lamps) live.lamps = {};
         live.lamps[service.index] = level;
