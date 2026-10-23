@@ -21,7 +21,7 @@ import {
   volumeMarkPlace,
   volumeScene,
 } from "../src/volume.js";
-import { deviceServiceRole } from "../src/panels/deviceCard.js";
+import { deviceServiceRole } from "../src/panels/deviceSettings.js";
 
 function stand() {
   const added = addScheme(createProject(), { name: "1 этаж", imageId: "plan-1", width: 1200, height: 800 });
@@ -173,4 +173,19 @@ test("штора: сторона открывания — своя или та, 
   // Старая метка без поля открывается как была (G68): поля не дописано.
   assert.equal(Object.prototype.hasOwnProperty.call(project.marks.find((mark) => mark.id === id), "curtainSide"), false);
   void updateMark;
+});
+
+test("бризер — тот же «Бризер», у которого в составе «Подогрев»", async () => {
+  const { typeDeviceOf } = await import("../src/model.js");
+  const { deviceWindowModel } = await import("../src/panels/deviceSettings.js");
+  const { strings } = await import("../src/strings.js");
+  const project = createProject();
+  const type = project.markTypes.find((item) => item.code === "Б");
+  const profile = typeDeviceOf(project, type.id);
+  assert.equal(profile.kind, "breezer");
+  // Вид назван просто «Бризер» — слова заказчика: «Бризер с подогревом это не
+  // отдельный тип, это тот же бризер, у которого есть сервис Подогрев».
+  assert.equal(strings.sim.kinds.breezer, "Бризер");
+  const model = deviceWindowModel({ ...profile, decoupled: [], params: { ...profile.params } });
+  assert.deepEqual(model.services.map((service) => service.label), [strings.sim.services.Fan, "Подогрев"]);
 });

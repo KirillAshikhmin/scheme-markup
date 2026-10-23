@@ -304,6 +304,21 @@ function deviceAddedFlags(draft) {
 }
 
 /**
+ * Подпись сервиса по виду устройства (правка после сборки сценариев): у
+ * бризера «Выключатель» — это подогрев, у ели две лампы — гирлянда и звезда, у
+ * тёплого пола термостат — сам пол. Имени в профиле у них нет: оно выводится,
+ * а не пишется (ADR 013). `null` — у вида своих подписей нет. Одна подпись на
+ * окно устройства (состав профиля) и на карточку дома (`deviceCard.js`).
+ */
+export function deviceServiceRole(kind, service) {
+  const roles = strings.sim.roles || {};
+  if (kind === "breezer" && service.type === "Switch") return roles.breezerHeat || null;
+  if (kind === "xmasTree" && service.type === "Lightbulb") return (service.index === 0 ? roles.treeGarland : roles.treeStar) || null;
+  if (kind === "warmFloor" && service.type === "Thermostat") return roles.warmFloor || null;
+  return null;
+}
+
+/**
  * Состав окна по черновику: что показать и что можно. Чистая функция —
  * по ней окно строится и по ней же тест проверяет состав. `aid` — у окна
  * метки её идентификатор аксессуара, у окна типа `null` (у каждой метки свой).
@@ -321,7 +336,8 @@ export function deviceWindowModel(draft, channels = 1, { aid = null } = {}) {
   const relayed = draft.services.some((service) => service.type === DEVICE_RELAY_TYPE);
   const services = draft.services.map((service, index) => {
     const meta = simServiceMeta(service.type);
-    const name = strings.sim.services[service.type] || service.type;
+    // У бризера «Выключатель» — «Подогрев», у ели лампы — гирлянда и звезда.
+    const name = deviceServiceRole(draft.kind, { type: service.type, index }) || strings.sim.services[service.type] || service.type;
     return {
       index,
       type: service.type,

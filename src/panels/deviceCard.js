@@ -24,6 +24,7 @@ import { pressDetector } from "../sim/presses.js";
 import { strings, text } from "../strings.js";
 import { scenarioScriptLogicOf, scenarioScriptLogicView } from "./scenarioScript.js";
 import { uiButton, uiEl } from "./ui.js";
+import { deviceServiceRole } from "./deviceSettings.js";
 
 // Что срабатывает как датчик (движок: `SIM_ENGINE_SENSORS`).
 const DEVICE_CARD_SENSORS = new Set(["MotionSensor", "OccupancySensor", "ContactSensor", "LeakSensor", "SmokeSensor"]);
@@ -366,20 +367,6 @@ function deviceCardControl(meta) {
  *              value, text, control: {kind: "toggle" | "range" | "select" |
  *              "readout", …}}`.
  */
-/**
- * Подпись сервиса по виду устройства (правка после сборки сценариев): у
- * бризера «Выключатель» — это подогрев, у ели две лампы — гирлянда и звезда, у
- * тёплого пола термостат — сам пол. Имени в профиле у них нет: оно выводится,
- * а не пишется (ADR 013). `null` — у вида своих подписей нет.
- */
-export function deviceServiceRole(kind, service) {
-  const roles = strings.sim.roles || {};
-  if (kind === "breezer" && service.type === "Switch") return roles.breezerHeat || null;
-  if (kind === "xmasTree" && service.type === "Lightbulb") return (service.index === 0 ? roles.treeGarland : roles.treeStar) || null;
-  if (kind === "warmFloor" && service.type === "Thermostat") return roles.warmFloor || null;
-  return null;
-}
-
 export function deviceCardModel(project, markId, read = null, readForms = undefined) {
   const accessory = markAccessory(project, markId);
   if (!accessory) return null;
