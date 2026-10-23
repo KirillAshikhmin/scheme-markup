@@ -22,8 +22,11 @@ import {
   findRoom,
   listedMarks,
   outlinesInOrder,
+  roomCeilingChosen,
+  roomHasCeiling,
   roomHasFloor,
   roomsInOrder,
+  setRoomCeiling,
   setRoomFloor,
   updateRoom,
 } from "../model.js";
@@ -91,6 +94,10 @@ export function roomsRows(project, schemeId) {
       outlineId: outline ? outline.id : null,
       // Пол помещения (таск 209): по умолчанию есть, и строка списка — его дом.
       hasFloor: roomHasFloor(project, room.id),
+      // Потолок (правка после сборки сценариев): сам по стенам этой схемы или
+      // выбранный рукой — кнопка говорит, что из двух.
+      hasCeiling: roomHasCeiling(project, room.id, schemeId),
+      ceilingChosen: roomCeilingChosen(project, room.id),
     };
   });
 }
@@ -313,6 +320,28 @@ function mountRoomsPanel(host, api) {
     commit(after.project, strings.history.roomFloor);
   }
 
+  /**
+   * Поставить или снять потолок (правка после сборки сценариев): «если высота
+   * стены 0, то там потолка нет, только пол, если не указано иное». Выбор,
+   * совпавший с выводом по стенам, модель снимает — помещение снова следует за
+   * стенами (`setRoomCeiling`).
+   */
+  function toggleCeiling(roomId) {
+    const before = project();
+    const schemeId = getState().schemeId;
+    const row = roomsRows(before, schemeId).find((item) => item.room.id === roomId);
+    if (!row) return;
+    let after;
+    try {
+      after = setRoomCeiling(before, roomId, !row.hasCeiling, schemeId);
+    } catch (error) {
+      fail(error);
+      return;
+    }
+    if (!after.changed) return;
+    commit(after.project, strings.history.roomCeiling);
+  }
+
   function recolor(roomId, color) {
     const current = findRoom(project(), roomId);
     // Поле цвета отдаёт значение в нижнем регистре, модель хранит в верхнем:
@@ -403,6 +432,19 @@ function mountRoomsPanel(host, api) {
             title: (row.hasFloor ? strings.rooms.floorOn : strings.rooms.floorOff) + ". " + strings.rooms.floorHint,
             attrs: { "aria-pressed": row.hasFloor ? "true" : "false" },
             on: { click: () => toggleFloor(row.room.id) },
+          }),
+          // Потолок — рядом с полом и тем же рисунком: нажатая — потолок есть,
+          // отжатая и перечёркнутая — помещение под открытым небом.
+          uiIconButton("ceilingSlab", {
+            class: "ui-btn " + (row.hasCeiling ? "rooms__floor--on" : "rooms__floor--off"),
+            title:
+              (row.hasCeiling ? strings.rooms.ceilingOn : strings.rooms.ceilingOff) +
+              " (" +
+              (row.ceilingChosen ? strings.rooms.ceilingChosen : strings.rooms.ceilingAuto) +
+              "). " +
+              strings.rooms.ceilingHint,
+            attrs: { "aria-pressed": row.hasCeiling ? "true" : "false" },
+            on: { click: () => toggleCeiling(row.room.id) },
           }),
           uiIconButton("trash", {
             class: "ui-btn ui-btn--danger",

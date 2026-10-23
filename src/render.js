@@ -66,6 +66,7 @@ import {
   typesInOrder,
   wallNames,
   wallVectors,
+  wallOwnHeightMm,
   wallsOnScheme,
 } from "./model.js";
 import { strings, text } from "./strings.js";
@@ -5715,11 +5716,36 @@ function drawDrawingLetters(ctx, bridge, names, walls, wallAt) {
   ctx.restore();
 }
 
+/** Пунктир стены высотой ноль: на плане это край пола, а не стена. */
+const DRAWING_LOW_WALL_DASH = [5, 3];
+
 function drawDrawingWall(ctx, bridge, wall, active) {
   const from = bridge.toScreen(wall.aMm);
   const to = bridge.toScreen(wall.bMm);
   const width = Math.max(1, Number(wall.thicknessMm) * bridge.pxPerMm);
   ctx.lineCap = "butt";
+  // **Стена высотой ноль** (правка после сборки сценариев) — стены нет, есть
+  // край пола: два пунктира по граням без заливки. Так её видно и выделить
+  // можно, а за стену её не примешь — как не примешь за неё границу балкона.
+  if (wallOwnHeightMm(wall) === 0) {
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const length = Math.hypot(dx, dy) || 1;
+    const nx = (dy / length) * (width / 2);
+    const ny = (-dx / length) * (width / 2);
+    ctx.save();
+    ctx.lineWidth = 1.2;
+    ctx.strokeStyle = active ? DRAWING_ACTIVE : DRAWING_WALL;
+    ctx.setLineDash(DRAWING_LOW_WALL_DASH);
+    ctx.beginPath();
+    ctx.moveTo(from.x + nx, from.y + ny);
+    ctx.lineTo(to.x + nx, to.y + ny);
+    ctx.moveTo(from.x - nx, from.y - ny);
+    ctx.lineTo(to.x - nx, to.y - ny);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
   ctx.lineWidth = width;
   ctx.strokeStyle = active ? DRAWING_ACTIVE : DRAWING_WALL;
   ctx.beginPath();

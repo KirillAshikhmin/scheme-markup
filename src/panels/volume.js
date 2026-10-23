@@ -2255,7 +2255,9 @@ function createVolume({ api, hosts }) {
    */
   function syncAir() {
     const climate = view === "person" && homeOn() ? simClimate() : null;
-    const room = climate ? volumeRoomAt(scene, person) : null;
+    // Помещение без потолка (балкон) — улица и для воздуха.
+    const found = climate ? volumeRoomAt(scene, person) : null;
+    const room = found && found.hasCeiling !== false ? found : null;
     const own = room && room.roomId && climate.rooms ? climate.rooms[room.roomId] : null;
     const said = own
       ? volumeAirLine(own.t, own.rh, own.co2)
@@ -2442,7 +2444,9 @@ function createVolume({ api, hosts }) {
     const strength = kind === "snow" ? weather.snow : kind === "rain" ? weather.rain : 0;
     rain.set(kind, strength, Math.min(1, (Number(at && at.tint && at.tint.share) || 0) / VOLUME_NIGHT_SHARE));
     const on = Boolean(kind) && !scene.empty;
-    const indoors = on && view === "person" && Boolean(volumeRoomAt(scene, person));
+    // На балконе без потолка — под небом: снег идёт по всему полю.
+    const here = on && view === "person" ? volumeRoomAt(scene, person) : null;
+    const indoors = Boolean(here) && here.hasCeiling !== false;
     rain.mask(indoors ? shown : null);
     rain.show(on);
   }

@@ -90,6 +90,9 @@ export function elevationNote(elevation, drawn) {
   if (!elevation) return "";
   const notes = [];
   if (!elevation.heightKnown) notes.push(text("elevation.noHeight", { height: elevation.heightShownMm }));
+  // Своя высота ноль (правка после сборки сценариев): стены нет, и пустой лист
+  // называется словом, а не выглядит поломкой.
+  if (elevation.heightKnown && elevation.heightShownMm === 0) notes.push(strings.elevation.noWall);
   const empty =
     elevation.openings.length === 0 && elevation.marks.length === 0 && elevation.objects.length === 0;
   if (empty) notes.push(strings.elevation.empty);

@@ -146,11 +146,18 @@ import {
   setRoomWallHeight,
   setSchemeAnchor,
   setSchemeWallHeight,
+  setWallHeight,
+  splitWall,
   updateOpening,
   updateSchemeObject,
   updateWall,
+  WALL_SPLIT_MIN_MM,
+  wallHeightInheritedMm,
+  wallHeightValueMm,
   wallLengthMm,
   wallName,
+  wallOwnHeightMm,
+  wallSplitStops,
   wallVectors,
   wallsOnScheme,
 } from "../model.js";
@@ -179,6 +186,7 @@ import {
 import {
   DRAWING_ACTIVE,
   DRAWING_EDGE,
+  DRAWING_BAD,
   DRAWING_GHOST_ALPHA,
   DRAWING_GHOST_DASH,
   SNAP_STEP_DEG,
@@ -464,7 +472,10 @@ export function workshopWallAdopt({ wantId, haveId, onScheme, tool } = {}) {
  * целиком: разойдись он с холстом, одна и та же клавиша делала бы на двух
  * поверхностях разное.
  */
-export function workshopEscStep({ anchorPick, draft, selected, mode } = {}) {
+export function workshopEscStep({ anchorPick, splitPick, draft, selected, mode } = {}) {
+  // Ожидание места деления стены — та же верхняя ступень, что точка привязки:
+  // пришло последним, снимается первым, а выделение стены остаётся.
+  if (splitPick) return "split";
   // Ожидание щелчка по точке привязки — верхняя ступень (таск 208): оно
   // пришло последним и снимается первым, как черновик снимается раньше
   // выделения. Черновика при этом под ним не бывает — `startAnchorPick`
@@ -1820,7 +1831,8 @@ function workshopHintSubject(tool, way) {
  * Чистая и вынесена наружу ради теста: про что говорит строка, видно без
  * браузера.
  */
-export function workshopModeNote({ anchorPick, mode, tool, wallCount, refusal } = {}) {
+export function workshopModeNote({ anchorPick, splitPick, mode, tool, wallCount, refusal } = {}) {
+  if (splitPick) return { text: strings.workshop.splitPickHint, bad: false };
   // Ждут щелчка по точке привязки (таск 208) — об этом строка и говорит, что
   // бы ни стояло в занятии: ожидание старше его, и щелчок уйдёт ему, а не
   // стене. Второй строки для этого не заводится — дверь к словам под кнопками
@@ -1837,6 +1849,68 @@ export function workshopModeNote({ anchorPick, mode, tool, wallCount, refusal } 
   // строка объясняет призрак, а не заменяет его.
   if (refusal) return { text: String(refusal), bad: true };
   return { text: drawPickerHint(tool), bad: false };
+}
+
+/**
+ * Подпись стены в списке: длина и толщина, а со своей высотой — и она
+ * (правка после сборки сценариев). Стену высотой ноль иначе не отличить от
+ * обычной, не выделив её.
+ */
+export function workshopWallNote(wall) {
+  const own = wallOwnHeightMm(wall);
+  if (own === 0) return text("workshop.listWallNoteNone", { length: wallLengthMm(wall) });
+  if (own !== null) {
+    return text("workshop.listWallNoteHeight", { length: wallLengthMm(wall), thickness: wall.thicknessMm, height: own });
+  }
+  return text("workshop.listWallNote", { length: wallLengthMm(wall), thickness: wall.thicknessMm });
+}
+
+/** Шаг, на который садится точка деления стены вне притяжки, мм. */
+export const WORKSHOP_SPLIT_ROUND_MM = 10;
+/** Насколько близко к примыканию точка деления к нему притягивается, точек экрана. */
+export const WORKSHOP_SPLIT_SNAP_PX = 14;
+
+/**
+ * Где делить стену по месту руки (правка после сборки сценариев): отступ от
+ * конца `a` — проекция руки на ось, притянутая к ближайшему примыканию другой
+ * стены (`stops`, не дальше `snapMm`) или округлённая до
+ * `WORKSHOP_SPLIT_ROUND_MM`. `free` (Alt) — миллиметр под рукой.
+ *
+ * `{atMm, snapped, ok, code}`: `code` — почему здесь делить нельзя (у конца,
+ * по проёму); слово то же, каким откажет модель (`splitWall`).
+ */
+export function workshopSplitAt(wall, pointMm, { stops = [], snapMm = 0, free = false, openings = [] } = {}) {
+  const vectors = wallVectors(wall);
+  if (!vectors || !pointMm) return null;
+  const raw = Math.max(
+    0,
+    Math.min(
+      vectors.len,
+      (Number(pointMm.x) - Number(wall.aMm.x)) * vectors.u.x + (Number(pointMm.y) - Number(wall.aMm.y)) * vectors.u.y,
+    ),
+  );
+  let at = Math.round(raw);
+  let snapped = false;
+  if (!free) {
+    let best = null;
+    for (const stop of stops) {
+      if (Math.abs(stop - raw) > snapMm) continue;
+      if (best === null || Math.abs(stop - raw) < Math.abs(best - raw)) best = stop;
+    }
+    if (best !== null) {
+      at = best;
+      snapped = true;
+    } else {
+      at = Math.round(raw / WORKSHOP_SPLIT_ROUND_MM) * WORKSHOP_SPLIT_ROUND_MM;
+    }
+  }
+  const length = wallLengthMm(wall);
+  let code = null;
+  if (at < WALL_SPLIT_MIN_MM || at > length - WALL_SPLIT_MIN_MM) code = "wallSplitEnd";
+  else if (openings.some((item) => at > Number(item.atMm) && at < Number(item.atMm) + Number(item.widthMm))) {
+    code = "wallSplitOpening";
+  }
+  return { atMm: at, snapped, ok: code === null, code };
 }
 
 /**
@@ -1874,7 +1948,7 @@ export function workshopListGroups(project, schemeId) {
       kind: "wall",
       id: wall.id,
       label: text("workshop.listWall", { name: wallName(project, wall.id) }),
-      note: text("workshop.listWallNote", { length: wallLengthMm(wall), thickness: wall.thicknessMm }),
+      note: workshopWallNote(wall),
     });
     for (const opening of openingsInWall(project, wall.id)) {
       openingRows.push({
@@ -2085,6 +2159,9 @@ function createWorkshop({ api, hosts }) {
   // чертежа, T164 и T168). Рука ушла с поля — `pointMm` пуст и призрака нет:
   // обещать постановку там, куда клик не дойдёт, нельзя.
   let anchorPick = null;
+  // Ожидание щелчка по месту деления стены (правка после сборки сценариев):
+  // `{wallId, at}` — какую стену и где сейчас черта под рукой.
+  let splitPick = null;
   let drag = null;
   let pan = null;
   // Нажатие, которое ещё не решило, чем станет: клик занятия или панорама.
@@ -2222,10 +2299,24 @@ function createWorkshop({ api, hosts }) {
   // (находка 9 разбора механик). Своя у каждой породы: пачка полей одна на
   // породу и переезжает в выделенную строку, значит и строка причины с ней.
   const wallBad = uiBadLine();
+  // Своя высота стены (правка после сборки сценариев): пусто — как у
+  // помещения, ноль — стены нет. Подсказкой стоит та высота, что будет без
+  // своей: так видно, что именно перебивает число.
+  const wallHeightInput = uiNumber(0, DRAWING_MM_MAX);
+  uiApply(wallHeightInput, () => applyWallHeight());
+  const wallHeightNote = uiEl("p", { class: "workshop__note" });
+  const splitButton = uiButton(strings.workshop.wallSplit, {
+    class: "ui-btn ui-btn--wide",
+    title: strings.workshop.wallSplitHint,
+    on: { click: () => startSplitPick() },
+  });
   const wallDetail = uiEl("div", { class: "workshop__detail ui-fields" }, [
     uiField(strings.workshop.thickness, thicknessInput),
+    uiField(strings.workshop.wallHeight, wallHeightInput),
+    wallHeightNote,
     wallBad,
     wallNote,
+    splitButton,
     removeButton(),
   ]);
 
@@ -2637,6 +2728,7 @@ function createWorkshop({ api, hosts }) {
     // стены перебивали бы умолчания проёма, за которым человек и переключился.
     clearBad();
     selected = null;
+    splitPick = null;
     tool = next;
     // Выделенная стена живёт и в состоянии сеанса: сняли выделение — полоса
     // развёртки над планом закрывается вместе с ним.
@@ -2651,6 +2743,8 @@ function createWorkshop({ api, hosts }) {
     // ответ про чужое число остался бы висеть (находка 9 разбора механик).
     clearBad();
     selected = next;
+    // Делили другую стену — ожидание с ней и уходит.
+    if (splitPick && !(next && next.kind === "wall" && next.id === splitPick.wallId)) splitPick = null;
     // Выделенная стена попадает и в состояние сеанса: выделение у чертежа и у
     // плана общее, и полоса развёртки выезжает по одному правилу на оба поля
     // (G227) — выделена стена, и галка «Развёртка выделенной стены» в
@@ -2663,7 +2757,7 @@ function createWorkshop({ api, hosts }) {
   // Снять ответ про негодное число во всех трёх пачках (находка 9 разбора
   // механик): он относился к тому, что было выделено.
   function clearBad() {
-    uiMarkBad(wallBad, [thicknessInput]);
+    uiMarkBad(wallBad, [thicknessInput, wallHeightInput]);
     uiMarkBad(openingBad, [openingWidth, openingHeight, openingFloor, openingAt]);
     uiMarkBad(objectBad, [objectWidth, objectDepth, objectTurn, objectHeight, objectFloor]);
   }
@@ -2758,6 +2852,116 @@ function createWorkshop({ api, hosts }) {
       fail(error);
       sync();
     }
+  }
+
+  /**
+   * Своя высота выделенной стены (правка после сборки сценариев). Отказ модели
+   * («проём выше стены») — у самого поля: число не понравилось именно в нём.
+   */
+  function applyWallHeight() {
+    const wall = selectedWall();
+    if (!wall) {
+      sync();
+      return;
+    }
+    const parsed = workshopParseFields([
+      { key: "heightMm", input: wallHeightInput, value: wallHeightInput.value, parse: wallHeightValueMm },
+    ]);
+    if (uiMarkBad(wallBad, [wallHeightInput], parsed.bad)) return;
+    let result;
+    try {
+      result = setWallHeight(project(), wall.id, parsed.values.heightMm);
+    } catch (error) {
+      uiMarkBad(wallBad, [wallHeightInput], [{ input: wallHeightInput, message: error && error.message ? error.message : String(error) }]);
+      return;
+    }
+    if (result.changed) commit(result.project, strings.history.wallOwnHeight);
+  }
+
+  // ——— деление стены (правка после сборки сценариев) ———
+  //
+  // «Править для каждого отрезка стены»: фасад, начерченный одним росчерком,
+  // делят там, где к нему примыкает перегородка, — и у каждого куска своя
+  // высота. Ожидание щелчка устроено как у точки привязки (таск 208): оно
+  // старше занятия, Esc снимает его первым, и под руку ничего не берётся.
+
+  function startSplitPick() {
+    const wall = selectedWall();
+    if (!wall) return;
+    settleDraft();
+    // Места притяжки считаются раз на ожидание: щуп сторон идёт вдоль всей
+    // стены, и гнать его на каждое движение руки незачем — стена под ним та же.
+    splitPick = { wallId: wall.id, at: null, stops: wallSplitStops(project(), wall.id) };
+    sync();
+  }
+
+  /** Где делить по месту руки: правило — чистая `workshopSplitAt`. */
+  function splitAtOf(event) {
+    const wall = splitPick ? findWall(project(), splitPick.wallId) : null;
+    if (!wall) return null;
+    return workshopSplitAt(wall, mmOf(event), {
+      stops: splitPick.stops,
+      snapMm: WORKSHOP_SPLIT_SNAP_PX / Math.max(1e-6, view.zoom),
+      free: Boolean(event.altKey),
+      openings: openingsInWall(project(), wall.id),
+    });
+  }
+
+  function placeSplit(event) {
+    const wallId = splitPick.wallId;
+    const at = splitAtOf(event);
+    splitPick = null;
+    if (!at) {
+      sync();
+      return;
+    }
+    let result;
+    try {
+      result = splitWall(project(), wallId, at.atMm);
+    } catch (error) {
+      fail(error);
+      sync();
+      return;
+    }
+    commit(result.project, strings.history.wallSplit);
+    notify(
+      text("workshop.splitDone", { first: wallLengthMm(result.first), second: wallLengthMm(result.second) }),
+      "success",
+    );
+    sync();
+  }
+
+  /** Метка деления на выделенной стене: поперечная черта и точки примыканий. */
+  function paintSplit() {
+    const wall = splitPick ? findWall(project(), splitPick.wallId) : null;
+    const vectors = wall ? wallVectors(wall) : null;
+    if (!vectors) return;
+    const along = (mm) => screenOf({ x: Number(wall.aMm.x) + vectors.u.x * mm, y: Number(wall.aMm.y) + vectors.u.y * mm });
+    const half = Math.max(8, (Number(wall.thicknessMm) * view.zoom) / 2 + 8);
+    const a = screenOf(wall.aMm);
+    const b = screenOf(wall.bMm);
+    const length = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+    const nx = (b.y - a.y) / length;
+    const ny = -(b.x - a.x) / length;
+    ctx.save();
+    ctx.fillStyle = WORKSHOP_ANCHOR;
+    for (const stop of splitPick.stops) {
+      const at = along(stop);
+      ctx.beginPath();
+      ctx.arc(at.x, at.y, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    const pick = splitPick.at;
+    if (pick) {
+      const at = along(pick.atMm);
+      ctx.strokeStyle = pick.ok ? WORKSHOP_ANCHOR : DRAWING_BAD;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(at.x + nx * half, at.y + ny * half);
+      ctx.lineTo(at.x - nx * half, at.y - ny * half);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   /**
@@ -3482,7 +3686,7 @@ function createWorkshop({ api, hosts }) {
     // ожидание старше занятия, и нажатие обязано дойти до клика, а не увести
     // стену. Найдено живым прогоном: точку ставили по лестнице, а лестница
     // выделялась и ехала за рукой — щелчок до `tap` не доходил вовсе.
-    if (tool === "edit" && !anchorPick) {
+    if (tool === "edit" && !anchorPick && !splitPick) {
       const pick = workshopPick(project(), schemeId, mmOf(event), view, selected, hiddenObjects());
       if (pick) {
         grab(pick, event);
@@ -3541,6 +3745,10 @@ function createWorkshop({ api, hosts }) {
     // Проверка стоит первой нарочно: иначе клик успел бы поставить вершину.
     if (anchorPick) {
       placeAnchor(event);
+      return;
+    }
+    if (splitPick) {
+      placeSplit(event);
       return;
     }
     if (tool === "walls") {
@@ -3723,6 +3931,13 @@ function createWorkshop({ api, hosts }) {
     }
     // Призрак точки привязки идёт за рукой — как призрак вещи (таск 208).
     // Стоит выше занятий по той же причине, что и клик: ожидание их старше.
+    if (splitPick) {
+      const next = onField(event) ? splitAtOf(event) : null;
+      const was = splitPick.at;
+      splitPick = { ...splitPick, at: next };
+      if (!was !== !next || (next && was && (next.atMm !== was.atMm || next.ok !== was.ok))) redraw();
+      return;
+    }
     if (anchorPick) {
       const next = onField(event) ? snapOf(mmOf(event), event.altKey).point : null;
       const was = anchorPick.pointMm;
@@ -4066,11 +4281,21 @@ function createWorkshop({ api, hosts }) {
       // Лесенка целиком — в `workshopEscStep`, здесь только исполнение.
       // Слушатель висит в фазе перехвата: иначе окно закрылось бы раньше, чем
       // черновик успел отмениться.
-      const step = workshopEscStep({ anchorPick: Boolean(anchorPick), draft, selected, mode: mode() });
+      const step = workshopEscStep({
+        anchorPick: Boolean(anchorPick),
+        splitPick: Boolean(splitPick),
+        draft,
+        selected,
+        mode: mode(),
+      });
       if (!step) return;
       event.preventDefault();
       event.stopPropagation();
-      if (step === "anchor") {
+      if (step === "split") {
+        // Передумали делить: стена как была, выделение на ней.
+        splitPick = null;
+        sync();
+      } else if (step === "anchor") {
         // Передумали ставить точку: прежняя остаётся как стояла, в историю не
         // идёт ничего. Занятие и выделение не трогались вовсе — возвращаться
         // некуда (таск 208).
@@ -4338,6 +4563,7 @@ function createWorkshop({ api, hosts }) {
     // стена — главное на чертеже, и прятать её под габаритом нельзя.
     paintDrawing();
     paintAnchor();
+    paintSplit();
     paintObjectHandles();
     paintDraft();
     paintGuides(box);
@@ -4896,6 +5122,8 @@ function createWorkshop({ api, hosts }) {
 
   function sync() {
     const current = project();
+    // Стену, которую ждали разделить, убрали отменой или удалением.
+    if (splitPick && !findWall(current, splitPick.wallId)) splitPick = null;
     const spot = placement();
     const wall = selectedWall();
     const now = mode();
@@ -4940,13 +5168,14 @@ function createWorkshop({ api, hosts }) {
   function syncCursor() {
     node.style.cursor = cursorFor({
       pan: Boolean(pan),
-      place: Boolean(anchorPick) || tool !== "edit",
+      place: Boolean(anchorPick) || Boolean(splitPick) || tool !== "edit",
     });
   }
 
   function syncModeNote() {
     const line = workshopModeNote({
       anchorPick: Boolean(anchorPick),
+      splitPick: Boolean(splitPick),
       mode: mode(),
       tool,
       wallCount: walls().length,
@@ -5127,6 +5356,11 @@ function createWorkshop({ api, hosts }) {
   function syncDetails(current, wall) {
     if (wall) {
       fieldValue(thicknessInput, wall.thicknessMm);
+      const own = wallOwnHeightMm(wall);
+      const inherited = wallHeightInheritedMm(current, wall.id);
+      fieldValue(wallHeightInput, own);
+      wallHeightInput.placeholder = String(inherited);
+      wallHeightNote.textContent = text("workshop.wallHeightHint", { height: inherited });
       wallNote.textContent = text("workshop.wallInfo", { length: wallLengthMm(wall) });
       return;
     }

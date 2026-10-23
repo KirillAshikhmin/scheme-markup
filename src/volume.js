@@ -71,6 +71,7 @@ import {
   outlinesInOrder,
   planFractionToMm,
   roomAtPoint,
+  outlineHasCeiling,
   roomHasFloor,
   planMmToFraction,
   projectCoords,
@@ -88,8 +89,9 @@ import {
   typeChannels,
   typeObjectView,
   WALL_HEIGHT_FALLBACK_MM,
-  wallHeightOnSide,
+  wallHeightMm,
   wallHeightShownMm,
+  wallOwnHeightMm,
   wallVectors,
   wallsOnScheme,
 } from "./model.js";
@@ -1269,8 +1271,12 @@ export function volumeSunOpenings(project, schemeId, rooms, places, heightOf, op
   // сквозь дыру в перекрытии сборка не умеет и не делает вид, что умеет: дыра
   // ведёт на **чужой этаж**, а этажи собираются порознь (таск 202) — см. разбор
   // у `volumeSunBeam`.
+  //
+  // Помещение без потолка (балкон, правка после сборки сценариев) для света —
+  // тоже улица: окно гостиной на открытый балкон светит небом, как наружное.
   const roomAt = (point) =>
-    rooms.find((room) => room.hasFloor !== false && volumePointInside(point, room.pointsMm)) || null;
+    rooms.find((room) => room.hasFloor !== false && room.hasCeiling !== false && volumePointInside(point, room.pointsMm)) ||
+    null;
   // Тюль по стенам: отступы вдоль стены, посчитанные один раз на сцену.
   const sheers = [];
   for (const place of volumeSheerPlaces(places)) {
@@ -3237,6 +3243,10 @@ export function volumeRooms(project, schemeId) {
       // объекта, где комнату удалили, а обводку оставили) считается с полом:
       // снимать его было некому.
       hasFloor: roomHasFloor(project, outline.roomId),
+      // Потолок (правка после сборки сценариев): «если высота стены 0, то там
+      // потолка нет, только пол, если не указано иное». Выводит его модель по
+      // стенам контура, выбор помещения главнее (`outlineHasCeiling`).
+      hasCeiling: outlineHasCeiling(project, outline),
     });
   }
   return rooms;
@@ -3259,7 +3269,9 @@ export function volumeClimateGeometry(project) {
   const ways = [];
   if (!project) return { rooms: [], ways };
   for (const scheme of schemesInOrder(project)) {
-    const list = volumeRooms(project, scheme.id).filter((room) => room.roomId);
+    // Помещение без потолка (балкон, терраса) для воздуха — улица: дверь на
+    // балкон выходит наружу, а датчик на нём показывает улицу.
+    const list = volumeRooms(project, scheme.id).filter((room) => room.roomId && room.hasCeiling !== false);
     if (list.length === 0) continue;
     for (const room of list) {
       const own = rooms.get(room.roomId) || { id: room.roomId, areaMm2: 0, heightMm: 0, windowsMm2: 0 };
@@ -3884,9 +3896,12 @@ export function volumeShiftPoints(points, shiftMm) {
 export function volumeWallHeights(project, schemeId, fallbackMm) {
   const heights = new Map();
   for (const wall of wallsOnScheme(project, schemeId)) {
-    const left = wallHeightOnSide(project, wall.id, "left");
-    const right = wallHeightOnSide(project, wall.id, "right");
-    heights.set(wall.id, Math.max(left > 0 ? left : 0, right > 0 ? right : 0) || fallbackMm);
+    // Своя высота стены (правка после сборки сценариев) — главнее, и ноль у
+    // неё значение: стены нет. Правило счёта одно и живёт в модели
+    // (`wallHeightMm`); `fallbackMm` остался доводом ради прежних вызовов —
+    // модель берёт ту же показанную высоту схемы сама.
+    const own = wallOwnHeightMm(wall);
+    heights.set(wall.id, own !== null ? own : wallHeightMm(project, wall.id) || fallbackMm);
   }
   return heights;
 }
@@ -4617,7 +4632,8 @@ export function volumeStackScene(project, plan, optionsOf, was = null) {
     const above = floors[at + 1];
     if (!above) return {};
     const { dx, dy } = coverShift(at);
-    const uppers = wallsOnScheme(project, above.schemeId).map((wall) => ({
+    // Стена соседа высотой ноль никого не накрывает: её нет.
+    const uppers = wallsOnScheme(project, above.schemeId).filter((wall) => wallOwnHeightMm(wall) !== 0).map((wall) => ({
       aMm: { x: Number(wall.aMm.x) + dx, y: Number(wall.aMm.y) + dy },
       bMm: { x: Number(wall.bMm.x) + dx, y: Number(wall.bMm.y) + dy },
       thicknessMm: wall.thicknessMm,
@@ -6284,6 +6300,10 @@ export function volumeScene(project, schemeId, options = {}) {
     // плиты, которым её потолок и был, стоять негде. Мерку считает одно место
     // (`volumeCeilingUnderVoid`), доводы ей даёт стопка — как и накрытиям стен.
     if (volumeCeilingUnderVoid(room, options.voids, options.capMm)) continue;
+    // **Потолка нет у помещения, открытого небу** (правка после сборки
+    // сценариев): балкон, у которого стены к улице ниже этажа, или помещение,
+    // которому потолок сняли рукой. Пол при этом остаётся — «только пол».
+    if (room.hasCeiling === false) continue;
     // **Потолок двусторонний** (таск 211, дефект D62): снизу это потолок
     // комнаты, сверху — крыша. До таска у него была одна сторона, нормалью
     // вниз, и сверху он отбрасывался отбором — поэтому в кадре сверху потолок
@@ -6346,7 +6366,12 @@ export function volumeScene(project, schemeId, options = {}) {
     // высоту, и это тот самый случай, который видно на рендерах заказчика.
     const cap = covers && covers.length > 0 ? Math.min(own, Number(options.capMm) || own) : own;
     const height = cap;
-    volumeWallFaces(wall, openings, height, faces, options.openDoorIds || null, miters.get(wall.id) || null, rooms);
+    // Стена высотой ноль (правка после сборки сценариев) — стены нет: ни
+    // граней, ни препятствия. Остаётся пол под ней — полоса ниже, — и по нему
+    // выходят на балкон.
+    if (height > 0) {
+      volumeWallFaces(wall, openings, height, faces, options.openDoorIds || null, miters.get(wall.id) || null, rooms);
+    }
     const vectors = wallVectors(wall);
     if (!vectors) continue;
     // Куски, которые верхняя стена не накрыла, продолжаются вверх своим телом:
@@ -6417,10 +6442,12 @@ export function volumeScene(project, schemeId, options = {}) {
     // Сплошные участки стены — во всю её высоту; низкая перемычка над проёмом
     // (G234) — своим куском от верха проёма до верха стены. У препятствия
     // появились высоты: по ним присевший проходит там, где стоящий не проходит.
-    const spans = [
-      ...volumeWallSolids(wall, openings).map((span) => ({ ...span, bottomMm: 0, topMm: height })),
-      ...volumeWallLintels(openings, height),
-    ];
+    const spans = !(height > 0)
+      ? []
+      : [
+          ...volumeWallSolids(wall, openings).map((span) => ({ ...span, bottomMm: 0, topMm: height })),
+          ...volumeWallLintels(openings, height),
+        ];
     for (const span of spans) {
       const middle = (span.fromMm + span.toMm) / 2;
       solids.push({
@@ -6496,6 +6523,12 @@ export function volumeScene(project, schemeId, options = {}) {
     if (markImages || !place.model) volumeMarkViewLines(place, faces);
   }
   volumeTagIndoor(faces, rooms);
+  // Помещение без потолка — под открытым небом (правка после сборки
+  // сценариев): его грани светит небо, как улицу, и снег на них идёт.
+  const openKeys = new Set(rooms.filter((room) => room.hasCeiling === false).map(volumeRoomKey).filter(Boolean));
+  if (openKeys.size > 0) {
+    for (const face of faces) if (face.room && openKeys.has(face.room)) face.open = true;
+  }
   // `wallCount` — настоящее число стен чертежа, а не длина `solids`: препятствий
   // больше, потому что проём режет стену на куски, а вещи на полу тоже держат.
   // Окно говорит о чертеже, и путать эти два числа нельзя.
@@ -7969,7 +8002,8 @@ function volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, b
     clear: Boolean(face.clear),
     // Грань дома — комнаты или проёма (правка после сборки сценариев): за ней
     // дождя и снега не видно (`volumeRainMask`).
-    inside: Boolean(face.room || face.sides || face.indoor),
+    // Грань помещения без потолка — под небом: снег на балконе идёт.
+    inside: !face.open && Boolean(face.room || face.sides || face.indoor),
     // Хозяева — только у своего этажа (`volumeFloorFaces`): у грани чужого
     // этажа их нет, и кадр не отдаёт её ни прицелу, ни щелчку, ни клавише
     // выключателя. Своего правила здесь нет — только послушание пометке.
@@ -8434,7 +8468,11 @@ export function volumeDayLevels(scene, sky) {
   if (held && held.sky === sky) return held.day;
   const areas = volumeRoomAreas(scene);
   const day = new Map();
-  for (const key of areas.keys()) day.set(key, 0);
+  // Помещение без потолка светит небо целиком — как улицу: в карту света окон
+  // оно не попадает вовсе, и тон у его граней уличный.
+  const open = new Set();
+  for (const room of (scene && scene.rooms) || []) if (room.hasCeiling === false) open.add(volumeRoomKey(room));
+  for (const key of areas.keys()) if (!open.has(key)) day.set(key, 0);
   if (sky > 0) {
     for (const [key, area] of volumeSkyWindows(scene).byRoom) {
       day.set(key, volumeWindowShare(area, areas.get(key)) * sky * VOLUME_DAY_BOUNCE);

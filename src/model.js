@@ -6296,8 +6296,12 @@ function checkOpeningFree(project, opening) {
  * не быть вовсе — тогда и сверять нечего.
  */
 function checkOpeningHeight(project, wall, opening) {
-  const height = Number(wallHeightOf(project, { schemeId: wall.schemeId })) || 0;
-  if (!(height > 0)) return;
+  // Своя высота стены (правка после сборки сценариев) главнее схемы: у стены
+  // двусвета в 6000 окно на 4000 законно, а в стену высотой ноль проём не
+  // ставится вовсе.
+  const own = wallOwnHeightMm(wall);
+  const height = own !== null ? own : Number(wallHeightOf(project, { schemeId: wall.schemeId })) || 0;
+  if (own === null && !(height > 0)) return;
   const top = Number(opening.heightAboveFloorMm) + Number(opening.heightMm);
   if (top > height) throw modelError("openingAboveHeight", { top, height });
 }
@@ -6887,6 +6891,8 @@ export function wallHeightShownMm(project, { schemeId, roomId } = {}) {
 function checkHeightOverOpenings(project, schemeId, height) {
   if (!(height > 0)) return;
   for (const wall of wallsOnScheme(project, schemeId)) {
+    // У стены со своей высотой схема ничего не решает.
+    if (wallOwnHeightMm(wall) !== null) continue;
     for (const opening of openingsInWall(project, wall.id)) {
       const top = Number(opening.heightAboveFloorMm) + Number(opening.heightMm);
       if (top > height) throw modelError("openingAboveHeight", { top, height });
@@ -6978,6 +6984,378 @@ export function setRoomWallHeight(project, roomId, value) {
     return { ...item, wallHeightMm: height };
   });
   return { project: withProject(project, { rooms }), room: rooms.find((item) => item.id === roomId), changed: true };
+}
+
+// ——— своя высота стены (правка после сборки сценариев) ————————————————————
+//
+// Слова заказчика: «Хочу сделать балкон, рисую стены, потом ставлю высоту
+// помещения балкона в 10 см, в итоге стена всё равно есть»; «лучше высоту
+// задавать не помещениям, а конкретным стенам. и, если высота стены 0, то там
+// потолка нет, только пол, если не указано иное»; «Общую высоту схемы задать ок,
+// а потом уже править для каждого отрезка стены».
+//
+// **Почему высота помещения балкон не делала.** Стена одна на две стороны, и
+// высоту ей даёт **большая** из сторон (`wallHeightMm`): у стены между кухней
+// и гостиной с потолками 2700 и 3000 правда — 3000. Улица в этом счёте стоит
+// высотой схемы, поэтому помещение может стену только поднять, а опустить —
+// никогда. Менять это правило нельзя: у санузла с подшивным потолком 2500 тогда
+// опустилась бы наружная стена.
+//
+// Поэтому у стены **своё** число (`wall.heightMm`), и оно главнее всех — схемы
+// и помещений по обе стороны. Поле необязательное (G68): нет его — стена
+// считается как считалась, и прежний объект открывается тем же.
+//
+// **Ноль — значение, а не пустота**: стены нет, под ней остаётся пол. Так и
+// собирается французский балкон — три стены в ноль.
+
+/** Своя высота стены: число (ноль тоже) или `null` — своей нет. */
+export function wallOwnHeightMm(wall) {
+  return wall && typeof wall.heightMm === "number" && wall.heightMm >= 0 ? wall.heightMm : null;
+}
+
+/**
+ * Разбор своей высоты стены: пусто — `null` («как у помещения»), иначе целые
+ * миллиметры не меньше нуля. Ноль — значение: «стены нет».
+ */
+export function wallHeightValueMm(value) {
+  if (value === null || value === undefined || (typeof value === "string" && value.trim() === "")) return null;
+  const mm = drawingOffsetMm(value);
+  if (mm > MARK_DIMENSION_MAX) {
+    throw modelError("drawingHeightTooBig", { max: MARK_DIMENSION_MAX, unit: strings.markSizes.unit });
+  }
+  return mm;
+}
+
+/**
+ * Высота стены **без своей**: большая из сторон (помещение со своей высотой
+ * или схема), а нет ни того ни другого — показанная высота схемы. Это то
+ * самое правило, которым объём рисовал стены до правки, и то число, которое
+ * поле высоты стены показывает подсказкой.
+ */
+export function wallHeightInheritedMm(project, wallId) {
+  const wall = findWall(project, wallId);
+  if (!wall) return 0;
+  const side = (name) => wallHeightOf(project, { schemeId: wall.schemeId, roomId: wallRoomId(project, wallId, name) });
+  const left = side("left");
+  const right = side("right");
+  return Math.max(left > 0 ? left : 0, right > 0 ? right : 0) || wallHeightShownMm(project, { schemeId: wall.schemeId }).mm;
+}
+
+/** Высота стены в объёме: своя, а нет её — по помещениям и схеме. */
+export function wallHeightMm(project, wallId) {
+  const own = wallOwnHeightMm(findWall(project, wallId));
+  return own !== null ? own : wallHeightInheritedMm(project, wallId);
+}
+
+/**
+ * Задать стене свою высоту или снять её (`""`, `null` — «как у помещения»).
+ * Опустить стену под стоящий в ней проём модель не даёт — тот же довод, что у
+ * высоты схемы: прижать проём значило бы угадать за человека.
+ */
+export function setWallHeight(project, wallId, value) {
+  const wall = requireWall(project, wallId);
+  const height = wallHeightValueMm(value);
+  if (height === null && wallOwnHeightMm(wall) === null) return { project, wall, changed: false };
+  if (height !== null && height === wallOwnHeightMm(wall)) return { project, wall, changed: false };
+  if (height !== null) {
+    for (const opening of openingsInWall(project, wallId)) {
+      const top = Number(opening.heightAboveFloorMm) + Number(opening.heightMm);
+      if (top > height) throw modelError("openingAboveHeight", { top, height });
+    }
+  }
+  let next;
+  if (height === null) {
+    const { heightMm, ...rest } = wall;
+    next = rest;
+  } else {
+    next = { ...wall, heightMm: height };
+  }
+  const walls = wallsOf(project).map((item) => (item.id === wallId ? next : item));
+  return { project: withProject(project, { walls }), wall: next, changed: true };
+}
+
+// ——— потолок помещения: сам по стенам и по выбору ———————————————————————
+//
+// «Если высота стены 0, то там потолка нет, только пол, если не указано иное».
+//
+// **Сам** — это вывод из стен: потолок не держится там, где помещение выходит
+// на улицу стеной ниже этажа. Ноль — крайний случай того же правила; балкон с
+// парапетом в метр открыт небу точно так же. Стена ниже между двумя помещениями
+// потолка не снимает: полустенка между кухней и гостиной — не улица.
+//
+// «Ниже этажа» — ниже **большего** из потолка помещения и высоты схемы. Так у
+// санузла с подшивным потолком 2500 наружная стена 2800 ниже не считается, а
+// балкон, которому прежде задали высоту 100 мм, открывается парапетом в метр.
+//
+// Спрашиваются только стены **со своей высотой**: у прочих высота — большая из
+// сторон, то есть не ниже потолка помещения по построению, и прежний объект
+// не теряет ни одного потолка (G68).
+//
+// **«Если не указано иное»** — ключ `hasCeiling` у помещения: крытая терраса на
+// столбах (стены в ноль, а навес есть) или лоджия. Пишется только тогда, когда
+// выбор расходится с выводом; совпал — ключ снимается, и помещение снова
+// следует за стенами.
+
+/** Шаг щупа вдоль стены: стена фасада идёт мимо нескольких помещений. */
+const WALL_SKY_STEP_MM = 300;
+
+const OUTLINE_SKY_CACHE = new WeakMap();
+
+/**
+ * Открыт ли контур небу по стенам: есть стена со своей высотой ниже этажа, с
+ * одной стороны которой этот контур, а с другой — улица (ни одного контура).
+ */
+export function outlineOpenToSky(project, outline) {
+  if (!project || !outline || !outline.schemeId) return false;
+  let held = OUTLINE_SKY_CACHE.get(project);
+  if (!held) {
+    held = new Map();
+    OUTLINE_SKY_CACHE.set(project, held);
+  }
+  if (held.has(outline.id)) return held.get(outline.id);
+  const schemeId = outline.schemeId;
+  const floor = Math.max(
+    wallHeightShownMm(project, { schemeId, roomId: outline.roomId }).mm,
+    wallHeightShownMm(project, { schemeId }).mm,
+  );
+  let open = false;
+  for (const wall of wallsOnScheme(project, schemeId)) {
+    const own = wallOwnHeightMm(wall);
+    if (own === null || own >= floor) continue;
+    const vectors = wallVectors(wall);
+    if (!vectors) continue;
+    const away = Number(wall.thicknessMm) / 2 + WALL_ROOM_PROBE_MM;
+    const steps = Math.max(1, Math.round(vectors.len / WALL_SKY_STEP_MM));
+    for (let index = 0; index < steps && !open; index += 1) {
+      const along = ((index + 0.5) / steps) * vectors.len;
+      const probe = (sign) =>
+        planMmToFraction(project, schemeId, {
+          x: Number(wall.aMm.x) + vectors.u.x * along + vectors.n.x * sign * away,
+          y: Number(wall.aMm.y) + vectors.u.y * along + vectors.n.y * sign * away,
+        });
+      const left = probe(1);
+      const right = probe(-1);
+      if (!left || !right) break;
+      const inLeft = pointInOutline(left, outline.points);
+      if (inLeft === pointInOutline(right, outline.points)) continue;
+      if (!outlineAtPoint(project, schemeId, inLeft ? right : left)) open = true;
+    }
+    if (open) break;
+  }
+  held.set(outline.id, open);
+  return open;
+}
+
+/**
+ * Потолок помещения по стенам, без выбора человека: нет, если хоть один его
+ * контур на этой схеме (или на любой, без `schemeId`) открыт небу.
+ */
+export function roomCeilingAuto(project, roomId, schemeId = null) {
+  if (!roomId) return true;
+  return !outlinesOf(project).some(
+    (outline) => outline.roomId === roomId && (!schemeId || outline.schemeId === schemeId) && outlineOpenToSky(project, outline),
+  );
+}
+
+/** Есть ли у помещения потолок: выбор человека, а нет его — по стенам. */
+export function roomHasCeiling(project, roomId, schemeId = null) {
+  const room = roomId ? findRoom(project, roomId) : null;
+  if (room && typeof room.hasCeiling === "boolean") return room.hasCeiling;
+  return roomCeilingAuto(project, roomId, schemeId);
+}
+
+/** Потолок контура в объёме: выбор помещения, а нет его — по стенам этого контура. */
+export function outlineHasCeiling(project, outline) {
+  const room = outline && outline.roomId ? findRoom(project, outline.roomId) : null;
+  if (room && typeof room.hasCeiling === "boolean") return room.hasCeiling;
+  return !outlineOpenToSky(project, outline);
+}
+
+/** Выбрал ли человек потолок помещению сам (ключ есть) или тот следует за стенами. */
+export function roomCeilingChosen(project, roomId) {
+  const room = roomId ? findRoom(project, roomId) : null;
+  return Boolean(room && typeof room.hasCeiling === "boolean");
+}
+
+/**
+ * Поставить или снять потолок. Выбор, совпавший с выводом по стенам
+ * (`roomCeilingAuto` на этой схеме), **удаляет ключ**: помещение снова следует
+ * за стенами, и объект прежней сборки упаковывается байт в байт.
+ */
+export function setRoomCeiling(project, roomId, on, schemeId = null) {
+  const room = findRoom(project, roomId);
+  if (!room) throw modelError("roomNotFound");
+  const want = on !== false;
+  const auto = roomCeilingAuto(project, roomId, schemeId);
+  const has = typeof room.hasCeiling === "boolean";
+  if (want === auto ? !has : has && room.hasCeiling === want) return { project, room, changed: false };
+  const rooms = project.rooms.map((item) => {
+    if (item.id !== roomId) return item;
+    const { hasCeiling, ...rest } = item;
+    return want === auto ? rest : { ...rest, hasCeiling: want };
+  });
+  return { project: withProject(project, { rooms }), room: rooms.find((item) => item.id === roomId), changed: true };
+}
+
+// ——— разделить стену (правка после сборки сценариев) ——————————————————————
+//
+// «Править для каждого отрезка стены». Стена — один отрезок (ADR 008), и
+// фасад, начерченный одним росчерком, остаётся одной стеной, сколько бы
+// помещений вдоль него ни шло. На объекте заказчика стена в 17 700 мм идёт мимо
+// холла в два света на 3200 мм из них — и поднималась в два этажа целиком,
+// потому что высоту стене дают по её середине. Разделить её — и у каждого куска
+// свои стороны и своя высота.
+//
+// Первый кусок **сохраняет `id`**: на нём остаются выделение, открытая
+// развёртка и всё, что лежит до точки деления. Проёмы и метки уходят в тот
+// кусок, где лежат (метка-отрезок — по своей середине), с отступом от его
+// начала. Резать проём модель не даёт: две половинки окна — это не окно.
+
+/** Ближе этого к концу стену не делят: кусок короче — не стена, а шов. */
+export const WALL_SPLIT_MIN_MM = 50;
+
+/** Шаг щупа вдоль стены, которым ищется смена помещения у её стороны. */
+const WALL_STOP_STEP_MM = 50;
+/**
+ * Граница помещения ближе этого к примыканию стены — то же место: контур
+ * обводят по грани перегородки, то есть в полутолщине от её оси, плюс рука.
+ */
+const WALL_STOP_JOIN_MM = 250;
+
+/**
+ * Где делить удобно: места вдоль стены, где к ней примыкают или её пересекают
+ * другие стены схемы (их оси), и места, где у какой-то её стороны **меняется
+ * помещение**, — отступы от конца `a`, по возрастанию. По ним притягивается
+ * точка деления.
+ *
+ * Смена помещения нужна не меньше примыканий: на объекте заказчика холл в два
+ * света переходит в гостиную без перегородки, и примыкания на этой границе нет
+ * — а высота стены у холла и у гостиной разная. Граница ищется щупом стороны
+ * (тот же отход, что у `wallRoomId`) и уточняется делением пополам до
+ * миллиметров, а ставится с шагом в 10 мм — так её и подписывают.
+ */
+export function wallSplitStops(project, wallId) {
+  const wall = findWall(project, wallId);
+  const vectors = wallVectors(wall);
+  if (!vectors) return [];
+  const stops = [];
+  // У самого конца помещение меняется всегда — там угол, и контур кончается у
+  // грани соседней стены. Такая граница делить не помогает.
+  const add = (at) => {
+    if (at < WALL_STOP_JOIN_MM || at > vectors.len - WALL_STOP_JOIN_MM) return;
+    if (!stops.some((item) => Math.abs(item - at) < 15)) stops.push(at);
+  };
+  const away = Number(wall.thicknessMm) / 2 + WALL_ROOM_PROBE_MM;
+  for (const sign of [1, -1]) {
+    const roomOf = (along) => {
+      const point = planMmToFraction(project, wall.schemeId, {
+        x: Number(wall.aMm.x) + vectors.u.x * along + vectors.n.x * sign * away,
+        y: Number(wall.aMm.y) + vectors.u.y * along + vectors.n.y * sign * away,
+      });
+      const outline = point ? outlineAtPoint(project, wall.schemeId, point) : null;
+      return outline ? outline.id : null;
+    };
+    const steps = Math.max(1, Math.ceil(vectors.len / WALL_STOP_STEP_MM));
+    let was = roomOf(0);
+    for (let index = 1; index <= steps; index += 1) {
+      const along = Math.min(vectors.len, index * WALL_STOP_STEP_MM);
+      const now = roomOf(along);
+      if (now !== was) {
+        let low = along - WALL_STOP_STEP_MM;
+        let high = along;
+        for (let step = 0; step < 6; step += 1) {
+          const middle = (low + high) / 2;
+          if (roomOf(middle) === was) low = middle;
+          else high = middle;
+        }
+        add(Math.round((low + high) / 2 / 10) * 10);
+      }
+      was = now;
+    }
+  }
+  const joins = [];
+  for (const other of wallsOnScheme(project, wall.schemeId)) {
+    if (other.id === wall.id) continue;
+    const them = wallVectors(other);
+    if (!them) continue;
+    const cross = vectors.u.x * them.u.y - vectors.u.y * them.u.x;
+    if (Math.abs(cross) < 0.2) continue;
+    const dx = Number(other.aMm.x) - Number(wall.aMm.x);
+    const dy = Number(other.aMm.y) - Number(wall.aMm.y);
+    // Пересечение осей: `t` — вдоль этой стены, `s` — вдоль той.
+    const t = (dx * them.u.y - dy * them.u.x) / cross;
+    const s = (dx * vectors.u.y - dy * vectors.u.x) / cross;
+    // Та стена кончается у грани этой, а не у её оси: запас — полтолщины.
+    const reach = Number(wall.thicknessMm) / 2 + 1;
+    if (s < -reach || s > them.len + reach) continue;
+    // Примыкание точнее границы контура (контур обводят рукой): оно вытесняет
+    // соседнюю границу помещения, а не встаёт рядом с ней.
+    const at = Math.round(t);
+    if (at < WALL_SPLIT_MIN_MM || at > vectors.len - WALL_SPLIT_MIN_MM) continue;
+    joins.push(at);
+  }
+  const kept = stops.filter((item) => !joins.some((at) => Math.abs(item - at) < WALL_STOP_JOIN_MM));
+  return [...new Set([...kept, ...joins])].sort((a, b) => a - b);
+}
+
+/** Разделить стену в `atMm` от конца `a`: `{project, first, second}`. */
+export function splitWall(project, wallId, atMm) {
+  const wall = requireWall(project, wallId);
+  const vectors = wallVectors(wall);
+  const length = wallLengthMm(wall);
+  const at = Math.round(Number(atMm));
+  if (!vectors || !Number.isFinite(at) || at < WALL_SPLIT_MIN_MM || at > length - WALL_SPLIT_MIN_MM) {
+    throw modelError("wallSplitEnd", { min: WALL_SPLIT_MIN_MM });
+  }
+  const openings = openingsInWall(project, wallId);
+  for (const opening of openings) {
+    const from = Number(opening.atMm);
+    if (at > from && at < from + Number(opening.widthMm)) throw modelError("wallSplitOpening");
+  }
+  const point = {
+    x: Math.round(Number(wall.aMm.x) + vectors.u.x * at) || 0,
+    y: Math.round(Number(wall.aMm.y) + vectors.u.y * at) || 0,
+  };
+  const first = { ...wall, bMm: point };
+  const second = { ...wall, id: newId(), aMm: point };
+  const firstLength = wallLengthMm(first);
+  const secondLength = wallLengthMm(second);
+  // Отступы — от начала своего куска; округление точки деления сдвигает длины
+  // на миллиметр, и проём у самого шва прижимается внутрь, а не вылезает.
+  const fit = (from, width, room) => Math.max(0, Math.min(from, room - width));
+  const moved = new Map();
+  for (const opening of openings) {
+    const from = Number(opening.atMm);
+    const width = Number(opening.widthMm);
+    moved.set(
+      opening.id,
+      from >= at
+        ? { ...opening, wallId: second.id, atMm: fit(from - at, width, secondLength) }
+        : { ...opening, atMm: fit(from, width, firstLength) },
+    );
+  }
+  const marks = project.marks.map((mark) => {
+    const binding = markWall(mark);
+    if (!binding || binding.wallId !== wallId) return mark;
+    const middle = binding.toMm === null ? binding.atMm : (binding.atMm + binding.toMm) / 2;
+    if (middle < at) {
+      if (binding.toMm === null || binding.toMm <= firstLength) return mark;
+      return { ...mark, wallToMm: firstLength };
+    }
+    const next = { ...mark, wallId: second.id, wallAtMm: Math.max(0, Math.min(secondLength, binding.atMm - at)) };
+    if (binding.toMm !== null) next.wallToMm = Math.max(0, Math.min(secondLength, binding.toMm - at));
+    return next;
+  });
+  const walls = [];
+  for (const item of wallsOf(project)) {
+    if (item.id !== wallId) {
+      walls.push(item);
+      continue;
+    }
+    walls.push(first, second);
+  }
+  const allOpenings = openingsOf(project).map((opening) => moved.get(opening.id) || opening);
+  return { project: withProject(project, { walls, openings: allOpenings, marks }), first, second };
 }
 
 // ——— чертёж: метка на стене ————————————————————————————————————————————
@@ -7545,6 +7923,9 @@ function wallSideOutline(project, wallId, side) {
 export function wallHeightOnSide(project, wallId, side, alongMm) {
   const wall = findWall(project, wallId);
   if (!wall) return null;
+  // Своя высота стены — одна на обе стороны и главнее помещений.
+  const own = wallOwnHeightMm(wall);
+  if (own !== null) return own;
   return wallHeightOf(project, { schemeId: wall.schemeId, roomId: wallRoomId(project, wallId, side, alongMm) });
 }
 
@@ -8112,7 +8493,8 @@ export function wallElevation(project, wallId, side = "left", cut = null) {
   // тому, что стоит на **этой** стене, и расходилась с объёмом на той же
   // стене. Комната та же, по которой взята заданная высота, — иначе лист
   // спрашивал бы об одной стороне у двух разных хозяев.
-  const shown = wallHeightShownMm(project, { schemeId: wall.schemeId, roomId });
+  const own = wallOwnHeightMm(wall);
+  const shown = own !== null ? { mm: own, known: true } : wallHeightShownMm(project, { schemeId: wall.schemeId, roomId });
   const room = roomId ? findRoom(project, roomId) : null;
   const named = wallNaming(project, wall.schemeId).walls.get(wallId) || { name: "", aLetter: "", bLetter: "" };
   return {
