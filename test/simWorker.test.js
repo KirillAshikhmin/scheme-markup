@@ -137,6 +137,67 @@ test("start {restore: true} поднимает дом без «Дом запущ
   assert.ok(worker.log().some((entry) => entry.code === "started"));
 });
 
+test("перезапуск сторожем: «на старте» и onStart не срабатывают снова, GlobalVariables — те, что поток отдал", () => {
+  const box = simHouse();
+  const id = (label) => box.marks[label];
+  box.project = addScenario(box.project, {
+    kind: "block",
+    name: "На старте — свет",
+    onStart: true,
+    targets: [put(ref(id("С3"), "On"), true)],
+  }).project;
+  withScript(box, "global", "Утилиты", "global.helper = function () { return 1; };\nGlobalVariables.boot = (GlobalVariables.boot || 0) + 1;");
+  const counter = [
+    "info = {",
+    '  name: "Счёт", onStart: true,',
+    "  sourceServices: [HS.StatelessProgrammableSwitch],",
+    "  sourceCharacteristics: [HC.ProgrammableSwitchEvent],",
+    "  options: {}, variables: {}",
+    "};",
+    "function trigger(source, value, variables, options, context) {",
+    "  GlobalVariables.hits = (GlobalVariables.hits || 0) + 1;",
+    "  GlobalVariables.helperKind = typeof global.helper;",
+    "}",
+  ].join("\n");
+  bind(box, withScript(box, "logic", "Счёт", counter), "В2");
+
+  const first = boot(box);
+  first.send({ type: "start", values: {} });
+  assert.ok(first.log().some((entry) => entry.code === "blockRun"), "свежий запуск не исполнил «на старте»");
+  const memory = first.of("memory").at(-1).memory;
+  assert.deepEqual(memory, { hub: { globals: { boot: 1, hits: 1, helperKind: "function" } } }, "поток не отдал память сценариев");
+
+  // Новый поток, поднятый сторожем: то же зеркало и та же память.
+  const second = boot(box);
+  second.send({ type: "start", values: {}, restore: true, memory });
+  assert.equal(second.log().some((entry) => entry.code === "blockRun"), false, "«Выполнить на старте» сработало после перезапуска");
+  assert.equal(second.log().some((entry) => entry.code === "hubTrigger"), false, "onStart логики сработал после перезапуска");
+  second.send({ type: "act", action: { kind: "press", markId: id("В2"), service: 0, press: "single" } });
+  assert.deepEqual(second.of("memory").at(-1).memory.hub.globals, { boot: 1, hits: 2, helperKind: "function" }, "GlobalVariables обнулились");
+
+  // Человек остановил и запустил дом — это старт хаба: память с нуля, «на старте» снова.
+  second.clear();
+  second.send({ type: "stop" });
+  assert.equal(second.of("memory").at(-1).memory, null);
+  second.send({ type: "start", values: {} });
+  assert.ok(second.log().some((entry) => entry.code === "blockRun"));
+  assert.deepEqual(second.of("memory").at(-1).memory.hub.globals, { boot: 1, hits: 1, helperKind: "function" });
+});
+
+test("import() в сценарии отвергается при разборе — модуль по сети не грузится", () => {
+  const box = simHouse();
+  withScript(box, "global", "Сеть", 'var mod = import("https://example.com/x.js");');
+  withScript(box, "global", "Шаблон", "var x = `${import('https://example.com/y.js')}`;");
+  withScript(box, "global", "Метод", "var lib = { import: function () { return 1; } };\nGlobalVariables.ok = lib.import();");
+  const worker = boot(box);
+  worker.send({ type: "start", values: {} });
+  const syntax = worker.log().filter((entry) => entry.code === "hubSyntax");
+  assert.equal(syntax.length, 2, "import() прошёл разбор");
+  assert.ok(syntax.every((entry) => /import\(\) недоступен/.test(entry.text)));
+  // Имена верхнего уровня глобального сценария — в общей памяти; функция `lib.import` в копию не едет.
+  assert.deepEqual(worker.of("memory").at(-1).memory.hub.globals, { lib: {}, ok: 1 }, "метод с именем import отвергнут зря");
+});
+
 test("advance: событие ровно на границе шага срабатывает, раньше — нет", () => {
   const box = simHouse();
   pressScenario(box, { off: true });

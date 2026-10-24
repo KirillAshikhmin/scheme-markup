@@ -97,7 +97,7 @@ test("текст бандла исполняется в Node с заглушко
 // код сценария исполняется в нём уже при открытии объекта.
 const SEALED = ["fetch", "XMLHttpRequest", "WebSocket", "EventSource", "importScripts", "indexedDB", "caches", "BroadcastChannel"];
 
-test("поток до первого сообщения без сети и хранилищ: побег из сценария через constructor видит там undefined", async () => {
+test("поток до первого сообщения без сети и хранилищ: побег из сценария к глобальному объекту видит там undefined", async () => {
   const { source } = await workerBundle();
   const sent = [];
   let listener = null;
@@ -131,14 +131,25 @@ test("поток до первого сообщения без сети и хр�
   // Глобальный сценарий исполняет свой верхний уровень уже на `load` — при
   // открытии объекта — и пробует достать глобальный объект потока.
   const box = simHouse();
+  // Нестрогая функция без хозяина видит глобальный объект как `this`.
   const escape =
-    'var g = ({}).constructor.constructor("return this")();\n' +
-    "g.escapeSeen = " + JSON.stringify(SEALED) + ".map(function (name) { return name + ':' + typeof g[name]; }).join(',');\n";
+    "var g = (function () { return this; })();\n" +
+    "g.escapeSeen = " + JSON.stringify(SEALED) + ".map(function (name) { return name + ':' + typeof g[name]; }).join(',');\n" +
+    // Код из строки — дорога к `import()` в обход разбора: каждая заперта.
+    "var tries = { eval: function () { return g.eval('1'); }, Function: function () { return g.Function('return 1')(); }," +
+    " ctor: function () { return (function () {}).constructor('return 1')(); }," +
+    " asyncCtor: function () { return (async function () {}).constructor('return 1'); }," +
+    " genCtor: function () { return (function* () {}).constructor('yield 1'); }," +
+    " timer: function () { return g.setTimeout('g.timerRan = 1', 0); } };\n" +
+    "g.codeSeen = Object.keys(tries).map(function (name) { try { tries[name](); return name + ':open'; } catch (e) { return name + ':closed'; } }).join(',');\n";
   box.project = addScenario(box.project, { kind: "global", name: "Побег", source: escape }).project;
   listener({ data: { type: "clock", clock: fixedAt(T0) } });
   listener({ data: { type: "load", spec: { ...buildHomeSpec(box.project), site: null, rooms: [] } } });
   listener({ data: { type: "start", values: {} } });
   assert.equal(look("globalThis.escapeSeen"), SEALED.map((name) => name + ":undefined").join(","), "побег из сценария увидел сеть или хранилище");
+  assert.equal(look("globalThis.codeSeen"), "eval:closed,Function:closed,ctor:closed,asyncCtor:closed,genCtor:closed,timer:closed", "код из строки исполняется");
+  // Свой код потока на запертом языке работает: функции в таймерах — да.
+  assert.equal(look("typeof setTimeout(function () {}, 0)") !== "undefined", true);
   // Поток при этом работает: на ping — pong.
   listener({ data: { type: "ping", n: 7 } });
   assert.deepEqual(sent.at(-1), { type: "pong", n: 7 });

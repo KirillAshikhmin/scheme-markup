@@ -33,7 +33,7 @@
 // перед `trigger` хозяин пишет `hubTrigger`, таймеры скриптов помечены
 // `hub:<id>`, остальное — по хуку, который движок зовёт.
 import { clockSimMs, volumeClockSpeedOf } from "../clockMath.js";
-import { text } from "../strings.js";
+import { strings, text } from "../strings.js";
 import { blocksOwner } from "./blocks.js";
 import { createSimEngine } from "./engine.js";
 import { createHubOwner } from "./hubApi.js";
@@ -47,6 +47,13 @@ export const SIM_WORKER_TICK_MAX_MS = 1000;
  * секунду, а странице довольно последнего — «Объём» перерисовывается по нему.
  */
 export const SIM_WORKER_CLIMATE_MS = 1000;
+/**
+ * Самая большая память сценариев (`GlobalVariables`), которую поток отдаёт
+ * странице для перезапуска сторожем, символов JSON. Больше — странице уходит
+ * последняя, что влезла: копировать мегабайты на каждое событие дороже, чем
+ * потерять их при редком зависании.
+ */
+export const SIM_WORKER_MEMORY_MAX = 262144;
 /** Сообщения, которые поток понимает (`interfaces.md`, «Протокол»). */
 export const SIM_WORKER_MESSAGES = Object.freeze([
   "load",
@@ -97,6 +104,7 @@ export const SIM_WORKER_SEALED = Object.freeze([
 export function simWorkerSeal(scope) {
   const left = [];
   if (!scope || (typeof scope !== "object" && typeof scope !== "function")) return left;
+  simWorkerNoStringCode(scope);
   const gone = (name) => {
     try {
       return scope[name] === undefined;
@@ -123,6 +131,45 @@ export function simWorkerSeal(scope) {
     if (!gone(name)) left.push(name);
   }
   return left;
+}
+
+/**
+ * Закрыть потоку исполнение кода из строки (известный баг: сценарий грузил
+ * модули по сети динамическим `import()`, а сеть у потока снята только
+ * именами). Сам `import(` в тексте сценария отвергает разбор
+ * (`hubScriptCompile`), а здесь закрываются дороги, которыми его текст можно
+ * собрать на ходу: `eval`, конструкторы функций (и через `.constructor` у
+ * обычной, асинхронной и генераторной функции), строка в `setTimeout` и
+ * `setInterval`. Конструктор, которым хозяин компилирует сценарии
+ * (`HubFunction`), взят модулем раньше — при разборе бандла.
+ *
+ * Только в настоящем потоке (`scope === globalThis`): на поддельном `scope`
+ * запасного пути в странице правка языка сломала бы саму страницу.
+ */
+export function simWorkerNoStringCode(scope) {
+  if (scope !== globalThis) return;
+  const refuse = function blockedCode() {
+    throw new Error(strings.sim.workerNoCode);
+  };
+  const lock = (owner, name, value) => {
+    try {
+      Object.defineProperty(owner, name, { value, writable: false, enumerable: false, configurable: false });
+    } catch {
+      // уже заперто
+    }
+  };
+  const kinds = [function () {}, async function () {}, function* () {}, async function* () {}];
+  for (const sample of kinds) lock(Object.getPrototypeOf(sample), "constructor", refuse);
+  lock(scope, "Function", refuse);
+  lock(scope, "eval", undefined);
+  for (const name of ["setTimeout", "setInterval"]) {
+    const real = scope[name];
+    if (typeof real !== "function") continue;
+    lock(scope, name, function onlyFunctions(handler, ...rest) {
+      if (typeof handler !== "function") refuse();
+      return real.call(scope, handler, ...rest);
+    });
+  }
 }
 
 const SIM_WORKER_SCRIPT_KINDS = new Set(["logic", "global"]);
@@ -372,7 +419,27 @@ export function simWorkerMain(scope) {
   }
 
   const tracer = simWorkerTracer(post);
-  engine = createSimEngine({ emit, owners: [simWorkerTraced(createHubOwner(), tracer), blocksOwner(), climateOwner()] });
+  const hub = createHubOwner();
+  engine = createSimEngine({ emit, owners: [simWorkerTraced(hub, tracer), blocksOwner(), climateOwner()] });
+
+  // Память хозяев для перезапуска сторожем: странице уходит, только когда
+  // изменилась (`{type: "memory", memory: {hub: {globals}}}`). Зависший поток
+  // уже ничего не скажет — поэтому отдаётся заранее, после каждого события.
+  let memoryText = "null";
+  function shareMemory() {
+    let memory = null;
+    let textNow = "null";
+    try {
+      memory = engine.running() ? { [hub.name]: hub.memory() } : null;
+      textNow = JSON.stringify(memory);
+    } catch {
+      // Геттер в памяти сценария бросил — странице остаётся прежняя копия.
+      return;
+    }
+    if (textNow === memoryText || textNow.length > SIM_WORKER_MEMORY_MAX) return;
+    memoryText = textNow;
+    post({ type: "memory", memory });
+  }
 
   function clockNow() {
     return clock ? clockSimMs(clock, realNow()) : engine.now();
@@ -408,6 +475,7 @@ export function simWorkerMain(scope) {
         post({ type: "log", entries: [failure(error)] });
       }
       tracer.idle();
+      shareMemory();
       wake();
       tellNext(false);
     }, Math.ceil(wait));
@@ -421,7 +489,7 @@ export function simWorkerMain(scope) {
       case "start":
         quietStart = data.restore === true;
         try {
-          engine.start(data.values);
+          engine.start(data.values, { restored: data.restore === true, memory: data.memory });
         } finally {
           quietStart = false;
         }
@@ -474,6 +542,7 @@ export function simWorkerMain(scope) {
       post({ type: "log", entries: [failure(error)] });
     }
     tracer.idle();
+    shareMemory();
     wake();
     tellNext(false);
   }

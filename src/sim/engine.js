@@ -125,7 +125,7 @@ function simEngineList(value) {
  *     setScenarioActive и `host.scenariosChanged()`);
  *   сообщения хозяев (`host.post`) — как есть.
  *
- * Методы: `load(spec)`, `start(values?)`, `stop()`, `reset()`, `values()`,
+ * Методы: `load(spec)`, `start(values?, {restored?, memory?})`, `stop()`, `reset()`, `values()`,
  * `value(markId, service, char)`, `act(action)`, `advanceTo(simMs)`,
  * `setClock({simMs})`, `nextAt()`, `now()`, `running()`,
  * `runScenario(id)`, `setScenarioActive(id, on)`, `scenarios()`.
@@ -164,9 +164,15 @@ function simEngineList(value) {
  *   `load(home, host)` — новый дом: `home` — `spec` из `load` как есть
  *     (`accessories, links, doors, scenarios, logicBindings` и лишние поля
  *     вроде `site`, `rooms`); прежние подписки и таймеры хозяина уже сняты;
- *   `start({reload, chain}, host)` — дом запущен (`reload: false`, `chain` —
- *     `[{k:"hub", what:"start"}]`, то есть `HUB[OnStart]`) или перестроен на
- *     ходу (`reload: true`, `what: "load"`). Подписки и таймеры — здесь;
+ *   `start({reload, restored, memory, chain}, host)` — дом запущен (`reload:
+ *     false`, `chain` — `[{k:"hub", what:"start"}]`, то есть `HUB[OnStart]`)
+ *     или перестроен на ходу (`reload: true`, `what: "load"`). Подписки и
+ *     таймеры — здесь. `restored: true` — тот же запуск, поднятый сторожем в
+ *     новом потоке: «на старте» не исполняется; `memory` — то, что хозяин
+ *     отдал хуком `memory()` перед зависанием (`null` — нечего);
+ *   `memory() -> данные | null` — память хозяина, которую стоит пронести
+ *     через перезапуск потока (структурно клонируемая; зовёт её поток, а не
+ *     движок);
  *   `stop(host)` — дом останавливается; после хука движок снимает все
  *     подписки и таймеры хозяина;
  *   `reset({chain}, host)` — «Сбросить дом»: значения уже умолчания, все
@@ -1389,7 +1395,10 @@ export function createSimEngine({ emit, owners = [] } = {}) {
     });
   }
 
-  function start(values) {
+  // `restored` — тот же запуск, поднятый сторожем в новом потоке; `memory` —
+  // память хозяев по их именам (`{hub: {globals}}`), которую старый поток
+  // успел отдать странице. Хозяин получает только свою.
+  function start(values, { restored = false, memory = null } = {}) {
     return batch(() => {
       if (isRunning) return false;
       restore(values);
@@ -1400,7 +1409,8 @@ export function createSimEngine({ emit, owners = [] } = {}) {
       settle(chain);
       drain();
       for (const entry of entries) {
-        call(entry, "start", { reload: false, chain });
+        const own = memory && typeof memory === "object" ? memory[entry.owner.name] : undefined;
+        call(entry, "start", { reload: false, restored: restored === true, memory: own === undefined ? null : own, chain });
         drain();
       }
       outScenarios = true;

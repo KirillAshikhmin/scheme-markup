@@ -884,7 +884,7 @@ export function blocksOwner() {
         else if (live.override && (live.override.base !== sc.active || live.override.on === sc.active)) live.override = null;
       }
     },
-    start({ reload, chain }, host) {
+    start({ reload, restored, chain }, host) {
       for (const sc of compiled) {
         for (const key of sc.keys.values()) {
           host.subscribe({ markId: key.markId, service: key.service, char: key.char }, (event) => onEvent(host, sc, key, event));
@@ -894,7 +894,9 @@ export function blocksOwner() {
         if (!reload || !Number.isFinite(live.anchor)) live.anchor = host.now();
         armTime(host, sc, false);
       }
-      if (reload) return;
+      // Перезапуск потока сторожем (`restored`) — не старт хаба: дом уже шёл,
+      // и «Выполнить на старте» второй раз не срабатывает.
+      if (reload || restored) return;
       for (const sc of compiled) if (sc.onStart && isActive(sc)) launch(host, sc, {}, chain);
     },
     stop() {

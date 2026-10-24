@@ -34,7 +34,7 @@
 // сценария собирает местное время из `getUTC`-частей этого числа: у имитации
 // нет часового пояса, `getHours()` — час на стене (`interfaces.md`, таск 02).
 import { CLOCK_DAY_MS } from "../clockMath.js";
-import { text } from "../strings.js";
+import { strings, text } from "../strings.js";
 import { HUB_CHAR_TYPES, HUB_SERVICE_TYPES } from "./hubTypes.js";
 import { cronNextAt, sunTimes } from "./schedule.js";
 
@@ -76,6 +76,44 @@ function hubHas(object, key) {
 
 function hubList(value) {
   return Array.isArray(value) ? value : [];
+}
+
+function hubPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+// Насколько глубоко память сценариев проносится через перезапуск потока.
+const HUB_MEMORY_DEPTH = 32;
+
+/**
+ * Данные памяти сценариев без того, что не переживёт копирование: функции,
+ * символы, `undefined`, циклы, нечисловые числа и всё, что не простой объект
+ * и не массив (`Map`, `Date`, экземпляры классов, глобальный объект потока —
+ * их не копируют вовсе: обход чужого графа на каждое событие дорог). Ответ —
+ * простые объекты, массивы, строки, конечные числа, логика и `null`.
+ */
+export function hubMemoryPlain(value, depth = 0, seen = new WeakSet()) {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
+  if (typeof value !== "object" || depth >= HUB_MEMORY_DEPTH || seen.has(value)) return undefined;
+  const proto = Object.getPrototypeOf(value);
+  if (!Array.isArray(value) && proto !== Object.prototype && proto !== null) return undefined;
+  seen.add(value);
+  let out;
+  if (Array.isArray(value)) {
+    out = value.map((item) => {
+      const plain = hubMemoryPlain(item, depth + 1, seen);
+      return plain === undefined ? null : plain;
+    });
+  } else {
+    out = {};
+    for (const key of Object.keys(value)) {
+      const plain = hubMemoryPlain(value[key], depth + 1, seen);
+      if (plain !== undefined) out[key] = plain;
+    }
+  }
+  seen.delete(value);
+  return out;
 }
 
 // ——— сканер исходника ————————————————————————————————————————————————————
@@ -449,6 +487,24 @@ function hubTopLevel(tokens) {
 
 // ——— компиляция ——————————————————————————————————————————————————————————
 
+// Строка динамического `import(` в исходнике или `null` (известный баг: модуль
+// по сети грузился мимо снятой у потока сети). Метод `x.import(…)` — не он.
+// Сканер споткнулся — тогда по самому тексту: лучше лишний отказ, чем дыра.
+function hubImportLine(code, scan) {
+  if (!scan.error) {
+    for (let at = 0; at < scan.tokens.length; at += 1) {
+      const token = scan.tokens[at];
+      if (token.type !== "name" || token.value !== "import" || !hubIsPunct(scan.tokens[at + 1], "(")) continue;
+      const prev = scan.tokens[at - 1];
+      if (hubIsPunct(prev, ".") || hubIsPunct(prev, "?.")) continue;
+      return token.line;
+    }
+    return null;
+  }
+  const match = /(^|[^.\w$])import\s*\(/.exec(code);
+  return match ? code.slice(0, match.index + match[1].length).split("\n").length : null;
+}
+
 let hubCompileSeq = 0;
 let hubLineShift = null;
 
@@ -551,6 +607,8 @@ function hubTypeofRead(name) {
 export function hubScriptCompile(source, { mode = "script" } = {}) {
   const code = String(source === null || source === undefined ? "" : source);
   const scan = hubScan(code);
+  const imported = hubImportLine(code, scan);
+  if (imported !== null) return { error: strings.sim.hubImport, line: imported };
   hubCompileSeq += 1;
   const url = "hub-" + hubCompileSeq + ".js";
   const head = "with (" + HUB_SCOPE + ") {\n";
@@ -2405,7 +2463,11 @@ export function createHubOwner() {
     return instance.alive || instance.fault !== null || !instance.active;
   }
 
-  function startAll(chain, host, fresh) {
+  // `restored` — память, с которой сторож поднял новый поток (`{globals}`), или
+  // `null`. Тогда дом не стартует, а продолжается: данные `GlobalVariables`
+  // возвращаются после верхнего уровня глобальных сценариев (их функции
+  // заводятся заново, данные — те, что были), `onStart` не исполняется.
+  function startAll(chain, host, fresh, restored = null) {
     const keep = fresh ? new Map() : held;
     held = new Map();
     for (const instance of instances.values()) if (keep.get(instance.id) !== instance) kill(instance);
@@ -2429,9 +2491,12 @@ export function createHubOwner() {
           revive(old, scenario, host);
         } else startOne(scenario, chain, host);
       }
+      if (kind === "global" && restored && hubPlainObject(restored.globals)) Object.assign(world.globalVars, hubMemoryPlain(restored.globals));
     }
     postForms(host, instances);
-    for (const instance of instances.values()) if (instance.kind === "logic" && !keep.has(instance.id)) onStart(instance, chain, host);
+    if (!restored) {
+      for (const instance of instances.values()) if (instance.kind === "logic" && !keep.has(instance.id)) onStart(instance, chain, host);
+    }
     host.scenariosChanged();
   }
 
@@ -2490,9 +2555,18 @@ export function createHubOwner() {
       if (!host.running()) evaluateDry(host);
     },
 
-    start({ reload, chain }, host) {
+    start({ reload, restored, memory, chain }, host) {
       worldOf(host);
-      startAll(hubList(chain), host, reload !== true);
+      const carried = restored === true && reload !== true ? (hubPlainObject(memory) ? memory : {}) : null;
+      startAll(hubList(chain), host, reload !== true, carried);
+    },
+
+    // Данные `GlobalVariables` — то, что потеряет поток, погашенный сторожем
+    // (известный баг: после перезапуска память обнулялась). Функции и прочее
+    // неклонируемое не едут — их заново заводит верхний уровень сценариев.
+    memory() {
+      if (!world) return null;
+      return { globals: hubMemoryPlain(world.globalVars) };
     },
 
     stop() {

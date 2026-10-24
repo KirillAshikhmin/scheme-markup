@@ -261,6 +261,10 @@ export function createSimulation(options = {}) {
   // уходят потоку до запуска.
   let climate = null;
   let savedClimate = null;
+  // Память хозяев сценариев от потока (`{hub: {globals}}`): ею сторож поднимает
+  // новый поток, чтобы `GlobalVariables` пережили перезапуск. Свежий запуск
+  // начинается без неё — как старт хаба.
+  let memory = null;
   let inPage = false;
   let closed = false;
 
@@ -348,7 +352,7 @@ export function createSimulation(options = {}) {
     }
     const rooms = climateRestore();
     if (rooms) out.push(rooms);
-    if (running && startPosted) out.push({ type: "start", values: mirrorValues(), restore: true });
+    if (running && startPosted) out.push({ type: "start", values: mirrorValues(), restore: true, memory });
     return out;
   }
 
@@ -371,6 +375,9 @@ export function createSimulation(options = {}) {
       case "next":
         nextAt = Number.isFinite(message.at) ? message.at : null;
         notify({});
+        break;
+      case "memory":
+        memory = message.memory && typeof message.memory === "object" ? message.memory : null;
         break;
       case "forms":
         forms.set(formKey(message.scenarioId, message.bindingId), message);
@@ -438,7 +445,7 @@ export function createSimulation(options = {}) {
       const off = new Set(list.slice(i + 1));
       const spec = overlay(home, off);
       const messages = [{ type: "clock", clock: clock.now() }, { type: "load", spec }];
-      if (running && startPosted) messages.push({ type: "start", values: mirrorValues(), restore: true });
+      if (running && startPosted) messages.push({ type: "start", values: mirrorValues(), restore: true, memory });
       messages.push(...replay);
       const result = await bridge.probe(messages);
       if (closed) return null;
@@ -707,6 +714,7 @@ export function createSimulation(options = {}) {
 
   function postStart() {
     startPosted = true;
+    memory = null;
     const rooms = climateRestore();
     if (rooms) post(rooms);
     post({ type: "start", values: mirrorValues() });
@@ -724,6 +732,7 @@ export function createSimulation(options = {}) {
 
   function stopNow() {
     running = false;
+    memory = null;
     held.length = 0;
     if (startPosted) post({ type: "stop" });
     startPosted = false;
