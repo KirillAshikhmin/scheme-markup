@@ -35,3 +35,25 @@ jobs:
           path: dist
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  # dist/ лежит в git ради запуска с диска (file://), а прод собирается заново.
+  # Правка src/ без пересборки dist/ на проде не видна, а у того, кто открыл
+  # папку с диска, страница старая. Отдельная работа: публикацию она не держит,
+  # но краснеет, пока dist/ не пересобран и не закоммичен.
+  dist:
+    name: dist/ в git — свежая сборка
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Сборка
+        run: npm run build
+      - name: Сверка с git
+        run: |
+          if [ -n "$(git status --porcelain -- dist)" ]; then
+            echo "::error::dist/ в git отстал от исходников: выполните node build.js и закоммитьте dist/ вместе с src/"
+            git status --short -- dist
+            exit 1
+          fi

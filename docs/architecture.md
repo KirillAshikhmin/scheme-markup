@@ -36,6 +36,7 @@ dist/assets/gost-type-a.ttf, sw.js, manifest.webmanifest, значки, guide.ht
         │  git subtree split --prefix=scheme_image → KirillAshikhmin/scheme-markup
         ▼
 GitHub Actions: npm test → npm run build → GitHub Pages
+               + отдельно: свежая сборка = dist/ в git (работа dist)
 ```
 
 `dist/` лежит в git и собирается байт в байт. Правка `src/` без пересборки `dist/` — недоделанная правка.
@@ -270,6 +271,8 @@ S=$(git subtree split --prefix=scheme_image HEAD)
 git merge-base --is-ancestor scheme-markup/main "$S" && git push -q scheme-markup "${S}:refs/heads/main"
 gh run list --repo KirillAshikhmin/scheme-markup --limit 1 --json headSha,status,conclusion
 ```
+
+В CI две работы: `deploy` (тесты, сборка, публикация) и `dist` — сборка и сверка с `dist/` в git. Вторая публикацию не держит, но краснеет, если `src/` правили без пересборки `dist/`.
 
 Пушить только быстрой перемоткой. Если проверка предка не прошла, значит в прод пушил кто-то ещё: разобраться, а не форсить. Прод — https://kirillashikhmin.github.io/scheme-markup/
 
