@@ -51436,6 +51436,12 @@ function volumeFace(points, rgb, options = {}) {
     // вещей в ней. По нему кадр светлит ночью комнату, где горит свет. Улица,
     // наружные стороны стен и всё, чему комнату не назвать, — `null`.
     room: options.room || null,
+    // **Вещь** (правка после сборки сценариев): грань вещи чертежа или тела
+    // метки — мебель, корпус устройства, ткань шторы. Физический свет кладёт на
+    // неё пятна ламп и окон, как на пол и стены: «сделай что бы физический
+    // свет подсвечивал объекты (мебель)». Ставит его сборка сцены
+    // (`volumeTagThing`); объявлено здесь, чтобы порода граней не менялась.
+    thing: false,
   };
 }
 
@@ -57380,6 +57386,7 @@ function volumeScene(project, schemeId, options = {}) {
     volumeObjectFaces(project, schemeId, object, schemeHeight.mm, faces, options.objectsClear !== false);
     // Вещь в комнате — её (таск 09 сценариев): включённый свет светлит и диван.
     if (rooms.length > 0 && faces.length > objectFrom) volumeTagRoom(faces, objectFrom, where, volumeMiddleOf(faces[objectFrom].p));
+    volumeTagThing(faces, objectFrom);
     for (const prism of volumeObjectPrisms(project, schemeId, object, schemeHeight.mm)) {
       if (!volumePrismBlocks(prism)) continue;
       const solid = volumePrismSolid(prism);
@@ -57403,6 +57410,7 @@ function volumeScene(project, schemeId, options = {}) {
     // Метка в комнате — её (таск 09 сценариев). Щуп — от лица вещи внутрь: у
     // метки на стене лицо лежит на кромке контура.
     if (rooms.length > 0) volumeTagRoom(faces, markFrom, where, volumeMarkProbe(place));
+    volumeTagThing(faces, markFrom);
     if (markImages || !place.model) volumeMarkViewLines(place, faces);
   }
   volumeTagIndoor(faces, rooms);
@@ -58317,6 +58325,13 @@ function volumeTagRoom(faces, from, where, at) {
   }
 }
 
+/** Грани `faces[from…]` — вещь: на них ложатся пятна физического света. */
+function volumeTagThing(faces, from) {
+  for (let index = from; index < faces.length; index += 1) {
+    if (!faces[index].line) faces[index].thing = true;
+  }
+}
+
 // ——— камера ——————————————————————————————————————————————————————————————
 
 /**
@@ -58783,11 +58798,14 @@ function volumeFrame(scene, camera, box, extra = null, tint = null, live = null)
     // Кольца пятен ламп — **сразу за своим куском** и с его местом в очереди:
     // то, что ближе куска, рисуется позже и закрывает пятно (правка после
     // сборки сценариев).
+    // Пятно на полупрозрачной вещи (мебель, ткань шторы) просвечивает так же,
+    // как она: иначе освещённый стол становился сплошной плитой.
+    const through = face.alpha === undefined ? 1 : face.alpha;
     const rings = decals ? decals.get(face) : null;
     if (rings) {
       for (const ring of rings) {
         const strength = live.lamps ? live.lamps.get(ring.markId) : 0;
-        const alpha = ring.alpha * (strength || 0);
+        const alpha = ring.alpha * (strength || 0) * through;
         if (!(alpha > VOLUME_LAMP_INVISIBLE)) continue;
         const color = live.colors ? live.colors.get(ring.markId) : null;
         take({ p: ring.p, n: ring.n || face.n, rgb: face.rgb, layer: face.layer, flat: face.flat, decal: alpha, lamp: true, ...(color ? { lampRgb: color } : {}) }, rank);
@@ -58798,7 +58816,7 @@ function volumeFrame(scene, camera, box, extra = null, tint = null, live = null)
     if (panes) {
       for (const ring of panes) {
         const strength = live.windows ? live.windows.get(ring.markId) : 0;
-        const alpha = ring.alpha * (strength || 0);
+        const alpha = ring.alpha * (strength || 0) * through;
         if (!(alpha > VOLUME_LAMP_INVISIBLE)) continue;
         take({ p: ring.p, n: ring.n || face.n, rgb: face.rgb, layer: face.layer, flat: face.flat, decal: alpha, lamp: false }, rank);
       }
@@ -59584,7 +59602,11 @@ function volumeDecalHosts(scene) {
     // тёмной соседке, и без пятна его сторона к проёму оставалась чёрной рядом
     // со светлым проёмом.
     const door = face.rgb === VOLUME_DOOR_RGB && face.doorId;
-    if (!door && face.rgb !== VOLUME_FLOOR_RGB && face.rgb !== VOLUME_WALL_RGB && face.rgb !== VOLUME_CEILING_RGB) continue;
+    // Мебель и тела меток — тоже (правка после сборки сценариев): «сделай что
+    // бы физический свет подсвечивал объекты (мебель)». Светящееся тело —
+    // нет: горит оно своим светом, а пятно чужой лампы его бы притушило.
+    const thing = face.thing && !face.lit && !face.led;
+    if (!door && !thing && face.rgb !== VOLUME_FLOOR_RGB && face.rgb !== VOLUME_WALL_RGB && face.rgb !== VOLUME_CEILING_RGB) continue;
     let list = byRoom.get(face.room);
     if (!list) byRoom.set(face.room, (list = []));
     list.push(face);
@@ -59746,7 +59768,24 @@ function volumeLampPool(decals, host, markId, source, way, share = 1) {
   });
   let list = decals.get(host);
   let before = 0;
-  for (let index = 0; index < radii.length; index += 1) {
+  let first = 0;
+  // У вещи куски маленькие: внешние кольца накрывают кусок целиком, и класть
+  // их стопкой одинаковых многоугольников незачем — они сливаются в один с
+  // долей самого внутреннего из них (доли колец — приращения, и стопка даёт
+  // ровно её). Внутренние, что режут кусок, идут как у стены.
+  if (host.thing) {
+    const inner = Math.cos(Math.PI / VOLUME_LAMP_SIDES);
+    let far = 0;
+    for (const point of shape) far = Math.max(far, Math.hypot(point.x - centre.x, point.y - centre.y));
+    while (first < radii.length && radii[first] * inner >= far) first += 1;
+    if (first > 0) {
+      before = peak * VOLUME_LAMP_RINGS[first - 1];
+      if (!list) decals.set(host, (list = []));
+      const piece = shape.map(from2);
+      list.push(flipped ? { markId, p: piece, alpha: before, n } : { markId, p: piece, alpha: before });
+    }
+  }
+  for (let index = first; index < radii.length; index += 1) {
     const ring = [];
     for (let side = 0; side < VOLUME_LAMP_SIDES; side += 1) {
       const angle = (side / VOLUME_LAMP_SIDES) * Math.PI * 2;

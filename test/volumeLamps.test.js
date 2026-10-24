@@ -21,6 +21,7 @@ import {
   addOutline,
   addRoom,
   addScheme,
+  addSchemeObject,
   addWall,
   applyMarkWalls,
   createProject,
@@ -476,6 +477,41 @@ test("порог открытой двери светится сквозь пр�
   // Свет лежит и внутри толщины стены (0…100), а не только за ней.
   const rings = light.decals.get(threshold).filter((ring) => ring.markId === box.marks.lamp);
   assert.ok(rings.some((ring) => Math.min(...ring.p.map((point) => point.x)) < 50), "порог внутри проёма остался без света");
+});
+
+// «А сделай что бы физический свет подсвечивал объекты (мебель)» (правка
+// после сборки сценариев): пятна лампы ложатся и на вещи её комнаты.
+test("физический свет светит мебель: пятна на диване под лампой, не на светящемся теле и не за закрытой дверью", () => {
+  const box = stand();
+  let project = box.project;
+  const sofa = (x, y) => {
+    const made = addSchemeObject(project, { schemeId: box.schemeId, catalogKey: "sofa", shape: "rect", atMm: { x, y }, widthMm: 2200, depthMm: 900, heightMm: 850 });
+    project = made.project;
+    return made.schemeObject.id;
+  };
+  sofa(-2000, -700);
+  sofa(1000, -900);
+  const scene = volumeScene(project, box.schemeId, { roofOff: true, openDoorIds: new Set() });
+  const light = volumeLiveLight(scene, liveOf(box, { lamp: 1 }), { physical: true });
+  const mine = [...light.decals.entries()].filter(([host, list]) => list.some((ring) => ring.markId === box.marks.lamp));
+  const things = mine.filter(([host]) => host.thing);
+  assert.ok(things.length > 0, "лампа не светит мебель");
+  assert.ok(things.every(([host]) => host.room === box.rooms.living), "лампа гостиной светит вещь за закрытой дверью");
+  const top = things.find(([host]) => host.n.z > 0.9);
+  assert.ok(top, "у дивана под лампой не светится верх");
+  for (const ring of top[1]) assert.ok(ring.alpha > 0 && ring.alpha < 1);
+  // Внешние кольца, накрывшие кусок целиком, — одним многоугольником, а не
+  // стопкой одинаковых.
+  for (const [, list] of things) {
+    const shapes = list.filter((ring) => ring.markId === box.marks.lamp).map((ring) => JSON.stringify(ring.p));
+    assert.equal(new Set(shapes).size, shapes.length, "на куске вещи стопка одинаковых колец");
+  }
+  // Тело лампы светится само: чужое пятно его бы притушило.
+  assert.ok(![...light.decals.keys()].some((host) => host.lit), "пятно легло на светящееся тело");
+  // Ночью пятна на вещах — в кадре.
+  const camera = { at: { x: -2000, y: 1200, z: 1600 }, yaw: -Math.PI / 2, pitch: -0.4 };
+  const frame = volumeFrame(scene, camera, { width: 800, height: 500 }, null, NIGHT, light);
+  assert.ok(frame.length > volumeFrame(scene, camera, { width: 800, height: 500 }, null, NIGHT, null).length, "пятен в кадре нет");
 });
 
 test("кадр ночью: кольца пятна идут сразу за своим куском, днём их нет", () => {
