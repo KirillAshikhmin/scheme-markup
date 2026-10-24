@@ -3692,7 +3692,7 @@ export function changeMarkType(project, markId, typeId) {
   const marks = project.marks.map((item) =>
     item.id === markId ? markWithoutOwnDevice({ ...item, typeId, number }) : item,
   );
-  return { project: withProject(project, { marks, counters }), mark: marks.find((m) => m.id === markId) };
+  return { project: followServiceRefs(project, withProject(project, { marks, counters })), mark: marks.find((m) => m.id === markId) };
 }
 
 // ——— справочник ———————————————————————————————————————————————————————
@@ -3888,7 +3888,7 @@ export function updateType(project, typeId, patch = {}) {
     counters[next.code] = Math.max(counters[next.code] || 0, carried);
     delete counters[current.code];
   }
-  return { project: withProject(project, { markTypes, counters }), type: next };
+  return { project: followServiceRefs(project, withProject(project, { markTypes, counters })), type: next };
 }
 
 export function deleteType(project, typeId) {
@@ -4423,7 +4423,7 @@ export function setTypeDevice(project, typeId, profile) {
     if (deviceProfileSame(typeDeviceOf(project, typeId), wanted)) return { project, type };
   }
   const markTypes = project.markTypes.map((item) => (item.id === typeId ? typeWithDevice(item, record) : item));
-  return { project: withProject(project, { markTypes }), type: markTypes.find((item) => item.id === typeId) };
+  return { project: followServiceRefs(project, withProject(project, { markTypes })), type: markTypes.find((item) => item.id === typeId) };
 }
 
 // Своя настройка метки, приведённая к словарю: частичная запись или `null`.
@@ -4668,7 +4668,7 @@ export function setMarkDevice(project, markId, patch) {
     else copy.device = record;
     return copy;
   });
-  return { project: withProject(project, { marks }), mark: marks.find((item) => item.id === markId) };
+  return { project: followServiceRefs(project, withProject(project, { marks })), mark: marks.find((item) => item.id === markId) };
 }
 
 // Метка без своего профиля — для смены типа (история 1.14): своя настройка
@@ -10339,6 +10339,127 @@ function scenarioMarkRefs(value, out) {
   return out;
 }
 
+// ——— ссылка на сервис идёт за сервисом ————————————————————————————————————
+//
+// Блоки сценариев и привязки логики ссылаются на сервис метки его **местом** в
+// развёрнутом профиле (`markDeviceOf`). Место — не имя: у выключателя ВВ
+// развёрнуто [реле 1, реле 2, кнопка 1, кнопка 2], у ставшего трёхклавишным —
+// [реле 1…3, кнопка 1…3], и «кнопка 1» уезжает с места 2 на место 3. Без
+// поправки ссылка на место 2 молча стала бы ссылкой на третье реле (известный
+// баг «ВВ 2→3»). Поэтому каждая команда, которая меняет профиль или каналы
+// (`updateType`, `setTypeDevice`, `setMarkDevice`, `changeMarkType`),
+// переводит ссылки: сервис узнаётся по виду, каналу и порядку среди таких же.
+//
+// Ссылка на сервис, которого больше нет (ВВВ→ВВ, третья клавиша), уходит за
+// конец списка: блок красный «устройство удалено», привязка — без сервиса,
+// `validate` говорит строкой `scenarioServiceMissing`. Вернуть клавишу —
+// значит выбрать её заново: случайным другим сервисом такая ссылка уже не
+// оживёт. Ctrl+Z возвращает всё целиком — шаг истории хранит объект до правки.
+// Метка, у которой профиль пропал совсем («без аксессуара»), ссылок не
+// двигает: тот же вид вернёт тот же список.
+
+function serviceIdentities(services) {
+  const seen = new Map();
+  return services.map((service) => {
+    const base = service.type + "|" + (Number.isInteger(service.channel) ? service.channel : "");
+    const nth = seen.get(base) || 0;
+    seen.set(base, nth + 1);
+    return base + "|" + nth;
+  });
+}
+
+// Перевод мест сервисов метки: функция «старое место → новое» или `null`,
+// если список сервисов не сдвинулся.
+function serviceMoves(before, after, markId) {
+  const was = markDeviceOf(before, markId);
+  const now = was ? markDeviceOf(after, markId) : null;
+  if (!was || !now) return null;
+  const from = serviceIdentities(was.services);
+  const to = serviceIdentities(now.services);
+  if (from.length === to.length && from.every((key, at) => key === to[at])) return null;
+  const places = new Map(to.map((key, at) => [key, at]));
+  return (index) => (index < from.length && places.has(from[index]) ? places.get(from[index]) : to.length);
+}
+
+// Дерево блоков с переведёнными ссылками; нечего переводить — то же значение.
+function scenarioRefsMoved(value, moves) {
+  if (Array.isArray(value)) {
+    let out = value;
+    value.forEach((item, at) => {
+      const next = scenarioRefsMoved(item, moves);
+      if (next === item) return;
+      if (out === value) out = [...value];
+      out[at] = next;
+    });
+    return out;
+  }
+  if (!value || typeof value !== "object") return value;
+  let out = value;
+  for (const key of Object.keys(value)) {
+    const next = scenarioRefsMoved(value[key], moves);
+    if (next === value[key]) continue;
+    if (out === value) out = { ...value };
+    out[key] = next;
+  }
+  const move = typeof value.markId === "string" ? moves.get(value.markId) : null;
+  if (move && Number.isInteger(value.service) && value.service >= 0) {
+    const service = move(value.service);
+    if (service !== value.service) {
+      if (out === value) out = { ...value };
+      out.service = service;
+    }
+  }
+  return out;
+}
+
+/**
+ * Ссылки сценариев и привязок логики объекта `after` на сервисы — вслед за
+ * сервисами, как они стояли в `before`. Сдвига нет — **тот же** объект.
+ */
+export function followServiceRefs(before, after) {
+  const scenarios = scenariosList(after);
+  const bindings = logicBindingsList(after);
+  if (scenarios.length === 0 && bindings.length === 0) return after;
+  const marks = new Set(bindings.map((binding) => binding.markId));
+  for (const scenario of scenarios) {
+    if (scenario && scenario.kind === "block") for (const markId of scenarioMarkRefs(scenario.targets, [])) marks.add(markId);
+  }
+  const moves = new Map();
+  for (const markId of marks) {
+    const move = serviceMoves(before, after, markId);
+    if (move) moves.set(markId, move);
+  }
+  if (moves.size === 0) return after;
+  const patch = {};
+  const movedScenarios = scenarios.map((scenario) => {
+    if (!scenario || scenario.kind !== "block") return scenario;
+    const targets = scenarioRefsMoved(scenario.targets, moves);
+    return targets === scenario.targets ? scenario : { ...scenario, targets };
+  });
+  if (movedScenarios.some((scenario, at) => scenario !== scenarios[at])) patch.scenarios = movedScenarios;
+  const movedBindings = bindings.map((binding) => {
+    const move = moves.get(binding.markId);
+    if (!move || !Number.isInteger(binding.service) || binding.service < 0) return binding;
+    const service = move(binding.service);
+    return service === binding.service ? binding : { ...binding, service };
+  });
+  if (movedBindings.some((binding, at) => binding !== bindings[at])) patch.logicBindings = movedBindings;
+  return Object.keys(patch).length > 0 ? { ...after, ...patch } : after;
+}
+
+// Ссылки блоков на сервисы, которых у живой метки нет: `[{markId, service}]`.
+function scenarioServiceRefs(value, out) {
+  if (Array.isArray(value)) {
+    for (const item of value) scenarioServiceRefs(item, out);
+  } else if (value && typeof value === "object") {
+    if (typeof value.markId === "string" && Number.isInteger(value.service) && value.service >= 0) {
+      out.push({ markId: value.markId, service: value.service });
+    }
+    for (const key of Object.keys(value)) scenarioServiceRefs(value[key], out);
+  }
+  return out;
+}
+
 // ——— проверка объекта —————————————————————————————————————————————————
 
 // Вид проблемы: «error» — объект поломан, «warning» — сделано намеренно, но
@@ -10691,10 +10812,28 @@ export function validate(project) {
   const scenarios = scenariosList(project);
   if (scenarios.length > 0) {
     const live = new Set(project.marks.map((mark) => mark.id));
+    // Сколько сервисов у метки — раз на метку, а не на ссылку.
+    const counts = new Map();
+    const serviceCount = (markId) => {
+      if (!counts.has(markId)) {
+        const profile = markDeviceOf(project, markId);
+        counts.set(markId, profile ? profile.services.length : null);
+      }
+      return counts.get(markId);
+    };
     for (const scenario of scenarios) {
       if (!scenario || scenario.kind !== "block") continue;
-      if (!scenarioMarkRefs(scenario.targets, []).some((markId) => !live.has(markId))) continue;
-      problems.push(problem("scenarioDeviceMissing", { name: scenario.name || "" }, scenario.id, "warning"));
+      if (scenarioMarkRefs(scenario.targets, []).some((markId) => !live.has(markId))) {
+        problems.push(problem("scenarioDeviceMissing", { name: scenario.name || "" }, scenario.id, "warning"));
+        continue;
+      }
+      // Метка жива, а сервиса на этом месте нет: клавишу убрали числом каналов
+      // или сервис — правкой аксессуара (`followServiceRefs`).
+      const gone = scenarioServiceRefs(scenario.targets, []).some((ref) => {
+        const count = serviceCount(ref.markId);
+        return count !== null && ref.service >= count;
+      });
+      if (gone) problems.push(problem("scenarioServiceMissing", { name: scenario.name || "" }, scenario.id, "warning"));
     }
   }
 

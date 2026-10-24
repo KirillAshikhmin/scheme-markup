@@ -102,6 +102,7 @@ export const WARNING_TARGETS = {
   // сценариев): переход открывает режим «Сценарии» на этом сценарии (таск 10,
   // `warningScreenPatch`).
   scenarioDeviceMissing: "scenario",
+  scenarioServiceMissing: "scenario",
 };
 
 // Ошибки сверху, вопросы о виде снизу: сперва то, что сломано, потом то, что
