@@ -51441,6 +51441,7 @@ function volumeFace(points, rgb, options = {}) {
     // неё пятна ламп и окон, как на пол и стены: «сделай что бы физический
     // свет подсвечивал объекты (мебель)». Ставит его сборка сцены
     // (`volumeTagThing`); объявлено здесь, чтобы порода граней не менялась.
+    // У вещи чертежа это её id — своей тени на себе она не получает.
     thing: false,
   };
 }
@@ -57008,6 +57009,7 @@ function volumeScene(project, schemeId, options = {}) {
       sunSpots: [],
       landMm: null,
       objectBoxes: [],
+      occluders: [],
       rooms: [],
       walls: [],
       boundsMm: null,
@@ -57356,6 +57358,9 @@ function volumeScene(project, schemeId, options = {}) {
   // Габариты вещей: **не препятствия** (G264), а места, которые заняты.
   // Разница — в следующем абзаце.
   const objectBoxes = [];
+  // Что отбрасывает тень от ламп (`volumeLampShades`): габариты вещей чертежа
+  // с их помещением.
+  const occluders = [];
   for (const object of objects) {
     // Рисуется модель или габарит — решает одно место (`volumeObjectFaces`).
     //
@@ -57386,8 +57391,13 @@ function volumeScene(project, schemeId, options = {}) {
     volumeObjectFaces(project, schemeId, object, schemeHeight.mm, faces, options.objectsClear !== false);
     // Вещь в комнате — её (таск 09 сценариев): включённый свет светлит и диван.
     if (rooms.length > 0 && faces.length > objectFrom) volumeTagRoom(faces, objectFrom, where, volumeMiddleOf(faces[objectFrom].p));
-    volumeTagThing(faces, objectFrom);
+    volumeTagThing(faces, objectFrom, object.id);
+    const room = faces.length > objectFrom ? faces[objectFrom].room : null;
     for (const prism of volumeObjectPrisms(project, schemeId, object, schemeHeight.mm)) {
+      // Тень от ламп — по габариту вещи (правка после сборки сценариев:
+      // «Мебель должна отбрасывать тень от ламп»): у стола тенью ложится
+      // столешница, у шкафа — короб, и ножки отдельными тенями кадру не нужны.
+      if (room && prism.topMm > prism.bottomMm) occluders.push(volumeOccluder(object.id, room, prism));
       if (!volumePrismBlocks(prism)) continue;
       const solid = volumePrismSolid(prism);
       // Габарит остаётся в сцене, но не в `solids`: по нему выбирается место,
@@ -57461,6 +57471,8 @@ function volumeScene(project, schemeId, options = {}) {
     // по которым видно, где в комнате пусто. Ими пользуется только выбор места
     // старта; ходьба, перенос и «тесно» спрашивают `solids`.
     objectBoxes,
+    // Габариты вещей для теней от ламп (`volumeLampShades`).
+    occluders,
     rooms,
     // Стены полосами: толща стены — помещение одной из сторон (`volumeRoomAt`).
     walls: wallBands,
@@ -58325,10 +58337,14 @@ function volumeTagRoom(faces, from, where, at) {
   }
 }
 
-/** Грани `faces[from…]` — вещь: на них ложатся пятна физического света. */
-function volumeTagThing(faces, from) {
+/**
+ * Грани `faces[from…]` — вещь: на них ложатся пятна физического света. `id` —
+ * вещь чертежа: своей тени на себе она не получает (`volumeLampShade`).
+ */
+function volumeTagThing(faces, from, id = null) {
+  const thing = id || true;
   for (let index = from; index < faces.length; index += 1) {
-    if (!faces[index].line) faces[index].thing = true;
+    if (!faces[index].line) faces[index].thing = thing;
   }
 }
 
@@ -58794,7 +58810,15 @@ function volumeFrame(scene, camera, box, extra = null, tint = null, live = null)
   const rankOf = (face) => volumeOrderRank(tree, camera.at, volumeMiddleOf(face.p)) - 0.5;
   let rank = 0;
   for (const face of volumeOrderWalk(tree, camera.at)) {
+    const before = polygons.length;
     take(face, rank);
+    // Кусок не попал в кадр — отвёрнут, за спиной или за краем — не попали и
+    // его пятна с тенями: они лежат в нём же и в его плоскости. Их и не
+    // считают; кадр от этого не меняется ни на один многоугольник.
+    if (polygons.length === before) {
+      rank += 1;
+      continue;
+    }
     // Кольца пятен ламп — **сразу за своим куском** и с его местом в очереди:
     // то, что ближе куска, рисуется позже и закрывает пятно (правка после
     // сборки сценариев).
@@ -58808,7 +58832,17 @@ function volumeFrame(scene, camera, box, extra = null, tint = null, live = null)
         const alpha = ring.alpha * (strength || 0) * through;
         if (!(alpha > VOLUME_LAMP_INVISIBLE)) continue;
         const color = live.colors ? live.colors.get(ring.markId) : null;
-        take({ p: ring.p, n: ring.n || face.n, rgb: face.rgb, layer: face.layer, flat: face.flat, decal: alpha, lamp: true, ...(color ? { lampRgb: color } : {}) }, rank);
+        take({ p: ring.p, n: ring.n || face.n, rgb: face.rgb, layer: face.layer, flat: face.flat, decal: alpha, lamp: true, seams: ring.seams, ...(color ? { lampRgb: color } : {}) }, rank);
+      }
+    }
+    // Тени вещей от ламп — поверх колец своего куска: кусок в свете без пятен,
+    // прозрачностью ровно на долю лампы тени (`volumeLampShades`).
+    const shades = decals && live.shades ? live.shades.get(face) : null;
+    if (shades) {
+      for (const shade of shades) {
+        const alpha = volumeShadeAlpha(shade, live.lamps) * through;
+        if (!(alpha > VOLUME_LAMP_INVISIBLE)) continue;
+        take({ p: shade.p, n: face.n, rgb: face.rgb, layer: face.layer, flat: face.flat, room: face.room, sides: face.sides, moon: face.moon, shadow: alpha, seams: shade.seams }, rank);
       }
     }
     // Кольца окон — тем же правилом; сила окна — доля неба на штору.
@@ -58818,7 +58852,7 @@ function volumeFrame(scene, camera, box, extra = null, tint = null, live = null)
         const strength = live.windows ? live.windows.get(ring.markId) : 0;
         const alpha = ring.alpha * (strength || 0) * through;
         if (!(alpha > VOLUME_LAMP_INVISIBLE)) continue;
-        take({ p: ring.p, n: ring.n || face.n, rgb: face.rgb, layer: face.layer, flat: face.flat, decal: alpha, lamp: false }, rank);
+        take({ p: ring.p, n: ring.n || face.n, rgb: face.rgb, layer: face.layer, flat: face.flat, decal: alpha, lamp: false, seams: ring.seams }, rank);
       }
     }
     rank += 1;
@@ -58935,27 +58969,74 @@ function volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, b
     if (live && typeof face.backRoom === "string") seen = { ...face, room: face.backRoom || null };
   }
   if (facing <= 0) return out;
-  const clipped = volumeClipNear(face.p.map((point) => volumeToCamera(point, camera.at, basis)));
-  if (clipped.length < 3) return out;
-  const xy = [];
+  // Грань целиком перед ближней плоскостью — а таких почти все — переводится
+  // в экран сразу, без промежуточных точек камеры: кадр делает это сотни раз,
+  // и на телефоне мусор от них съедал заметную долю кадра. Счёт тот же, число
+  // в число, что у `volumeToCamera` и `volumeClipNear`; задетую плоскостью
+  // грань режет прежний путь.
+  const eye = camera.at;
+  const right = basis.right;
+  const up = basis.up;
+  const fwd = basis.fwd;
+  let xy = [];
   let depth = 0;
+  let count = face.p.length;
   let minX = Infinity;
   let maxX = -Infinity;
   let minY = Infinity;
   let maxY = -Infinity;
-  for (const point of clipped) {
-    const scale = focal / point.z;
-    const x = halfWidth + point.x * scale;
-    const y = halfHeight - point.y * scale;
+  let whole = true;
+  for (const point of face.p) {
+    const dx = point.x - eye.x;
+    const dy = point.y - eye.y;
+    const dz = point.z - eye.z;
+    const z = dx * fwd.x + dy * fwd.y + dz * fwd.z;
+    if (!(z >= VOLUME_NEAR_MM)) {
+      whole = false;
+      break;
+    }
+    const scale = focal / z;
+    const x = halfWidth + (dx * right.x + dy * right.y + dz * right.z) * scale;
+    const y = halfHeight - (dx * up.x + dy * up.y + dz * up.z) * scale;
     xy.push(x, y);
-    depth += point.z;
+    depth += z;
     if (x < minX) minX = x;
     if (x > maxX) maxX = x;
     if (y < minY) minY = y;
     if (y > maxY) maxY = y;
   }
+  if (!whole) {
+    const clipped = volumeClipNear(face.p.map((point) => volumeToCamera(point, eye, basis)));
+    if (clipped.length < 3) return out;
+    xy = [];
+    depth = 0;
+    count = clipped.length;
+    minX = Infinity;
+    maxX = -Infinity;
+    minY = Infinity;
+    maxY = -Infinity;
+    for (const point of clipped) {
+      const scale = focal / point.z;
+      const x = halfWidth + point.x * scale;
+      const y = halfHeight - point.y * scale;
+      xy.push(x, y);
+      depth += point.z;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+  }
   if (maxX < 0 || minX > box.width || maxY < 0 || minY > box.height) return out;
-  const middle = depth / clipped.length;
+  // Пятно света и тени не обводится, а раздаётся по швам (`volumeDecalSeams`)
+  // — номерам своих рёбер. Срезанное ближней плоскостью пятно рёбра
+  // перенумеровало, и такое обводится целиком, как прежде.
+  let soft = face.decal !== undefined || face.shadow !== undefined;
+  if (soft && face.seams && face.seams.length > 0) {
+    if (whole) volumeSeamGrow(xy, face.seams);
+    else soft = false;
+  }
+  const middle = depth / count;
   // Время года и туман (правка «погода»): земля плиты — земля сезона, а всё
   // снаружи дома тонет в тумане по дальности. В доме тумана нет: у граней
   // комнаты и проёма своё помещение (`room`, `sides`).
@@ -58984,6 +59065,9 @@ function volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, b
     // дальше — если за ним есть кому отвечать (таск 189, см. `volumeSightAt`).
     // Рисование об этом не спрашивает — прозрачность уже в цвете.
     clear: Boolean(face.clear),
+    // Пятно света или тени поверх своей грани (`decal`, `shadow`): без обводки
+    // (`volumeDraw`), швы уже раздвинуты (`volumeSeamGrow`).
+    soft,
     // Грань дома — комнаты или проёма (правка после сборки сценариев): за ней
     // дождя и снега не видно (`volumeRainMask`).
     // Грань помещения без потолка — под небом: снег на балконе идёт.
@@ -59104,6 +59188,7 @@ function volumeLiveLight(scene, live, options = {}) {
     physical,
     lamps,
     decals: physical && live && lamps.size > 0 ? volumeLampDecals(scene, live) : null,
+    shades: physical && live && lamps.size > 0 ? volumeLampShades(scene, live) : null,
     ...(colors.size > 0 ? { colors } : {}),
     ...(roomRgb ? { roomRgb } : {}),
   };
@@ -59552,41 +59637,74 @@ const VOLUME_LAMP_INVISIBLE = 0.004;
 const volumeDecalMemo = new WeakMap();
 
 /**
- * **Пятна ламп сцены**: `Map<кусок грани, [{markId, p, alpha}]>` — кольца
- * каждой лампы на кусках пола, стен и потолка, на которые она светит. Кусок —
- * ровно тот, что лежит в дереве порядка (`scene.order`): кольцо обрезано им и
- * рисуется сразу за ним.
+ * **Пятна ламп сцены**: `Map<кусок грани, [{markId, p, alpha, src, seams}]>` —
+ * кольца каждой лампы на кусках пола, стен и потолка, на которые она светит.
+ * Кусок — ровно тот, что лежит в дереве порядка (`scene.order`): кольцо
+ * обрезано им и рисуется сразу за ним. `seams` — рёбра кольца, лежащие на краю
+ * куска (`volumeDecalSeams`), `src` — источник лампы, от которого кольцо.
  *
  * От включённости это не зависит: геометрия считается **на все лампы сцены
  * разом** и раз на сцену, а кадр берёт кольца горящих и красит их по яркости.
  * Сцена пересобирается на открытую дверь — и клин сквозь проём вместе с ней.
  */
 function volumeLampDecals(scene, live) {
+  const built = volumeLampBuilt(scene, live);
+  return built ? built.decals : null;
+}
+
+/**
+ * **Тени вещей от ламп** (правка после сборки сценариев: «Мебель должна
+ * отбрасывать тень от ламп»): `Map<кусок грани, [{markId, p, own, mix, gone,
+ * seams}]>` — куда габарит вещи чертежа закрывает лампу своего помещения.
+ *
+ * Тень — не тёмное пятно, а **кусок без этой лампы**: кадр кладёт поверх
+ * колец сам кусок в его свете без пятен (`shadow` у `volumeLiveFill`) такой
+ * прозрачностью, чтобы из света в этом месте ушла ровно доля лампы. `own` —
+ * сколько света даёт здесь источник тени, `mix` — `[markId, доля, …]`: сколько
+ * дают все лампы, чьи кольца легли сюда. Одна лампа — тень снимает весь её
+ * свет, три — только свет своей, и под столом от двух других светло.
+ *
+ * Считается с пятнами, тем же разом на сцену и набор ламп.
+ */
+function volumeLampShades(scene, live) {
+  const built = volumeLampBuilt(scene, live);
+  return built ? built.shades : null;
+}
+
+/** Пятна и тени ламп сцены — раз на сцену и набор ламп. */
+function volumeLampBuilt(scene, live) {
   if (!scene || !scene.order) return null;
   const ids = [];
   for (const [markId, item] of live || []) if (item && item.kind === "light") ids.push(markId);
   ids.sort();
   const sign = ids.join(" ");
   const held = volumeDecalMemo.get(scene);
-  if (held && held.sign === sign) return held.decals;
-  const decals = volumeLampDecalsBuild(scene, ids, live);
-  volumeDecalMemo.set(scene, { sign, decals });
-  return decals;
+  if (held && held.sign === sign) return held;
+  const built = { sign, ...volumeLampDecalsBuild(scene, ids, live) };
+  volumeDecalMemo.set(scene, built);
+  return built;
 }
 
 function volumeLampDecalsBuild(scene, ids, live) {
   const decals = new Map();
+  const shades = new Map();
   const byRoom = volumeDecalHosts(scene);
   const ways = volumeLampOpenings(scene).filter((way) => !way.shut);
+  const occluders = scene.occluders || [];
   for (const markId of ids) {
     const place = volumeMarkPlace(scene, markId);
     if (!place) continue;
     const item = live.get(markId);
     const key = (item && item.roomId) || volumeRoomKeyAt(scene, volumeMarkProbe(place));
     if (!key) continue;
-    for (const source of volumeLampSources(place)) volumeSourcePools(decals, byRoom, ways, key, markId, source);
+    for (const source of volumeLampSources(place)) {
+      const blockers = volumeShadeBlockers(occluders, key, source.at);
+      const shade = blockers.length > 0 ? { blockers, shades, planes: new Map() } : null;
+      volumeSourcePools(decals, byRoom, ways, key, markId, source, shade);
+    }
   }
-  return decals;
+  volumeShadeMix(decals, shades);
+  return { decals, shades };
 }
 
 const volumeHostMemo = new WeakMap();
@@ -59611,8 +59729,120 @@ function volumeDecalHosts(scene) {
     if (!list) byRoom.set(face.room, (list = []));
     list.push(face);
   }
+  for (const list of byRoom.values()) volumeFindSeams(list);
   volumeHostMemo.set(scene, byRoom);
   return byRoom;
+}
+
+/** Швы кусков: `кусок → [номер ребра]` (`volumeFindSeams`). */
+const volumeSeamMemo = new WeakMap();
+
+/** Рёбра куска, по которым он встык с соседом той же плоскости и комнаты. */
+function volumeHostSeams(host) {
+  return volumeSeamMemo.get(host) || null;
+}
+
+/**
+ * Где куски одной комнаты лежат встык в одной плоскости: дерево порядка
+ * разрезало грань, и пятно на двух половинах должно сойтись без шва
+ * (`volumeSeamGrow`). Край комнаты, угол и кромка грани швом не считаются —
+ * за ними пятна этой лампы нет, и раздавать его туда значило бы пустить свет
+ * гостиной полоской в коридор.
+ */
+function volumeFindSeams(hosts) {
+  const groups = new Map();
+  for (const host of hosts) {
+    const n = host.n;
+    const key = Math.round(n.x * 1e4) + " " + Math.round(n.y * 1e4) + " " + Math.round(n.z * 1e4);
+    let group = groups.get(key);
+    if (!group) groups.set(key, (group = []));
+    const o = host.p[0];
+    group.push({ host, at: n.x * o.x + n.y * o.y + n.z * o.z, box: volumeHostBox(host), joins: new Set() });
+  }
+  for (const group of groups.values()) {
+    for (let i = 0; i < group.length; i += 1) {
+      for (let j = i + 1; j < group.length; j += 1) {
+        const a = group[i];
+        const b = group[j];
+        if (Math.abs(a.at - b.at) > VOLUME_SEAM_MM || !volumeBoxesTouch(a.box, b.box)) continue;
+        volumeSharedEdges(a, b);
+      }
+    }
+    for (const item of group) if (item.joins.size > 0) volumeSeamMemo.set(item.host, [...item.joins].sort((x, y) => x - y));
+  }
+}
+
+const volumeHostBoxMemo = new WeakMap();
+
+/**
+ * Вещь, отбрасывающая тень: `{id, room, corners, bottomMm, topMm, box}` —
+ * габарит призмы с её помещением и рамкой в трёх осях.
+ */
+function volumeOccluder(id, room, prism) {
+  const box = volumeBox3(prism.corners.map((corner) => ({ x: corner.x, y: corner.y, z: prism.bottomMm })));
+  box.maxZ = prism.topMm;
+  return { id, room, corners: prism.corners, bottomMm: prism.bottomMm, topMm: prism.topMm, box };
+}
+
+/** Габарит куска — раз на кусок. */
+function volumeHostBox(host) {
+  let box = volumeHostBoxMemo.get(host);
+  if (!box) volumeHostBoxMemo.set(host, (box = volumeBox3(host.p)));
+  return box;
+}
+
+/** Габарит точек в трёх осях. */
+function volumeBox3(points) {
+  const box = { minX: Infinity, minY: Infinity, minZ: Infinity, maxX: -Infinity, maxY: -Infinity, maxZ: -Infinity };
+  for (const point of points) {
+    box.minX = Math.min(box.minX, point.x);
+    box.minY = Math.min(box.minY, point.y);
+    box.minZ = Math.min(box.minZ, point.z);
+    box.maxX = Math.max(box.maxX, point.x);
+    box.maxY = Math.max(box.maxY, point.y);
+    box.maxZ = Math.max(box.maxZ, point.z);
+  }
+  return box;
+}
+
+function volumeBoxesTouch(a, b) {
+  const e = VOLUME_SEAM_MM;
+  return a.minX <= b.maxX + e && b.minX <= a.maxX + e && a.minY <= b.maxY + e && b.minY <= a.maxY + e && a.minZ <= b.maxZ + e && b.minZ <= a.maxZ + e;
+}
+
+/** Рёбра двух кусков одной плоскости, лежащие на одной прямой внахлёст, — в `joins` обоих. */
+function volumeSharedEdges(a, b) {
+  const pa = a.host.p;
+  const pb = b.host.p;
+  for (let i = 0; i < pa.length; i += 1) {
+    const from = pa[i];
+    const to = pa[(i + 1) % pa.length];
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const dz = to.z - from.z;
+    const length = Math.hypot(dx, dy, dz);
+    if (!(length > VOLUME_SEAM_MM)) continue;
+    const off = (P) => {
+      const px = P.x - from.x;
+      const py = P.y - from.y;
+      const pz = P.z - from.z;
+      const cx = py * dz - pz * dy;
+      const cy = pz * dx - px * dz;
+      const cz = px * dy - py * dx;
+      return { gap: Math.hypot(cx, cy, cz) / length, along: (px * dx + py * dy + pz * dz) / length };
+    };
+    for (let j = 0; j < pb.length; j += 1) {
+      const p = off(pb[j]);
+      const q = off(pb[(j + 1) % pb.length]);
+      if (p.gap > VOLUME_SEAM_MM || q.gap > VOLUME_SEAM_MM) continue;
+      // Внахлёст больше миллиметра, а не касание концами.
+      const lo = Math.max(0, Math.min(p.along, q.along));
+      const hi = Math.min(length, Math.max(p.along, q.along));
+      if (hi - lo <= 1) continue;
+      a.joins.add(i);
+      b.joins.add(j);
+    }
+  }
 }
 
 /**
@@ -59634,8 +59864,8 @@ const VOLUME_LAMP_SOFT_STEPS = 6;
  * проёма край по-прежнему резкий — там тень касается косяка, — а дальше
  * расходится полутенью, как от настоящего плафона.
  */
-function volumeSourcePools(decals, byRoom, ways, key, id, source) {
-  for (const host of byRoom.get(key) || []) volumeLampPool(decals, host, id, source, null);
+function volumeSourcePools(decals, byRoom, ways, key, id, source, shade = null) {
+  for (const host of byRoom.get(key) || []) volumeLampPool(decals, host, id, source, null, 1, shade);
   for (const way of ways) {
     const into = way.left === key ? way.right : way.right === key ? way.left : null;
     if (!into) continue;
@@ -59691,8 +59921,11 @@ function volumeLampFacing(n, source, distanceMm) {
  * (d² + s²)`, не больше `VOLUME_LAMP_PEAK`, и на направление лампы.
  * Прозрачность кольца — приращение: наложенные друг на друга кольца дают ровно
  * долю своего кольца.
+ *
+ * `shade` — вещи, отбрасывающие тень от этого источника (`volumeLampShade`):
+ * только в своей комнате, клину сквозь проём теней нет.
  */
-function volumeLampPool(decals, host, markId, source, way, share = 1) {
+function volumeLampPool(decals, host, markId, source, way, share = 1, shade = null) {
   let n = host.n;
   const o = host.p[0];
   const L = source.at;
@@ -59724,6 +59957,10 @@ function volumeLampPool(decals, host, markId, source, way, share = 1) {
   };
   const centre = to2({ x: L.x - n.x * d, y: L.y - n.y * d, z: L.z - n.z * d });
   let shape = host.p.map(to2);
+  // Свой кусок целиком — по нему ищутся швы (`volumeDecalSeams`): клин сквозь
+  // проём `shape` ещё обрежет.
+  const outline = shape;
+  const joins = volumeHostSeams(host);
   // Кусок дальше внешнего кольца — мимо.
   const reach = radii[0];
   let near = Infinity;
@@ -59769,36 +60006,422 @@ function volumeLampPool(decals, host, markId, source, way, share = 1) {
   let list = decals.get(host);
   let before = 0;
   let first = 0;
-  // У вещи куски маленькие: внешние кольца накрывают кусок целиком, и класть
-  // их стопкой одинаковых многоугольников незачем — они сливаются в один с
-  // долей самого внутреннего из них (доли колец — приращения, и стопка даёт
-  // ровно её). Внутренние, что режут кусок, идут как у стены.
-  if (host.thing) {
+  // Кольца, которые накрывают кусок целиком, класть стопкой одинаковых
+  // многоугольников незачем — они сливаются в один с долей самого внутреннего
+  // из них (доли колец — приращения, и стопка даёт ровно её). Внутренние, что
+  // режут кусок, идут по одному. Сначала так стало у вещей — их куски
+  // маленькие; потом у всех (правка «оптимизировать весь Объём»): дерево
+  // порядка режет стену и пол на полосы, и у полосы вдали от лампы все шесть
+  // колец были одним и тем же куском шесть раз — шесть заливок вместо одной.
+  const put = (piece, alpha) => {
+    if (!list) decals.set(host, (list = []));
+    const seams = volumeDecalSeams(piece, outline, joins);
+    const ring = flipped ? { markId, p: piece.map(from2), alpha, n, src: source, seams } : { markId, p: piece.map(from2), alpha, src: source, seams };
+    list.push(ring);
+    return ring;
+  };
+  let merged = null;
+  {
     const inner = Math.cos(Math.PI / VOLUME_LAMP_SIDES);
     let far = 0;
     for (const point of shape) far = Math.max(far, Math.hypot(point.x - centre.x, point.y - centre.y));
     while (first < radii.length && radii[first] * inner >= far) first += 1;
     if (first > 0) {
       before = peak * VOLUME_LAMP_RINGS[first - 1];
-      if (!list) decals.set(host, (list = []));
-      const piece = shape.map(from2);
-      list.push(flipped ? { markId, p: piece, alpha: before, n } : { markId, p: piece, alpha: before });
+      merged = put(shape, before);
     }
   }
   for (let index = first; index < radii.length; index += 1) {
-    const ring = [];
-    for (let side = 0; side < VOLUME_LAMP_SIDES; side += 1) {
-      const angle = (side / VOLUME_LAMP_SIDES) * Math.PI * 2;
-      ring.push({ x: centre.x + Math.cos(angle) * radii[index], y: centre.y + Math.sin(angle) * radii[index] });
-    }
-    const piece = volumeClipPolygon(shape, ring);
+    const piece = volumeClipPolygon(shape, volumeRingPoints(centre, radii[index]));
     const target = peak * VOLUME_LAMP_RINGS[index];
+    // Кольцо, хоть край его и прошёл у самого угла, накрыло кусок целиком —
+    // и оно уходит в общий кусок, а не ложится вторым таким же.
+    if (piece.length === shape.length && piece.every((point, at) => point.x === shape[at].x && point.y === shape[at].y)) {
+      before = target;
+      if (merged) merged.alpha = target;
+      else merged = put(shape, target);
+      continue;
+    }
     const alpha = 1 - (1 - target) / (1 - before);
     before = target;
     if (piece.length < 3) continue;
-    if (!list) decals.set(host, (list = []));
-    list.push(flipped ? { markId, p: piece.map(from2), alpha, n } : { markId, p: piece.map(from2), alpha });
+    put(piece, alpha);
   }
+  if (shade && !way && !host.both && list) volumeLampShade(shade, host, markId, source, { n, o, d, to2, from2, centre, shape, joins, reach: radii[0] });
+}
+
+/** Углы кольца пятна на единичной окружности — раз на сборку модуля. */
+const VOLUME_RING_UNIT = Array.from({ length: VOLUME_LAMP_SIDES }, (item, side) => {
+  const angle = (side / VOLUME_LAMP_SIDES) * Math.PI * 2;
+  return { x: Math.cos(angle), y: Math.sin(angle) };
+});
+
+/** Кольцо пятна: шестнадцатиугольник радиуса `radius` вокруг `centre` в плоскости куска. */
+function volumeRingPoints(centre, radius) {
+  return VOLUME_RING_UNIT.map((unit) => ({ x: centre.x + unit.x * radius, y: centre.y + unit.y * radius }));
+}
+
+/** Насколько точка может отойти от края куска, оставаясь на нём, мм. */
+const VOLUME_SEAM_MM = 0.5;
+/**
+ * На сколько экранных точек пятно раздаётся наружу по шву: столько же, сколько
+ * закрывала прежняя обводка в точку толщиной, — половина с каждой стороны.
+ */
+const VOLUME_SEAM_GROW_PX = 0.5;
+/** Сдвиги точек для `volumeSeamGrow` — один запас на все кадры, без мусора. */
+let volumeSeamMoves = new Float64Array(64);
+
+/**
+ * **Швы пятна**: номера рёбер многоугольника `piece` (ребро `i` — от точки `i`
+ * к следующей), которые лежат на рёбрах `joins` куска `shape` — там, где кусок
+ * встык с соседом той же плоскости и той же комнаты (`volumeHostSeams`). Оба
+ * многоугольника — в плоскости куска.
+ *
+ * Пол и стену дерево порядка режет на куски, и кольцо одного пятна ложится
+ * на соседние куски двумя многоугольниками встык. Без обводки сглаживание
+ * края у каждого из двух закрашивает пиксель шва наполовину — и по куску
+ * проступала тёмная линия, тем темнее, чем больше колец в стопке. Поэтому по
+ * этим рёбрам пятно в кадре раздаётся на полточки (`volumeSeamGrow`), а дуги
+ * колец остаются мягкими: обводка по дуге и давала круги на потолке.
+ * Обводить одни швы не годилось: телефону дорог сам вызов обводки, а не её
+ * длина, и кадр с обводкой швов стоил почти столько же, сколько с полной.
+ */
+function volumeDecalSeams(piece, shape, joins) {
+  const seams = [];
+  if (!joins || joins.length === 0) return seams;
+  for (let index = 0; index < piece.length; index += 1) {
+    const a = piece[index];
+    const b = piece[(index + 1) % piece.length];
+    for (const at of joins) {
+      const from = shape[at];
+      const to = shape[(at + 1) % shape.length];
+      if (volumeOnEdge(a, from, to) && volumeOnEdge(b, from, to)) {
+        seams.push(index);
+        break;
+      }
+    }
+  }
+  return seams;
+}
+
+/**
+ * Раздать многоугольник `xy` (экранные точки подряд) наружу по рёбрам `seams`
+ * на `VOLUME_SEAM_GROW_PX`: обе точки ребра — по его внешней нормали. Точка
+ * между двумя швами уходит по обеим.
+ */
+function volumeSeamGrow(xy, seams) {
+  const count = xy.length / 2;
+  let area = 0;
+  for (let index = 0; index < count; index += 1) {
+    const next = (index + 1) % count;
+    area += xy[index * 2] * xy[next * 2 + 1] - xy[next * 2] * xy[index * 2 + 1];
+  }
+  const sign = area > 0 ? 1 : -1;
+  if (volumeSeamMoves.length < xy.length) volumeSeamMoves = new Float64Array(xy.length * 2);
+  const moves = volumeSeamMoves;
+  moves.fill(0, 0, xy.length);
+  for (const index of seams) {
+    const next = (index + 1) % count;
+    const dx = xy[next * 2] - xy[index * 2];
+    const dy = xy[next * 2 + 1] - xy[index * 2 + 1];
+    const length = Math.hypot(dx, dy);
+    if (!(length > 0)) continue;
+    const nx = (sign * dy * VOLUME_SEAM_GROW_PX) / length;
+    const ny = (-sign * dx * VOLUME_SEAM_GROW_PX) / length;
+    moves[index * 2] += nx;
+    moves[index * 2 + 1] += ny;
+    moves[next * 2] += nx;
+    moves[next * 2 + 1] += ny;
+  }
+  for (let index = 0; index < xy.length; index += 1) xy[index] += moves[index];
+  return xy;
+}
+
+/** Лежит ли точка на отрезке `from → to` (в пределах `VOLUME_SEAM_MM`). */
+function volumeOnEdge(point, from, to) {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const length2 = dx * dx + dy * dy;
+  if (!(length2 > 0)) return false;
+  const cross = dx * (point.y - from.y) - dy * (point.x - from.x);
+  if (cross * cross > VOLUME_SEAM_MM * VOLUME_SEAM_MM * length2) return false;
+  const along = dx * (point.x - from.x) + dy * (point.y - from.y);
+  const slack = VOLUME_SEAM_MM * Math.sqrt(length2);
+  return along >= -slack && along <= length2 + slack;
+}
+
+// ——— тени вещей от ламп (правка после сборки сценариев) ———
+//
+// Слова заказчика: «Мебель должна отбрасывать тень от ламп». Тень — габарит
+// вещи (`scene.occluders`), спроецированный из точки лампы на плоскость куска,
+// на котором лежит её пятно: пол, стена, потолок, соседняя вещь. Габарит —
+// выпуклая призма, и тень его — выпуклая оболочка проекций её вершин.
+
+/**
+ * Выше этой доли высоты лампы над плоскостью вещь тень не удлиняет: луч через
+ * такую точку уходит почти вдоль плоскости, и тень её кончалась бы за
+ * квартирой. Вещь срезается на этой высоте — тень от шкафа выше настенного
+ * светильника всё равно доходит до края пятна.
+ */
+const VOLUME_SHADE_TOP = 0.9;
+/**
+ * Тень, где её лампа даёт меньше этой доли, не кладётся: на краю пятна она
+ * темнит пол на пару оттенков, а в комнате с двадцатью лампами таких — тысячи.
+ */
+const VOLUME_SHADE_FAINT = 0.05;
+
+/**
+ * Вещи помещения `key`, от которых источник в точке `at` отбрасывает тень.
+ * Вещь, внутри которой лампа, — не тень, а абажур: лампа на столе светит над
+ * столом, а не гаснет.
+ */
+function volumeShadeBlockers(occluders, key, at) {
+  const out = [];
+  for (const occluder of occluders) {
+    if (occluder.room !== key) continue;
+    if (at.z >= occluder.bottomMm - 1 && at.z <= occluder.topMm + 1 && volumePointInside(at, occluder.corners)) continue;
+    // Вещь дальше, чем достаёт пятно, тени в нём не кладёт: в большой комнате
+    // это и есть почти все вещи для каждой лампы.
+    let near = Infinity;
+    for (const corner of occluder.corners) near = Math.min(near, Math.hypot(corner.x - at.x, corner.y - at.y));
+    if (near > VOLUME_LAMP_REACH_MM && !volumePointInside(at, occluder.corners)) continue;
+    out.push(occluder);
+  }
+  return out;
+}
+
+/**
+ * Тень вещи на плоскости `(n, o)` от точки `L`, поднятой над ней на `d`:
+ * проекции вершин габарита, срезанного плоскостью куска и высотой
+ * `VOLUME_SHADE_TOP` (точки в трёх осях, на плоскости), или `null` — вещь не
+ * между лампой и плоскостью.
+ */
+function volumeShadeHull(blocker, L, n, o, d) {
+  const top = d * VOLUME_SHADE_TOP;
+  const corners = blocker.corners;
+  const count = corners.length;
+  const points = [];
+  const at = [];
+  for (const z of [blocker.bottomMm, blocker.topMm]) {
+    for (const corner of corners) at.push({ x: corner.x, y: corner.y, z });
+  }
+  const level = at.map((P) => n.x * (P.x - o.x) + n.y * (P.y - o.y) + n.z * (P.z - o.z));
+  const cast = (P, h) => {
+    const s = d / (d - h);
+    points.push({ x: L.x + (P.x - L.x) * s, y: L.y + (P.y - L.y) * s, z: L.z + (P.z - L.z) * s });
+  };
+  for (let index = 0; index < at.length; index += 1) if (level[index] >= 0 && level[index] <= top) cast(at[index], level[index]);
+  const edge = (i, j) => {
+    for (const cut of [0, top]) {
+      const a = level[i] - cut;
+      const b = level[j] - cut;
+      if (!(a * b < 0)) continue;
+      const t = a / (a - b);
+      cast({ x: at[i].x + (at[j].x - at[i].x) * t, y: at[i].y + (at[j].y - at[i].y) * t, z: at[i].z + (at[j].z - at[i].z) * t }, cut);
+    }
+  };
+  for (let i = 0; i < count; i += 1) {
+    const j = (i + 1) % count;
+    edge(i, j);
+    edge(count + i, count + j);
+    edge(i, count + i);
+  }
+  return points.length >= 3 ? points : null;
+}
+
+/**
+ * Тени вещей `shade.blockers` от одного источника на одном куске: оболочка
+ * проекций габарита, обрезанная внешним кольцом пятна (дальше лампа не
+ * светит — и тени нет) и самим куском. Плоскость у кусков пола одна на всех,
+ * и оболочка считается раз на плоскость (`shade.planes`).
+ */
+function volumeLampShade(shade, host, markId, source, plane) {
+  const { n, o, d, to2, from2, centre, shape, joins } = plane;
+  const key = n.x.toFixed(3) + " " + n.y.toFixed(3) + " " + n.z.toFixed(3) + " " + Math.round(n.x * o.x + n.y * o.y + n.z * o.z);
+  let hulls = shade.planes.get(key);
+  if (!hulls) shade.planes.set(key, (hulls = new Map()));
+  let reach = null;
+  const box = volumeHostBox(host);
+  // Лучи от лампы к куску лежат в габарите «лампа плюс кусок»: вещь вне его
+  // кусок не затеняет, и её тень на эту плоскость можно не строить.
+  const L = source.at;
+  const rays = {
+    minX: Math.min(box.minX, L.x),
+    minY: Math.min(box.minY, L.y),
+    minZ: Math.min(box.minZ, L.z),
+    maxX: Math.max(box.maxX, L.x),
+    maxY: Math.max(box.maxY, L.y),
+    maxZ: Math.max(box.maxZ, L.z),
+  };
+  for (const blocker of shade.blockers) {
+    // Своей тени на себе вещь не получает: её отвёрнутые грани и так без пятна.
+    if (host.thing === blocker.id) continue;
+    if (!volumeBoxesTouch(blocker.box, rays)) continue;
+    if (!hulls.has(blocker)) {
+      const points = volumeShadeHull(blocker, source.at, n, o, d);
+      hulls.set(blocker, points ? { points, box: volumeBox3(points) } : null);
+    }
+    const cast = hulls.get(blocker);
+    // Тень мимо куска — дальше не считается: у пола комнаты десятки кусков, а
+    // тень вещи ложится на немногие.
+    if (!cast || !volumeBoxesTouch(cast.box, box)) continue;
+    const hull = cast.points;
+    // Внешнее кольцо режет только тень, вышедшую за него.
+    let shadow = volumeHull(hull.map(to2));
+    const inner = plane.reach * Math.cos(Math.PI / VOLUME_LAMP_SIDES);
+    if (shadow.some((point) => Math.hypot(point.x - centre.x, point.y - centre.y) > inner)) {
+      if (!reach) reach = volumeRingPoints(centre, plane.reach);
+      shadow = volumeClipPolygon(shadow, reach);
+    }
+    if (shadow.length < 3) continue;
+    const piece = volumeClipPolygon(shape, shadow);
+    if (piece.length < 3) continue;
+    let list = shade.shades.get(host);
+    if (!list) shade.shades.set(host, (list = []));
+    list.push({ markId, src: source, p: piece.map(from2), at: from2(volumeCentroid2(piece)), own: 0, mix: null, gone: null, seams: volumeDecalSeams(piece, shape, joins) });
+  }
+}
+
+/** Середина многоугольника по площади (в плоскости); у вырожденного — средняя точка. */
+function volumeCentroid2(points) {
+  let area = 0;
+  let x = 0;
+  let y = 0;
+  for (let index = 0; index < points.length; index += 1) {
+    const a = points[index];
+    const b = points[(index + 1) % points.length];
+    const cross = a.x * b.y - b.x * a.y;
+    area += cross;
+    x += (a.x + b.x) * cross;
+    y += (a.y + b.y) * cross;
+  }
+  if (Math.abs(area) < 1e-9) {
+    const middle = volumeMiddleOf(points.map((point) => ({ x: point.x, y: point.y, z: 0 })));
+    return { x: middle.x, y: middle.y };
+  }
+  return { x: x / (3 * area), y: y / (3 * area) };
+}
+
+/**
+ * Сколько света в середине каждой тени даёт её источник (`own`) и каждая
+ * лампа, чьи кольца легли туда (`mix`): по самим кольцам куска, теми долями,
+ * которыми их кладёт кадр. Тень, где её источник почти не светит
+ * (`VOLUME_SHADE_FAINT`), отбрасывается.
+ *
+ * `gone` — `[markId, доля, …]`: источники других ламп, чьи тени кадр кладёт
+ * на эту точку раньше. Их света здесь уже нет, и тень снимает свою долю из
+ * того, что осталось: под столом в комнате с тремя лампами три тени дают
+ * темноту, а не треть её.
+ */
+function volumeShadeMix(decals, shades) {
+  for (const [host, list] of shades) {
+    const n = host.n;
+    const ax = Math.abs(n.x);
+    const ay = Math.abs(n.y);
+    const az = Math.abs(n.z);
+    // Точка в многоугольнике — в двух осях: та, вдоль которой смотрит кусок,
+    // отбрасывается. Кольца куска сводятся к двум осям раз на кусок.
+    const u = az >= ax && az >= ay ? "x" : ax >= ay ? "y" : "x";
+    const v = az >= ax && az >= ay ? "y" : "z";
+    const rings = (decals.get(host) || []).map((ring) => ({ ring, flat: volumeFlat2(ring.p, u, v) }));
+    const kept = [];
+    for (const shade of list) {
+      const px = shade.at[u];
+      const py = shade.at[v];
+      const keeps = new Map();
+      const bySource = new Map();
+      for (const { ring, flat } of rings) {
+        if (!volumeInsideFlat(flat, px, py)) continue;
+        keeps.set(ring.markId, (keeps.has(ring.markId) ? keeps.get(ring.markId) : 1) * (1 - ring.alpha));
+        bySource.set(ring.src, (bySource.has(ring.src) ? bySource.get(ring.src) : 1) * (1 - ring.alpha));
+      }
+      shade.own = 1 - (bySource.has(shade.src) ? bySource.get(shade.src) : 1);
+      if (!(shade.own > VOLUME_SHADE_FAINT)) continue;
+      const mix = [];
+      for (const [markId, keep] of keeps) mix.push(markId, 1 - keep);
+      shade.mix = mix;
+      const gone = [];
+      for (const before of kept) {
+        if (before.shade.markId === shade.markId || !volumeInsideFlat(before.flat, px, py)) continue;
+        if (bySource.has(before.shade.src)) gone.push(before.shade.markId, 1 - bySource.get(before.shade.src));
+      }
+      shade.gone = gone;
+      kept.push({ shade, flat: volumeFlat2(shade.p, u, v) });
+    }
+    for (const item of kept) item.shade.src = null;
+    if (kept.length > 0) shades.set(host, kept.map((item) => item.shade));
+    else shades.delete(host);
+  }
+}
+
+/**
+ * Многоугольник в двух осях `u`, `v` для `volumeInsideFlat`: точки подряд и
+ * габарит — по нему мимо проходящая точка отсеивается сразу.
+ */
+function volumeFlat2(points, u, v) {
+  const xy = new Float64Array(points.length * 2);
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (let index = 0; index < points.length; index += 1) {
+    const x = points[index][u];
+    const y = points[index][v];
+    xy[index * 2] = x;
+    xy[index * 2 + 1] = y;
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  return { xy, minX, maxX, minY, maxY };
+}
+
+/** Точка `(px, py)` в многоугольнике, сведённом к двум осям (`volumeFlat2`). */
+function volumeInsideFlat(flat, px, py) {
+  if (px < flat.minX || px > flat.maxX || py < flat.minY || py > flat.maxY) return false;
+  const xy = flat.xy;
+  const count = xy.length / 2;
+  let inside = false;
+  for (let index = 0, back = count - 1; index < count; back = index, index += 1) {
+    const ax = xy[index * 2];
+    const ay = xy[index * 2 + 1];
+    const bx = xy[back * 2];
+    const by = xy[back * 2 + 1];
+    if (ay > py !== by > py && px < ((bx - ax) * (py - ay)) / (by - ay) + ax) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * Прозрачность тени в кадре: насколько надо вернуть кусок к его свету без
+ * пятен, чтобы из света ушла ровно доля источника тени при нынешней яркости
+ * ламп (`lamps`: `markId → сила`).
+ *
+ * Кольца кладутся одно на другое, и света в точке — `1 − П(1 − aₖ)` по лампам.
+ * Кусок поверх колец прозрачностью `s` оставляет от света `(1 − П)(1 − s)`, а
+ * без источника тени света `1 − П/(1 − a)`; отсюда `s`. Одна лампа — тень
+ * снимает весь её свет. Тени, положенные сюда раньше (`gone`), свой свет уже
+ * сняли — из `П` он вынут.
+ */
+function volumeShadeAlpha(shade, lamps) {
+  const strength = lamps ? lamps.get(shade.markId) || 0 : 0;
+  if (!(strength > 0) || !shade.mix) return 0;
+  let keep = 1;
+  for (let index = 0; index < shade.mix.length; index += 2) {
+    const level = lamps.get(shade.mix[index]) || 0;
+    keep *= 1 - Math.min(1, level * shade.mix[index + 1]);
+  }
+  for (let index = 0; index < (shade.gone || []).length; index += 2) {
+    const level = lamps.get(shade.gone[index]) || 0;
+    keep /= 1 - Math.min(0.999, level * shade.gone[index + 1]);
+  }
+  keep = Math.min(1, keep);
+  const light = 1 - keep;
+  if (!(light > VOLUME_LAMP_INVISIBLE)) return 0;
+  const mine = Math.min(0.999, strength * shade.own);
+  const without = 1 - keep / (1 - mine);
+  return Math.max(0, Math.min(1, 1 - Math.max(0, without) / light));
 }
 
 /**
@@ -59839,6 +60462,12 @@ function volumeLampBeam(edge, L, n, o) {
 function volumeLiveFill(face, normal, tint, live) {
   const alpha = face.alpha === undefined ? 1 : face.alpha;
   const shade = face.flat ? 1 : volumeShade(normal);
+  // Тень вещи от лампы: свой кусок в своём свете — тот же счёт, что ниже у
+  // обычной грани, только прозрачностью тени.
+  if (face.shadow !== undefined) {
+    const own = volumeLiveTint(face, tint, live);
+    return volumeFill(face.rgb, shade, face.shadow, face.moon ? volumeMoonTint(own, face.moon) : own);
+  }
   if (face.decal !== undefined) {
     // Под лампой и у окна грань светлее, чем просто без тьмы: светлота
     // поднимается к единице (`VOLUME_LAMP_LIFT`, `VOLUME_WINDOW_LIFT`).
@@ -60376,9 +61005,15 @@ function volumeDraw(ctx, polygons) {
     if (!polygon.stroke) {
       ctx.closePath();
       ctx.fillStyle = polygon.fill;
-      ctx.strokeStyle = polygon.fill;
+      // Обводка своим цветом закрывает шов между соседними гранями. Пятну
+      // света и тени (`soft`) её не нужно: шов с соседним куском закрыт тем,
+      // что пятно раздвинуто по нему (`volumeSeamGrow`), а по дуге кольца
+      // обводка клала кайму двойной прозрачности — круги на потолке — и
+      // стоила телефону столько же, сколько заливка: замер стенда с мебелью
+      // — 23,5 мс заливки кадра с обводкой пятен против 13 без неё.
+      if (!polygon.soft) ctx.strokeStyle = polygon.fill;
       ctx.fill();
-      ctx.stroke();
+      if (!polygon.soft) ctx.stroke();
       continue;
     }
     if (polygon.closed) ctx.closePath();
@@ -97829,6 +98464,34 @@ function volumeRainStep(drops, kind, dt, width, height, at = 0) {
 }
 
 /**
+ * Частицы на кадр: снег — кружками, дождь — штрихами. **Одна заливка или одна
+ * обводка на все** (правка «оптимизировать весь Объём»): снежинка своей
+ * заливкой — это семьсот заливок на кадр, и телефону они дороги.
+ */
+function volumeRainDraw(ctx, kind, drops, night = 0) {
+  // Ночью осадки темнее: белая крупа на чёрном небе светилась бы.
+  const light = Math.round(225 - 120 * night);
+  if (kind === "snow") {
+    ctx.fillStyle = "rgba(" + light + "," + light + "," + (light + 10) + ",0.85)";
+    ctx.beginPath();
+    for (const drop of drops) {
+      ctx.moveTo(drop.x + drop.size, drop.y);
+      ctx.arc(drop.x, drop.y, drop.size, 0, Math.PI * 2);
+    }
+    ctx.fill();
+    return;
+  }
+  ctx.strokeStyle = "rgba(" + (light - 20) + "," + (light - 10) + "," + light + ",0.45)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (const drop of drops) {
+    ctx.moveTo(drop.x, drop.y);
+    ctx.lineTo(drop.x - drop.size * 0.25, drop.y - drop.size);
+  }
+  ctx.stroke();
+}
+
+/**
  * Поле осадков: `{node, set(kind, strength, night), show(on), resize(w, h, ratio), dispose()}`.
  * `kind` — `"rain" | "snow" | null`. Пока поле не видно или осадков нет, кадры
  * не заказываются вовсе.
@@ -97868,25 +98531,7 @@ function volumeRainCreate() {
     volumeRainStep(drops, kind, dt, width, height, time / 1000);
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     ctx.clearRect(0, 0, width, height);
-    // Ночью осадки темнее: белая крупа на чёрном небе светилась бы.
-    const light = Math.round(225 - 120 * night);
-    if (kind === "snow") {
-      ctx.fillStyle = "rgba(" + light + "," + light + "," + (light + 10) + ",0.85)";
-      for (const drop of drops) {
-        ctx.beginPath();
-        ctx.arc(drop.x, drop.y, drop.size, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    } else {
-      ctx.strokeStyle = "rgba(" + (light - 20) + "," + (light - 10) + "," + light + ",0.45)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      for (const drop of drops) {
-        ctx.moveTo(drop.x, drop.y);
-        ctx.lineTo(drop.x - drop.size * 0.25, drop.y - drop.size);
-      }
-      ctx.stroke();
-    }
+    volumeRainDraw(ctx, kind, drops, night);
     if (masked && maskNode) {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.globalCompositeOperation = "destination-out";
@@ -98552,6 +99197,27 @@ const VOLUME_STICK_RUN = 0.9;
 const VOLUME_STICK_EDGE_PX = 24;
 /** Сколько точек пальцу можно уехать, чтобы касание осталось нажатием. */
 const VOLUME_TAP_SLOP_PX = 10;
+
+/**
+ * **Плотность холста «Объёма» — не больше двух точек на точку стиля**
+ * (правка после сборки сценариев: «мобильные девайсы слабее заметно и уже
+ * начинают подлагивать»).
+ *
+ * У телефона плотность экрана — три, и холст во весь экран — девять точек на
+ * каждую: почти три миллиона, и каждую кадр красит по нескольку раз (пол,
+ * пятна ламп поверх него, вещь поверх пятна). Замер стенда «Объёма» на
+ * телефонном поле 844 × 390 с мебелью и лампами: заливка кадра при плотности
+ * три — 13 мс, при двух — 7,7. Кадр «Объёма» — ровные многоугольники без
+ * мелкого рисунка и текста: разницы между двумя и тремя на нём не видно, а
+ * цену видно.
+ */
+const VOLUME_RATIO_MAX = 2;
+
+/** Плотность холста по плотности экрана: `VOLUME_RATIO_MAX` сверху, единица без ответа. */
+function volumeRatio(devicePixelRatio) {
+  const ratio = Number(devicePixelRatio);
+  return ratio > 0 ? Math.min(VOLUME_RATIO_MAX, ratio) : 1;
+}
 /** Взгляд свайпом: градусов на точку при средней чувствительности. */
 const VOLUME_TOUCH_LOOK_DEG_PX = 0.22;
 
@@ -100031,7 +100697,7 @@ function createVolume({ api, hosts }) {
 
   function resize() {
     if (!(stage.clientWidth > 0) || !(stage.clientHeight > 0)) return;
-    const ratio = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
+    const ratio = volumeRatio(typeof window !== "undefined" ? window.devicePixelRatio : 1);
     const box = viewport();
     node.style.width = box.width + "px";
     node.style.height = box.height + "px";
@@ -100307,7 +100973,7 @@ function createVolume({ api, hosts }) {
     // присваивание, и только на своём режиме: запись из погасшего поля отняла
     // бы место у того, на которое смотрят.
     placeHere();
-    const ratio = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
+    const ratio = volumeRatio(typeof window !== "undefined" ? window.devicePixelRatio : 1);
     const box = viewport();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, node.width, node.height);

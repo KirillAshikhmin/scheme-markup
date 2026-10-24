@@ -66,6 +66,34 @@ export function volumeRainStep(drops, kind, dt, width, height, at = 0) {
 }
 
 /**
+ * Частицы на кадр: снег — кружками, дождь — штрихами. **Одна заливка или одна
+ * обводка на все** (правка «оптимизировать весь Объём»): снежинка своей
+ * заливкой — это семьсот заливок на кадр, и телефону они дороги.
+ */
+export function volumeRainDraw(ctx, kind, drops, night = 0) {
+  // Ночью осадки темнее: белая крупа на чёрном небе светилась бы.
+  const light = Math.round(225 - 120 * night);
+  if (kind === "snow") {
+    ctx.fillStyle = "rgba(" + light + "," + light + "," + (light + 10) + ",0.85)";
+    ctx.beginPath();
+    for (const drop of drops) {
+      ctx.moveTo(drop.x + drop.size, drop.y);
+      ctx.arc(drop.x, drop.y, drop.size, 0, Math.PI * 2);
+    }
+    ctx.fill();
+    return;
+  }
+  ctx.strokeStyle = "rgba(" + (light - 20) + "," + (light - 10) + "," + light + ",0.45)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (const drop of drops) {
+    ctx.moveTo(drop.x, drop.y);
+    ctx.lineTo(drop.x - drop.size * 0.25, drop.y - drop.size);
+  }
+  ctx.stroke();
+}
+
+/**
  * Поле осадков: `{node, set(kind, strength, night), show(on), resize(w, h, ratio), dispose()}`.
  * `kind` — `"rain" | "snow" | null`. Пока поле не видно или осадков нет, кадры
  * не заказываются вовсе.
@@ -105,25 +133,7 @@ export function volumeRainCreate() {
     volumeRainStep(drops, kind, dt, width, height, time / 1000);
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     ctx.clearRect(0, 0, width, height);
-    // Ночью осадки темнее: белая крупа на чёрном небе светилась бы.
-    const light = Math.round(225 - 120 * night);
-    if (kind === "snow") {
-      ctx.fillStyle = "rgba(" + light + "," + light + "," + (light + 10) + ",0.85)";
-      for (const drop of drops) {
-        ctx.beginPath();
-        ctx.arc(drop.x, drop.y, drop.size, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    } else {
-      ctx.strokeStyle = "rgba(" + (light - 20) + "," + (light - 10) + "," + light + ",0.45)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      for (const drop of drops) {
-        ctx.moveTo(drop.x, drop.y);
-        ctx.lineTo(drop.x - drop.size * 0.25, drop.y - drop.size);
-      }
-      ctx.stroke();
-    }
+    volumeRainDraw(ctx, kind, drops, night);
     if (masked && maskNode) {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.globalCompositeOperation = "destination-out";

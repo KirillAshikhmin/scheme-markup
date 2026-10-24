@@ -690,6 +690,27 @@ export const VOLUME_STICK_RUN = 0.9;
 export const VOLUME_STICK_EDGE_PX = 24;
 /** Сколько точек пальцу можно уехать, чтобы касание осталось нажатием. */
 export const VOLUME_TAP_SLOP_PX = 10;
+
+/**
+ * **Плотность холста «Объёма» — не больше двух точек на точку стиля**
+ * (правка после сборки сценариев: «мобильные девайсы слабее заметно и уже
+ * начинают подлагивать»).
+ *
+ * У телефона плотность экрана — три, и холст во весь экран — девять точек на
+ * каждую: почти три миллиона, и каждую кадр красит по нескольку раз (пол,
+ * пятна ламп поверх него, вещь поверх пятна). Замер стенда «Объёма» на
+ * телефонном поле 844 × 390 с мебелью и лампами: заливка кадра при плотности
+ * три — 13 мс, при двух — 7,7. Кадр «Объёма» — ровные многоугольники без
+ * мелкого рисунка и текста: разницы между двумя и тремя на нём не видно, а
+ * цену видно.
+ */
+export const VOLUME_RATIO_MAX = 2;
+
+/** Плотность холста по плотности экрана: `VOLUME_RATIO_MAX` сверху, единица без ответа. */
+export function volumeRatio(devicePixelRatio) {
+  const ratio = Number(devicePixelRatio);
+  return ratio > 0 ? Math.min(VOLUME_RATIO_MAX, ratio) : 1;
+}
 /** Взгляд свайпом: градусов на точку при средней чувствительности. */
 export const VOLUME_TOUCH_LOOK_DEG_PX = 0.22;
 
@@ -2170,7 +2191,7 @@ function createVolume({ api, hosts }) {
 
   function resize() {
     if (!(stage.clientWidth > 0) || !(stage.clientHeight > 0)) return;
-    const ratio = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
+    const ratio = volumeRatio(typeof window !== "undefined" ? window.devicePixelRatio : 1);
     const box = viewport();
     node.style.width = box.width + "px";
     node.style.height = box.height + "px";
@@ -2446,7 +2467,7 @@ function createVolume({ api, hosts }) {
     // присваивание, и только на своём режиме: запись из погасшего поля отняла
     // бы место у того, на которое смотрят.
     placeHere();
-    const ratio = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
+    const ratio = volumeRatio(typeof window !== "undefined" ? window.devicePixelRatio : 1);
     const box = viewport();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, node.width, node.height);
