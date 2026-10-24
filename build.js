@@ -14,7 +14,8 @@ import { createHash } from "node:crypto";
 import { readdir, readFile, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { strings } from "./src/strings.js";
+import vm from "node:vm";
+import { strings, text } from "./src/strings.js";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const srcDir = path.join(root, "src");
@@ -195,6 +196,214 @@ export function blankLiterals(source) {
   return out;
 }
 
+// ——— комментарии вон ————————————————————————————————————————————————————————
+//
+// Исходники — наполовину русские комментарии: страница весила 7,2 МБ, из них
+// 3,5 МБ — слова для того, кто правит код (замер 2026-10-24). Человеку с
+// телефоном они не нужны, поэтому в `dist/` код едет без них: комментарий
+// выпадает, отступы в начале строк и пустые строки — тоже. Строки, шаблоны и
+// регулярные выражения переносятся байт в байт.
+//
+// Разбор свой и проще `blankLiterals`: там нужен только ответ «код или нет»,
+// здесь — сам текст. Регулярное выражение от деления отличается по последнему
+// значимому слову: после имени, числа, строки и закрывающей скобки — деление,
+// после ключевых слов и знаков — выражение. Ошибку разбора ловит не он сам, а
+// три независимые проверки: `blankLiterals` исходника и итога сходятся до
+// пробела (`test/buildStrip.test.js`), итог разбирается движком JS
+// (`assertParses`), и весь прогон тестов исполняет бандл потока.
+//
+// Многострочный комментарий становится переводом строки, однострочный —
+// пробелом: перевод строки внутри `/* */` для правила точки с запятой (ASI)
+// значим (`return /*\n*/ x` — это `return;`).
+
+const STRIP_REGEX_AFTER_WORDS = new Set([
+  "return", "typeof", "instanceof", "in", "of", "new", "delete", "void", "throw", "case", "do", "else", "yield", "await",
+]);
+const STRIP_WORD = /[A-Za-z0-9_$\u0080-\uffff]/;
+
+export function stripComments(source) {
+  const out = [];
+  let i = 0;
+  // Последнее значимое: "word" (+ само слово), "value" (число, строка,
+  // шаблон, выражение, `)` `]` `}`), "punct" — после него `/` открывает выражение.
+  let last = "punct";
+  let lastWord = "";
+  let lineStart = true;
+  const frames = [];
+  let depth = 0;
+  const emitNewline = () => {
+    while (out.length > 0 && (out[out.length - 1] === " " || out[out.length - 1] === "\t")) out.pop();
+    if (out.length > 0 && out[out.length - 1] !== "\n") out.push("\n");
+    lineStart = true;
+  };
+  // Шаблон с позиции после «`» или «}» подстановки: до «`» или «${».
+  const template = () => {
+    const from = i;
+    while (i < source.length) {
+      const ch = source[i];
+      if (ch === "\\") {
+        i += 2;
+        continue;
+      }
+      if (ch === "`") {
+        i += 1;
+        out.push(source.slice(from, i));
+        last = "value";
+        return;
+      }
+      if (ch === "$" && source[i + 1] === "{") {
+        i += 2;
+        out.push(source.slice(from, i));
+        frames.push(depth);
+        last = "punct";
+        return;
+      }
+      i += 1;
+    }
+    throw new Error("stripComments: незакрытый шаблон");
+  };
+  while (i < source.length) {
+    const ch = source[i];
+    const next = source[i + 1];
+    if (ch === "\n" || ch === "\r") {
+      i += 1;
+      emitNewline();
+      continue;
+    }
+    if (ch === " " || ch === "\t") {
+      i += 1;
+      if (!lineStart && out.length > 0 && out[out.length - 1] !== " ") out.push(" ");
+      continue;
+    }
+    if (ch === "/" && next === "/") {
+      while (i < source.length && source[i] !== "\n" && source[i] !== "\r") i += 1;
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      const end = source.indexOf("*/", i + 2);
+      if (end < 0) throw new Error("stripComments: незакрытый комментарий");
+      const body = source.slice(i, end + 2);
+      i = end + 2;
+      if (/[\n\r\u2028\u2029]/.test(body)) emitNewline();
+      else if (!lineStart && out.length > 0 && out[out.length - 1] !== " ") out.push(" ");
+      continue;
+    }
+    lineStart = false;
+    if (ch === '"' || ch === "'") {
+      const from = i;
+      i += 1;
+      while (i < source.length && source[i] !== ch) i += source[i] === "\\" ? 2 : 1;
+      i += 1;
+      out.push(source.slice(from, i));
+      last = "value";
+      continue;
+    }
+    if (ch === "`") {
+      out.push("`");
+      i += 1;
+      template();
+      continue;
+    }
+    if (ch === "/" && (last === "punct" || (last === "word" && STRIP_REGEX_AFTER_WORDS.has(lastWord)))) {
+      const from = i;
+      let inClass = false;
+      i += 1;
+      while (i < source.length) {
+        const c = source[i];
+        if (c === "\\") {
+          i += 2;
+          continue;
+        }
+        if (c === "\n") throw new Error("stripComments: регулярное выражение без конца строки");
+        i += 1;
+        if (c === "[") inClass = true;
+        else if (c === "]") inClass = false;
+        else if (c === "/" && !inClass) break;
+      }
+      while (i < source.length && STRIP_WORD.test(source[i])) i += 1;
+      out.push(source.slice(from, i));
+      last = "value";
+      continue;
+    }
+    if (STRIP_WORD.test(ch)) {
+      const from = i;
+      while (i < source.length && STRIP_WORD.test(source[i])) i += 1;
+      const word = source.slice(from, i);
+      out.push(word);
+      last = /^[0-9]/.test(word) ? "value" : "word";
+      lastWord = word;
+      continue;
+    }
+    if (ch === "{") depth += 1;
+    else if (ch === "}") {
+      if (frames.length > 0 && frames[frames.length - 1] === depth) {
+        frames.pop();
+        out.push("}");
+        i += 1;
+        template();
+        continue;
+      }
+      depth -= 1;
+    }
+    out.push(ch);
+    i += 1;
+    last = ch === ")" || ch === "]" || ch === "}" ? "value" : "punct";
+  }
+  emitNewline();
+  return out.join("");
+}
+
+// Стили без комментариев, отступов и пустых строк; строки в кавычках — как есть.
+export function stripCssComments(css) {
+  const out = [];
+  let i = 0;
+  let lineStart = true;
+  while (i < css.length) {
+    const ch = css[i];
+    if (ch === "\n" || ch === "\r") {
+      i += 1;
+      while (out.length > 0 && (out[out.length - 1] === " " || out[out.length - 1] === "\t")) out.pop();
+      if (out.length > 0 && out[out.length - 1] !== "\n") out.push("\n");
+      lineStart = true;
+      continue;
+    }
+    if (ch === " " || ch === "\t") {
+      i += 1;
+      if (!lineStart && out[out.length - 1] !== " ") out.push(" ");
+      continue;
+    }
+    if (ch === "/" && css[i + 1] === "*") {
+      const end = css.indexOf("*/", i + 2);
+      if (end < 0) throw new Error("stripCssComments: незакрытый комментарий");
+      i = end + 2;
+      if (!lineStart && out[out.length - 1] !== " ") out.push(" ");
+      continue;
+    }
+    lineStart = false;
+    if (ch === '"' || ch === "'") {
+      const from = i;
+      i += 1;
+      while (i < css.length && css[i] !== ch && css[i] !== "\n") i += css[i] === "\\" ? 2 : 1;
+      i += 1;
+      out.push(css.slice(from, i));
+      continue;
+    }
+    out.push(ch);
+    i += 1;
+  }
+  return out.join("").trim() + "\n";
+}
+
+// Итог разбора обязан разбираться движком JS: сорванная склейка или
+// испорченный разбор комментариев падают здесь, а не у человека в браузере.
+function assertParses(code, where) {
+  try {
+    new vm.Script(code, { filename: where });
+  } catch (error) {
+    throw new Error("Собранный код не разбирается (" + where + "): " + error.message);
+  }
+}
+
 // Бандл — одна область видимости: одноимённые объявления в разных модулях
 // стали бы SyntaxError в браузере, поэтому ловим их здесь.
 function assertUniqueTopLevelNames(sources) {
@@ -273,18 +482,72 @@ export function assertWorkerPure(modules) {
   }
 }
 
+// ——— словарь потока —————————————————————————————————————————————————————————
+//
+// Поток говорит журналом и подписями имитации, а остальной словарь страницы
+// (окна, панели, ошибки модели) ему не нужен: целиком он вёз вторую копию
+// `strings.js` — 343 КБ на каждую загрузку (известный баг). В бандл потока
+// вместо модуля идёт его выжимка: разделы `WORKER_STRINGS` тем же значением,
+// что в странице (подписи хаба уже вписаны), и та же функция `text`.
+// Обращение модуля потока к строке вне выжимки роняет сборку: в потоке
+// `text` молча вернул бы ключ вместо слов.
+export const WORKER_STRINGS = Object.freeze(["sim", "rooms.none"]);
+const stringsFile = path.join(srcDir, "strings.js");
+
+function workerStringKeys(source) {
+  const keys = [];
+  for (const match of source.matchAll(/\btext\(\s*["']([A-Za-z][\w.]*)/g)) keys.push(match[1].replace(/\.$/, ""));
+  for (const match of source.matchAll(/\bstrings\.([A-Za-z][\w.]*)/g)) {
+    if (!match[1].endsWith("js")) keys.push(match[1]);
+  }
+  return keys;
+}
+
+export function assertWorkerStrings(modules) {
+  for (const { name, source } of modules) {
+    if (name === "src/strings.js") continue;
+    for (const key of workerStringKeys(source)) {
+      const inside = WORKER_STRINGS.some((own) => key === own || key.startsWith(own + ".") || own.startsWith(key + "."));
+      if (!inside) {
+        throw new Error("Модуль потока " + name + " читает строку " + key + ", которой нет в словаре потока (WORKER_STRINGS в build.js)");
+      }
+    }
+  }
+}
+
+export function workerStringsSource() {
+  const picked = {};
+  for (const key of WORKER_STRINGS) {
+    const parts = key.split(".");
+    let from = strings;
+    let into = picked;
+    parts.forEach((part, at) => {
+      from = from[part];
+      if (at === parts.length - 1) into[part] = from;
+      else into = into[part] || (into[part] = {});
+    });
+  }
+  return "const strings = " + JSON.stringify(picked) + ";\n" + text.toString() + "\n";
+}
+
 // Бандл потока: `worker.js` и всё, что он импортирует, — тем же разбором, что
 // страница, в той же одной области видимости, плюс вызов входа в конце.
 function workerBundleFrom(sources) {
   const files = walkModules(sources, [workerEntryFile]);
-  assertWorkerPure(files.map((file) => ({ name: relativeName(file), source: sources.get(file).source })));
+  const modules = files.map((file) => ({ name: relativeName(file), source: sources.get(file).source }));
+  assertWorkerPure(modules);
+  assertWorkerStrings(modules);
   const body = files
-    .map((file) => "// " + relativeName(file) + "\n" + stripModuleSyntax(sources.get(file).source, file))
+    .map((file) => "// " + relativeName(file) + "\n" + (file === stringsFile ? workerStringsSource() : moduleCode(sources.get(file).source, file)))
     .join("\n\n");
-  return {
-    source: "(function () {\n" + body + "\n" + WORKER_BUNDLE_CALL + "\n})();\n",
-    modules: files.map(relativeName),
-  };
+  const source = "(function () {\n" + body + "\n" + WORKER_BUNDLE_CALL + "\n})();\n";
+  assertParses(source, "бандл потока имитации");
+  return { source, modules: files.map(relativeName) };
+}
+
+// Модуль в бандл: без комментариев и без строк `import`/`export`.
+function moduleCode(source, file) {
+  return stripModuleSyntax(stripComments(source), file);
 }
 
 /**
@@ -578,14 +841,15 @@ export async function buildPage() {
   const worker = workerBundleFrom(sources);
   const script = orderModules(sources)
     .map((file) => {
-      const own = sources.get(file).source;
+      const own = stripComments(sources.get(file).source);
       const source = file === workerSourceFile ? withWorkerSource(own, worker.source) : own;
       return "// " + path.relative(root, file) + "\n" + stripModuleSyntax(source, file);
     })
     .join("\n\n");
+  assertParses("(function () {\n" + script + "\n})();", "страница");
 
   const cssFiles = await listFiles(srcDir, ".css");
-  const css = (await Promise.all(cssFiles.map((file) => readFile(file, "utf8")))).join("\n");
+  const css = stripCssComments((await Promise.all(cssFiles.map((file) => readFile(file, "utf8")))).join("\n"));
 
   const template = await readFile(path.join(srcDir, "index.html"), "utf8");
   const html = template

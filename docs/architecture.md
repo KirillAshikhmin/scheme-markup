@@ -30,8 +30,8 @@
 src/**/*.js + src/**/*.css + src/index.html
         │  node build.js  (своя склейка: топосортировка импортов → один IIFE)
         ▼
-dist/index.html  ≈7,2 МБ  ── страница целиком: код, стили, строки
-   └─ внутри строкой SIM_WORKER_SOURCE — второй бандл (поток имитации, ADR 010)
+dist/index.html  ≈2,8 МБ  ── страница целиком: код и стили без комментариев, строки
+   └─ внутри строкой SIM_WORKER_SOURCE — второй бандл (поток имитации, ADR 010), ≈320 КБ
 dist/assets/gost-type-a.ttf, sw.js, manifest.webmanifest, значки, guide.html
         │  git subtree split --prefix=scheme_image → KirillAshikhmin/scheme-markup
         ▼
@@ -235,13 +235,14 @@ project (объект, model.js)
 `node build.js` (`npm run build`):
 
 1. Читает исходники, строит граф относительных импортов (`dependenciesOf`) и упорядочивает его (`orderModules`).
-2. Срезает `import` / `export` (`stripModuleSyntax`) и склеивает модули в один IIFE.
-3. Собирает второй бандл потока из `src/sim/worker.js` (`workerBundleFrom`), проверяет его чистоту (`assertWorkerPure`) и подставляет строкой (`withWorkerSource`).
+2. Убирает комментарии, отступы и пустые строки (`stripComments`, у стилей — `stripCssComments`), срезает `import` / `export` (`stripModuleSyntax`) и склеивает модули в один IIFE. Исходники — наполовину комментарии: без них страница 2,8 МБ вместо 7,2 (сжатой по сети 0,67 МБ вместо 1,9). Разбор сверяет `test/buildStrip.test.js`.
+3. Собирает второй бандл потока из `src/sim/worker.js` (`workerBundleFrom`), проверяет его чистоту (`assertWorkerPure`) и подставляет строкой (`withWorkerSource`). Вместо `strings.js` в поток идёт выжимка словаря — разделы `WORKER_STRINGS` (`sim`, `rooms.none`) и та же `text`; модуль потока, читающий строку вне выжимки, роняет сборку (`assertWorkerStrings`).
 4. Проверяет итог:
    - имена уникальны (`assertUniqueTopLevelNames`; разбор строк и комментариев — `blankLiterals`, он один на сборку и тесты);
    - нет управляющих символов (`assertPlainText`);
    - код и стили внутри страницы (`assertCodeInside`);
-   - ссылки только на файлы рядом (`assertLocalLinks`, `assertOffline`).
+   - ссылки только на файлы рядом (`assertLocalLinks`, `assertOffline`);
+   - страница и поток разбираются движком JS (`assertParses`).
 5. Пишет `dist/`: страницу, шрифт, `sw.js` со списком офлайн-кэша, манифест, значки, `guide.html`.
 
 `npm test` — `node --test "test/**/*.test.js"`: около 2900 тестов за несколько секунд. Один тест пропускается без соседнего `../../Sprut.Hub_Tools`.
