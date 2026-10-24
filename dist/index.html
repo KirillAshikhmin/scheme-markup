@@ -40776,6 +40776,12 @@ bridge.post(climateWeather());
 weatherOff = weather.watch(() => {
 if (bridge) bridge.post(climateWeather());
 });
+if (home) {
+const spec = overlay(home);
+sentText = JSON.stringify(spec);
+sentSpec = spec;
+bridge.post({ type: "load", spec });
+}
 return bridge;
 }
 function post(message) {
@@ -41108,10 +41114,10 @@ savedClimate = null;
 forgetEdited();
 fitMirror(before);
 revision += 1;
-const spec = overlay(home);
-const textNow = JSON.stringify(spec);
 const entries = [];
-if (textNow !== sentText) {
+const spec = bridge ? overlay(home) : null;
+const textNow = spec ? JSON.stringify(spec) : sentText;
+if (spec && textNow !== sentText) {
 const lost =
 !switching &&
 running &&
@@ -41175,6 +41181,7 @@ return true;
 const leadOf = (markId) => (project && typeof markId === "string" ? deviceFollowers(project).get(markId) || markId : markId);
 function act(action) {
 if (closed || !project || !action || typeof action !== "object") return false;
+if (!running) return false;
 const markId = leadOf(action.markId);
 post({ type: "act", action: markId === action.markId ? action : { ...action, markId } });
 return running;
@@ -41222,7 +41229,7 @@ if (closed || !Number.isFinite(by)) return false;
 const nowMs = timers.now();
 const target = clock.simMs(nowMs) + by;
 clock.step(by, nowMs);
-post({ type: "advance", toMs: target });
+if (bridge) post({ type: "advance", toMs: target });
 return true;
 }
 function scenarioActive(id, on) {
@@ -41302,8 +41309,15 @@ post({ type: "run", scenarioId: id });
 return running;
 },
 scenarioActive,
-scenarios: scenariosView,
-optionForms,
+scenarios: () => {
+ensureBridge();
+return scenariosView();
+},
+optionForms: (bindingId, scenarioId = null) => {
+ensureBridge();
+return optionForms(bindingId, scenarioId);
+},
+awake: () => bridge !== null,
 hung: () => ({ scenarios: [...hungScenarios.keys()], bindings: [...hungBindings.keys()] }),
 inPage: () => inPage,
 saved: () => saveChain,
@@ -51021,7 +51035,9 @@ if ("screen" in changed || "schemeId" in changed || "project" in changed) canvas
 if ("schemeId" in changed || "schemeImage" in changed || "project" in changed) canvasAutoFit(state);
 canvasRedraw();
 });
-simWatch(() => canvasRedraw());
+simWatch(() => {
+if (canvasOnScreen(canvasState())) canvasRedraw();
+});
 canvasResize();
 canvasSyncCursor();
 canvasAutoFit(canvasState());
@@ -58621,7 +58637,9 @@ if (
 )
 redraw();
 });
-const unwatch = simWatch(() => redraw());
+const unwatch = simWatch(() => {
+if (host.isConnected && host.getClientRects().length > 0) redraw();
+});
 const observer = typeof ResizeObserver === "function" ? new ResizeObserver(() => redraw()) : null;
 if (observer) observer.observe(host);
 syncCursor();

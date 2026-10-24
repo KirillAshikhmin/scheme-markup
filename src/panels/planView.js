@@ -297,7 +297,12 @@ export function createPlanView(host, api, options = {}) {
     )
       redraw();
   });
-  const unwatch = simWatch(() => redraw());
+  // Скрытое поле (другой режим, свёрнутый раздел) событий дома не рисует
+  // (известный баг): показали снова — перерисуют смена `screen` или
+  // ResizeObserver, у которого размер из нуля стал настоящим.
+  const unwatch = simWatch(() => {
+    if (host.isConnected && host.getClientRects().length > 0) redraw();
+  });
   const observer = typeof ResizeObserver === "function" ? new ResizeObserver(() => redraw()) : null;
   if (observer) observer.observe(host);
   syncCursor();

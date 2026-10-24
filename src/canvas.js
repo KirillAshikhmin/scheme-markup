@@ -4631,7 +4631,13 @@ function mountCanvas(host, api) {
     canvasRedraw();
   });
   // Дом живёт сам: изменения устройств, запуск и остановка перерисовывают план.
-  simWatch(() => canvasRedraw());
+  // Только показанный: живое состояние план рисует лишь в «Схеме»
+  // (`canvasSimLocked`), а в «Объёме» и «Сценариях» каждое событие дома
+  // перерисовывало бы скрытое поле (известный баг). Вернулись на план — смена
+  // `screen` перерисует его сама.
+  simWatch(() => {
+    if (canvasOnScreen(canvasState())) canvasRedraw();
+  });
   canvasResize();
   canvasSyncCursor();
   canvasAutoFit(canvasState());

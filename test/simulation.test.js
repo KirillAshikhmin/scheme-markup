@@ -239,15 +239,53 @@ test("без Worker (конструктор бросает) — движок в 
   const box = pressHouse();
   const { sim } = session({ spawn: noWorker });
   sim.sync(box.project);
+  assert.equal(sim.awake(), false, "движок поднялся без запуска");
+  sim.start();
+  await settle();
   assert.equal(sim.inPage(), true);
   const told = sim.journal().filter((entry) => entry.code === "noWorker");
   assert.equal(told.length, 1);
   assert.equal(told[0].kind, "system");
-  sim.start();
   await settle();
   sim.press(box.marks["В2"], 0, "single");
   await settle();
   assert.equal(sim.value(box.marks["С3"], 0, "On"), true, "движок в странице не исполнил сценарий");
+});
+
+test("поток поднимается по надобности: открытый и правленный объект и действия остановленного дома его не будят, запуск и вопрос экрана — будят", async () => {
+  const box = pressHouse();
+  const made = [];
+  const spawn = (source) => {
+    const fake = { posted: [], postMessage: (message) => fake.posted.push(message), terminate() {}, addEventListener() {} };
+    made.push(fake);
+    return fake;
+  };
+  const { sim } = session({ spawn, bridge: { source: "stub" } });
+  sim.sync(box.project);
+  sim.sync({ ...box.project, name: "Правка 1" });
+  sim.sync({ ...box.project, name: "Правка 2" });
+  assert.equal(sim.press(box.marks["В2"], 0, "single"), false);
+  sim.presence(["кухня"]);
+  sim.step(60000);
+  assert.equal(made.length, 0, "действие остановленного дома подняло поток — движок его всё равно отбросит");
+  sim.start();
+  await settle();
+  assert.equal(made.length, 1, "запуск не поднял поток");
+  const loads = made[0].posted.filter((message) => message.type === "load");
+  assert.equal(loads.length, 1, "поток получил дом не одной загрузкой");
+  assert.ok(made[0].posted.some((message) => message.type === "start"));
+
+  const quiet = session({ spawn, bridge: { source: "stub" } }).sim;
+  const before = made.length;
+  quiet.sync(box.project);
+  quiet.sync({ ...box.project, name: "Правка" });
+  assert.equal(quiet.awake(), false, "поток поднялся от одного открытия объекта");
+  assert.equal(made.length, before);
+  assert.equal(quiet.value(box.marks["С3"], 0, "On"), false, "зеркало без потока не знает начальных значений");
+  quiet.optionForms(null, "нет");
+  assert.equal(quiet.awake(), true, "форма опций не подняла поток");
+  assert.equal(made.length, before + 1);
+  assert.equal(made.at(-1).posted.filter((message) => message.type === "load").length, 1);
 });
 
 test("щелчок по выключателю → свет: зеркало, живое состояние и подписчик", async () => {
@@ -712,6 +750,8 @@ test("сторож: верхний уровень скрипта завис на
   const fake = freezable(timers, { onPost: (message, spec) => message.type === "trace" && (message.where === "load" || message.where === "start") && marked(spec) });
   const { sim } = session({ timers, spawn: fake.spawn });
   sim.sync(box.project);
+  // Режим «Сценарии» спрашивает состояние сценариев — поток поднимается и грузит дом.
+  sim.scenarios();
   assert.ok(await until(() => sim.hung().scenarios.length > 0, timers, { step: 250, limit: 80 }), "виновник не найден");
   assert.deepEqual(sim.hung().scenarios, [hungId]);
   assert.ok(fake.made.length >= 3, "проб не было");

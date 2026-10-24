@@ -300,6 +300,11 @@ export function createSimulation(options = {}) {
 
   // ——— поток ————————————————————————————————————————————————————————————
 
+  // Поток поднимается по надобности, а не при открытии объекта (известный баг:
+  // он работал у каждого, кто просто смотрит план, и на каждую правку получал
+  // весь дом): на запуск дома, на любое действие и когда экрану нужно то, что
+  // знает только поток, — формы опций и состояние сценариев. До того правка
+  // объекта потоку не уходит вовсе; поднявшись, он получает дом как есть.
   function ensureBridge() {
     if (bridge || closed) return bridge;
     bridge = makeBridge({ onMessage: receive, onHang: hangAnswer, onPage: pageMode, restore: restoreMessages });
@@ -312,6 +317,12 @@ export function createSimulation(options = {}) {
     weatherOff = weather.watch(() => {
       if (bridge) bridge.post(climateWeather());
     });
+    if (home) {
+      const spec = overlay(home);
+      sentText = JSON.stringify(spec);
+      sentSpec = spec;
+      bridge.post({ type: "load", spec });
+    }
     return bridge;
   }
 
@@ -690,10 +701,11 @@ export function createSimulation(options = {}) {
     forgetEdited();
     fitMirror(before);
     revision += 1;
-    const spec = overlay(home);
-    const textNow = JSON.stringify(spec);
     const entries = [];
-    if (textNow !== sentText) {
+    // Потока ещё нет — дом ему не нужен: он получит его, когда поднимется.
+    const spec = bridge ? overlay(home) : null;
+    const textNow = spec ? JSON.stringify(spec) : sentText;
+    if (spec && textNow !== sentText) {
       // Сказать «таймеры сброшены правкой» можно только про сценарий, который
       // их правда теряет: логику, которой правка не коснулась, дом не трогает.
       const lost =
@@ -768,6 +780,9 @@ export function createSimulation(options = {}) {
 
   function act(action) {
     if (closed || !project || !action || typeof action !== "object") return false;
+    // Остановленный дом действий не исполняет (движок их отбрасывает), и
+    // ходьба по «Объёму» не должна будить ради них поток.
+    if (!running) return false;
     const markId = leadOf(action.markId);
     post({ type: "act", action: markId === action.markId ? action : { ...action, markId } });
     return running;
@@ -820,7 +835,8 @@ export function createSimulation(options = {}) {
     const nowMs = timers.now();
     const target = clock.simMs(nowMs) + by;
     clock.step(by, nowMs);
-    post({ type: "advance", toMs: target });
+    // Без потока шагать некому: поднявшись, он получит часы целиком.
+    if (bridge) post({ type: "advance", toMs: target });
     return true;
   }
 
@@ -906,8 +922,17 @@ export function createSimulation(options = {}) {
       return running;
     },
     scenarioActive,
-    scenarios: scenariosView,
-    optionForms,
+    // Состояние сценариев и формы опций знает только поток: спросили — пора поднимать.
+    scenarios: () => {
+      ensureBridge();
+      return scenariosView();
+    },
+    optionForms: (bindingId, scenarioId = null) => {
+      ensureBridge();
+      return optionForms(bindingId, scenarioId);
+    },
+    // Поднят ли поток (для тестов и замеров): до запуска и до вопросов экрана — нет.
+    awake: () => bridge !== null,
     hung: () => ({ scenarios: [...hungScenarios.keys()], bindings: [...hungBindings.keys()] }),
     inPage: () => inPage,
     saved: () => saveChain,
