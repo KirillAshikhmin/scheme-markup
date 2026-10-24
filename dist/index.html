@@ -23195,6 +23195,119 @@ function roomAtPoint(project, schemeId, point) {
   return outline ? outline.roomId : null;
 }
 
+// ——— чьё место в толще стены (правка после сборки сценариев) ——————————————
+//
+// Слова заказчика: «Стою в дверном проеме внутри квартиры, а оно считает что
+// я на улице… Дверные проемы и прочие — это часть квартиры. И они должны
+// относиться к одному из смежных помещений. За исключением помещений без
+// крыши… исправь их сразу и координально. Что бы не сталкивались больше.
+// Можно, например, всю стену приписывать комнате».
+//
+// Контуры помещений обводят по граням стен, и толща стены — порог, откосы
+// проёма, ниша — не лежит ни в одном из них. Спрашивать «где это» по одним
+// контурам значило звать её улицей: человек в проёме попадал под снег и
+// уличный градусник, метка на стене оставалась без помещения. Теперь правило
+// одно на план и на «Объём», и живёт оно здесь (`wallPlaceRoom`):
+//
+//   — точка в контуре — его помещение, как и было;
+//   — точка в толще стены — помещение **своей половины** стены: щуп за гранью
+//     с той стороны оси, где лежит точка. Там улица или помещение без крыши —
+//     помещение под крышей с другой стороны: проём из комнаты на улицу, на
+//     лестницу, на балкон — комнатный. Под крышей нет ни с одной стороны —
+//     что есть (балкон), а нет ничего — улица;
+//   — у самой грани, на щуп от неё, — помещение только **своей** стороны:
+//     контур, недотянутый до стены, не делает улицей полосу у стены, а
+//     стоящий на улице у наружной стены в дом не попадает.
+//
+// Это вопрос «где стоит» — человек, метка, вещь. Щупы «что за этой гранью»
+// (свет сторон стены, стороны проёма, воздух через проём, развёртка) им не
+// спрашивают: они нарочно выходят из стены и спрашивают контур.
+
+/** Насколько за грань стены ищется помещение её стороны, мм. */
+const WALL_PLACE_PROBE_MM = 150;
+
+/** Стены для `wallPlaceRoom`: `{a, u, n, len, half}` в мм; вырожденные выпадают. */
+function wallPlaceBands(walls) {
+  const bands = [];
+  for (const wall of walls || []) {
+    const vectors = wallVectors(wall);
+    if (!vectors) continue;
+    bands.push({
+      a: { x: Number(wall.aMm.x), y: Number(wall.aMm.y) },
+      u: vectors.u,
+      n: vectors.n,
+      len: vectors.len,
+      half: Math.max(0, Number(wall.thicknessMm) || 0) / 2,
+    });
+  }
+  return bands;
+}
+
+/**
+ * Помещение точки `at` (мм) в толще стены или у её грани — или `null`, если
+ * точка не у стены или со всех сторон улица. `contourAt(point)` — помещение
+ * по контуру в точке (мм), `roofed(room)` — под крышей ли оно. Точку в
+ * контуре спрашивают у контура, а не здесь.
+ */
+function wallPlaceRoom(bands, at, contourAt, roofed = () => true) {
+  if (!at) return null;
+  let open = null;
+  for (const band of bands || []) {
+    const dx = at.x - band.a.x;
+    const dy = at.y - band.a.y;
+    const along = dx * band.u.x + dy * band.u.y;
+    if (along < 0 || along > band.len) continue;
+    const across = dx * band.n.x + dy * band.n.y;
+    const reach = Math.abs(across);
+    if (reach > band.half + WALL_PLACE_PROBE_MM) continue;
+    const away = band.half + WALL_PLACE_PROBE_MM;
+    const probe = (sign) =>
+      contourAt({
+        x: band.a.x + band.u.x * along + band.n.x * sign * away,
+        y: band.a.y + band.u.y * along + band.n.y * sign * away,
+      });
+    const sign = across < 0 ? -1 : 1;
+    const mine = probe(sign);
+    if (mine && roofed(mine)) return mine;
+    // За гранью — только своя сторона: другая лежит за стеной.
+    if (reach > band.half) {
+      open = open || mine;
+      continue;
+    }
+    const other = probe(-sign);
+    if (other && roofed(other)) return other;
+    open = open || mine || other;
+  }
+  return open;
+}
+
+/**
+ * Контур места на плане: точка в контуре — он, в толще стены и у её грани —
+ * по правилу `wallPlaceRoom`. Это вопрос «где стоит» (метка, устройство,
+ * вещь); `outlineAtPoint` остаётся вопросом «что в этом контуре».
+ */
+function outlineAtPlace(project, schemeId, point) {
+  const own = outlineAtPoint(project, schemeId, point);
+  if (own || !point) return own;
+  const at = planFractionToMm(project, schemeId, point);
+  if (!at) return null;
+  return wallPlaceRoom(
+    wallPlaceBands(wallsOnScheme(project, schemeId)),
+    at,
+    (probe) => {
+      const fraction = planMmToFraction(project, schemeId, probe);
+      return fraction ? outlineAtPoint(project, schemeId, fraction) : null;
+    },
+    (outline) => outlineHasCeiling(project, outline),
+  );
+}
+
+/** Помещение места на плане — `outlineAtPlace`, ключом помещения. */
+function roomAtPlace(project, schemeId, point) {
+  const outline = outlineAtPlace(project, schemeId, point);
+  return outline ? outline.roomId : null;
+}
+
 function normalizeOutlinePoints(points) {
   const list = normalizePoints(points);
   if (list.length < OUTLINE_MIN_POINTS) throw modelError("shortOutline");
@@ -27572,7 +27685,8 @@ function removeMarkPoint(project, markId, index) {
 // ——— автопривязка метки к помещению ——————————————————————————————————
 //
 // Решение заказчика: «Подставлять автоматически, ручная правка главнее».
-// Метка внутри контура получает его помещение сама, вне всех контуров — поле
+// Метка внутри контура получает его помещение сама, на стене — помещение своей
+// стороны (`roomAtPlace`), вне контуров и стен — поле
 // пустое. Метку, которой помещение вписали руками (`roomManual`), автоматика
 // не трогает больше никогда: ни при перемещении, ни при перерисовке контура.
 // Вписано ли помещение метки руками. Объекты, размеченные до появления
@@ -27589,7 +27703,9 @@ function applyRoomOutlines(project, schemeId) {
     if (markRoomManual(mark)) return mark;
     if (schemeId && mark.schemeId !== schemeId) return mark;
     const point = Array.isArray(mark.points) && mark.points.length > 0 ? mark.points[0] : null;
-    const roomId = point ? roomAtPoint(project, mark.schemeId, point) : null;
+    // Метка на стене — помещения своей стороны (`roomAtPlace`): выключатель у
+    // двери стоит в толще стены, вне контуров, и оставался без помещения.
+    const roomId = point ? roomAtPlace(project, mark.schemeId, point) : null;
     if ((mark.roomId || null) === roomId) return mark;
     changed.push(mark.id);
     return { ...mark, roomId };
@@ -54043,10 +54159,10 @@ function volumeClimateGeometry(project) {
   return { rooms: [...rooms.values()], ways };
 }
 
-/** Высота в точке: по накрывающему её контуру, иначе по схеме. */
+/** Высота в точке: по помещению места (вещь в нише стены — тоже), иначе по схеме. */
 function volumeHeightAt(project, schemeId, pointMm, fallbackMm) {
   const fraction = planMmToFraction(project, schemeId, pointMm);
-  const roomId = fraction ? roomAtPoint(project, schemeId, fraction) : null;
+  const roomId = fraction ? roomAtPlace(project, schemeId, fraction) : null;
   if (!roomId) return fallbackMm;
   return volumeHeightMm(project, schemeId, roomId).mm;
 }
@@ -55866,7 +55982,7 @@ function volumeLineFrames(repeat, path, acrossMm, bottomMm, topMm) {
  * — неразмещённая; полное описание места — размещённая. Чистая: ни холста, ни
  * строк, — правило места обязано проверяться без браузера.
  */
-function volumeMarkPlacement(project, mark, rooms = []) {
+function volumeMarkPlacement(project, mark, where = []) {
   if (!mark || markIsComment(mark)) return null;
   const path = volumeMarkPathMm(project, mark);
   if (path.length === 0) return { markId: mark.id, skip: VOLUME_MARK_NO_POINT };
@@ -56030,7 +56146,7 @@ function volumeMarkPlacement(project, mark, rooms = []) {
 
   // ——— в воздухе на своей высоте и под потолком ———
   const middle = volumePathMiddle(path);
-  const room = heightMm === null ? volumeRoomAt({ rooms }, middle) : null;
+  const room = heightMm === null ? volumeRoomAt(where, middle) : null;
   if (heightMm === null && !room) return { markId: mark.id, skip: VOLUME_MARK_NO_PLACE };
   // Вверх у вещи без стены идёт **выступ**: она лежит лицом к полу или к
   // потолку, а не стоит боком. Потолочная свисает выступом от потолка, висящая
@@ -56127,13 +56243,14 @@ function volumeMarkPlacement(project, mark, rooms = []) {
  * сборка выдумала. Поэтому `spare` отдельным списком, а не причиной в
  * `unplaced`: это разные новости, и смешивать их нельзя.
  */
-function volumeMarks(project, schemeId, { marks, rooms } = {}) {
+function volumeMarks(project, schemeId, { marks, rooms, walls } = {}) {
   const list = marks || (project ? project.marks.filter((mark) => mark.schemeId === schemeId) : []);
   const placed = [];
   const unplaced = [];
   const spare = [];
+  const where = { rooms: rooms || [], walls: walls || [] };
   for (const mark of list) {
-    const place = volumeMarkPlacement(project, mark, rooms || []);
+    const place = volumeMarkPlacement(project, mark, where);
     if (!place) continue;
     if (place.skip) {
       unplaced.push({ markId: mark.id, label: labelOf(project, mark.id), reason: place.skip });
@@ -56886,6 +57003,7 @@ function volumeScene(project, schemeId, options = {}) {
       landMm: null,
       objectBoxes: [],
       rooms: [],
+      walls: [],
       boundsMm: null,
       doors: [],
       sheers: [],
@@ -56896,6 +57014,10 @@ function volumeScene(project, schemeId, options = {}) {
     };
   }
   const rooms = volumeRooms(project, schemeId);
+  // Стены полосами — для вопроса «где стоит» (`volumeRoomAt`): толща стены
+  // принадлежит помещению одной из сторон.
+  const wallBands = wallPlaceBands(walls);
+  const where = { rooms, walls: wallBands };
   const schemeHeight = volumeHeightMm(project, schemeId, null);
   if (!schemeHeight.known && !rooms.some((room) => room.heightKnown)) notes.push("noHeight");
   const faces = [];
@@ -57257,7 +57379,7 @@ function volumeScene(project, schemeId, options = {}) {
     const objectFrom = faces.length;
     volumeObjectFaces(project, schemeId, object, schemeHeight.mm, faces, options.objectsClear !== false);
     // Вещь в комнате — её (таск 09 сценариев): включённый свет светлит и диван.
-    if (rooms.length > 0 && faces.length > objectFrom) volumeTagRoom(faces, objectFrom, rooms, volumeMiddleOf(faces[objectFrom].p));
+    if (rooms.length > 0 && faces.length > objectFrom) volumeTagRoom(faces, objectFrom, where, volumeMiddleOf(faces[objectFrom].p));
     for (const prism of volumeObjectPrisms(project, schemeId, object, schemeHeight.mm)) {
       if (!volumePrismBlocks(prism)) continue;
       const solid = volumePrismSolid(prism);
@@ -57271,7 +57393,7 @@ function volumeScene(project, schemeId, options = {}) {
   // стены и вещи чертежа, и спорят с ними порядком, а не ярусом. Вещь на стене
   // стоит перед стеной — это и значит «перед»; препятствием она при этом не
   // становится (сквозь розетку ходят).
-  const marks = volumeMarks(project, schemeId, { marks: options.marks, rooms });
+  const marks = volumeMarks(project, schemeId, { marks: options.marks, rooms, walls: wallBands });
   const markImages = options.markImages !== false;
   for (const place of marks.placed) {
     const markFrom = faces.length;
@@ -57280,7 +57402,7 @@ function volumeScene(project, schemeId, options = {}) {
     volumeMarkFaces(place, faces, options.curtainShares ? volumeCurtainShare(options.curtainShares, place.markId) : 0);
     // Метка в комнате — её (таск 09 сценариев). Щуп — от лица вещи внутрь: у
     // метки на стене лицо лежит на кромке контура.
-    if (rooms.length > 0) volumeTagRoom(faces, markFrom, rooms, volumeMarkProbe(place));
+    if (rooms.length > 0) volumeTagRoom(faces, markFrom, where, volumeMarkProbe(place));
     if (markImages || !place.model) volumeMarkViewLines(place, faces);
   }
   volumeTagIndoor(faces, rooms);
@@ -57332,6 +57454,8 @@ function volumeScene(project, schemeId, options = {}) {
     // старта; ходьба, перенос и «тесно» спрашивают `solids`.
     objectBoxes,
     rooms,
+    // Стены полосами: толща стены — помещение одной из сторон (`volumeRoomAt`).
+    walls: wallBands,
     boundsMm: bounds,
     // На сколько нарисованное выходит за габарит чертежа: стена стоит на всю
     // толщину от своей оси, а пол под ней — ещё и с напуском (D37). Обзор
@@ -58063,17 +58187,35 @@ function volumeFreeSpotNear(solids, at, headMm = VOLUME_HEAD_MM, reachMm = 3000,
   return null;
 }
 
-/**
- * В каком помещении стоит человек — по контурам сцены, а не по `roomAtPoint`:
- * контуры здесь уже переведены в миллиметры, и спрашивается это на каждом
- * шаге. Окно называет комнату вслух — заказчик про обзор сказал «без него не
- * понять, где стоишь», и имя комнаты отвечает на то же самое словом.
- */
-function volumeRoomAt(scene, at) {
-  for (const room of scene.rooms || []) {
+/** Контур сцены под точкой — без стен: им щупают «что за этой гранью». */
+function volumeContourAt(rooms, at) {
+  for (const room of rooms || []) {
     if (volumePointInside(at, room.pointsMm)) return room;
   }
   return null;
+}
+
+/**
+ * В каком помещении стоит человек (или вещь, или метка) — по контурам сцены,
+ * а не по `roomAtPoint`: контуры здесь уже переведены в миллиметры, и
+ * спрашивается это на каждом шаге. Окно называет комнату вслух — заказчик про
+ * обзор сказал «без него не понять, где стоишь», и имя комнаты отвечает на то
+ * же самое словом.
+ *
+ * Толща стены — проём, порог, откос — помещение одной из сторон по общему
+ * правилу плана и объёма (`wallPlaceRoom`, правка после сборки сценариев):
+ * «Стою в дверном проеме внутри квартиры, а оно считает что я на улице». Стены
+ * сцена несёт полосами (`scene.walls`). `where` — сцена или `{rooms, walls}`;
+ * голый список контуров — только контуры.
+ */
+function volumeRoomAt(where, at) {
+  if (!where || !at) return null;
+  const rooms = Array.isArray(where) ? where : where.rooms;
+  const own = volumeContourAt(rooms, at);
+  if (own) return own;
+  const walls = Array.isArray(where) ? null : where.walls;
+  if (!walls || walls.length === 0) return null;
+  return wallPlaceRoom(walls, at, (probe) => volumeContourAt(rooms, probe), (room) => room.hasCeiling !== false);
 }
 
 /**
@@ -58086,13 +58228,13 @@ function volumeRoomKey(room) {
   return room.roomId || room.outlineId || null;
 }
 
-/** Ключ помещения, в котором лежит точка плана, или `null` — улица. */
-function volumeRoomKeyAt(rooms, at) {
-  if (!at) return null;
-  for (const room of rooms || []) {
-    if (volumePointInside(at, room.pointsMm)) return volumeRoomKey(room);
-  }
-  return null;
+/**
+ * Ключ помещения, в котором лежит точка плана, или `null` — улица. `where` —
+ * как у `volumeRoomAt`: со стенами это «где стоит», голым списком контуров —
+ * щуп за гранью стены.
+ */
+function volumeRoomKeyAt(where, at) {
+  return volumeRoomKey(volumeRoomAt(where, at));
 }
 
 // Насколько отступить от грани внутрь помещения, спрашивая, чьё оно: метка на
@@ -58164,10 +58306,11 @@ function volumeTagIndoor(faces, rooms) {
 /**
  * Приписать грани `faces[from…]` помещению, в котором стоит вещь: ключ
  * помещения точки `at` (таск 09 сценариев). Линиям помещение не нужно — у них
- * свой цвет.
+ * свой цвет. `where` — контуры и стены сцены: вещь в нише и метка на стене —
+ * помещения своей стороны.
  */
-function volumeTagRoom(faces, from, rooms, at) {
-  const key = volumeRoomKeyAt(rooms, at);
+function volumeTagRoom(faces, from, where, at) {
+  const key = volumeRoomKeyAt(where, at);
   if (!key) return;
   for (let index = from; index < faces.length; index += 1) {
     if (!faces[index].line) faces[index].room = key;
@@ -58914,7 +59057,7 @@ function volumeLiveLight(scene, live, options = {}) {
     const strength = level * fade * (tree ? VOLUME_TREE_LIGHT : 1);
     lamps.set(markId, strength);
     if (color) colors.set(markId, color);
-    const key = item.roomId || volumeRoomKeyAt(scene && scene.rooms, volumeMarkProbe(place));
+    const key = item.roomId || volumeRoomKeyAt(scene, volumeMarkProbe(place));
     if (key) {
       const power = volumeLampPower(place) * strength;
       sums.set(key, (sums.get(key) || 0) + power);
@@ -59421,7 +59564,7 @@ function volumeLampDecalsBuild(scene, ids, live) {
     const place = volumeMarkPlace(scene, markId);
     if (!place) continue;
     const item = live.get(markId);
-    const key = (item && item.roomId) || volumeRoomKeyAt(scene.rooms, volumeMarkProbe(place));
+    const key = (item && item.roomId) || volumeRoomKeyAt(scene, volumeMarkProbe(place));
     if (!key) continue;
     for (const source of volumeLampSources(place)) volumeSourcePools(decals, byRoom, ways, key, markId, source);
   }
@@ -63426,7 +63569,7 @@ function simClimateOf(project, accessories) {
     const type = findType(project, mark.typeId);
     const code = type ? String(type.code || "").trim().toUpperCase() : "";
     const first = Array.isArray(mark.points) && mark.points.length > 0 ? mark.points[0] : null;
-    const roomId = mark.roomId || (first && mark.schemeId ? roomAtPoint(project, mark.schemeId, first) : null) || null;
+    const roomId = mark.roomId || (first && mark.schemeId ? roomAtPlace(project, mark.schemeId, first) : null) || null;
     let role = null;
     if (accessory.kind === "breezer" || code === "Б") role = "supply";
     else if (code === "ВЫТ") role = "hood";

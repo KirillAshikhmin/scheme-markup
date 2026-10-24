@@ -4817,6 +4817,119 @@ export function roomAtPoint(project, schemeId, point) {
   return outline ? outline.roomId : null;
 }
 
+// ——— чьё место в толще стены (правка после сборки сценариев) ——————————————
+//
+// Слова заказчика: «Стою в дверном проеме внутри квартиры, а оно считает что
+// я на улице… Дверные проемы и прочие — это часть квартиры. И они должны
+// относиться к одному из смежных помещений. За исключением помещений без
+// крыши… исправь их сразу и координально. Что бы не сталкивались больше.
+// Можно, например, всю стену приписывать комнате».
+//
+// Контуры помещений обводят по граням стен, и толща стены — порог, откосы
+// проёма, ниша — не лежит ни в одном из них. Спрашивать «где это» по одним
+// контурам значило звать её улицей: человек в проёме попадал под снег и
+// уличный градусник, метка на стене оставалась без помещения. Теперь правило
+// одно на план и на «Объём», и живёт оно здесь (`wallPlaceRoom`):
+//
+//   — точка в контуре — его помещение, как и было;
+//   — точка в толще стены — помещение **своей половины** стены: щуп за гранью
+//     с той стороны оси, где лежит точка. Там улица или помещение без крыши —
+//     помещение под крышей с другой стороны: проём из комнаты на улицу, на
+//     лестницу, на балкон — комнатный. Под крышей нет ни с одной стороны —
+//     что есть (балкон), а нет ничего — улица;
+//   — у самой грани, на щуп от неё, — помещение только **своей** стороны:
+//     контур, недотянутый до стены, не делает улицей полосу у стены, а
+//     стоящий на улице у наружной стены в дом не попадает.
+//
+// Это вопрос «где стоит» — человек, метка, вещь. Щупы «что за этой гранью»
+// (свет сторон стены, стороны проёма, воздух через проём, развёртка) им не
+// спрашивают: они нарочно выходят из стены и спрашивают контур.
+
+/** Насколько за грань стены ищется помещение её стороны, мм. */
+export const WALL_PLACE_PROBE_MM = 150;
+
+/** Стены для `wallPlaceRoom`: `{a, u, n, len, half}` в мм; вырожденные выпадают. */
+export function wallPlaceBands(walls) {
+  const bands = [];
+  for (const wall of walls || []) {
+    const vectors = wallVectors(wall);
+    if (!vectors) continue;
+    bands.push({
+      a: { x: Number(wall.aMm.x), y: Number(wall.aMm.y) },
+      u: vectors.u,
+      n: vectors.n,
+      len: vectors.len,
+      half: Math.max(0, Number(wall.thicknessMm) || 0) / 2,
+    });
+  }
+  return bands;
+}
+
+/**
+ * Помещение точки `at` (мм) в толще стены или у её грани — или `null`, если
+ * точка не у стены или со всех сторон улица. `contourAt(point)` — помещение
+ * по контуру в точке (мм), `roofed(room)` — под крышей ли оно. Точку в
+ * контуре спрашивают у контура, а не здесь.
+ */
+export function wallPlaceRoom(bands, at, contourAt, roofed = () => true) {
+  if (!at) return null;
+  let open = null;
+  for (const band of bands || []) {
+    const dx = at.x - band.a.x;
+    const dy = at.y - band.a.y;
+    const along = dx * band.u.x + dy * band.u.y;
+    if (along < 0 || along > band.len) continue;
+    const across = dx * band.n.x + dy * band.n.y;
+    const reach = Math.abs(across);
+    if (reach > band.half + WALL_PLACE_PROBE_MM) continue;
+    const away = band.half + WALL_PLACE_PROBE_MM;
+    const probe = (sign) =>
+      contourAt({
+        x: band.a.x + band.u.x * along + band.n.x * sign * away,
+        y: band.a.y + band.u.y * along + band.n.y * sign * away,
+      });
+    const sign = across < 0 ? -1 : 1;
+    const mine = probe(sign);
+    if (mine && roofed(mine)) return mine;
+    // За гранью — только своя сторона: другая лежит за стеной.
+    if (reach > band.half) {
+      open = open || mine;
+      continue;
+    }
+    const other = probe(-sign);
+    if (other && roofed(other)) return other;
+    open = open || mine || other;
+  }
+  return open;
+}
+
+/**
+ * Контур места на плане: точка в контуре — он, в толще стены и у её грани —
+ * по правилу `wallPlaceRoom`. Это вопрос «где стоит» (метка, устройство,
+ * вещь); `outlineAtPoint` остаётся вопросом «что в этом контуре».
+ */
+export function outlineAtPlace(project, schemeId, point) {
+  const own = outlineAtPoint(project, schemeId, point);
+  if (own || !point) return own;
+  const at = planFractionToMm(project, schemeId, point);
+  if (!at) return null;
+  return wallPlaceRoom(
+    wallPlaceBands(wallsOnScheme(project, schemeId)),
+    at,
+    (probe) => {
+      const fraction = planMmToFraction(project, schemeId, probe);
+      return fraction ? outlineAtPoint(project, schemeId, fraction) : null;
+    },
+    (outline) => outlineHasCeiling(project, outline),
+  );
+}
+
+/** Помещение места на плане — `outlineAtPlace`, ключом помещения. */
+export function roomAtPlace(project, schemeId, point) {
+  const outline = outlineAtPlace(project, schemeId, point);
+  return outline ? outline.roomId : null;
+}
+
 function normalizeOutlinePoints(points) {
   const list = normalizePoints(points);
   if (list.length < OUTLINE_MIN_POINTS) throw modelError("shortOutline");
@@ -9230,7 +9343,8 @@ export function removeMarkPoint(project, markId, index) {
 // ——— автопривязка метки к помещению ——————————————————————————————————
 //
 // Решение заказчика: «Подставлять автоматически, ручная правка главнее».
-// Метка внутри контура получает его помещение сама, вне всех контуров — поле
+// Метка внутри контура получает его помещение сама, на стене — помещение своей
+// стороны (`roomAtPlace`), вне контуров и стен — поле
 // пустое. Метку, которой помещение вписали руками (`roomManual`), автоматика
 // не трогает больше никогда: ни при перемещении, ни при перерисовке контура.
 // Вписано ли помещение метки руками. Объекты, размеченные до появления
@@ -9248,7 +9362,9 @@ export function applyRoomOutlines(project, schemeId) {
     if (markRoomManual(mark)) return mark;
     if (schemeId && mark.schemeId !== schemeId) return mark;
     const point = Array.isArray(mark.points) && mark.points.length > 0 ? mark.points[0] : null;
-    const roomId = point ? roomAtPoint(project, mark.schemeId, point) : null;
+    // Метка на стене — помещения своей стороны (`roomAtPlace`): выключатель у
+    // двери стоит в толще стены, вне контуров, и оставался без помещения.
+    const roomId = point ? roomAtPlace(project, mark.schemeId, point) : null;
     if ((mark.roomId || null) === roomId) return mark;
     changed.push(mark.id);
     return { ...mark, roomId };

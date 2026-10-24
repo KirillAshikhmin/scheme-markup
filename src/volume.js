@@ -70,7 +70,7 @@ import {
   openingsInWall,
   outlinesInOrder,
   planFractionToMm,
-  roomAtPoint,
+  roomAtPlace,
   outlineHasCeiling,
   roomHasFloor,
   planMmToFraction,
@@ -92,6 +92,8 @@ import {
   wallHeightMm,
   wallHeightShownMm,
   wallOwnHeightMm,
+  wallPlaceBands,
+  wallPlaceRoom,
   wallVectors,
   wallsOnScheme,
 } from "./model.js";
@@ -3516,10 +3518,10 @@ export function volumeClimateGeometry(project) {
   return { rooms: [...rooms.values()], ways };
 }
 
-/** Высота в точке: по накрывающему её контуру, иначе по схеме. */
+/** Высота в точке: по помещению места (вещь в нише стены — тоже), иначе по схеме. */
 function volumeHeightAt(project, schemeId, pointMm, fallbackMm) {
   const fraction = planMmToFraction(project, schemeId, pointMm);
-  const roomId = fraction ? roomAtPoint(project, schemeId, fraction) : null;
+  const roomId = fraction ? roomAtPlace(project, schemeId, fraction) : null;
   if (!roomId) return fallbackMm;
   return volumeHeightMm(project, schemeId, roomId).mm;
 }
@@ -5339,7 +5341,7 @@ function volumeLineFrames(repeat, path, acrossMm, bottomMm, topMm) {
  * — неразмещённая; полное описание места — размещённая. Чистая: ни холста, ни
  * строк, — правило места обязано проверяться без браузера.
  */
-export function volumeMarkPlacement(project, mark, rooms = []) {
+export function volumeMarkPlacement(project, mark, where = []) {
   if (!mark || markIsComment(mark)) return null;
   const path = volumeMarkPathMm(project, mark);
   if (path.length === 0) return { markId: mark.id, skip: VOLUME_MARK_NO_POINT };
@@ -5503,7 +5505,7 @@ export function volumeMarkPlacement(project, mark, rooms = []) {
 
   // ——— в воздухе на своей высоте и под потолком ———
   const middle = volumePathMiddle(path);
-  const room = heightMm === null ? volumeRoomAt({ rooms }, middle) : null;
+  const room = heightMm === null ? volumeRoomAt(where, middle) : null;
   if (heightMm === null && !room) return { markId: mark.id, skip: VOLUME_MARK_NO_PLACE };
   // Вверх у вещи без стены идёт **выступ**: она лежит лицом к полу или к
   // потолку, а не стоит боком. Потолочная свисает выступом от потолка, висящая
@@ -5600,13 +5602,14 @@ export function volumeMarkPlacement(project, mark, rooms = []) {
  * сборка выдумала. Поэтому `spare` отдельным списком, а не причиной в
  * `unplaced`: это разные новости, и смешивать их нельзя.
  */
-export function volumeMarks(project, schemeId, { marks, rooms } = {}) {
+export function volumeMarks(project, schemeId, { marks, rooms, walls } = {}) {
   const list = marks || (project ? project.marks.filter((mark) => mark.schemeId === schemeId) : []);
   const placed = [];
   const unplaced = [];
   const spare = [];
+  const where = { rooms: rooms || [], walls: walls || [] };
   for (const mark of list) {
-    const place = volumeMarkPlacement(project, mark, rooms || []);
+    const place = volumeMarkPlacement(project, mark, where);
     if (!place) continue;
     if (place.skip) {
       unplaced.push({ markId: mark.id, label: labelOf(project, mark.id), reason: place.skip });
@@ -6361,6 +6364,7 @@ export function volumeScene(project, schemeId, options = {}) {
       landMm: null,
       objectBoxes: [],
       rooms: [],
+      walls: [],
       boundsMm: null,
       doors: [],
       sheers: [],
@@ -6371,6 +6375,10 @@ export function volumeScene(project, schemeId, options = {}) {
     };
   }
   const rooms = volumeRooms(project, schemeId);
+  // Стены полосами — для вопроса «где стоит» (`volumeRoomAt`): толща стены
+  // принадлежит помещению одной из сторон.
+  const wallBands = wallPlaceBands(walls);
+  const where = { rooms, walls: wallBands };
   const schemeHeight = volumeHeightMm(project, schemeId, null);
   if (!schemeHeight.known && !rooms.some((room) => room.heightKnown)) notes.push("noHeight");
   const faces = [];
@@ -6732,7 +6740,7 @@ export function volumeScene(project, schemeId, options = {}) {
     const objectFrom = faces.length;
     volumeObjectFaces(project, schemeId, object, schemeHeight.mm, faces, options.objectsClear !== false);
     // Вещь в комнате — её (таск 09 сценариев): включённый свет светлит и диван.
-    if (rooms.length > 0 && faces.length > objectFrom) volumeTagRoom(faces, objectFrom, rooms, volumeMiddleOf(faces[objectFrom].p));
+    if (rooms.length > 0 && faces.length > objectFrom) volumeTagRoom(faces, objectFrom, where, volumeMiddleOf(faces[objectFrom].p));
     for (const prism of volumeObjectPrisms(project, schemeId, object, schemeHeight.mm)) {
       if (!volumePrismBlocks(prism)) continue;
       const solid = volumePrismSolid(prism);
@@ -6746,7 +6754,7 @@ export function volumeScene(project, schemeId, options = {}) {
   // стены и вещи чертежа, и спорят с ними порядком, а не ярусом. Вещь на стене
   // стоит перед стеной — это и значит «перед»; препятствием она при этом не
   // становится (сквозь розетку ходят).
-  const marks = volumeMarks(project, schemeId, { marks: options.marks, rooms });
+  const marks = volumeMarks(project, schemeId, { marks: options.marks, rooms, walls: wallBands });
   const markImages = options.markImages !== false;
   for (const place of marks.placed) {
     const markFrom = faces.length;
@@ -6755,7 +6763,7 @@ export function volumeScene(project, schemeId, options = {}) {
     volumeMarkFaces(place, faces, options.curtainShares ? volumeCurtainShare(options.curtainShares, place.markId) : 0);
     // Метка в комнате — её (таск 09 сценариев). Щуп — от лица вещи внутрь: у
     // метки на стене лицо лежит на кромке контура.
-    if (rooms.length > 0) volumeTagRoom(faces, markFrom, rooms, volumeMarkProbe(place));
+    if (rooms.length > 0) volumeTagRoom(faces, markFrom, where, volumeMarkProbe(place));
     if (markImages || !place.model) volumeMarkViewLines(place, faces);
   }
   volumeTagIndoor(faces, rooms);
@@ -6807,6 +6815,8 @@ export function volumeScene(project, schemeId, options = {}) {
     // старта; ходьба, перенос и «тесно» спрашивают `solids`.
     objectBoxes,
     rooms,
+    // Стены полосами: толща стены — помещение одной из сторон (`volumeRoomAt`).
+    walls: wallBands,
     boundsMm: bounds,
     // На сколько нарисованное выходит за габарит чертежа: стена стоит на всю
     // толщину от своей оси, а пол под ней — ещё и с напуском (D37). Обзор
@@ -7538,17 +7548,35 @@ export function volumeFreeSpotNear(solids, at, headMm = VOLUME_HEAD_MM, reachMm 
   return null;
 }
 
-/**
- * В каком помещении стоит человек — по контурам сцены, а не по `roomAtPoint`:
- * контуры здесь уже переведены в миллиметры, и спрашивается это на каждом
- * шаге. Окно называет комнату вслух — заказчик про обзор сказал «без него не
- * понять, где стоишь», и имя комнаты отвечает на то же самое словом.
- */
-export function volumeRoomAt(scene, at) {
-  for (const room of scene.rooms || []) {
+/** Контур сцены под точкой — без стен: им щупают «что за этой гранью». */
+function volumeContourAt(rooms, at) {
+  for (const room of rooms || []) {
     if (volumePointInside(at, room.pointsMm)) return room;
   }
   return null;
+}
+
+/**
+ * В каком помещении стоит человек (или вещь, или метка) — по контурам сцены,
+ * а не по `roomAtPoint`: контуры здесь уже переведены в миллиметры, и
+ * спрашивается это на каждом шаге. Окно называет комнату вслух — заказчик про
+ * обзор сказал «без него не понять, где стоишь», и имя комнаты отвечает на то
+ * же самое словом.
+ *
+ * Толща стены — проём, порог, откос — помещение одной из сторон по общему
+ * правилу плана и объёма (`wallPlaceRoom`, правка после сборки сценариев):
+ * «Стою в дверном проеме внутри квартиры, а оно считает что я на улице». Стены
+ * сцена несёт полосами (`scene.walls`). `where` — сцена или `{rooms, walls}`;
+ * голый список контуров — только контуры.
+ */
+export function volumeRoomAt(where, at) {
+  if (!where || !at) return null;
+  const rooms = Array.isArray(where) ? where : where.rooms;
+  const own = volumeContourAt(rooms, at);
+  if (own) return own;
+  const walls = Array.isArray(where) ? null : where.walls;
+  if (!walls || walls.length === 0) return null;
+  return wallPlaceRoom(walls, at, (probe) => volumeContourAt(rooms, probe), (room) => room.hasCeiling !== false);
 }
 
 /**
@@ -7561,13 +7589,13 @@ export function volumeRoomKey(room) {
   return room.roomId || room.outlineId || null;
 }
 
-/** Ключ помещения, в котором лежит точка плана, или `null` — улица. */
-export function volumeRoomKeyAt(rooms, at) {
-  if (!at) return null;
-  for (const room of rooms || []) {
-    if (volumePointInside(at, room.pointsMm)) return volumeRoomKey(room);
-  }
-  return null;
+/**
+ * Ключ помещения, в котором лежит точка плана, или `null` — улица. `where` —
+ * как у `volumeRoomAt`: со стенами это «где стоит», голым списком контуров —
+ * щуп за гранью стены.
+ */
+export function volumeRoomKeyAt(where, at) {
+  return volumeRoomKey(volumeRoomAt(where, at));
 }
 
 // Насколько отступить от грани внутрь помещения, спрашивая, чьё оно: метка на
@@ -7639,10 +7667,11 @@ function volumeTagIndoor(faces, rooms) {
 /**
  * Приписать грани `faces[from…]` помещению, в котором стоит вещь: ключ
  * помещения точки `at` (таск 09 сценариев). Линиям помещение не нужно — у них
- * свой цвет.
+ * свой цвет. `where` — контуры и стены сцены: вещь в нише и метка на стене —
+ * помещения своей стороны.
  */
-function volumeTagRoom(faces, from, rooms, at) {
-  const key = volumeRoomKeyAt(rooms, at);
+function volumeTagRoom(faces, from, where, at) {
+  const key = volumeRoomKeyAt(where, at);
   if (!key) return;
   for (let index = from; index < faces.length; index += 1) {
     if (!faces[index].line) faces[index].room = key;
@@ -8389,7 +8418,7 @@ export function volumeLiveLight(scene, live, options = {}) {
     const strength = level * fade * (tree ? VOLUME_TREE_LIGHT : 1);
     lamps.set(markId, strength);
     if (color) colors.set(markId, color);
-    const key = item.roomId || volumeRoomKeyAt(scene && scene.rooms, volumeMarkProbe(place));
+    const key = item.roomId || volumeRoomKeyAt(scene, volumeMarkProbe(place));
     if (key) {
       const power = volumeLampPower(place) * strength;
       sums.set(key, (sums.get(key) || 0) + power);
@@ -8896,7 +8925,7 @@ function volumeLampDecalsBuild(scene, ids, live) {
     const place = volumeMarkPlace(scene, markId);
     if (!place) continue;
     const item = live.get(markId);
-    const key = (item && item.roomId) || volumeRoomKeyAt(scene.rooms, volumeMarkProbe(place));
+    const key = (item && item.roomId) || volumeRoomKeyAt(scene, volumeMarkProbe(place));
     if (!key) continue;
     for (const source of volumeLampSources(place)) volumeSourcePools(decals, byRoom, ways, key, markId, source);
   }

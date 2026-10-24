@@ -40,7 +40,7 @@
 // `scenarioHung` (`{name, label, where}`), `hungUnknown` (`{count}`).
 import { appClockJump, appClockNow, appClockSimMs, appClockStep, appClockWatch } from "./appClock.js";
 import { appWeatherRead, appWeatherWatch } from "./appWeather.js";
-import { deviceFollowers, findMark, findType, markControlsByChannel, roomAtPoint, roomsInOrder, scenariosInOrder } from "./model.js";
+import { deviceFollowers, findMark, findType, markControlsByChannel, roomAtPlace, roomsInOrder, scenariosInOrder } from "./model.js";
 import { getSetting, setSetting } from "./store.js";
 import { text } from "./strings.js";
 import { SIM_BRIDGE_REPLAY, createSimBridge } from "./sim/bridge.js";
@@ -126,7 +126,7 @@ export function simClimateOf(project, accessories) {
     const type = findType(project, mark.typeId);
     const code = type ? String(type.code || "").trim().toUpperCase() : "";
     const first = Array.isArray(mark.points) && mark.points.length > 0 ? mark.points[0] : null;
-    const roomId = mark.roomId || (first && mark.schemeId ? roomAtPoint(project, mark.schemeId, first) : null) || null;
+    const roomId = mark.roomId || (first && mark.schemeId ? roomAtPlace(project, mark.schemeId, first) : null) || null;
     let role = null;
     if (accessory.kind === "breezer" || code === "Б") role = "supply";
     else if (code === "ВЫТ") role = "hood";
