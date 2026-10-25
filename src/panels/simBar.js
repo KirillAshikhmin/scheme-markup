@@ -8,6 +8,11 @@
 // слышат сценарии. Пока дом остановлен, полоса — одна кнопка запуска: часам
 // «Схемы» там делать нечего, их ведёт «Объём».
 //
+// На телефоне (`#app.is-mobile`) запущенная полоса — одна строка: «Остановить»,
+// время с ускорением и кнопка «Часы»; часы, шаги, «Сбросить дом» и «Выполнить
+// команду» раскрываются по ней (известный баг: полоса занимала половину плана,
+// а в лежачем телефоне — весь). На компьютере кнопки нет и полоса как была.
+//
 // Клавиши (только в «Схеме», при запущенном доме, вне полей и диалогов):
 // `P` — пауза, `N` — «К следующему событию», `E` — нажать на выделенное
 // устройство. Правило — чистая `simBarKeyAction`.
@@ -200,9 +205,9 @@ export function simBarMount(host, api) {
   const start = uiButton("", { class: "ui-btn sim-bar__start", on: { click: () => (simRunning() ? simStop() : simStart()) } });
   const status = uiEl("span", { class: "sim-bar__status" });
   const warn = uiEl("span", { class: "sim-bar__warn", text: strings.sim.bar.noWorker });
-  const reset = uiButton(strings.sim.bar.reset, { class: "ui-btn", title: strings.sim.bar.resetHint, on: { click: () => simReset() } });
+  const reset = uiButton(strings.sim.bar.reset, { class: "ui-btn sim-bar__reset", title: strings.sim.bar.resetHint, on: { click: () => simReset() } });
   const command = uiButton(strings.sim.bar.command, {
-    class: "ui-btn",
+    class: "ui-btn sim-bar__command",
     title: strings.sim.bar.commandHint,
     on: { click: () => openSimCommands(api) },
   });
@@ -257,7 +262,20 @@ export function simBarMount(host, api) {
   const next = uiButton(strings.sim.bar.next, { class: "ui-btn", on: { click: () => simNextEvent() } });
 
   const clock = uiEl("div", { class: "sim-bar__group sim-bar__clock" }, [dateField, timeField, speed, pause, now, ...steps, next]);
-  const row = uiEl("div", { class: "sim-bar__row" }, [start, status, warn, reset, command]);
+  // Свёрнутая строка телефона: время с ускорением и кнопка раскрытия. Видны
+  // только на телефоне — правило в `sim.css`.
+  const brief = uiEl("span", { class: "sim-bar__brief" });
+  let expanded = false;
+  const more = uiButton(strings.sim.bar.more, {
+    class: "ui-btn sim-bar__more",
+    on: {
+      click: () => {
+        expanded = !expanded;
+        update();
+      },
+    },
+  });
+  const row = uiEl("div", { class: "sim-bar__row" }, [start, status, brief, warn, reset, command, more]);
   host.replaceChildren(row, clock);
 
   function togglePause() {
@@ -279,8 +297,14 @@ export function simBarMount(host, api) {
     command.hidden = !running;
     clock.hidden = !running;
     host.classList.toggle("is-running", running);
+    host.classList.toggle("is-expanded", expanded);
+    more.textContent = expanded ? strings.sim.bar.less : strings.sim.bar.more;
+    more.title = expanded ? strings.sim.bar.lessHint : strings.sim.bar.moreHint;
+    more.setAttribute("aria-expanded", expanded ? "true" : "false");
     if (!running) return;
     const parts = simBarClockText(appClockSimMs());
+    const said = text("sim.bar.brief", { time: parts.time.slice(0, 5), speed: view.speed });
+    if (brief.textContent !== said) brief.textContent = said;
     // Поле, в котором сейчас курсор, не перезаписывается — человек набирает.
     const active = typeof document !== "undefined" ? document.activeElement : null;
     if (active !== dateField) dateField.value = volumeDateText(parts.day);

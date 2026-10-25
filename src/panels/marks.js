@@ -1369,7 +1369,11 @@ function mountMarksPanel(host, api) {
       for (const field of node.querySelectorAll("input")) field.readOnly = true;
       for (const field of node.querySelectorAll("select")) field.disabled = true;
       // Кнопка связи — тоже правка: в режиме просмотра она не нажимается.
-      for (const button of node.querySelectorAll("button")) button.disabled = true;
+      // Кроме «Аксессуара»: на телефоне окно открывается только смотреть
+      // (`editDevice`, `readOnly`), а погашенная кнопка закрывала его совсем.
+      for (const button of node.querySelectorAll("button")) {
+        if (!button.classList.contains("mark-row__device")) button.disabled = true;
+      }
     }
     return node;
   }

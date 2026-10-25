@@ -35,6 +35,7 @@ const OBJECT_PICKER_CSS = readFileSync(new URL("../src/panels/objectPicker.css",
 const PANELS_CSS = readFileSync(new URL("../src/panels/panels.css", import.meta.url), "utf8");
 const CANVAS_CSS = readFileSync(new URL("../src/panels/canvas.css", import.meta.url), "utf8");
 const MARKS_CSS = readFileSync(new URL("../src/panels/marks.css", import.meta.url), "utf8");
+const SIM_CSS = readFileSync(new URL("../src/panels/sim.css", import.meta.url), "utf8");
 const TYPES_JS = readFileSync(new URL("../src/panels/types.js", import.meta.url), "utf8");
 // Мера значка справочника наружу не отдаётся (имя внутреннее), поэтому читается
 // текстом — тем же приёмом, которым сверяются мерки чертежа в measures.test.js.
@@ -55,6 +56,9 @@ test("граница узкой раскладки в стиле полосы �
     1,
     "в elevation.css нет медиа-запроса на " + LAYOUT_NARROW_WIDTH + " точек",
   );
+  // Журнал имитации уступает карточке низ поля на той же границе.
+  assert.equal(count(SIM_CSS, "@media (max-width: " + LAYOUT_NARROW_WIDTH + "px)"), 1, "в sim.css нет медиа-запроса на " + LAYOUT_NARROW_WIDTH + " точек");
+  assert.equal(count(SIM_CSS, "@media (max-width: 900px)"), 0, "в sim.css осталась граница 900 точек мимо LAYOUT_NARROW_WIDTH");
 });
 
 test("меры окна выбора типа: колонка, просвет, доля экрана и поля карточки", () => {

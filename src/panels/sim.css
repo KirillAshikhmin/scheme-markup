@@ -100,6 +100,30 @@
   top: 48px;
 }
 
+/* Телефон: запущенная полоса — одна строка (часы и остальное — по «Часы»).
+   На компьютере строки и кнопки нет вовсе. */
+.sim-bar__brief,
+.sim-bar__more {
+  display: none;
+}
+
+#app.is-mobile .sim-bar.is-running .sim-bar__brief {
+  display: inline;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+#app.is-mobile .sim-bar.is-running .sim-bar__more {
+  display: inline-flex;
+}
+
+#app.is-mobile .sim-bar.is-running .sim-bar__status,
+#app.is-mobile .sim-bar.is-running:not(.is-expanded) .sim-bar__clock,
+#app.is-mobile .sim-bar.is-running:not(.is-expanded) .sim-bar__reset,
+#app.is-mobile .sim-bar.is-running:not(.is-expanded) .sim-bar__command {
+  display: none;
+}
+
 /* ——— «Выполнить команду» ————————————————————————————————————————————— */
 .sim-command__list {
   display: flex;
@@ -396,8 +420,9 @@
   font-weight: 600;
 }
 
-/* Узкое поле: журнал и карточка делят низ — журнал уступает в высоту. */
-@media (max-width: 900px) {
+/* Узкое поле: журнал и карточка делят низ — журнал уступает в высоту. Граница —
+   `LAYOUT_NARROW_WIDTH` (`app.js`), её держит `test/cssMeasures.test.js`. */
+@media (max-width: 860px) {
   #sim-journal {
     top: auto;
     right: auto;
