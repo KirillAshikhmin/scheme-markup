@@ -9,6 +9,8 @@
   },
   "scripts": {
     "test": "node --test \"test/**/*.test.js\"",
-    "build": "node build.js"
+    "build": "node build.js",
+    "bench": "node tools/bench/volume.mjs",
+    "bench:browser": "node tools/bench/volume.mjs --browser"
   }
 }

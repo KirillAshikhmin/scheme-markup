@@ -1,0 +1,54 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Стенд заливки «Объёма»</title>
+<canvas id="field"></canvas>
+<script type="module">
+  // Заливка кадра «Объёма» в настоящем Chrome (tools/bench/volume.mjs --browser):
+  // те же кадры, что меряет Node, рисуются `volumeDraw` на холсте 844 × 390 с
+  // плотностью 1 и 2. Время — до готовых пикселей: `getImageData` ждёт, пока
+  // видеокарта дорисует. Ответ уходит POST'ом на `/result` своего сервера.
+  // Охрана по адресу: страница работает только у сервера стенда.
+  const send = (body) => fetch("/result", { method: "POST", body: JSON.stringify(body) });
+  try {
+    if (location.port !== "8471") throw new Error("чужой адрес " + location.href);
+    const rounds = Math.max(1, Number(new URLSearchParams(location.search).get("rounds")) || 5);
+    const V = await import("/src/volume.js");
+    const scenes = await (await fetch("/scenes.json")).json();
+    const box = { width: 844, height: 390 };
+    const canvas = document.getElementById("field");
+    const ctx = canvas.getContext("2d");
+    const tint = V.volumeMood({ minutes: 22 * 60 + 30 }).tint;
+    const out = {};
+    for (const [name, data] of Object.entries(scenes)) {
+      const scene = V.volumeScene(data.project, data.schemeId, { roofOff: true, openDoorIds: new Set(data.doors) });
+      const live = new Map(data.lamps.map((id) => [id, { on: true, level: 1, kind: "light", roomId: null }]));
+      const light = V.volumeLiveLight(scene, live, { physical: true, tint });
+      const frames = data.cameras.map((cam) => V.volumeFrame(scene, cam, box, null, tint, light));
+      const own = {};
+      for (const ratio of [1, 2]) {
+        canvas.width = box.width * ratio;
+        canvas.height = box.height * ratio;
+        const draw = (polygons) => {
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+          V.volumeDraw(ctx, polygons);
+          ctx.getImageData(0, 0, 1, 1);
+        };
+        for (const polygons of frames.slice(0, 4)) draw(polygons);
+        const times = [];
+        for (let r = 0; r < rounds; r += 1) {
+          const at = performance.now();
+          for (const polygons of frames) draw(polygons);
+          times.push((performance.now() - at) / frames.length);
+        }
+        times.sort((a, b) => a - b);
+        own["fill" + ratio] = times[Math.floor(times.length / 2)];
+      }
+      out[name] = own;
+    }
+    await send(out);
+  } catch (error) {
+    await send({ error: String(error && error.stack ? error.stack : error) });
+  }
+</script>
