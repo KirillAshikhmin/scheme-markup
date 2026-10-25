@@ -7,6 +7,8 @@
 // в шапке `volume.js`), циклов нет. Решения и доводы — в шапках разделов ниже.
 import {
   DEG,
+  VOLUME_CEILING_RGB,
+  VOLUME_FLOOR_RGB,
   VOLUME_LAND_RGB,
   VOLUME_LAYER_BODY,
   VOLUME_LAYER_SHADOW,
@@ -16,6 +18,7 @@ import {
   VOLUME_SHADE_MIN,
   VOLUME_SHADOW_RGB,
   VOLUME_SUN_AT,
+  VOLUME_WALL_RGB,
   volumeClearAlpha,
   volumeNormalize,
 } from "./measures.js";
@@ -164,7 +167,75 @@ export function volumeFace(points, rgb, options = {}) {
     // (`volumeTagThing`); объявлено здесь, чтобы порода граней не менялась.
     // У вещи чертежа это её id — своей тени на себе она не получает.
     thing: false,
+    // **Крашеная поверхность** (правка без автопилота, 2026-10-25): `wall`,
+    // `floor` или `ceiling` у стены, пола и потолка, которым человек задал
+    // краску (`volumePainted`). У некрашеной `null`: её узнают по краске сборки
+    // (`VOLUME_WALL_RGB` и соседи), как узнавали до правки.
+    paint: null,
+    // Цвет изнанки двусторонней грани, если он не свой: у крашеного потолка
+    // изнанка — крыша, и она остаётся краской сборки (`volumePainted`).
+    backRgb: null,
   };
+}
+
+// ——— краска стен, пола и потолка (правка без автопилота, 2026-10-25) ————————
+//
+// Краску задаёт объект (`wall.paint`, `room.paint` — разбор в `model.js`), а
+// грань получает её **цветом** — тем же `rgb`, которым красилась прежде. Всё,
+// что берёт цвет у грани, берёт его и у крашеной без единой правки: заливка,
+// ночь, кольца ламп и тени вещей (они копируют `rgb` хозяина), свет комнаты.
+//
+// Но по `rgb` сборка ещё и **узнаёт** поверхность: стена ли это, пол ли,
+// потолок (`face.rgb === VOLUME_WALL_RGB`). Крашеная грань этот вопрос
+// проваливала бы, поэтому она несёт ответ полем `paint`, а вопрос задают
+// `volumeIsWall`, `volumeIsFloor`, `volumeIsCeiling`. Некрашеная отвечает
+// прежним сравнением — объект без краски собирается грань в грань тем же.
+
+const VOLUME_PAINT_RGB = new Map();
+
+/**
+ * Цвет краски гранью: `[r, g, b]` или `null` — не крашено. Один массив на код:
+ * сотни граней одной стены делят его, как делят `VOLUME_WALL_RGB`.
+ */
+export function volumePaintRgb(hex) {
+  if (!hex) return null;
+  const key = String(hex).toUpperCase();
+  let rgb = VOLUME_PAINT_RGB.get(key);
+  if (rgb) return rgb;
+  if (!/^#[0-9A-F]{6}$/.test(key)) return null;
+  rgb = [parseInt(key.slice(1, 3), 16), parseInt(key.slice(3, 5), 16), parseInt(key.slice(5, 7), 16)];
+  VOLUME_PAINT_RGB.set(key, rgb);
+  return rgb;
+}
+
+/**
+ * Покрасить грань: цвет и имя поверхности. Без краски грань как была.
+ *
+ * Изнанка двустороннего потолка — **крыша** (таск 211): снаружи дом не
+ * перекрашивается от того, что в спальне потолок голубой, и изнанка держит
+ * прежний цвет (`backRgb`, его берёт кадр — `volumeFacePolygons`).
+ */
+export function volumePainted(face, rgb, surface) {
+  if (!face || !rgb) return face;
+  if (surface === "ceiling" && face.both) face.backRgb = face.rgb;
+  face.rgb = rgb;
+  face.paint = surface;
+  return face;
+}
+
+/** Стена ли это — крашеная или краской сборки. */
+export function volumeIsWall(face) {
+  return face.rgb === VOLUME_WALL_RGB || face.paint === "wall";
+}
+
+/** Пол ли это — крашеный или краской сборки. */
+export function volumeIsFloor(face) {
+  return face.rgb === VOLUME_FLOOR_RGB || face.paint === "floor";
+}
+
+/** Потолок ли это — крашеный или краской сборки (и низ плиты, он того же цвета). */
+export function volumeIsCeiling(face) {
+  return face.rgb === VOLUME_CEILING_RGB || face.paint === "ceiling";
 }
 
 /**

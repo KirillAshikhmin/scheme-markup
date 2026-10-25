@@ -7420,6 +7420,188 @@ export function setRoomCeiling(project, roomId, on, schemeId = null) {
   return { project: withProject(project, { rooms }), room: rooms.find((item) => item.id === roomId), changed: true };
 }
 
+// ——— покраска стен, пола и потолка (правка без автопилота, 2026-10-25) ————————
+//
+// Слова заказчика: «Сделай функцию покраски пола стен, и потолка, при чем
+// каждый отрезок стены отдельно. Пол и потолок один цвет на помещение, включая
+// их проёмы». На вопросы сборки он ответил: красить «полями в „Чертеже“ и
+// „Помещениях“», а отрезок между двумя помещениями — «каждую сторону своим
+// цветом».
+//
+// **Краска — свойство объекта, а не вид**: она уезжает с файлом к напарнику, и
+// правка идёт через историю, как высота стены. Рисует её только «Объём»: план,
+// развёртка и выгрузки — чертёж, и цветом стен они не говорят.
+//
+// **Ключи необязательные** (G68): `wall.paint = {left, right}` и
+// `room.paint = {floor, ceiling}`, значение — `#RRGGBB` в верхнем регистре.
+// Сброшенная краска удаляет свой ключ, опустевший `paint` удаляет сам себя
+// (образец — `project.site`). Объект прежней сборки открывается некрашеным и
+// упаковывается байт в байт прежним: писать в него нечего.
+//
+// **Сторона стены** — `left`/`right` от её направления, теми же словами, что у
+// развёртки и стороны открывания двери (`wallVectors`). Что за стороной, модель
+// не хранит, а выводит по контурам (`wallRoomId`), поэтому краска держится
+// стороны, а не помещения: обвели комнату заново — стена осталась крашеной.
+// Деление стены (`splitWall`) отдаёт краску обоим кускам: они и были одной
+// стороной одного цвета.
+//
+// **Пол — вместе со своими проёмами**: полоса пола под стеной поделена по
+// сторонам и берёт помещение своей стороны (`volumeScene`), поэтому порог в
+// проёме наполовину пол одной комнаты, наполовину другой — ровно там, где в
+// жизни стык покрытий под полотном двери. Откосы проёма поделены так же и берут
+// краску стороны своей стены.
+
+/** Стороны стены, которые красятся порознь. */
+export const WALL_PAINT_SIDES = ["left", "right"];
+/** Что красится у помещения: один цвет на все его контуры. */
+export const ROOM_PAINT_PARTS = ["floor", "ceiling"];
+
+/**
+ * Палитра окна краски: стены и потолки, затем полы. Палитра плана
+ * (`ROOM_PALETTE`) для этого не годится — она подобрана, чтобы десяток контуров
+ * различался на белом листе, а стены красят светлым и тёплым. Число то же,
+ * двадцать четыре, — сетка окна рассчитана на шесть столбцов.
+ */
+export const PAINT_PALETTE = [
+  "#FFFFFF",
+  "#F4F1EA",
+  "#EFE6D2",
+  "#E3D5BC",
+  "#CFC1A8",
+  "#BDB5A6",
+  "#DADAD6",
+  "#A7A9A8",
+  "#5E6264",
+  "#3A3D40",
+  "#B9C4AE",
+  "#8A9268",
+  "#BFD8CF",
+  "#BCD0DE",
+  "#7D93A6",
+  "#2F4A63",
+  "#C9775A",
+  "#DDB7AE",
+  "#D9B45A",
+  "#9E9E99",
+  "#D8B98C",
+  "#B08556",
+  "#7A5236",
+  "#4A3226",
+];
+
+function paintHex(value) {
+  const color = typeof value === "string" ? value.trim() : "";
+  return /^#[0-9a-fA-F]{6}$/.test(color) ? color.toUpperCase() : null;
+}
+
+/**
+ * Разбор краски: пусто — `null` («снять»), иначе `#RRGGBB` в верхнем регистре.
+ * Мусор — отказ словами: угадывать цвет за человека нельзя.
+ */
+export function paintColorValue(value) {
+  if (value === null || value === undefined || (typeof value === "string" && value.trim() === "")) return null;
+  const color = paintHex(value);
+  if (!color) throw modelError("paintColorInvalid");
+  return color;
+}
+
+function paintRead(item, key) {
+  const paint = item && item.paint && typeof item.paint === "object" ? item.paint : null;
+  return paint ? paintHex(paint[key]) : null;
+}
+
+// Краска одной части с остальными как были; опустевший `paint` уходит целиком.
+function paintWith(item, key, color) {
+  const paint = { ...(item.paint && typeof item.paint === "object" ? item.paint : {}) };
+  if (color === null) delete paint[key];
+  else paint[key] = color;
+  const { paint: was, ...rest } = item;
+  return Object.keys(paint).length > 0 ? { ...rest, paint } : rest;
+}
+
+/** Краска стороны стены (`left`/`right`): `#RRGGBB` или `null` — некрашеная. */
+export function wallPaintOf(wall, side) {
+  return paintRead(wall, side);
+}
+
+/** Краска пола или потолка помещения (`floor`/`ceiling`), или `null`. */
+export function roomPaintOf(room, part) {
+  return paintRead(room, part);
+}
+
+/** Покрасить сторону стены или снять краску (`null`, `""`). */
+export function setWallPaint(project, wallId, side, value) {
+  const wall = requireWall(project, wallId);
+  if (!WALL_PAINT_SIDES.includes(side)) throw modelError("paintPartInvalid");
+  const color = paintColorValue(value);
+  if (color === wallPaintOf(wall, side)) return { project, wall, changed: false };
+  const next = paintWith(wall, side, color);
+  const walls = wallsOf(project).map((item) => (item.id === wallId ? next : item));
+  return { project: withProject(project, { walls }), wall: next, changed: true };
+}
+
+/** Покрасить пол или потолок помещения или снять краску (`null`, `""`). */
+export function setRoomPaint(project, roomId, part, value) {
+  const room = findRoom(project, roomId);
+  if (!room) throw modelError("roomNotFound");
+  if (!ROOM_PAINT_PARTS.includes(part)) throw modelError("paintPartInvalid");
+  const color = paintColorValue(value);
+  if (color === roomPaintOf(room, part)) return { project, room, changed: false };
+  const next = paintWith(room, part, color);
+  const rooms = project.rooms.map((item) => (item.id === roomId ? next : item));
+  return { project: withProject(project, { rooms }), room: next, changed: true };
+}
+
+/**
+ * Стороны стен, обращённые в помещение, на всех схемах, где оно обведено:
+ * `[{wallId, side}]`. Правило «чья сторона» не своё, а развёртки
+ * (`roomWallSides`: щуп середины стороны, `wallSideOutline`), — те же стены,
+ * что лист «развёртки помещения». Стена фасада, идущая мимо трёх комнат,
+ * достаётся той, что у её середины; разводят их делением (`splitWall`).
+ */
+export function roomPaintSides(project, roomId) {
+  if (!roomId) return [];
+  const sides = [];
+  for (const scheme of project.schemes || []) {
+    if (!outlinesOf(project).some((outline) => outline.roomId === roomId && outline.schemeId === scheme.id)) continue;
+    sides.push(...roomWallSides(project, scheme.id, roomId));
+  }
+  return sides;
+}
+
+/**
+ * Все стены помещения одним цветом (или снять краску со всех): каждая сторона,
+ * обращённая в него (`roomPaintSides`), получает свою краску — та же запись,
+ * что у одной стороны, только разом. `{project, changed, count}`.
+ */
+export function setRoomWallsPaint(project, roomId, value) {
+  if (!findRoom(project, roomId)) throw modelError("roomNotFound");
+  const color = paintColorValue(value);
+  const sides = roomPaintSides(project, roomId);
+  let next = project;
+  let changed = false;
+  for (const { wallId, side } of sides) {
+    const result = setWallPaint(next, wallId, side, color);
+    if (!result.changed) continue;
+    next = result.project;
+    changed = true;
+  }
+  return { project: next, changed, count: sides.length };
+}
+
+/**
+ * Краска стен помещения одним ответом: `{color, mixed, count}`. `color` — общий
+ * цвет всех сторон (`null` — все некрашеные), `mixed` — стороны крашены
+ * по-разному. Так окно помещения показывает одну кнопку на все стены.
+ */
+export function roomWallsPaint(project, roomId) {
+  const sides = roomPaintSides(project, roomId);
+  const colors = new Set(sides.map(({ wallId, side }) => wallPaintOf(findWall(project, wallId), side)));
+  if (colors.size > 1) return { color: null, mixed: true, count: sides.length };
+  const [color = null] = colors;
+  return { color, mixed: false, count: sides.length };
+}
+
 // ——— разделить стену (правка после сборки сценариев) ——————————————————————
 //
 // «Править для каждого отрезка стены». Стена — один отрезок (ADR 008), и

@@ -615,7 +615,7 @@
 #panel-rooms .rooms__row {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   padding: 3px 4px;
   border: 1px solid transparent;
   border-radius: 6px;
@@ -635,9 +635,17 @@
   font-size: 11px;
 }
 
+/* Значков в строке пять (контур, пол, потолок, краска, удаление): поля у них
+   уже, а квадратик цвета у́же общего, — иначе имени помещения не оставалось
+   места (покраска, правка без автопилота: с пятым значком поле сжималось до
+   13 точек при прежних 43). */
 #panel-rooms .rooms__row .ui-btn {
   flex: none;
-  padding: 2px 5px;
+  padding: 2px 3px;
+}
+
+#panel-rooms .rooms__row .colorpick__button {
+  width: 26px;
 }
 
 /* Комната, которую сейчас обводят или чей контур правят. */
@@ -684,6 +692,32 @@
 #panel-rooms .rooms__row .ui-btn.rooms__floor--on {
   color: var(--accent);
   border-color: var(--accent);
+}
+
+/* Окно «Покраска» помещения: подпись слева, поле краски справа, пояснения
+   строками под ними. Окно у́же общей меры: в нём три коротких строки. */
+.rooms__paint {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: min(300px, 100%);
+}
+
+.rooms__paintRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rooms__paintLabel {
+  flex: 1;
+  min-width: 0;
+}
+
+.rooms__paintNote {
+  margin: 0;
+  color: var(--panel-muted);
+  font-size: 12px;
 }
 
 #panel-rooms .rooms__add {

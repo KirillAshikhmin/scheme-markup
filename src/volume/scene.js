@@ -26,7 +26,7 @@ import {
   VOLUME_LAYER_BASE,
   VOLUME_WALL_RGB,
 } from "./measures.js";
-import { volumeAt, volumeClockwise, volumeFace, volumeShadowShift } from "./faces.js";
+import { volumeAt, volumeClockwise, volumeFace, volumePainted, volumeShadowShift } from "./faces.js";
 import {
   VOLUME_FLOOR_LAP,
   VOLUME_SUN_PROBE_MM,
@@ -42,6 +42,7 @@ import {
   volumeSideParts,
   volumeSideStops,
   volumeWallFaces,
+  volumeWallPaintRgb,
   volumeWallLintels,
   volumeWallMiters,
   volumeWallSolids,
@@ -382,6 +383,9 @@ export function volumeScene(project, schemeId, options = {}) {
   // принадлежит помещению одной из сторон.
   const wallBands = wallPlaceBands(walls);
   const where = { rooms, walls: wallBands };
+  // Краска пола по ключу помещения: её берут и полосы пола под стенами.
+  const floorRgbOf = new Map();
+  for (const room of rooms) if (room.floorRgb) floorRgbOf.set(volumeRoomKey(room), room.floorRgb);
   const schemeHeight = volumeHeightMm(project, schemeId, null);
   if (!schemeHeight.known && !rooms.some((room) => room.heightKnown)) notes.push("noHeight");
   const faces = [];
@@ -509,10 +513,14 @@ export function volumeScene(project, schemeId, options = {}) {
     if (room.hasFloor) {
       faces.push(
         // Ярус у пола **телесный** (таск 211): порядок ему считает дерево.
-        volumeFace(room.pointsMm.map((point) => volumeAt(point, 0)), VOLUME_FLOOR_RGB, {
-          normal: { x: 0, y: 0, z: 1 },
-          room: volumeRoomKey(room),
-        }),
+        volumePainted(
+          volumeFace(room.pointsMm.map((point) => volumeAt(point, 0)), VOLUME_FLOOR_RGB, {
+            normal: { x: 0, y: 0, z: 1 },
+            room: volumeRoomKey(room),
+          }),
+          room.floorRgb,
+          "floor",
+        ),
       );
       volumeSlabFaces(room.pointsMm, 0, faces);
     }
@@ -538,16 +546,20 @@ export function volumeScene(project, schemeId, options = {}) {
     // этажи раздельными: низ перекрытия — это и есть потолок нижнего этажа, а
     // толщину ему даёт плита пола верхнего.
     faces.push(
-      volumeFace(
-        [...room.pointsMm].reverse().map((point) => volumeAt(point, room.heightMm)),
-        VOLUME_CEILING_RGB,
-        // **«Снять крышу»** (таск 212, требование G319) — это ровно вторая
-        // сторона потолка, и ничего больше. Отметка снята (умолчание) —
-        // потолок двусторонний, дом сверху глухой, как с таска 211. Отметка
-        // стоит — у потолка остаётся одна сторона, нижняя: изнутри он тот же
-        // до грани, а сверху отбор по нормали его не рисует вовсе, и видно
-        // планировку. Ни одной грани при этом не прибавляется и не убавляется.
-        { normal: { x: 0, y: 0, z: -1 }, both: options.roofOff !== true, room: volumeRoomKey(room) },
+      volumePainted(
+        volumeFace(
+          [...room.pointsMm].reverse().map((point) => volumeAt(point, room.heightMm)),
+          VOLUME_CEILING_RGB,
+          // **«Снять крышу»** (таск 212, требование G319) — это ровно вторая
+          // сторона потолка, и ничего больше. Отметка снята (умолчание) —
+          // потолок двусторонний, дом сверху глухой, как с таска 211. Отметка
+          // стоит — у потолка остаётся одна сторона, нижняя: изнутри он тот же
+          // до грани, а сверху отбор по нормали его не рисует вовсе, и видно
+          // планировку. Ни одной грани при этом не прибавляется и не убавляется.
+          { normal: { x: 0, y: 0, z: -1 }, both: options.roofOff !== true, room: volumeRoomKey(room) },
+        ),
+        room.ceilingRgb,
+        "ceiling",
       ),
     );
   }
@@ -605,6 +617,7 @@ export function volumeScene(project, schemeId, options = {}) {
     if (cap < own) {
       for (const span of volumeWallFree(vectors.len, covers)) {
         const middleMm = (span.fromMm + span.toMm) / 2;
+        const from = faces.length;
         volumePrismFaces(
           volumeBoxCorners(
             {
@@ -620,6 +633,12 @@ export function volumeScene(project, schemeId, options = {}) {
           VOLUME_WALL_RGB,
           faces,
         );
+        // Бока куска — стороны той же стены и той же краски (покраска).
+        for (let index = from; index < faces.length; index += 1) {
+          const face = faces[index];
+          const across = face.n.x * vectors.n.x + face.n.y * vectors.n.y;
+          if (Math.abs(across) > 0.9) volumePainted(face, volumeWallPaintRgb(wall, Math.sign(across)), "wall");
+        }
       }
     }
     // **Пол под стеной** (дефект D37). Слова заказчика: «под дверными проёмами
@@ -678,6 +697,10 @@ export function volumeScene(project, schemeId, options = {}) {
             VOLUME_FLOOR_RGB,
             { normal: { x: 0, y: 0, z: 1 }, room: part.room },
           );
+          // Пол в проёме — пол своего помещения (покраска, правка без
+          // автопилота: «пол… один цвет на помещение, включая их проёмы»):
+          // порог крашен наполовину одной комнатой, наполовину другой.
+          if (part.room) volumePainted(piece, floorRgbOf.get(part.room), "floor");
           // Половина на улицу — пол дома (снег на нём не идёт, «пол бывает
           // только в доме»), но без комнаты: светит её улица. Щупы
           // `volumeTagIndoor` её не трогают — нашли бы ей комнату за стеной.

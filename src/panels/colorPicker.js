@@ -9,6 +9,7 @@
 // «насыщенность/яркость» и полоса оттенка рисуются холстом, а любое движение
 // мыши здесь повторяется стрелками и полями R, G, B.
 import {
+  PAINT_PALETTE,
   ROOM_PALETTE,
   colorBlend,
   colorDistance,
@@ -286,7 +287,9 @@ export function openColorPicker(options = {}) {
       setHsv({ h: next.s === 0 ? hsv.h : next.h, s: next.s, v: next.v }, skip);
     }
 
-    for (const color of ROOM_PALETTE) {
+    // Палитра — плана, а у краски своя (`PAINT_PALETTE`): стены красят светлым
+    // и тёплым, а не цветами, которыми различают контуры.
+    for (const color of options.palette || ROOM_PALETTE) {
       const busy = colorTaken(color, taken);
       // Плитка называется словом и кодом — и занятая тоже.
       const hint = colorSwatchTitle(color, busy);
@@ -344,7 +347,9 @@ export function openColorPicker(options = {}) {
         field,
         hue,
         uiEl("div", { class: "colorpick__bottom" }, [
-          uiEl("div", { class: "colorpick__preview" }, [chipBefore, chip, onPlan]),
+          // «Как ляжет на план» — только у цвета контура: краска стен на план
+          // не ложится вовсе.
+          uiEl("div", { class: "colorpick__preview" }, options.planPreview === false ? [chipBefore, chip] : [chipBefore, chip, onPlan]),
           uiEl("div", { class: "colorpick__numbers" }, [
             numberField("r", strings.colorPicker.red),
             numberField("g", strings.colorPicker.green),
@@ -416,3 +421,64 @@ export function colorPickerButton({ value, used, title, dialogTitle, onPick }) {
   });
   return button;
 }
+
+// ——— поле краски (правка без автопилота, 2026-10-25) ————————————————————
+//
+// Краска стены, пола и потолка — не цвет контура: у неё есть «не крашено», и
+// это не цвет, а отсутствие ключа (`wall.paint`, `room.paint` в модели).
+// Поэтому у поля две кнопки: квадратик цвета, открывающий окно с палитрой
+// краски, и «Снять», которая возвращает краску сборки. Некрашеное показывает
+// цвет, которым «Объём» нарисует поверхность сам (`fallback`), — пунктирной
+// рамкой: так видно, что его не выбирали. «Разные» — у кнопки на все стены
+// помещения, когда стороны крашены порознь.
+//
+// Поле не перестраивается на каждую перерисовку колонки: значение ему ставит
+// `set`, а выбор уходит наружу через `onPick` (`null` — снять). Подпись `set`
+// меняет тоже: у стороны стены она называет помещение за ней.
+export function colorPaintField({ label, fallback, onPick }) {
+  let value = null;
+  let mixed = false;
+  const swatch = uiEl("button", {
+    class: "colorpick__button colorpick__paint",
+    type: "button",
+    on: {
+      click: async () => {
+        const picked = await openColorPicker({
+          color: value || fallback,
+          title: text("paint.dialog", { label }),
+          palette: PAINT_PALETTE,
+          planPreview: false,
+        });
+        if (picked) onPick(picked);
+      },
+    },
+  });
+  const clear = uiButton(strings.paint.clear, {
+    class: "ui-btn colorpick__clear",
+    title: text("paint.clearHint", { label }),
+    on: { click: () => onPick(null) },
+  });
+  const node = uiEl("span", { class: "colorpick__paintField" }, [swatch, clear]);
+  function set(next, options = {}) {
+    if (options.label) label = options.label;
+    value = next || null;
+    mixed = Boolean(options.mixed);
+    swatch.classList.toggle("is-unset", !value && !mixed);
+    swatch.classList.toggle("is-mixed", mixed);
+    swatch.setAttribute("style", "background:" + (value || fallback));
+    const hint = mixed
+      ? text("paint.mixed", { label })
+      : value
+        ? colorLabel(label, value)
+        : text("paint.unset", { label });
+    swatch.title = hint;
+    swatch.setAttribute("aria-label", hint);
+    clear.hidden = !value && !mixed;
+    clear.title = text("paint.clearHint", { label });
+    swatch.disabled = Boolean(options.disabled);
+    clear.disabled = Boolean(options.disabled);
+  }
+  set(null);
+  return { node, set };
+}
+

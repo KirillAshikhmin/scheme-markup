@@ -147,16 +147,21 @@ import {
   setSchemeAnchor,
   setSchemeWallHeight,
   setWallHeight,
+  setWallPaint,
   splitWall,
   updateOpening,
   updateSchemeObject,
   updateWall,
+  WALL_PAINT_SIDES,
   WALL_SPLIT_MIN_MM,
+  rgbToHex,
   wallHeightInheritedMm,
   wallHeightValueMm,
   wallLengthMm,
   wallName,
   wallOwnHeightMm,
+  wallPaintOf,
+  wallRoomId,
   wallSplitStops,
   wallVectors,
   wallsOnScheme,
@@ -238,6 +243,8 @@ import { drawPickerHint, drawPickerName, drawPickerNote, openDrawPicker } from "
 import { createElevationStrip, elevationPlace } from "./elevation.js";
 import { screenPlaceOf, screenPlaceSet } from "../screenPlace.js";
 import { createFieldPlate } from "./plate.js";
+import { colorPaintField } from "./colorPicker.js";
+import { VOLUME_WALL_RGB } from "../volume.js";
 
 // «Схема», у которой один пиксель плана — один миллиметр чертежа. Через неё
 // мастерская зовёт готовую геометрию `render.js`: `zoom` становится «пикселей
@@ -2302,12 +2309,33 @@ function createWorkshop({ api, hosts }) {
     title: strings.workshop.wallSplitHint,
     on: { click: () => startSplitPick() },
   });
+  // Покраска сторон (правка без автопилота, 2026-10-25): «каждый отрезок
+  // стены отдельно», а у отрезка между двумя помещениями — каждая сторона
+  // своим цветом. Сторона названа, как у развёртки, — слева или справа по ходу
+  // стены — и помещением за ней: по нему её и узнают.
+  const wallPaintFallback = rgbToHex({ r: VOLUME_WALL_RGB[0], g: VOLUME_WALL_RGB[1], b: VOLUME_WALL_RGB[2] });
+  const wallPaint = WALL_PAINT_SIDES.map((side) => {
+    const label = uiEl("span", { class: "workshop__paintLabel" });
+    const field = colorPaintField({
+      label: strings.workshop.paint,
+      fallback: wallPaintFallback,
+      onPick: (color) => applyWallPaint(side, color),
+    });
+    return { side, label, field, row: uiEl("div", { class: "workshop__paintRow" }, [label, field.node]) };
+  });
+  // Помещения за сторонами спрашиваются щупом по контурам — не на каждое
+  // движение мыши, а когда сменились объект или стена.
+  let wallPaintShown = { project: null, wallId: null, labels: [] };
   const wallDetail = uiEl("div", { class: "workshop__detail ui-fields" }, [
     uiField(strings.workshop.thickness, thicknessInput),
     uiField(strings.workshop.wallHeight, wallHeightInput),
     wallHeightNote,
     wallBad,
     wallNote,
+    uiEl("div", { class: "workshop__paint", title: strings.workshop.paintHint }, [
+      uiEl("span", { class: "ui-field__label", text: strings.workshop.paint }),
+      ...wallPaint.map((item) => item.row),
+    ]),
     splitButton,
     removeButton(),
   ]);
@@ -2865,6 +2893,23 @@ function createWorkshop({ api, hosts }) {
       return;
     }
     if (result.changed) commit(result.project, strings.history.wallOwnHeight);
+  }
+
+  /**
+   * Покрасить сторону выделенной стены или снять краску (`null`). Это свойство
+   * объекта — идёт через историю, как высота стены.
+   */
+  function applyWallPaint(side, color) {
+    const wall = selectedWall();
+    if (!wall) return;
+    let result;
+    try {
+      result = setWallPaint(project(), wall.id, side, color);
+    } catch (error) {
+      fail(error);
+      return;
+    }
+    if (result.changed) commit(result.project, strings.history.wallPaint);
   }
 
   // ——— деление стены (правка после сборки сценариев) ———
@@ -5297,6 +5342,7 @@ function createWorkshop({ api, hosts }) {
       wallHeightInput.placeholder = String(inherited);
       wallHeightNote.textContent = text("workshop.wallHeightHint", { height: inherited });
       wallNote.textContent = text("workshop.wallInfo", { length: wallLengthMm(wall) });
+      syncWallPaint(current, wall);
       return;
     }
     const opening = selectedOpening();
@@ -5306,6 +5352,29 @@ function createWorkshop({ api, hosts }) {
     }
     const object = selectedObject();
     if (object) syncObject(current, object);
+  }
+
+  /** Краска сторон выделенной стены и помещения за ними. */
+  function syncWallPaint(current, wall) {
+    if (wallPaintShown.project !== current || wallPaintShown.wallId !== wall.id) {
+      wallPaintShown = {
+        project: current,
+        wallId: wall.id,
+        labels: wallPaint.map(({ side }) => {
+          const room = findRoom(current, wallRoomId(current, wall.id, side));
+          return text("workshop.paintSide", {
+            side: side === "left" ? strings.elevation.side_left : strings.elevation.side_right,
+            room: room ? room.name : strings.workshop.paintStreet,
+          });
+        }),
+      };
+    }
+    wallPaint.forEach((item, index) => {
+      const label = wallPaintShown.labels[index];
+      item.label.textContent = label;
+      item.label.title = label;
+      item.field.set(wallPaintOf(wall, item.side), { label });
+    });
   }
 
   function syncOpening(opening) {

@@ -17,7 +17,7 @@ import {
   volumeRoomKey,
   volumeShiftPoints,
 } from "./shapes.js";
-import { volumeDoorOpen, volumeOpeningFaceMm, volumeWallTiles } from "./walls.js";
+import { volumeDoorOpen, volumeOpeningFaceMm, volumeWallPaintRgb, volumeWallTiles } from "./walls.js";
 
 // ——— солнце в комнате (таск 196, дефект D51, требование G301) —————————————
 //
@@ -697,9 +697,13 @@ export function volumeRoomLight(room, options = {}) {
         });
       }
     }
-    edges.push({ offMm: found.offMm, tiles, holes });
+    // Краска стороны, которой стена смотрит в это помещение (покраска): пятно
+    // на ней светлеет из её цвета. Наружу — `m`, внутрь — против него.
+    const inner = found.vectors.n.x * m.x + found.vectors.n.y * m.y >= 0 ? -1 : 1;
+    edges.push({ offMm: found.offMm, tiles, holes, rgb: volumeWallPaintRgb(wall, inner) });
   }
-  return { pointsMm: points, edges };
+  // Краска пола помещения (покраска): пятно на полу — из неё.
+  return { pointsMm: points, edges, floorRgb: room.floorRgb || null };
 }
 
 /**
@@ -715,6 +719,7 @@ export function volumeShiftRoomLight(light, shiftMm) {
   if (!light) return null;
   if (!shiftMm || (!shiftMm.x && !shiftMm.y)) return light;
   return {
+    ...light,
     pointsMm: volumeShiftPoints(light.pointsMm, shiftMm),
     edges: (light.edges || []).map((edge) => {
       if (!edge) return null;
@@ -961,8 +966,8 @@ function volumeSunBeam(faceMm, room, ctx, entry, steps, out) {
       // же дерево (`volumeOrderRank`): грань пятна коплоскостна полу, и обход
       // ставит её сразу за ним, а тело, стоящее на этом полу, — после неё.
       moon
-        ? volumeMoonFace(floor.map((point) => volumeAt(point, baseMm)), VOLUME_FLOOR_RGB, { x: 0, y: 0, z: 1 }, room, moon)
-        : volumeFace(floor.map((point) => volumeAt(point, baseMm)), volumeSunSpotRgb(fade), {
+        ? volumeMoonFace(floor.map((point) => volumeAt(point, baseMm)), room.floorRgb || VOLUME_FLOOR_RGB, { x: 0, y: 0, z: 1 }, room, moon)
+        : volumeFace(floor.map((point) => volumeAt(point, baseMm)), volumeSunSpotRgb(fade, room.floorRgb || VOLUME_FLOOR_RGB), {
             normal: { x: 0, y: 0, z: 1 },
             flat: true,
           }),
@@ -1082,13 +1087,14 @@ function volumeSunBeam(faceMm, room, ctx, entry, steps, out) {
     };
     // Пятно на сплошных куках лица — цвет и мера те же, что у напольного:
     // своя краска грани при светлоте 1 (`volumeSunSpotRgb`).
-    const rgb = volumeSunSpotRgb(fade, VOLUME_WALL_RGB, volumeShade(inside));
+    const paint = one.wall.rgb || VOLUME_WALL_RGB;
+    const rgb = volumeSunSpotRgb(fade, paint, volumeShade(inside));
     for (const tile of one.wall.tiles) {
       const patch = volumeSunFaceClip(beam, tile, faceAt);
       if (patch.length < 3 || volumeSunArea(patch) < VOLUME_SUN_MIN_MM2) continue;
       out.push(
         moon
-          ? volumeMoonFace(patch.map(spotAt), VOLUME_WALL_RGB, inside, room, moon)
+          ? volumeMoonFace(patch.map(spotAt), paint, inside, room, moon)
           : volumeFace(patch.map(spotAt), rgb, { normal: inside, flat: true }),
       );
     }

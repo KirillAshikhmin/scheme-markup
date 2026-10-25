@@ -246,6 +246,29 @@
   background: #1c2129;
 }
 
+/* Покраска сторон стены: подпись «Слева · Кухня» и поле краски в одну строку.
+   Длинное имя помещения уходит в многоточие — целиком оно в подсказке. */
+.workshop__paint {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.workshop__paintRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.workshop__paintLabel {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Подвал списка стен: общая высота и своя высота у помещений (таск 187).
    Отделён чертой — это не ещё одна строка списка, а то, что относится ко всем
    стенам сразу.

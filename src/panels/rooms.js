@@ -22,17 +22,23 @@ import {
   findRoom,
   listedMarks,
   outlinesInOrder,
+  rgbToHex,
   roomCeilingChosen,
   roomHasCeiling,
   roomHasFloor,
+  roomPaintOf,
+  roomWallsPaint,
   roomsInOrder,
   setRoomCeiling,
   setRoomFloor,
+  setRoomPaint,
+  setRoomWallsPaint,
   updateRoom,
 } from "../model.js";
 import { strings, text } from "../strings.js";
-import { uiButton, uiConfirm, uiEl, uiIconButton } from "./ui.js";
-import { colorPickerButton } from "./colorPicker.js";
+import { uiButton, uiConfirm, uiEl, uiIconButton, uiModal } from "./ui.js";
+import { colorPaintField, colorPickerButton } from "./colorPicker.js";
+import { VOLUME_CEILING_RGB, VOLUME_FLOOR_RGB, VOLUME_WALL_RGB } from "../volume.js";
 import { CANVAS_MODE_ROOM_TRACE, canvasCommit, canvasRoomTraceSaid, canvasStartRoomTrace } from "../canvas.js";
 import { roomTraceReady } from "../roomTrace.js";
 
@@ -47,6 +53,14 @@ function roomColorField(project, room, onChange) {
     onPick: onChange,
   });
 }
+
+// Цвета, которыми «Объём» рисует некрашеное: поле краски показывает их
+// пунктиром, пока человек своего не выбрал.
+const ROOMS_PAINT_FALLBACK = {
+  floor: rgbToHex({ r: VOLUME_FLOOR_RGB[0], g: VOLUME_FLOOR_RGB[1], b: VOLUME_FLOOR_RGB[2] }),
+  ceiling: rgbToHex({ r: VOLUME_CEILING_RGB[0], g: VOLUME_CEILING_RGB[1], b: VOLUME_CEILING_RGB[2] }),
+  walls: rgbToHex({ r: VOLUME_WALL_RGB[0], g: VOLUME_WALL_RGB[1], b: VOLUME_WALL_RGB[2] }),
+};
 
 function roomsKey(name) {
   return String(name == null ? "" : name).trim().toLowerCase();
@@ -98,6 +112,8 @@ export function roomsRows(project, schemeId) {
       // выбранный рукой — кнопка говорит, что из двух.
       hasCeiling: roomHasCeiling(project, room.id, schemeId),
       ceilingChosen: roomCeilingChosen(project, room.id),
+      // Крашены ли пол или потолок (покраска): кнопка краски тогда отмечена.
+      painted: Boolean(roomPaintOf(room, "floor") || roomPaintOf(room, "ceiling")),
     };
   });
 }
@@ -342,6 +358,103 @@ function mountRoomsPanel(host, api) {
     commit(after.project, strings.history.roomCeiling);
   }
 
+  // ——— покраска помещения (правка без автопилота, 2026-10-25) ———
+  //
+  // «Пол и потолок один цвет на помещение, включая их проёмы». Окно — по
+  // кнопке в строке: три поля в строку не влезли бы, а колонка у помещений
+  // одна на все режимы. Третье поле — все стены помещения разом: по одной их
+  // красят в строке стены на «Чертеже», а квартиру из восьми комнат так
+  // красили бы полсотни раз. Каждый выбор — свой шаг истории, окно лишь
+  // показывает объект, каким он стал.
+  function openPaint(roomId) {
+    const room = findRoom(project(), roomId);
+    if (!room) return;
+    const paintPart = (part, color) => {
+      const before = project();
+      let after;
+      try {
+        after = setRoomPaint(before, roomId, part, color);
+      } catch (error) {
+        fail(error);
+        return;
+      }
+      if (after.changed) commit(after.project, strings.history.roomPaint);
+    };
+    const paintWalls = (color) => {
+      const before = project();
+      let after;
+      try {
+        after = setRoomWallsPaint(before, roomId, color);
+      } catch (error) {
+        fail(error);
+        return;
+      }
+      if (after.changed) commit(after.project, strings.history.roomPaint);
+    };
+    const fields = {
+      floor: colorPaintField({ label: strings.rooms.paintFloor, fallback: ROOMS_PAINT_FALLBACK.floor, onPick: (color) => paintPart("floor", color) }),
+      ceiling: colorPaintField({
+        label: strings.rooms.paintCeiling,
+        fallback: ROOMS_PAINT_FALLBACK.ceiling,
+        onPick: (color) => paintPart("ceiling", color),
+      }),
+      walls: colorPaintField({ label: strings.rooms.paintWalls, fallback: ROOMS_PAINT_FALLBACK.walls, onPick: paintWalls }),
+    };
+    const wallsNote = uiEl("p", { class: "rooms__paintNote" });
+    const row = (label, field) =>
+      uiEl("div", { class: "rooms__paintRow" }, [uiEl("span", { class: "rooms__paintLabel", text: label }), field.node]);
+    let modal = null;
+    let stop = null;
+    const sync = () => {
+      const fresh = findRoom(project(), roomId);
+      if (!fresh) {
+        if (modal) modal.close();
+        if (stop) stop();
+        return;
+      }
+      fields.floor.set(roomPaintOf(fresh, "floor"));
+      fields.ceiling.set(roomPaintOf(fresh, "ceiling"));
+      const walls = roomWallsPaint(project(), roomId);
+      fields.walls.set(walls.color, { mixed: walls.mixed, disabled: walls.count === 0 });
+      wallsNote.textContent = walls.count > 0 ? text("rooms.paintWallsCount", { count: walls.count }) : strings.rooms.paintWallsNone;
+    };
+    const finish = () => {
+      if (stop) stop();
+      stop = null;
+    };
+    modal = uiModal({
+      title: text("rooms.paintTitle", { name: room.name }),
+      body: [
+        uiEl("div", { class: "rooms__paint" }, [
+          row(strings.rooms.paintFloor, fields.floor),
+          row(strings.rooms.paintCeiling, fields.ceiling),
+          row(strings.rooms.paintWalls, fields.walls),
+          wallsNote,
+          uiEl("p", { class: "rooms__paintNote", text: strings.rooms.paintHint }),
+        ]),
+      ],
+      actions: [
+        uiButton(strings.rooms.paintDone, {
+          class: "ui-btn ui-btn--accent",
+          on: {
+            click: () => {
+              finish();
+              modal.close();
+            },
+          },
+        }),
+      ],
+      dismissable: true,
+      onCancel: finish,
+    });
+    // Отмена и правка в другом окне меняют объект под открытым окном — оно
+    // показывает то, что есть, а не то, что было при открытии.
+    stop = subscribe((state, changed) => {
+      if ("project" in changed) sync();
+    });
+    sync();
+  }
+
   function recolor(roomId, color) {
     const current = findRoom(project(), roomId);
     // Поле цвета отдаёт значение в нижнем регистре, модель хранит в верхнем:
@@ -445,6 +558,13 @@ function mountRoomsPanel(host, api) {
               strings.rooms.ceilingHint,
             attrs: { "aria-pressed": row.hasCeiling ? "true" : "false" },
             on: { click: () => toggleCeiling(row.room.id) },
+          }),
+          // Покраска (правка без автопилота): пол, потолок и стены помещения в
+          // «Объёме». Крашеное помечено цветом кнопки, как поставленный контур.
+          uiIconButton("paint", {
+            class: "ui-btn" + (row.painted ? " rooms__outline--set" : ""),
+            title: (row.painted ? strings.rooms.paintSet : strings.rooms.paint) + ". " + strings.rooms.paintHint,
+            on: { click: () => openPaint(row.room.id) },
           }),
           uiIconButton("trash", {
             class: "ui-btn ui-btn--danger",

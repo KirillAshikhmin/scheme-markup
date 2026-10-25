@@ -189,3 +189,27 @@
 .colorpick__button:hover {
   border-color: var(--panel-text);
 }
+
+/* Поле краски (покраска): квадратик и «Снять» рядом. Некрашеное — пунктирная
+   рамка поверх цвета «Объёма» по умолчанию: его не выбирали. Разные стороны —
+   косая полоса поверх цвета. */
+.colorpick__paintField {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
+
+.colorpick__paint.is-unset {
+  border-style: dashed;
+  border-color: var(--panel-muted);
+}
+
+.colorpick__paint.is-mixed {
+  background-image: repeating-linear-gradient(135deg, rgba(0, 0, 0, 0.35) 0 4px, transparent 4px 8px) !important;
+}
+
+.colorpick__clear {
+  padding: 2px 6px;
+  font-size: 12px;
+}

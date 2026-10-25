@@ -12,7 +12,6 @@ import {
   VOLUME_CROUCH_MM_S,
   VOLUME_EYE_MM,
   VOLUME_FALL_MM_S2,
-  VOLUME_FLOOR_RGB,
   VOLUME_HEAD_MM,
   VOLUME_JUMP_MM_S,
   VOLUME_LAND_RGB,
@@ -22,6 +21,7 @@ import {
   VOLUME_STAIR_REACH_MM,
   VOLUME_STEP_MM,
 } from "./measures.js";
+import { volumeIsFloor } from "./faces.js";
 import { volumeBasis, volumeFocal } from "./camera.js";
 import {
   VOLUME_ROOM_PROBE_MM,
@@ -840,7 +840,7 @@ export function volumeTagIndoor(faces, rooms) {
     // снег на ней обязан идти.
     if (face.rgb === VOLUME_LAND_RGB || face.layer !== VOLUME_LAYER_BODY) continue;
     const middle = volumeMiddleOf(face.p);
-    const floor = face.rgb === VOLUME_FLOOR_RGB;
+    const floor = volumeIsFloor(face);
     if (middle.z < 0 && !floor) continue;
     const n = face.n || { x: 0, y: 0, z: 0 };
     const roomAt = (dx, dy) => {

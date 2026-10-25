@@ -22,6 +22,7 @@ import {
   openingVents,
   openingWalkThrough,
   wallHeightMm,
+  wallPaintOf,
   wallVectors,
 } from "../model.js";
 import {
@@ -36,7 +37,7 @@ import {
   VOLUME_STEP_MM,
   VOLUME_WALL_RGB,
 } from "./measures.js";
-import { volumeAt, volumeFace } from "./faces.js";
+import { volumeAt, volumeFace, volumePaintRgb, volumePainted } from "./faces.js";
 import {
   VOLUME_SUN_PROBE_MM,
   volumeBoxCorners,
@@ -47,6 +48,16 @@ import {
 import { volumeMiddleOf } from "./order.js";
 
 // ——— стена ———————————————————————————————————————————————————————————————
+
+/**
+ * Краска стороны стены гранью (покраска, правка без автопилота): `sign` —
+ * `1` у левой стороны (нормаль `n`), `−1` у правой, как у `volumeWallFaces`;
+ * `null` — не крашено. Хозяин краски — объект (`wallPaintOf`).
+ */
+export function volumeWallPaintRgb(wall, sign) {
+  if (!(sign === 1 || sign === -1)) return null;
+  return volumePaintRgb(wallPaintOf(wall, sign > 0 ? "left" : "right"));
+}
 
 /**
  * Проём, через который проходят. Решает **геометрия, а не вид**: низ не выше
@@ -406,6 +417,7 @@ export function volumeWallFaces(wall, openings, heightMm, out = [], openDoorIds 
     // Наружная сторона — улица, ничья. Помещение у стороны меняется вдоль
     // стены (`volumeSideStops`), и кусок между проёмами режется ещё и там.
     const known = rooms && rooms.length > 0;
+    const paint = volumeWallPaintRgb(wall, side);
     const stops = known ? volumeSideStops(wall, side, rooms) : [];
     const roomAt = (along) => (known ? volumeRoomKeyAt(rooms, at(along, (half + VOLUME_SUN_PROBE_MM) * side)) : null);
     for (const tile of volumeWallTiles(len, heightMm, openings)) {
@@ -433,15 +445,19 @@ export function volumeWallFaces(wall, openings, heightMm, out = [], openDoorIds 
         const firstBottom = side > 0 ? bottomTo : bottomFrom;
         const secondBottom = side > 0 ? bottomFrom : bottomTo;
         out.push(
-          volumeFace(
-            [
-              volumeAt(first, firstBottom),
-              volumeAt(second, secondBottom),
-              volumeAt(second, tile.topMm),
-              volumeAt(first, tile.topMm),
-            ],
-            VOLUME_WALL_RGB,
-            { normal, room: part.room },
+          volumePainted(
+            volumeFace(
+              [
+                volumeAt(first, firstBottom),
+                volumeAt(second, secondBottom),
+                volumeAt(second, tile.topMm),
+                volumeAt(first, tile.topMm),
+              ],
+              VOLUME_WALL_RGB,
+              { normal, room: part.room },
+            ),
+            paint,
+            "wall",
           ),
         );
       }
@@ -474,11 +490,16 @@ export function volumeWallFaces(wall, openings, heightMm, out = [], openDoorIds 
       : [[start, finish, 0]];
     for (const [first, second, sign] of pieces) {
       const room = known ? volumeRoomKeyAt(rooms, at(along + inward, (half + VOLUME_SUN_PROBE_MM) * sign)) : null;
+      // Половина торца — краской своей стороны, как половина откоса.
       out.push(
-        volumeFace([volumeAt(first, 0), volumeAt(second, 0), volumeAt(second, heightMm), volumeAt(first, heightMm)], VOLUME_WALL_RGB, {
-          normal,
-          room,
-        }),
+        volumePainted(
+          volumeFace([volumeAt(first, 0), volumeAt(second, 0), volumeAt(second, heightMm), volumeAt(first, heightMm)], VOLUME_WALL_RGB, {
+            normal,
+            room,
+          }),
+          volumeWallPaintRgb(wall, sign),
+          "wall",
+        ),
       );
     }
   }
@@ -560,6 +581,9 @@ function volumeTagSides(wall, opening, faces, from, rooms) {
     const own = roomOf(sign);
     if (own) face.room = own;
     else face.indoor = false;
+    // Половина откоса, подоконника и перемычки — краской стороны своей стены
+    // (покраска, правка без автопилота). Полотно и пол проёма — не стена.
+    if (face.rgb === VOLUME_WALL_RGB) volumePainted(face, volumeWallPaintRgb(wall, sign), "wall");
     // Изнанка двусторонней грани: у полотна закрытой двери — соседняя
     // комната, у раскрытого полотна в комнате — та же. Пустая строка — улица.
     if (face.both) face.backRoom = (central ? roomOf(-sign) : own) || "";

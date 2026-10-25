@@ -7,9 +7,7 @@
 // в шапке `volume.js`), циклов нет. Решения и доводы — в шапках разделов ниже.
 import { lightFadeOf } from "../lightFade.js";
 import {
-  VOLUME_CEILING_RGB,
   VOLUME_DOOR_RGB,
-  VOLUME_FLOOR_RGB,
   VOLUME_GLOW_MIN,
   VOLUME_GLOW_RGB,
   VOLUME_HEAT_GLOW_RGB,
@@ -23,10 +21,18 @@ import {
   VOLUME_SCREEN_RGB,
   VOLUME_STAR_RGB,
   VOLUME_TREE_LIGHT,
-  VOLUME_WALL_RGB,
   volumeNormalize,
 } from "./measures.js";
-import { volumeFill, volumeHull, volumeShade, volumeShare01, volumeTintRgb } from "./faces.js";
+import {
+  volumeFill,
+  volumeHull,
+  volumeIsCeiling,
+  volumeIsFloor,
+  volumeIsWall,
+  volumeShade,
+  volumeShare01,
+  volumeTintRgb,
+} from "./faces.js";
 import {
   VOLUME_MARK_WALL,
   volumeBox3,
@@ -679,7 +685,7 @@ function volumeDecalHosts(scene) {
     // бы физический свет подсвечивал объекты (мебель)». Светящееся тело —
     // нет: горит оно своим светом, а пятно чужой лампы его бы притушило.
     const thing = face.thing && !face.lit && !face.led;
-    if (!door && !thing && face.rgb !== VOLUME_FLOOR_RGB && face.rgb !== VOLUME_WALL_RGB && face.rgb !== VOLUME_CEILING_RGB) continue;
+    if (!door && !thing && !volumeIsFloor(face) && !volumeIsWall(face) && !volumeIsCeiling(face)) continue;
     let list = byRoom.get(face.room);
     if (!list) byRoom.set(face.room, (list = []));
     list.push(face);

@@ -70,7 +70,6 @@ import {
   VOLUME_NIGHT_SHARE,
   VOLUME_AROUND_NEAR_MM,
   VOLUME_AROUND_PITCH_DEG,
-  VOLUME_CEILING_RGB,
   VOLUME_LOOK_DEG_PX,
   VOLUME_MARK_NO_PLACE,
   VOLUME_MARK_NO_POINT,
@@ -104,6 +103,7 @@ import {
   volumeFloorPlan,
   volumeFloors,
   volumeFrame,
+  volumeIsCeiling,
   volumeLinkLines,
   volumeLiveLight,
   volumeLiveSigns,
@@ -2493,8 +2493,10 @@ function createVolume({ api, hosts }) {
     // «первую грань потолочного цвета» нельзя: тем же цветом крашен низ плиты,
     // и он односторонний всегда — на нём сверка и застревала, а отметка не
     // доезжала до кадра.
-    const roofed = (scene.faces || []).some((face) => face.rgb === VOLUME_CEILING_RGB && face.both === true);
-    const ceilings = (scene.faces || []).some((face) => face.rgb === VOLUME_CEILING_RGB && face.n.z < 0);
+    // Крашеный потолок (покраска) — тоже потолок: спрашивать цвет нельзя,
+    // иначе крашеный дом пересобирался бы на каждой сверке.
+    const roofed = (scene.faces || []).some((face) => volumeIsCeiling(face) && face.both === true);
+    const ceilings = (scene.faces || []).some((face) => volumeIsCeiling(face) && face.n.z < 0);
     // «Прозрачные объекты» (правка после сборки сценариев) — тоже сама сцена:
     // прозрачность у граней, и пересобрать их можно только заново.
     const clearChanged = !scene.empty && scene.objectsClear !== undefined && scene.objectsClear !== (volumeParamsRead().objectsClear !== false);

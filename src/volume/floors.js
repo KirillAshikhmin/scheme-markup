@@ -8,6 +8,7 @@
 import {
   SCHEME_ANCHOR_OBJECT_KEYS,
   WALL_HEIGHT_FALLBACK_MM,
+  findRoom,
   openingOpens,
   openingVentCell,
   openingWalkThrough,
@@ -18,6 +19,7 @@ import {
   planMmToFraction,
   roomAtPlace,
   roomHasFloor,
+  roomPaintOf,
   schemeAnchorOriginMm,
   schemeFloorOf,
   schemeObjectCorners,
@@ -43,7 +45,7 @@ import {
   VOLUME_SLAB_RGB,
   VOLUME_STEP_MM,
 } from "./measures.js";
-import { volumeAt, volumeClockwise, volumeFace } from "./faces.js";
+import { volumeAt, volumeClockwise, volumeFace, volumePaintRgb } from "./faces.js";
 import {
   VOLUME_SUN_PROBE_MM,
   VOLUME_WALL_SAME_DEG,
@@ -108,6 +110,7 @@ export function volumeRooms(project, schemeId) {
     }
     if (!ok || points.length < 3) continue;
     const height = volumeHeightMm(project, schemeId, outline.roomId);
+    const room = outline.roomId ? findRoom(project, outline.roomId) : null;
     rooms.push({
       outlineId: outline.id,
       roomId: outline.roomId || null,
@@ -123,6 +126,11 @@ export function volumeRooms(project, schemeId) {
       // потолка нет, только пол, если не указано иное». Выводит его модель по
       // стенам контура, выбор помещения главнее (`outlineHasCeiling`).
       hasCeiling: outlineHasCeiling(project, outline),
+      // Краска пола и потолка (правка без автопилота, 2026-10-25): одна на
+      // помещение, сколько бы у него ни было контуров. `null` — не крашено, и
+      // грань идёт краской сборки, как до правки.
+      floorRgb: volumePaintRgb(roomPaintOf(room, "floor")),
+      ceilingRgb: volumePaintRgb(roomPaintOf(room, "ceiling")),
     });
   }
   return rooms;

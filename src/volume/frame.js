@@ -261,6 +261,8 @@ function volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, b
     normal = { x: -normal.x, y: -normal.y, z: -normal.z };
     facing = -facing;
     if (live && typeof face.backRoom === "string") seen = { ...face, room: face.backRoom || null };
+    // Изнанка со своим цветом — крыша над крашеным потолком (`volumePainted`).
+    if (face.backRgb) seen = { ...seen, rgb: face.backRgb };
   }
   if (facing <= 0) return out;
   // Грань целиком перед ближней плоскостью — а таких почти все — переводится
@@ -334,7 +336,7 @@ function volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, b
   // Время года и туман (правка «погода»): земля плиты — земля сезона, а всё
   // снаружи дома тонет в тумане по дальности. В доме тумана нет: у граней
   // комнаты и проёма своё помещение (`room`, `sides`).
-  const rgb = tint && tint.land && face.rgb === VOLUME_LAND_RGB ? tint.land : face.rgb;
+  const rgb = tint && tint.land && seen.rgb === VOLUME_LAND_RGB ? tint.land : seen.rgb;
   // Земля плиты тонет ровно, как земля фона ниже горизонта (`VOLUME_FOG_GROUND`).
   const fogged =
     tint && tint.fog && !face.room && !face.sides && !face.led && face.decal === undefined && !face.lit
@@ -351,7 +353,7 @@ function volumeFacePolygons(face, camera, basis, focal, halfWidth, halfHeight, b
     fill: fogged
       ? volumeFill(rgb, face.flat ? 1 : volumeShade(normal), face.alpha === undefined ? 1 : face.alpha, tint, fogged)
       : live
-        ? volumeLiveFill(rgb === face.rgb ? seen : { ...seen, rgb }, normal, tint, live)
+        ? volumeLiveFill(rgb === seen.rgb ? seen : { ...seen, rgb }, normal, tint, live)
         : face.led
           ? volumeFill(face.rgb, 1, 1, null)
           : volumeFill(rgb, face.flat ? 1 : volumeShade(normal), face.alpha === undefined ? 1 : face.alpha, tint),
