@@ -9,6 +9,7 @@ import {
   SCHEME_ANCHOR_OBJECT_KEYS,
   WALL_HEIGHT_FALLBACK_MM,
   openingOpens,
+  openingVentCell,
   openingWalkThrough,
   openingsInWall,
   outlineHasCeiling,
@@ -134,9 +135,11 @@ export function volumeRooms(project, schemeId) {
  * по помещениям и с улицей при открытых дверях».
  *
  * `{rooms: [{id, areaMm2, heightMm, windowsMm2}], ways: [{id, a, b, areaMm2,
- * window, leaf}]}` — у проёма стороны `a`, `b` (помещение или `null` — улица),
- * окно ли это (`window`) и есть ли полотно (`leaf`): у арки и проёма полотна
- * нет, и воздух через них ходит всегда. Сторона спрашивается тем же щупом, что
+ * window, leaf, ventMm2}]}` — у проёма стороны `a`, `b` (помещение или `null` —
+ * улица), окно ли это (`window`) и есть ли полотно (`leaf`): у арки и проёма
+ * полотна нет, и воздух через них ходит всегда. `ventMm2` — площадь створки
+ * окна (`openingVentCell`): через открытое окно воздух идёт ею, а не всем
+ * проёмом; у глухого окна и у не-окна — 0. Сторона спрашивается тем же щупом, что
  * у света (`VOLUME_SUN_PROBE_MM`). Помещение из двух контуров — одно.
  */
 export function volumeClimateGeometry(project) {
@@ -173,7 +176,9 @@ export function volumeClimateGeometry(project) {
         if ((!a && !b) || a === b) continue;
         const areaMm2 = Math.max(0, Number(opening.widthMm) || 0) * Math.max(0, Number(opening.heightMm) || 0);
         const window = !openingWalkThrough(opening.kind);
-        ways.push({ id: opening.id, a, b, areaMm2, window, leaf: openingOpens(opening.kind) });
+        const cell = openingVentCell(opening);
+        const ventMm2 = cell ? areaMm2 * (cell.toShare - cell.fromShare) * (cell.topShare - cell.bottomShare) : 0;
+        ways.push({ id: opening.id, a, b, areaMm2, window, leaf: openingOpens(opening.kind), ventMm2 });
         if (window && (!a || !b)) rooms.get(a || b).windowsMm2 += areaMm2;
       }
     }

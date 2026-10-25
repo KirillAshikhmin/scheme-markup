@@ -9,6 +9,7 @@ import {
   drawingBoundsMm,
   findScheme,
   openingOpens,
+  openingVents,
   openingsInWall,
   outlinesInOrder,
   schemeObjectsOnScheme,
@@ -176,7 +177,8 @@ export function volumeStackScene(project, plan, optionsOf, was = null) {
     // Своя доля общих множеств: двери, шторы и вещи **этого** этажа. Ими ключ
     // отвечает на «моё ли это открыли» (см. `volumeFloorKey`).
     const known = {
-      doors: sub.doors || [],
+      // Створка окна — тоже «открыли»: этаж с распахнутым окном собирается заново.
+      doors: [...(sub.doors || []), ...(sub.windows || [])],
       sheers: sub.sheers || [],
       objects: schemeObjectsOnScheme(project, item.schemeId).map((object) => object.id),
     };
@@ -367,6 +369,7 @@ export function volumeScene(project, schemeId, options = {}) {
       walls: [],
       boundsMm: null,
       doors: [],
+      windows: [],
       sheers: [],
       stairs: [],
       marks: [],
@@ -555,6 +558,9 @@ export function volumeScene(project, schemeId, options = {}) {
   // Все двери схемы: по этому списку хоткей «все двери» (G210) знает, что
   // открывать, не спрашивая объект второй раз.
   const doors = [];
+  // Окна со створкой (правка без автопилота, 2026-10-25): их открывают по
+  // одному — E и касанием; «все двери» их не трогает.
+  const windows = [];
   // Высоты посчитаны выше, до плиты: по ним идёт вынос земли и тень дома (D43),
   // по ним же сводятся углы (G265) — ус ставится только между стенами одной
   // высоты.
@@ -575,6 +581,7 @@ export function volumeScene(project, schemeId, options = {}) {
       // роллетные с секционными в него не попадали — `R` их не трогал, а
       // счётчик «открыто N из M» их не считал.
       if (openingOpens(opening.kind) && opening.id) doors.push(opening.id);
+      else if (openingVents(opening.kind) && opening.id) windows.push(opening.id);
     }
     const own = wallHeights.get(wall.id);
     // **Стена уступает полосе этажа выше** (таск 214, дефект D65). Накрыта
@@ -842,6 +849,7 @@ export function volumeScene(project, schemeId, options = {}) {
     wallCount: walls.length,
     openingCount: walls.reduce((sum, wall) => sum + openingsInWall(project, wall.id).length, 0),
     doors,
+    windows,
     // Лестницы схемы (таск 149): по ним окно спрашивает про этаж. Лежат в
     // сцене, а не ищутся на каждом шаге, — спрашивается это на каждом шаге, а
     // меняется только вместе с чертежом, то есть вместе со всей сценой.

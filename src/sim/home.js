@@ -22,6 +22,7 @@ import {
   markIsComment,
   markOpeningHit,
   openingOpens,
+  openingVents,
   openingsInWall,
   planFractionToMm,
   scenariosInOrder,
@@ -233,9 +234,9 @@ function deviceIsContact(project, markId) {
 
 /**
  * Дверь датчика открытия: своя (`mark.device.doorId`; `null` — связь снята
- * рукой) → проём, в который метка попала (`markOpeningHit`) → ближайшая
- * открывающаяся дверь схемы не дальше `DEVICE_DOOR_REACH_MM`. `null` — двери
- * нет или метка не датчик открытия.
+ * рукой) → проём, в который метка попала (`markOpeningHit`; дверь или окно со
+ * створкой) → ближайшая открывающаяся дверь схемы не дальше
+ * `DEVICE_DOOR_REACH_MM`. `null` — двери нет или метка не датчик открытия.
  */
 export function markDoorOf(project, markId) {
   const mark = project ? findMark(project, markId) : null;
@@ -245,8 +246,11 @@ export function markDoorOf(project, markId) {
     if (device.doorId === null) return null;
     if (typeof device.doorId === "string" && findOpening(project, device.doorId)) return device.doorId;
   }
+  // Метка в проёме окна со створкой — датчик этого окна (правка без
+  // автопилота, 2026-10-25): окна теперь открывают, и геркон на раме ходит с
+  // ним. Ближайшая дверь ниже ищется только среди дверей, как и было.
   const hit = markOpeningHit(project, mark);
-  if (hit && openingOpens(hit.kind)) return hit.id;
+  if (hit && (openingOpens(hit.kind) || openingVents(hit.kind))) return hit.id;
   const first = Array.isArray(mark.points) && mark.points.length > 0 ? mark.points[0] : null;
   const at = first ? planFractionToMm(project, mark.schemeId, first) : null;
   if (!at) return null;

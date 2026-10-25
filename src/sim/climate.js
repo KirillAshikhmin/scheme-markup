@@ -134,11 +134,12 @@ export function climateStep(state, outdoor, geometry, open, effects, heating, dt
     add(id, "co2", (co2 - item.co2) * share);
   };
   for (const way of (geometry && geometry.ways) || []) {
-    // Окно закрыто всегда: открывать окна сборка не умеет. Дверь — пока её не
-    // открыли; арка и проём без полотна открыты всегда.
-    if (way.window) continue;
+    // Окно — пока не распахнули створку, и воздух идёт её площадью (`ventMm2`):
+    // открытое окно проветривает, а не становится дырой во всю стену. Дверь —
+    // пока её не открыли; арка и проём без полотна открыты всегда.
+    if (way.window && !open.has(way.id)) continue;
     if (way.leaf && !open.has(way.id)) continue;
-    const m2 = (Number(way.areaMm2) || 0) / 1e6;
+    const m2 = (Number(way.window ? way.ventMm2 : way.areaMm2) || 0) / 1e6;
     if (way.a && way.b) {
       const one = was.get(way.a);
       const two = was.get(way.b);

@@ -6347,6 +6347,35 @@ export function openingFaceGrid(opening) {
   return { xs, ys };
 }
 
+// ——— окно, которое открывают (правка без автопилота, 2026-10-25) ————————
+//
+// Климат проветривался только через двери: «сборка не умеет открывать окна».
+// Окно открывается створкой — одной секцией лица (`openingFaceGrid`), как у
+// настоящего окна, где поворотная створка одна, а остальные глухие: первая
+// секция по ширине и верхняя по высоте (у балконного — над поясом). Витраж в
+// пол — сплошное остекление, створки у него нет. Положение створки — экран и
+// дом имитации, а не объект: в `project.json` не пишется ничего (G68).
+
+/** Открывается ли у вида проёма створка окна: окна, кроме витража в пол. */
+export function openingVents(kind) {
+  return openingFamilyOf(kind) === "window" && kind !== "windowGlazing";
+}
+
+/**
+ * Створка окна долями просвета: `{fromShare, toShare, bottomShare,
+ * topShare}` — или `null`, если створки у вида нет.
+ */
+export function openingVentCell(opening) {
+  if (!opening || !openingVents(opening.kind)) return null;
+  const grid = openingFaceGrid(opening);
+  return {
+    fromShare: 0,
+    toShare: grid.xs.length > 0 ? grid.xs[0] : 1,
+    bottomShare: grid.ys.length > 0 ? grid.ys[grid.ys.length - 1] : 0,
+    topShare: 1,
+  };
+}
+
 /**
  * **Сколько у гармошки звеньев** — одно число на план, развёртку и объём
  * (таск 226, требование G338).

@@ -385,7 +385,8 @@ export function volumeOpenAlive(scene, saved) {
   const doors = new Set();
   const sheers = new Set();
   const add = (sub) => {
-    for (const id of (sub && sub.doors) || []) doors.add(id);
+    // Окно со створкой открывают тем же множеством, что двери.
+    for (const id of [...((sub && sub.doors) || []), ...((sub && sub.windows) || [])]) doors.add(id);
     for (const id of (sub && sub.sheers) || []) sheers.add(id);
   };
   add(scene);
@@ -880,12 +881,27 @@ export function volumeSheerLine(sheers, open, aimed, touching) {
 export function volumeDoorLine(doors, open, aimed, touching) {
   const list = doors || [];
   if (list.length === 0) return "";
+  // Под прицелом окно, а не дверь: о дверях — счётом, без «этой двери».
+  if (aimed && !list.includes(aimed)) aimed = null;
   const count = list.filter((id) => open.has(id)).length;
   const state = text("volume.doors", { open: count, count: list.length });
   // Пальцем клавиши E нет вовсе (таск 149), и обещать её значило бы оставить
   // планшет с закрытыми дверями: там дверь открывается касанием по ней.
   if (touching) return state + " " + strings.volume.doorTouch;
   return aimed ? state + " " + strings.volume.doorAimed : state + " " + strings.volume.doorKeys;
+}
+
+/**
+ * Строка про окна со створкой (правка без автопилота, 2026-10-25): сколько
+ * распахнуто и чем их открывают — как у дверей, только без «все разом».
+ */
+export function volumeWindowLine(windows, open, aimed, touching) {
+  const list = windows || [];
+  if (list.length === 0) return "";
+  const count = list.filter((id) => open.has(id)).length;
+  const state = text("volume.windows", { open: count, count: list.length });
+  if (touching) return state + " " + strings.volume.windowTouch;
+  return aimed && list.includes(aimed) ? state + " " + strings.volume.windowAimed : state + " " + strings.volume.windowKeys;
 }
 
 /**
@@ -930,6 +946,7 @@ export function volumeHintText(state) {
   // устройствами. Пальцем — про кнопку «Действие», мышью — про E и щелчок.
   if (state.home) parts.push(state.touching ? strings.volume.homeTouchHint : strings.volume.homeHint);
   parts.push(volumeDoorLine(state.doors, state.open, state.aimedDoor, state.touching));
+  parts.push(volumeWindowLine(state.windows, state.open, state.aimedDoor, state.touching));
   parts.push(volumeSheerLine(state.sheers, state.openSheers || new Set(), state.aimedSheer, state.touching));
   // Про этажи — последней: лестница под рукой есть далеко не всегда, а когда
   // есть, это самое новое в строке. Там же и возврат (G216).
@@ -3100,8 +3117,11 @@ function createVolume({ api, hosts }) {
     }
     const next = volumeDoorsAfterAll(doors, openDoors);
     const was = new Set(openDoors);
+    // «Все двери» окон не трогает: распахнутая створка остаётся как была.
+    const windows = [...openDoors].filter((id) => !doors.includes(id));
     openDoors.clear();
     for (const id of next) openDoors.add(id);
+    for (const id of windows) openDoors.add(id);
     openRev += 1;
     rebuildScene();
     if (homeOn()) for (const id of doors) if (was.has(id) !== openDoors.has(id)) simDoor(id, openDoors.has(id));
@@ -3241,7 +3261,7 @@ function createVolume({ api, hosts }) {
   /** Поле встало в дом: двери говорят датчикам, человек — помещению. */
   function homeArrive() {
     homePlace = null;
-    if (!scene.empty) for (const id of scene.doors || []) simDoor(id, openDoors.has(id));
+    if (!scene.empty) for (const id of [...(scene.doors || []), ...(scene.windows || [])]) simDoor(id, openDoors.has(id));
     // Прежняя память открытых штор (история 2.14) — один раз и только дому,
     // который здесь ещё не запускали: его собственная память старше.
     if (!homeSeeded && !homeKnown) {
@@ -4944,6 +4964,7 @@ function createVolume({ api, hosts }) {
       // про курсор ему ни к чему (таск 09 сценариев).
       aim: !aimNode.hidden && !touching,
       doors: scene.doors,
+      windows: scene.windows,
       open: openDoors,
       aimedDoor,
       sheers: scene.sheers,

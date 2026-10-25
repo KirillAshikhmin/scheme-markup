@@ -18,6 +18,8 @@ import {
   openingMotionOf,
   openingOpens,
   openingSlatted,
+  openingVentCell,
+  openingVents,
   openingWalkThrough,
   wallHeightMm,
   wallVectors,
@@ -796,11 +798,14 @@ function volumeOpeningFaces(wall, opening, heightMm, out, openDoorIds, rooms = n
   // подоконник и перемычка открывающегося проёма помечены его дверью. По ним
   // прицел узнаёт проём и тогда, когда полотно уехало, — открытую дверь
   // закрывают, глядя в её проём (`volumeDoorwayAt`).
-  if (opening.id && openingOpens(opening.kind)) {
+  // Окно со створкой — так же (правка без автопилота, 2026-10-25): глядя в
+  // его проём, E открывает и закрывает створку.
+  if (opening.id && (openingOpens(opening.kind) || openingVents(opening.kind))) {
     for (let index = reveals; index < out.length; index += 1) out[index].doorway = opening.id;
   }
   if (openingFamilyOf(opening.kind) === "window") {
     volumeWindowFrame(at, from, to, bottom, top, out, openingFaceGrid(opening));
+    if (opening.id && volumeDoorOpen(openDoorIds, opening.id)) volumeWindowSash(wall, opening, { from, to, bottom, top }, out, rooms);
     return out;
   }
   if (openingHasLeaf(opening.kind)) {
@@ -1018,6 +1023,49 @@ function volumeWindowFrame(at, from, to, bottom, top, out, grid) {
       ),
     );
   }
+}
+
+/** На сколько градусов распахнута створка окна внутрь комнаты. */
+export const VOLUME_SASH_DEG = 75;
+
+/**
+ * **Открытая створка окна** (правка без автопилота, 2026-10-25): та секция
+ * лица, что открывается (`openingVentCell`), распахнута внутрь комнаты на
+ * `VOLUME_SASH_DEG` вокруг своего края у начала стены. Рама и импосты окна
+ * остаются на месте, как у настоящего окна; створка — рамка из четырёх брусков
+ * без стекла, как и само окно в объёме. Бруски помечены окном (`doorId`):
+ * прицел на створку закрывает его. Помещений нет или они с обеих сторон —
+ * створка открывается на ту сторону, куда смотрит нормаль стены.
+ */
+function volumeWindowSash(wall, opening, span, out, rooms) {
+  const cell = openingVentCell(opening);
+  const vectors = wallVectors(wall);
+  if (!cell || !vectors) return out;
+  const { u, n } = vectors;
+  const half = VOLUME_FRAME_MM / 2;
+  const width = span.to - span.from;
+  const height = span.top - span.bottom;
+  const from = span.from + width * cell.fromShare + (cell.fromShare > 0 ? half : VOLUME_FRAME_MM);
+  const to = span.from + width * cell.toShare - (cell.toShare < 1 ? half : VOLUME_FRAME_MM);
+  const bottom = span.bottom + height * cell.bottomShare + (cell.bottomShare > 0 ? half : VOLUME_FRAME_MM);
+  const top = span.bottom + height * cell.topShare - (cell.topShare < 1 ? half : VOLUME_FRAME_MM);
+  const sash = to - from;
+  if (!(sash > VOLUME_FRAME_MM * 3) || !(top - bottom > VOLUME_FRAME_MM * 3)) return out;
+  const inner = volumeInnerSide(wall, rooms, (from + to) / 2) || 1;
+  const turn = (VOLUME_SASH_DEG * Math.PI) / 180;
+  const dir = { x: u.x * Math.cos(turn) + n.x * inner * Math.sin(turn), y: u.y * Math.cos(turn) + n.y * inner * Math.sin(turn) };
+  const hinge = { x: Number(wall.aMm.x) + u.x * from, y: Number(wall.aMm.y) + u.y * from };
+  const at = (along, z) => volumeAt({ x: hinge.x + dir.x * along, y: hinge.y + dir.y * along }, z);
+  const bar = VOLUME_FRAME_MM * 0.8;
+  const quad = (fromAlong, toAlong, low, high) => {
+    if (!(toAlong > fromAlong) || !(high > low)) return;
+    out.push(volumeFace([at(fromAlong, low), at(toAlong, low), at(toAlong, high), at(fromAlong, high)], VOLUME_FRAME_RGB, { both: true, doorId: opening.id }));
+  };
+  quad(0, sash, bottom, bottom + bar);
+  quad(0, sash, top - bar, top);
+  quad(0, bar, bottom + bar, top - bar);
+  quad(sash - bar, sash, bottom + bar, top - bar);
+  return out;
 }
 
 /**
