@@ -950,12 +950,16 @@
    они должны одинаково. */
 
 /* Счётчик кадров по адресу `?fps` (`fpsMeter.js`): замер на живом телефоне.
-   Слева сверху под плашкой подсказки, мелко и сквозь пальцы — он не должен
-   мешать ходить, которым и меряется. */
+   По центру под переключателем режимов, мелко и сквозь пальцы: углы заняты
+   кнопками, а он не должен мешать ходить, которым и меряется. */
 .volume__fps {
   position: absolute;
-  left: var(--canvas-corner-edge);
-  top: calc(var(--canvas-corner-edge) + 40px);
+  left: 50%;
+  transform: translateX(-50%);
+  top: calc(var(--canvas-corner-edge) + 48px);
+  max-width: calc(100% - 2 * var(--canvas-corner-edge));
+  overflow: hidden;
+  text-overflow: ellipsis;
   padding: 3px 6px;
   border-radius: 4px;
   background: rgba(13, 17, 23, 0.72);

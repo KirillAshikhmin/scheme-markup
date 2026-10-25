@@ -712,6 +712,31 @@ export function volumeRatio(devicePixelRatio) {
   const ratio = Number(devicePixelRatio);
   return ratio > 0 ? Math.min(VOLUME_RATIO_MAX, ratio) : 1;
 }
+
+// ——— плотность на ходу (правка без автопилота, 2026-10-25) ———
+//
+// Узкое место кадра — заливка, и она растёт с площадью холста: при плотности
+// два точек вчетверо больше, чем при единице (стенд: 4,8 мс против 1,9 на
+// квартире с мебелью, `npm run bench:browser`). Пока камера движется, глаз
+// мелочи не видит, а рывки — видит. Поэтому **пальцем на ходу** холст рисуется
+// плотностью `VOLUME_MOTION_RATIO`, а встал — через `VOLUME_MOTION_SETTLE_MS`
+// кадр перерисовывается во всю плотность. «На ходу» — камера сдвинулась с
+// прошлого кадра, и тот был не раньше `VOLUME_MOTION_GAP_MS`: разгорающаяся
+// лампа и бегущие часы кадры заказывают, но камера стоит — они идут чётко.
+// Мышью и клавишами плотность не трогается: на компьютере запас есть.
+
+/** Плотность холста на ходу пальцем. */
+export const VOLUME_MOTION_RATIO = 1;
+/** Кадр позже прошлого на столько — уже не ход, а новое движение с места, мс. */
+export const VOLUME_MOTION_GAP_MS = 150;
+/** Сколько стоять, чтобы кадр стал чётким, мс. */
+export const VOLUME_MOTION_SETTLE_MS = 160;
+
+/** Плотность кадра: `full` — по экрану (`volumeRatio`), на ходу пальцем — не больше `VOLUME_MOTION_RATIO`. */
+export function volumeMotionRatio(full, { moving = false, touch = false } = {}) {
+  const ratio = Number(full) > 0 ? Number(full) : 1;
+  return moving && touch ? Math.min(ratio, Math.max(VOLUME_MOTION_RATIO, 1)) : ratio;
+}
 /** Взгляд свайпом: градусов на точку при средней чувствительности. */
 export const VOLUME_TOUCH_LOOK_DEG_PX = 0.22;
 
@@ -1419,6 +1444,11 @@ function createVolume({ api, hosts }) {
   // Зашли пальцем (таск 149). Догадка по виду указателя — сразу, точный ответ —
   // по первому касанию: мышь площадку ходьбы не увидит никогда.
   let touching = volumeTouchLikely();
+  // Плотность холста сейчас и память хода для неё (`paintRatio`).
+  let backingRatio = null;
+  let lastCameraKey = null;
+  let lastPaintAt = -Infinity;
+  let settleTimer = null;
   // Палец на поле (правка после сборки сценариев, «как стандарт в отрасли»):
   // `stick` — палец хода в левой половине, `{id, bx, by, sx, sy, moved}` —
   // середина плавающего джойстика и где палец лёг; `pad` — куда он ведёт,
@@ -1783,7 +1813,7 @@ function createVolume({ api, hosts }) {
       ? setInterval(() => {
           if (closed || !fpsNode) return;
           const read = fpsMeter.read(performance.now());
-          const ratio = volumeRatio(typeof window !== "undefined" ? window.devicePixelRatio : 1);
+          const ratio = backingRatio || volumeRatio(typeof window !== "undefined" ? window.devicePixelRatio : 1);
           // Дробь по-русски — запятой, как во всех числах сборки.
           const num = (value, digits) => value.toFixed(digits).replace(".", ",");
           const said =
@@ -2226,6 +2256,7 @@ function createVolume({ api, hosts }) {
     node.style.height = box.height + "px";
     node.width = Math.round(box.width * ratio);
     node.height = Math.round(box.height * ratio);
+    backingRatio = ratio;
     rain.resize(box.width, box.height, ratio);
     placeStance();
     redraw();
@@ -2497,12 +2528,41 @@ function createVolume({ api, hosts }) {
     if (fpsMeter) fpsMeter.frame(paintFrom, performance.now(), shown.length);
   }
 
+  // Плотность этого кадра (`volumeMotionRatio`): на ходу пальцем — пониже, и
+  // холст под неё переразмечается; встали — чёткий кадр по таймеру. Память
+  // плотности — у `touching` выше: её читает и `resize()`.
+  function paintRatio() {
+    const full = volumeRatio(typeof window !== "undefined" ? window.devicePixelRatio : 1);
+    const spot = camera();
+    const key = [spot.at.x, spot.at.y, spot.at.z, spot.yaw, spot.pitch].map((value) => Math.round(value * 1000)).join(",");
+    const time = now();
+    const moving = lastCameraKey !== null && key !== lastCameraKey && time - lastPaintAt < VOLUME_MOTION_GAP_MS;
+    lastCameraKey = key;
+    lastPaintAt = time;
+    const ratio = volumeMotionRatio(full, { moving, touch: touching });
+    if (ratio !== backingRatio) {
+      const box = viewport();
+      node.width = Math.round(box.width * ratio);
+      node.height = Math.round(box.height * ratio);
+      backingRatio = ratio;
+    }
+    if (settleTimer !== null) clearTimeout(settleTimer);
+    settleTimer =
+      ratio < full && typeof setTimeout === "function"
+        ? setTimeout(() => {
+            settleTimer = null;
+            if (!closed) redraw();
+          }, VOLUME_MOTION_SETTLE_MS)
+        : null;
+    return ratio;
+  }
+
   function paintScene() {
     // Где стоит человек — общему месту трёх видов (G276, D61). На кадр это одно
     // присваивание, и только на своём режиме: запись из погасшего поля отняла
     // бы место у того, на которое смотрят.
     placeHere();
-    const ratio = volumeRatio(typeof window !== "undefined" ? window.devicePixelRatio : 1);
+    const ratio = paintRatio();
     const box = viewport();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, node.width, node.height);
@@ -4993,6 +5053,7 @@ function createVolume({ api, hosts }) {
     homeHere = false;
     closed = true;
     if (fpsTimer !== null) clearInterval(fpsTimer);
+    if (settleTimer !== null) clearTimeout(settleTimer);
     volumeSurface = null;
     hosts.stage.replaceChildren();
     hosts.side.replaceChildren();

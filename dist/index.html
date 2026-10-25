@@ -5197,8 +5197,12 @@ background: linear-gradient(to bottom, #fff 0 4px, transparent 4px 7px, #fff 7px
 }
 .volume__fps {
 position: absolute;
-left: var(--canvas-corner-edge);
-top: calc(var(--canvas-corner-edge) + 40px);
+left: 50%;
+transform: translateX(-50%);
+top: calc(var(--canvas-corner-edge) + 48px);
+max-width: calc(100% - 2 * var(--canvas-corner-edge));
+overflow: hidden;
+text-overflow: ellipsis;
 padding: 3px 6px;
 border-radius: 4px;
 background: rgba(13, 17, 23, 0.72);
@@ -63831,6 +63835,13 @@ function volumeRatio(devicePixelRatio) {
 const ratio = Number(devicePixelRatio);
 return ratio > 0 ? Math.min(VOLUME_RATIO_MAX, ratio) : 1;
 }
+const VOLUME_MOTION_RATIO = 1;
+const VOLUME_MOTION_GAP_MS = 150;
+const VOLUME_MOTION_SETTLE_MS = 160;
+function volumeMotionRatio(full, { moving = false, touch = false } = {}) {
+const ratio = Number(full) > 0 ? Number(full) : 1;
+return moving && touch ? Math.min(ratio, Math.max(VOLUME_MOTION_RATIO, 1)) : ratio;
+}
 const VOLUME_TOUCH_LOOK_DEG_PX = 0.22;
 function volumeTouchZone(x, width) {
 return Number(x) < (Number(width) || 0) / 2 ? "move" : "look";
@@ -64134,6 +64145,10 @@ let aimedMark = null;
 const aimedSheer = () => Boolean(aimedMark && (scene.sheers || []).includes(aimedMark));
 let altFree = false;
 let touching = volumeTouchLikely();
+let backingRatio = null;
+let lastCameraKey = null;
+let lastPaintAt = -Infinity;
+let settleTimer = null;
 let stick = null;
 let pad = null;
 let swipe = null;
@@ -64274,7 +64289,7 @@ fpsMeter && typeof setInterval === "function"
 ? setInterval(() => {
 if (closed || !fpsNode) return;
 const read = fpsMeter.read(performance.now());
-const ratio = volumeRatio(typeof window !== "undefined" ? window.devicePixelRatio : 1);
+const ratio = backingRatio || volumeRatio(typeof window !== "undefined" ? window.devicePixelRatio : 1);
 const num = (value, digits) => value.toFixed(digits).replace(".", ",");
 const said =
 read.fps === null
@@ -64505,6 +64520,7 @@ node.style.width = box.width + "px";
 node.style.height = box.height + "px";
 node.width = Math.round(box.width * ratio);
 node.height = Math.round(box.height * ratio);
+backingRatio = ratio;
 rain.resize(box.width, box.height, ratio);
 placeStance();
 redraw();
@@ -64670,9 +64686,34 @@ const paintFrom = fpsMeter ? performance.now() : 0;
 paintScene();
 if (fpsMeter) fpsMeter.frame(paintFrom, performance.now(), shown.length);
 }
+function paintRatio() {
+const full = volumeRatio(typeof window !== "undefined" ? window.devicePixelRatio : 1);
+const spot = camera();
+const key = [spot.at.x, spot.at.y, spot.at.z, spot.yaw, spot.pitch].map((value) => Math.round(value * 1000)).join(",");
+const time = now();
+const moving = lastCameraKey !== null && key !== lastCameraKey && time - lastPaintAt < VOLUME_MOTION_GAP_MS;
+lastCameraKey = key;
+lastPaintAt = time;
+const ratio = volumeMotionRatio(full, { moving, touch: touching });
+if (ratio !== backingRatio) {
+const box = viewport();
+node.width = Math.round(box.width * ratio);
+node.height = Math.round(box.height * ratio);
+backingRatio = ratio;
+}
+if (settleTimer !== null) clearTimeout(settleTimer);
+settleTimer =
+ratio < full && typeof setTimeout === "function"
+? setTimeout(() => {
+settleTimer = null;
+if (!closed) redraw();
+}, VOLUME_MOTION_SETTLE_MS)
+: null;
+return ratio;
+}
 function paintScene() {
 placeHere();
-const ratio = volumeRatio(typeof window !== "undefined" ? window.devicePixelRatio : 1);
+const ratio = paintRatio();
 const box = viewport();
 ctx.setTransform(1, 0, 0, 1, 0, 0);
 ctx.clearRect(0, 0, node.width, node.height);
@@ -66132,6 +66173,7 @@ if (homeHere && simRunning()) simStop();
 homeHere = false;
 closed = true;
 if (fpsTimer !== null) clearInterval(fpsTimer);
+if (settleTimer !== null) clearTimeout(settleTimer);
 volumeSurface = null;
 hosts.stage.replaceChildren();
 hosts.side.replaceChildren();
