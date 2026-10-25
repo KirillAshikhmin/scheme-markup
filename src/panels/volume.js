@@ -141,6 +141,7 @@ import {
   volumeStart,
   volumeStep,
 } from "../volume.js";
+import { createFpsMeter, fpsMeterOn } from "../fpsMeter.js";
 import { markCardModel, markCardParts } from "./markCard.js";
 import { deviceCardView, deviceClickPlan, deviceLiveKinds, devicePresserOf } from "./deviceCard.js";
 import { openSimCommands } from "./simBar.js";
@@ -1773,6 +1774,33 @@ function createVolume({ api, hosts }) {
     refreshHour();
     redraw();
   });
+  // Счётчик кадров по адресу `?fps` (`fpsMeter.js`): замер на живом телефоне.
+  // Без адреса его нет вовсе — ни узла, ни таймера, ни вызова часов на кадр.
+  const fpsMeter = typeof location !== "undefined" && fpsMeterOn(location.search, location.hash) ? createFpsMeter() : null;
+  const fpsNode = fpsMeter ? uiEl("div", { class: "volume__fps", attrs: { "aria-hidden": "true" } }) : null;
+  const fpsTimer =
+    fpsMeter && typeof setInterval === "function"
+      ? setInterval(() => {
+          if (closed || !fpsNode) return;
+          const read = fpsMeter.read(performance.now());
+          const ratio = volumeRatio(typeof window !== "undefined" ? window.devicePixelRatio : 1);
+          // Дробь по-русски — запятой, как во всех числах сборки.
+          const num = (value, digits) => value.toFixed(digits).replace(".", ",");
+          const said =
+            read.fps === null
+              ? text("volume.fpsIdle", { w: node.width, h: node.height, ratio: num(ratio, 2) })
+              : text("volume.fps", {
+                  fps: Math.round(read.fps),
+                  ms: num(read.ms, 1),
+                  max: num(read.maxMs, 1),
+                  polygons: read.polygons,
+                  w: node.width,
+                  h: node.height,
+                  ratio: num(ratio, 2),
+                });
+          if (fpsNode.textContent !== said) fpsNode.textContent = said;
+        }, 250)
+      : null;
   const stage = uiEl("div", { class: "volume__stage", attrs: { tabindex: "-1" } }, [
     node,
     rain.node,
@@ -1787,6 +1815,7 @@ function createVolume({ api, hosts }) {
     clockNode,
     hintPlate.node,
     askBox,
+    ...(fpsNode ? [fpsNode] : []),
   ]);
   const ctx = node.getContext ? node.getContext("2d") : null;
 
@@ -2463,6 +2492,12 @@ function createVolume({ api, hosts }) {
 
   function paint() {
     if (!ctx || closed) return;
+    const paintFrom = fpsMeter ? performance.now() : 0;
+    paintScene();
+    if (fpsMeter) fpsMeter.frame(paintFrom, performance.now(), shown.length);
+  }
+
+  function paintScene() {
     // Где стоит человек — общему месту трёх видов (G276, D61). На кадр это одно
     // присваивание, и только на своём режиме: запись из погасшего поля отняла
     // бы место у того, на которое смотрят.
@@ -4957,6 +4992,7 @@ function createVolume({ api, hosts }) {
     if (homeHere && simRunning()) simStop();
     homeHere = false;
     closed = true;
+    if (fpsTimer !== null) clearInterval(fpsTimer);
     volumeSurface = null;
     hosts.stage.replaceChildren();
     hosts.side.replaceChildren();

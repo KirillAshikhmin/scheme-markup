@@ -948,3 +948,21 @@
    справа — и обе берут вид у общей `.canvas-hint` в `canvas.css`. Поле объёма
    тёмное, а плашки светлые — те же, что над планом: инструмент один, и читаться
    они должны одинаково. */
+
+/* Счётчик кадров по адресу `?fps` (`fpsMeter.js`): замер на живом телефоне.
+   Слева сверху под плашкой подсказки, мелко и сквозь пальцы — он не должен
+   мешать ходить, которым и меряется. */
+.volume__fps {
+  position: absolute;
+  left: var(--canvas-corner-edge);
+  top: calc(var(--canvas-corner-edge) + 40px);
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: rgba(13, 17, 23, 0.72);
+  color: #7ee787;
+  font: 11px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+  z-index: 5;
+}

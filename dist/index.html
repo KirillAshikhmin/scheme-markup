@@ -5177,6 +5177,20 @@ width: 1px;
 height: 11px;
 background: linear-gradient(to bottom, #fff 0 4px, transparent 4px 7px, #fff 7px 11px);
 }
+.volume__fps {
+position: absolute;
+left: var(--canvas-corner-edge);
+top: calc(var(--canvas-corner-edge) + 40px);
+padding: 3px 6px;
+border-radius: 4px;
+background: rgba(13, 17, 23, 0.72);
+color: #7ee787;
+font: 11px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+white-space: nowrap;
+pointer-events: none;
+user-select: none;
+z-index: 5;
+}
 .workshop__panel {
 display: flex;
 flex-direction: column;
@@ -7761,6 +7775,8 @@ pick: "Клик по стене чертежа открывает её разв�
 },
 volume: {
 title: "Объём · {name}",
+fps: "{fps} к/с · кадр {ms} мс, макс {max} · граней {polygons} · холст {w}×{h} ×{ratio}",
+fpsIdle: "кадров нет — поле ждёт движения · холст {w}×{h} ×{ratio}",
 titleFloor: "Объём · {name} · этаж {floor}",
 open: "Объём",
 openHint: "Пройти по этой схеме в объёме: стены с толщиной, пол, потолок, проёмы и объекты. Режим только смотрит — объект он не меняет.",
@@ -51284,6 +51300,47 @@ mountCanvasElevation(host, api);
 registerPanel(PANEL_IDS.canvas, mountCanvas);
 registerPanel(PANEL_IDS.overlay, mountCanvasOverlay);
 
+// src/fpsMeter.js
+const FPS_WINDOW_MS = 1000;
+const FPS_GAP_MS = 250;
+function fpsMeterOn(search = "", hash = "") {
+return /(?:^|[?&#])fps(?:[=&#]|$)/.test(String(search || "")) || /(?:^|[#&])fps(?:[=&]|$)/.test(String(hash || ""));
+}
+function createFpsMeter() {
+const frames = [];
+function trim(now) {
+while (frames.length > 0 && now - frames[0].start > FPS_WINDOW_MS) frames.shift();
+}
+return {
+frame(start, end, polygons = 0) {
+if (!Number.isFinite(start) || !Number.isFinite(end)) return;
+frames.push({ start, ms: Math.max(0, end - start), polygons: Number(polygons) || 0 });
+trim(end);
+},
+read(now) {
+trim(now);
+if (frames.length === 0) return { fps: null, ms: null, maxMs: null, polygons: null, frames: 0 };
+let gaps = 0;
+let span = 0;
+for (let i = 1; i < frames.length; i += 1) {
+const gap = frames[i].start - frames[i - 1].start;
+if (gap > 0 && gap <= FPS_GAP_MS) {
+gaps += 1;
+span += gap;
+}
+}
+const total = frames.reduce((sum, item) => sum + item.ms, 0);
+return {
+fps: gaps > 0 ? (1000 * gaps) / span : null,
+ms: total / frames.length,
+maxMs: Math.max(...frames.map((item) => item.ms)),
+polygons: frames[frames.length - 1].polygons,
+frames: frames.length,
+};
+},
+};
+}
+
 // src/imagePrep.js
 const PLAN_IMAGE_TYPES = ["image/png", "image/jpeg"];
 const PLAN_IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg"];
@@ -64129,6 +64186,30 @@ if (closed) return;
 refreshHour();
 redraw();
 });
+const fpsMeter = typeof location !== "undefined" && fpsMeterOn(location.search, location.hash) ? createFpsMeter() : null;
+const fpsNode = fpsMeter ? uiEl("div", { class: "volume__fps", attrs: { "aria-hidden": "true" } }) : null;
+const fpsTimer =
+fpsMeter && typeof setInterval === "function"
+? setInterval(() => {
+if (closed || !fpsNode) return;
+const read = fpsMeter.read(performance.now());
+const ratio = volumeRatio(typeof window !== "undefined" ? window.devicePixelRatio : 1);
+const num = (value, digits) => value.toFixed(digits).replace(".", ",");
+const said =
+read.fps === null
+? text("volume.fpsIdle", { w: node.width, h: node.height, ratio: num(ratio, 2) })
+: text("volume.fps", {
+fps: Math.round(read.fps),
+ms: num(read.ms, 1),
+max: num(read.maxMs, 1),
+polygons: read.polygons,
+w: node.width,
+h: node.height,
+ratio: num(ratio, 2),
+});
+if (fpsNode.textContent !== said) fpsNode.textContent = said;
+}, 250)
+: null;
 const stage = uiEl("div", { class: "volume__stage", attrs: { tabindex: "-1" } }, [
 node,
 rain.node,
@@ -64143,6 +64224,7 @@ aimNode,
 clockNode,
 hintPlate.node,
 askBox,
+...(fpsNode ? [fpsNode] : []),
 ]);
 const ctx = node.getContext ? node.getContext("2d") : null;
 let stageSize = { width: 0, height: 0 };
@@ -64503,6 +64585,11 @@ else crouchButton.setAttribute("aria-pressed", crouchLatched ? "true" : "false")
 }
 function paint() {
 if (!ctx || closed) return;
+const paintFrom = fpsMeter ? performance.now() : 0;
+paintScene();
+if (fpsMeter) fpsMeter.frame(paintFrom, performance.now(), shown.length);
+}
+function paintScene() {
 placeHere();
 const ratio = volumeRatio(typeof window !== "undefined" ? window.devicePixelRatio : 1);
 const box = viewport();
@@ -65963,6 +66050,7 @@ stopHome = null;
 if (homeHere && simRunning()) simStop();
 homeHere = false;
 closed = true;
+if (fpsTimer !== null) clearInterval(fpsTimer);
 volumeSurface = null;
 hosts.stage.replaceChildren();
 hosts.side.replaceChildren();
