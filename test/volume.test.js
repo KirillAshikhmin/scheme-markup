@@ -13,7 +13,7 @@
 //      кадр будет похож на поломку рисовальщика, а не на правило.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -3761,7 +3761,9 @@ test("предел стояния камеры снят: обзор спуска
   // Таск 195 держал камеру над крышей (`volumeAroundStand`) ровно затем, чтобы
   // она не оказалась внутри стены. Заказчик предел снял сам — «по камере — ок,
   // пусть в стенах оказываемся, это ожидаемо», — и функции этой больше нет.
-  const volumeSource = readFileSync(new URL("../src/volume.js", import.meta.url), "utf8");
+  // Счёт «Объёма» — дверь `volume.js` и модули `volume/*.js`.
+  const volumeDir = new URL("../src/volume/", import.meta.url);
+  const volumeSource = [readFileSync(new URL("../src/volume.js", import.meta.url), "utf8"), ...readdirSync(volumeDir).map((name) => readFileSync(new URL(name, volumeDir), "utf8"))].join("\n");
   assert.ok(!/export function volumeAroundStand/.test(volumeSource), "предел стояния вернулся");
   // Кадрирование: камера встаёт по взгляду и расстоянию, и ничего кроме пола
   // её не держит. Цель на полу, взгляд −42°, семь метров.

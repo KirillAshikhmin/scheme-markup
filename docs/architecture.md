@@ -17,7 +17,7 @@
 | Любая правка | §3 (слои), §4 (поток правки), правила корневого `AGENTS.md` |
 | Поле или правило объекта | `src/model.js` (шапка + ближайшие функции), §4, ADR 002/008/013/014 |
 | «Схема», «Чертёж», выгрузки | §5, `render.js`, `canvas.js`, `panels/workshop.js` |
-| «Объём» | §6 целиком; разделы `volume.js` — `ast-index outline scheme_image/src/volume.js` |
+| «Объём» | §6 целиком; модули — §6.2, функции файла — `ast-index outline scheme_image/src/volume/lamps.js` |
 | Имитация, сценарии, аксессуары | §7, `CONTEXT.md`, ADR 009–020 |
 | Сборка, CI, прод | §9, §10, `build.js` |
 | Найти символ, вызовы, файл | §11 (`ast-index`) |
@@ -43,7 +43,7 @@ GitHub Actions: npm test → npm run build → GitHub Pages
 
 ## 3. Слои и модули
 
-112 модулей, ~105 тыс. строк в `src/`. Стрелки зависимостей идут только вниз, циклов нет (проверяет `build.js`):
+132 модуля, ~106 тыс. строк в `src/`. Стрелки зависимостей идут только вниз, циклов нет (проверяет `build.js`):
 
 ```
 каркас и панели      app.js · panels/*.js                       DOM, события, окна
@@ -64,7 +64,7 @@ GitHub Actions: npm test → npm run build → GitHub Pages
 
 | Модуль | Строк | Что внутри |
 |---|---|---|
-| `src/volume.js` | 13 490 | «Объём» — весь счёт: сцена, свет, тени, порядок граней, камера, ходьба, небо, фон (§6) |
+| `src/volume/*.js` | 14 600 в 19 модулях | «Объём» — весь счёт: сцена, свет, тени, порядок граней, камера, ходьба, небо, фон (§6); самые крупные — `backdrop.js` 1 660, `lamps.js` 1 510 |
 | `src/model.js` | 10 977 | все правила объекта: справочники, метки, нумерация, стены, проёмы, помещения, этажи, профили аксессуаров, валидация, миграции |
 | `src/render.js` | 7 121 | геометрия и рисование 2D: метки, подписи, легенда, чертёж, `hitTest`, `drawScheme`, `drawDrawing` |
 | `src/panels/workshop.js` | 5 807 | режим «Чертёж»: стены, проёмы, вещи, развёртки, черновики |
@@ -131,33 +131,42 @@ project ──▶ volumeScene(project, schemeId, opts)  scene: faces[] (стен
 
 Кадр рисуется **по событию**: движение, свет в пути (`lights.busy`), часы. Стоячее поле кадров не заказывает.
 
-### 6.2 Модуль `volume.js` по разделам
+### 6.2 Модули `src/volume/`
 
-Разделы отбиты строками `// ——— имя ———`; полный список с номерами строк — `grep -n '^// ———' src/volume.js`.
+Счёт «Объёма» разложен по `src/volume/*.js` (2026-10-25; до того — один `volume.js` на 13,5 тыс. строк). `src/volume.js` — дверь: шапка с доводами и реэкспорт прежнего наружного списка (339 имён). Снаружи «Объём» читают через неё, соседи по папке — напрямую. Слои снизу вверх, каждый читает только нижние (`build.js` ловит циклы):
 
-| Раздел | Ключевые функции |
-|---|---|
-| числа, стойка, мелкая арифметика | `VOLUME_*` мерки, `volumeStance*` |
-| грани, тон, затенение | `volumeFill`, `volumeShade`, `volumeTintRgb`, `volumeFaceNormal` |
-| солнце и луна в комнате | `volumeSunSpotFaces`, `volumeMoonSpotFaces`, `volumeSunOpenings`, `volumeShadowFaces` |
-| стены, углы, проёмы | `volumeWallFaces`, `volumeWallMiters`, `volumeWallSolids`, `volumeDoorOpen`, `volumeCurtain*` |
-| пол, потолок, вещи, лестница, этажи, двусвет | `volumeFloorFaces`, `volumeObjectFaces`, `volumeStairs`, `volumeStackScene`, `volumeCeilingUnderVoid` |
-| метки и модели | `volumeMarks`, `volumeMarkFaces`, `volumeModelFaces` (тела из `objectModels/*`) |
-| сцена | `volumeScene`, `volumeTagThing`, `volumeOccluder` |
-| где встать, ходьба, падение | `volumeRoomAt` (то же правило, что `wallPlaceRoom` плана), `volumeCanStand`, `volumeMoveTo`, `volumeFallTo` |
-| камера, отсечение | `volumeBasis`, `volumeFocal`, `volumeClipNear` |
-| порядок граней (BSP) | `volumeOrderTree` (раз на сцену), `volumeOrderWalk` (на кадр), `volumeOrderRank` |
-| кадр и рисование | `volumeFrame`, `volumeFacePolygons`, `volumeLiveFill`, `volumeDraw` |
-| свет ламп и неба | `volumeLiveLight`, `volumeLampSources`, `volumeRoomTint`, `volumeDayLevels`, `volumeWindowDecals` |
-| пятна ламп | `volumeLampDecals`, `volumeLampPool`, `volumeDecalHosts`, швы — `volumeFindSeams`, `volumeSeamGrow` |
-| тени вещей от ламп | `volumeLampShades`, `volumeShadeBlockers`, `volumeLampShade`, `volumeShadeMix`, `volumeShadeAlpha` |
-| признаки работы, шкалы, ель | `volumeLiveSigns`, `volumeCo2Rgb`, `volumeGlowFill` |
-| фон, город, горы, небо, светила | `volumeDrawBackdrop`, `volumeSkyColors`, `volumeBodyAt`, `volumeMoonShape`, `volumeMood` |
-| обзор со стороны | `volumeAround*` |
+```
+measures → faces → camera → shapes → order → palette → sky → walls → sun →
+marks → floors → walk → scene → lamps → signs → frame → pick → backdrop → around
+```
+
+| Модуль | Что | Ключевые функции |
+|---|---|---|
+| `measures.js` | мерки человека и стойки, ярусы кадра, краски, прозрачность | `VOLUME_*` |
+| `faces.js` | векторная арифметика, грань, тон, тень дома | `volumeFill`, `volumeShade`, `volumeTintRgb`, `volumeFaceNormal`, `volumeShadowFaces` |
+| `camera.js` | базис взгляда, фокус, отсечение | `volumeBasis`, `volumeFocal`, `volumeClipNear` |
+| `shapes.js` | общие помощники формы | `volumePointInside`, `volumePrismFaces`, `volumeRoomAt` (то же правило, что `wallPlaceRoom` плана), `volumeRoomKeyAt`, `volumeOccluder` |
+| `order.js` | порядок граней (BSP) | `volumeOrderTree` (раз на сцену), `volumeOrderWalk` (на кадр), `volumeOrderRank` |
+| `palette.js` | виды фона и краски его вещей | `volumeBackdropKindOf` |
+| `sky.js` | час суток, светила, погода | `volumeMood`, `volumeSkyColors`, `volumeBodyAt`, `volumeMoonShape` |
+| `walls.js` | стены, углы, проёмы | `volumeWallFaces`, `volumeWallMiters`, `volumeWallSolids`, `volumeDoorOpen` |
+| `sun.js` | солнце и луна в комнате, шторы и тюль | `volumeSunSpotFaces`, `volumeMoonSpotFaces`, `volumeSunOpenings`, `volumeCurtain*` |
+| `marks.js` | тела меток, модели, выделение и связи | `volumeMarks`, `volumeMarkFaces`, `volumeModelFaces` (тела из `objectModels/*`) |
+| `floors.js` | пол, потолок, вещи, лестница, двусвет | `volumeFloorFaces`, `volumeObjectFaces`, `volumeStairs`, `volumeCeilingUnderVoid` |
+| `walk.js` | где встать, ходьба, стойка, падение | `volumeCanStand`, `volumeMoveTo`, `volumeFallTo`, `volumeStanceStep`, `volumeStairLanding` |
+| `scene.js` | сборка сцены | `volumeScene`, `volumeStackScene` |
+| `lamps.js` | свет ламп и неба, пятна, швы, тени вещей | `volumeLiveLight`, `volumeLampSources`, `volumeRoomTint`, `volumeWindowDecals`, `volumeLampDecals`, `volumeSeamGrow`, `volumeLampShades`, `volumeShadeAlpha` |
+| `signs.js` | признаки работы, шкалы, ель | `volumeLiveSigns`, `volumeCo2Rgb` |
+| `frame.js` | кадр и рисование | `volumeFrame`, `volumeFacePolygons`, `volumeDraw`, `volumeRainMask` |
+| `pick.js` | что под пальцем | `volumePickAt`, `volumeSightAt`, `volumeChannelAt`, `volumeDoorAt` |
+| `backdrop.js` | фон: горизонт, земля, деревья, горы, город | `volumeDrawBackdrop`, `volumeDrawBackdropNear` |
+| `around.js` | обзор со стороны | `volumeAround*` |
+
+Внутри модулей разделы отбиты строками `// ——— имя ———` (`grep -n '^// ———' src/volume/*.js`), шапки разделов переехали вместе с кодом.
 
 ### 6.3 Решения, на которых всё стоит
 
-- **Свой рисовальщик по Canvas 2D, не WebGL** (шапка `volume.js`): одна среда рисования с планом и развёрткой, без библиотек. Узкое место — заливка пикселей, а не арифметика.
+- **Свой рисовальщик по Canvas 2D, не WebGL** (шапка `volume.js` — двери модулей): одна среда рисования с планом и развёрткой, без библиотек. Узкое место — заливка пикселей, а не арифметика.
 - **Порядок граней — дерево разбиения (BSP), не сортировка** (D32, D33): строится при сборке сцены, обходится за `n` на кадр, верен в каждом пикселе. Поэтому прозрачным вещам второй проход не нужен. Ярусы `VOLUME_LAYER_*` (плита, тень дома, полы, солнечные пятна, тела) кладутся до и после дерева.
 - **Время суток — одно непрерывное число** (высота солнца), а не четыре состояния: ни одного «если ночь» в рисовании.
 - **Физический свет** (отметка «Физический свет», по умолчанию включена):
@@ -288,7 +297,7 @@ gh run list --repo KirillAshikhmin/scheme-markup --limit 1 --json headSha,status
 ast-index symbol volumeLampShades           # где объявлено (имена уникальны — ответ один)
 ast-index usages canvasCommit               # все места в коде, кроме строк импорта
 ast-index callers volumeShadeAlpha          # кто вызывает
-ast-index outline scheme_image/src/volume.js  # все функции и константы файла со строками
+ast-index outline scheme_image/src/volume/lamps.js  # все функции и константы файла со строками
 ast-index imports scheme_image/src/panels/volume.js
 ast-index search LampShade --fuzzy          # по части имени
 ```
@@ -306,6 +315,6 @@ ast-index search LampShade --fuzzy          # по части имени
 | Новый вид устройства или сервис | `sim/catalog.js` | профиль по коду типа (`typeDeviceOf`), `sim/live.js` для вида на поверхностях |
 | Новый код журнала имитации | `sim/engine.js` или хозяин + `strings.sim.journal` | |
 | Новый блок сценария | `sim/blocks.js` + `scenarioTree.js` + `panels/scenarioEditor.js` | ADR 011, 018 |
-| Свет, тени, пятна в «Объёме» | `volume.js`, разделы «свет ламп», «пятна ламп», «тени вещей от ламп» | замер кадра до и после (§6.4) |
+| Свет, тени, пятна в «Объёме» | `volume/lamps.js` | замер кадра до и после (§6.4, `npm run bench`) |
 | Новая панель | `panels/x.js` + точка монтирования в `index.html` + `PANEL_IDS` в `app.js` | панели не импортируют друг друга |
 | Новая выгрузка | `exporter.js` / `gostSheet.js` + `panels/export.js`; командная строка — `tools/scheme.mjs` | считать у модели, не своим кодом |

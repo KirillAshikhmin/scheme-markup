@@ -436,7 +436,8 @@ test("направление не видно никому, кроме модел
     if (!/topAzimuth|projectCoords/.test(source)) continue;
     seen.push(relative(SRC, file).split("\\").join("/"));
   }
-  const stray = seen.filter((name) => !allowed.has(name));
+  // Счёт «Объёма» разложен по `volume/*.js` (дверь — `volume.js`): это всё тот же объём.
+  const stray = seen.filter((name) => !allowed.has(name) && !name.startsWith("volume/"));
   assert.deepEqual(stray, [], "направление или координаты читает тот, кто рисует лист");
   assert.ok(seen.includes("model.js"), "сканер ничего не нашёл — проверять было бы нечего");
 });

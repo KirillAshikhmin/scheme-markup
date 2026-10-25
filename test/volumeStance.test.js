@@ -728,7 +728,8 @@ test("поворот взгляда считает одно место на об
 
 test("второго счёта высоты нет, и отметки не доходят до объекта (таск 192, G68)", () => {
   // Требование таска прямое: «не заводи второго счёта высоты». Проверяется это
-  // по исходникам: `liftMm` живёт **только** в `volume.js`, а поле спрашивает
+  // по исходникам: `liftMm` живёт **только** в счёте ходьбы «Объёма»
+  // (`volume/walk.js`, вынесен из `volume.js`), а поле спрашивает
   // высоту дверью `volumeStanceEye`. Появись `liftMm` в панели — там и завёлся
   // бы второй счёт высоты человека.
   //
@@ -744,8 +745,8 @@ test("второго счёта высоты нет, и отметки не до
     }
   };
   walk(join(dirname(fileURLToPath(import.meta.url)), "..", "src"));
-  const owns = sources.filter((file) => file.text.includes("liftMm")).map((file) => basename(file.name));
-  assert.deepEqual(owns, ["volume.js"], "высоту считает одно место: " + owns.join(", "));
+  const owns = sources.filter((file) => file.text.includes("liftMm")).map((file) => basename(dirname(file.name)) + "/" + basename(file.name));
+  assert.deepEqual(owns, ["volume/walk.js"], "высоту считает одно место: " + owns.join(", "));
   // Три отметки — настройки браузера, и в объект им нельзя (G68). Ни модель, ни
   // формат файла проекта о них не знают: миграции тут браться не от чего.
   for (const key of ["volumeSmoothSky", "volumeThroughWalls"]) {
