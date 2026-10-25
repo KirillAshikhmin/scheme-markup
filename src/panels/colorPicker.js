@@ -23,6 +23,7 @@ import {
   rgbToHsv,
 } from "../model.js";
 import { colorNameHex } from "../colorName.js";
+import { getSetting, setSetting } from "../store.js";
 import { strings, text } from "../strings.js";
 import { uiButton, uiEl, uiModal } from "./ui.js";
 
@@ -34,6 +35,81 @@ const COLOR_FALLBACK = "#8B949E";
 // Плотность заливки контура на белом плане: окно показывает цвет и линией,
 // и заливкой — так видно, как он ляжет на схему.
 const COLOR_PLAN_ALPHA = 0.12;
+
+// ——— последние цвета (правка без автопилота, 2026-10-25) ———————————————
+//
+// Слова заказчика: «В выборе цвета под основной палитрой добавь Последние
+// используемые цвета, 3 ряда». Ряд — та же сетка, что у палитры: шесть плиток,
+// значит в памяти восемнадцать цветов, новый — первым, повтор поднимается
+// наверх, а не двоится.
+//
+// **Списков два**, как и палитр: у контуров и категорий (`plan`) и у краски
+// (`paint`). Палитры разведены нарочно — контуры различают насыщенным, стены
+// красят светлым, — и общий список снова смешал бы одно с другим.
+//
+// Живут они **в настройках браузера**, а не в объекте: это память руки, а не
+// свойство квартиры (G68 миграции не требует) — как выбор погоды и фона.
+// Помнится цвет, выбранный кнопкой «ОК», — то, что ушло в объект.
+
+/** Столбцов в сетке палитры и последних. Повтор в стиле держит `cssMeasures.test.js`. */
+export const COLOR_PALETTE_COLUMNS = 6;
+/** Рядов последних цветов. */
+export const COLOR_RECENT_ROWS = 3;
+export const COLOR_RECENT_MAX = COLOR_PALETTE_COLUMNS * COLOR_RECENT_ROWS;
+/** Ключ настроек браузера: `{plan: [...], paint: [...]}`. */
+export const COLOR_RECENT_SETTING = "colorRecent";
+const COLOR_RECENT_KINDS = ["plan", "paint"];
+
+/**
+ * Список последних с цветом `color` во главе: код в верхнем регистре, повтор
+ * снят, длина не больше `max`. Мусор вместо цвета список не меняет.
+ */
+export function colorRecentAdd(list, color, max = COLOR_RECENT_MAX) {
+  const was = colorRecentOf(list, max);
+  const hex = hexToRgb(color) ? String(color).trim().toUpperCase() : null;
+  if (!hex) return was;
+  return [hex, ...was.filter((item) => item !== hex)].slice(0, max);
+}
+
+/** Сохранённый список, приведённый к правилам: коды, без повторов и мусора. */
+export function colorRecentOf(saved, max = COLOR_RECENT_MAX) {
+  const out = [];
+  for (const item of Array.isArray(saved) ? saved : []) {
+    const hex = hexToRgb(item) ? String(item).trim().toUpperCase() : null;
+    if (hex && !out.includes(hex)) out.push(hex);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+const colorRecentState = { lists: { plan: [], paint: [] }, loading: null, chosen: false };
+
+function colorRecentKind(kind) {
+  return COLOR_RECENT_KINDS.includes(kind) ? kind : "plan";
+}
+
+// Поднять списки из настроек — один раз за сеанс. Окно ждёт этого перед тем,
+// как открыться: чтение настроек — доли миллисекунды, а окно без последних,
+// дорисованных через миг, прыгало бы под рукой.
+function colorRecentLoad() {
+  if (!colorRecentState.loading) {
+    colorRecentState.loading = Promise.resolve(getSetting(COLOR_RECENT_SETTING))
+      .then((saved) => {
+        if (colorRecentState.chosen || !saved || typeof saved !== "object") return;
+        for (const kind of COLOR_RECENT_KINDS) colorRecentState.lists[kind] = colorRecentOf(saved[kind]);
+      })
+      .catch(() => {});
+  }
+  return colorRecentState.loading;
+}
+
+function colorRecentRemember(kind, color) {
+  const key = colorRecentKind(kind);
+  const next = colorRecentAdd(colorRecentState.lists[key], color);
+  colorRecentState.lists = { ...colorRecentState.lists, [key]: next };
+  colorRecentState.chosen = true;
+  Promise.resolve(setSetting(COLOR_RECENT_SETTING, colorRecentState.lists)).catch(() => {});
+}
 
 function colorHexOf(hsv) {
   return rgbToHex(hsvToRgb(hsv));
@@ -173,6 +249,10 @@ function colorEnter(node, run) {
 }
 
 export function openColorPicker(options = {}) {
+  return colorRecentLoad().then(() => colorPickerWindow(options));
+}
+
+function colorPickerWindow(options) {
   return new Promise((resolve) => {
     const before = hexToRgb(options.color) ? String(options.color).trim().toUpperCase() : COLOR_FALLBACK;
     const taken = colorTakenList(options.used).filter(
@@ -217,6 +297,12 @@ export function openColorPicker(options = {}) {
       class: "colorpick__palette",
       attrs: { role: "group", "aria-label": strings.colorPicker.palette },
     });
+    const recent = uiEl("div", {
+      class: "colorpick__palette colorpick__recent",
+      title: strings.colorPicker.recentHint,
+      attrs: { role: "group", "aria-label": strings.colorPicker.recent },
+    });
+    const tiles = [];
     const numbers = {};
 
     function numberField(key, label) {
@@ -265,7 +351,7 @@ export function openColorPicker(options = {}) {
         if (input === skip) continue;
         input.value = String(rgb[key]);
       }
-      for (const button of swatches.children) {
+      for (const button of tiles) {
         const same = colorDistance(button.dataset.color, color) < 1;
         button.classList.toggle("is-active", same);
         button.setAttribute("aria-pressed", same ? "true" : "false");
@@ -289,7 +375,8 @@ export function openColorPicker(options = {}) {
 
     // Палитра — плана, а у краски своя (`PAINT_PALETTE`): стены красят светлым
     // и тёплым, а не цветами, которыми различают контуры.
-    for (const color of options.palette || ROOM_PALETTE) {
+    // Плитка палитры и плитка последних — одна и та же кнопка.
+    const swatchOf = (color) => {
       const busy = colorTaken(color, taken);
       // Плитка называется словом и кодом — и занятая тоже.
       const hint = colorSwatchTitle(color, busy);
@@ -302,7 +389,20 @@ export function openColorPicker(options = {}) {
       });
       button.dataset.color = color;
       colorEnter(button, () => setColor(color));
-      swatches.append(button);
+      tiles.push(button);
+      return button;
+    };
+    for (const color of options.palette || ROOM_PALETTE) swatches.append(swatchOf(color));
+    // Последние — три ряда всегда: пустые места держат высоту окна, и оно не
+    // растёт от того, сколько цветов уже выбирали.
+    const recentKind = colorRecentKind(options.recent);
+    const used = colorRecentState.lists[recentKind];
+    for (let index = 0; index < COLOR_RECENT_MAX; index += 1) {
+      recent.append(
+        index < used.length
+          ? swatchOf(used[index])
+          : uiEl("span", { class: "colorpick__swatch is-empty", attrs: { "aria-hidden": "true" } }),
+      );
     }
 
     colorDrag(field, (x, y) => setHsv(colorFieldToHsv({ h: hsv.h, x, y })));
@@ -341,6 +441,11 @@ export function openColorPicker(options = {}) {
       uiEl("div", { class: "colorpick__side" }, [
         uiEl("p", { class: "colorpick__caption", text: strings.colorPicker.palette }),
         swatches,
+        uiEl(
+          "div",
+          { class: "colorpick__recentBox" + (used.length === 0 ? " is-blank" : "") },
+          [uiEl("p", { class: "colorpick__caption", text: strings.colorPicker.recent, title: strings.colorPicker.recentHint }), recent],
+        ),
       ]),
       uiEl("div", { class: "colorpick__side colorpick__side--custom" }, [
         uiEl("p", { class: "colorpick__caption", text: strings.colorPicker.custom }),
@@ -365,6 +470,7 @@ export function openColorPicker(options = {}) {
 
     const done = (result) => {
       modal.close();
+      if (result) colorRecentRemember(recentKind, result);
       resolve(result);
     };
     modal = uiModal({
@@ -448,6 +554,7 @@ export function colorPaintField({ label, fallback, onPick }) {
           title: text("paint.dialog", { label }),
           palette: PAINT_PALETTE,
           planPreview: false,
+          recent: "paint",
         });
         if (picked) onPick(picked);
       },

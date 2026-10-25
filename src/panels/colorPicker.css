@@ -43,6 +43,32 @@
   border-color: var(--panel-text);
 }
 
+/* Последние цвета: подпись и сетка одним блоком. */
+.colorpick__recentBox {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* На телефоне стороны окна встают столбиком, и пустые ряды последних только
+   уводили «ОК» за край экрана: там видны одни выбранные цвета, а без них —
+   ни подписи, ни сетки. */
+#app.is-mobile .colorpick__swatch.is-empty,
+#app.is-mobile .colorpick__recentBox.is-blank {
+  display: none;
+}
+
+/* Пустое место в последних: держит три ряда, пока цветов меньше. */
+.colorpick__swatch.is-empty {
+  border-style: dashed;
+  border-color: rgba(255, 255, 255, 0.12);
+  cursor: default;
+}
+
+.colorpick__swatch.is-empty:hover {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
 .colorpick__swatch.is-active {
   box-shadow: 0 0 0 2px var(--panel-bg), 0 0 0 4px var(--panel-text);
 }

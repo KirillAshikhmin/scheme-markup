@@ -632,6 +632,23 @@ cursor: pointer;
 .colorpick__swatch:hover {
 border-color: var(--panel-text);
 }
+.colorpick__recentBox {
+display: flex;
+flex-direction: column;
+gap: 8px;
+}
+#app.is-mobile .colorpick__swatch.is-empty,
+#app.is-mobile .colorpick__recentBox.is-blank {
+display: none;
+}
+.colorpick__swatch.is-empty {
+border-style: dashed;
+border-color: rgba(255, 255, 255, 0.12);
+cursor: default;
+}
+.colorpick__swatch.is-empty:hover {
+border-color: rgba(255, 255, 255, 0.12);
+}
 .colorpick__swatch.is-active {
 box-shadow: 0 0 0 2px var(--panel-bg), 0 0 0 4px var(--panel-text);
 }
@@ -8899,6 +8916,8 @@ mixed: "{label}: стороны крашены по-разному — выбе�
 colorPicker: {
 title: "Цвет",
 palette: "Палитра",
+recent: "Последние",
+recentHint: "Цвета, выбранные здесь недавно, — новый первым. У краски стен и у цветов плана списки свои",
 custom: "Свой цвет",
 field: "Насыщенность и яркость: стрелки — точнее, Shift — крупнее",
 hue: "Оттенок: стрелки влево и вправо",
@@ -51945,6 +51964,48 @@ const COLOR_HUE_HEIGHT = 18;
 const COLOR_STEP = { fine: 0.02, coarse: 0.1, hue: 2, hueCoarse: 12 };
 const COLOR_FALLBACK = "#8B949E";
 const COLOR_PLAN_ALPHA = 0.12;
+const COLOR_PALETTE_COLUMNS = 6;
+const COLOR_RECENT_ROWS = 3;
+const COLOR_RECENT_MAX = COLOR_PALETTE_COLUMNS * COLOR_RECENT_ROWS;
+const COLOR_RECENT_SETTING = "colorRecent";
+const COLOR_RECENT_KINDS = ["plan", "paint"];
+function colorRecentAdd(list, color, max = COLOR_RECENT_MAX) {
+const was = colorRecentOf(list, max);
+const hex = hexToRgb(color) ? String(color).trim().toUpperCase() : null;
+if (!hex) return was;
+return [hex, ...was.filter((item) => item !== hex)].slice(0, max);
+}
+function colorRecentOf(saved, max = COLOR_RECENT_MAX) {
+const out = [];
+for (const item of Array.isArray(saved) ? saved : []) {
+const hex = hexToRgb(item) ? String(item).trim().toUpperCase() : null;
+if (hex && !out.includes(hex)) out.push(hex);
+if (out.length >= max) break;
+}
+return out;
+}
+const colorRecentState = { lists: { plan: [], paint: [] }, loading: null, chosen: false };
+function colorRecentKind(kind) {
+return COLOR_RECENT_KINDS.includes(kind) ? kind : "plan";
+}
+function colorRecentLoad() {
+if (!colorRecentState.loading) {
+colorRecentState.loading = Promise.resolve(getSetting(COLOR_RECENT_SETTING))
+.then((saved) => {
+if (colorRecentState.chosen || !saved || typeof saved !== "object") return;
+for (const kind of COLOR_RECENT_KINDS) colorRecentState.lists[kind] = colorRecentOf(saved[kind]);
+})
+.catch(() => {});
+}
+return colorRecentState.loading;
+}
+function colorRecentRemember(kind, color) {
+const key = colorRecentKind(kind);
+const next = colorRecentAdd(colorRecentState.lists[key], color);
+colorRecentState.lists = { ...colorRecentState.lists, [key]: next };
+colorRecentState.chosen = true;
+Promise.resolve(setSetting(COLOR_RECENT_SETTING, colorRecentState.lists)).catch(() => {});
+}
 function colorHexOf(hsv) {
 return rgbToHex(hsvToRgb(hsv));
 }
@@ -52040,6 +52101,9 @@ run();
 return node;
 }
 function openColorPicker(options = {}) {
+return colorRecentLoad().then(() => colorPickerWindow(options));
+}
+function colorPickerWindow(options) {
 return new Promise((resolve) => {
 const before = hexToRgb(options.color) ? String(options.color).trim().toUpperCase() : COLOR_FALLBACK;
 const taken = colorTakenList(options.used).filter(
@@ -52081,6 +52145,12 @@ const swatches = uiEl("div", {
 class: "colorpick__palette",
 attrs: { role: "group", "aria-label": strings.colorPicker.palette },
 });
+const recent = uiEl("div", {
+class: "colorpick__palette colorpick__recent",
+title: strings.colorPicker.recentHint,
+attrs: { role: "group", "aria-label": strings.colorPicker.recent },
+});
+const tiles = [];
 const numbers = {};
 function numberField(key, label) {
 const input = uiEl("input", {
@@ -52121,7 +52191,7 @@ for (const [key, input] of Object.entries(numbers)) {
 if (input === skip) continue;
 input.value = String(rgb[key]);
 }
-for (const button of swatches.children) {
+for (const button of tiles) {
 const same = colorDistance(button.dataset.color, color) < 1;
 button.classList.toggle("is-active", same);
 button.setAttribute("aria-pressed", same ? "true" : "false");
@@ -52137,7 +52207,7 @@ if (!rgb) return;
 const next = rgbToHsv(rgb);
 setHsv({ h: next.s === 0 ? hsv.h : next.h, s: next.s, v: next.v }, skip);
 }
-for (const color of options.palette || ROOM_PALETTE) {
+const swatchOf = (color) => {
 const busy = colorTaken(color, taken);
 const hint = colorSwatchTitle(color, busy);
 const button = uiEl("button", {
@@ -52149,7 +52219,18 @@ on: { click: () => setColor(color) },
 });
 button.dataset.color = color;
 colorEnter(button, () => setColor(color));
-swatches.append(button);
+tiles.push(button);
+return button;
+};
+for (const color of options.palette || ROOM_PALETTE) swatches.append(swatchOf(color));
+const recentKind = colorRecentKind(options.recent);
+const used = colorRecentState.lists[recentKind];
+for (let index = 0; index < COLOR_RECENT_MAX; index += 1) {
+recent.append(
+index < used.length
+? swatchOf(used[index])
+: uiEl("span", { class: "colorpick__swatch is-empty", attrs: { "aria-hidden": "true" } }),
+);
 }
 colorDrag(field, (x, y) => setHsv(colorFieldToHsv({ h: hsv.h, x, y })));
 colorDrag(hue, (x) => setHsv({ h: x * 360, s: hsv.s, v: hsv.v }));
@@ -52183,6 +52264,11 @@ const body = uiEl("div", { class: "colorpick" }, [
 uiEl("div", { class: "colorpick__side" }, [
 uiEl("p", { class: "colorpick__caption", text: strings.colorPicker.palette }),
 swatches,
+uiEl(
+"div",
+{ class: "colorpick__recentBox" + (used.length === 0 ? " is-blank" : "") },
+[uiEl("p", { class: "colorpick__caption", text: strings.colorPicker.recent, title: strings.colorPicker.recentHint }), recent],
+),
 ]),
 uiEl("div", { class: "colorpick__side colorpick__side--custom" }, [
 uiEl("p", { class: "colorpick__caption", text: strings.colorPicker.custom }),
@@ -52202,6 +52288,7 @@ shuffle,
 ]);
 const done = (result) => {
 modal.close();
+if (result) colorRecentRemember(recentKind, result);
 resolve(result);
 };
 modal = uiModal({
@@ -52258,6 +52345,7 @@ color: value || fallback,
 title: text("paint.dialog", { label }),
 palette: PAINT_PALETTE,
 planPreview: false,
+recent: "paint",
 });
 if (picked) onPick(picked);
 },
