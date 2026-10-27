@@ -176,14 +176,82 @@ const STAR_INNER = 0.45;
 // добавить сверх своей меры; сколько именно, решает холст по роду указателя
 // (`canvasHitSlack`). Ноль по умолчанию — мышь считает как считала.
 const HIT_SLACK_PX = 4;
-// Ширина буквы относительно кегля — оценка, одинаковая в тесте и на холсте.
-// Доля кегля на знак в оценке ширины подписи. Мерить по-настоящему тут нечем:
-// `labelBox` зовут и попадание по клику, и тесты, а холста у них нет. Значит,
-// оценка берётся с запасом: 0,62 — про строчную латиницу, а коды заказчик
-// пишет прописной кириллицей, которая шире примерно на шестую часть. Занижение
-// стоит дважды: подпись у края плана не уезжает влево, когда пора, и клик по
-// ней промахивается мимо прямоугольника.
+// Доля кегля на знак — **запасная** оценка ширины подписи, для тестов в Node,
+// где холста нет и мерить нечем. В браузере ширину меряет `labelTextWidth`.
+// Оценка с запасом: 0,62 — про строчную латиницу, а коды заказчик пишет
+// прописной кириллицей, которая шире примерно на шестую часть.
 const LABEL_CHAR_RATIO = 0.75;
+// Кегль замера. Строка меряется один раз на этом кегле, а ширина на любом
+// другом — пропорцией: раскладка считает подписи в пикселях плана, рамка — в
+// пикселях экрана, и разойтись им нельзя.
+const LABEL_MEASURE_PX = 100;
+// Замер на 100 px → доля кегля, по шрифту и строке.
+const labelMeasureCache = new Map();
+// Семейства, файл которых уже дошёл: дальше `fonts.check` их не спрашивают.
+const labelMeasureLoaded = new Set();
+let labelMeasureCtx = null;
+
+// Контекст для замера — свой, не кадра: подписи меряют и попадание по клику, и
+// раскладка, у которых холста на руках нет. Нет ни `OffscreenCanvas`, ни
+// `document` (Node) — `null`, и ширина берётся оценкой.
+function labelMeasureContext() {
+  if (labelMeasureCtx) return labelMeasureCtx;
+  try {
+    let ctx = null;
+    if (typeof OffscreenCanvas === "function") ctx = new OffscreenCanvas(1, 1).getContext("2d");
+    else if (typeof document !== "undefined" && document && typeof document.createElement === "function") {
+      const canvas = document.createElement("canvas");
+      ctx = canvas && typeof canvas.getContext === "function" ? canvas.getContext("2d") : null;
+    }
+    if (ctx && typeof ctx.measureText === "function") labelMeasureCtx = ctx;
+  } catch {
+    labelMeasureCtx = null;
+  }
+  return labelMeasureCtx;
+}
+
+/**
+ * Дошёл ли файл шрифта. Пока нет, `measureText` меряет запасным шрифтом: такой
+ * замер не запоминается, а раскладка подписей держит этот признак в ключе —
+ * иначе первая раскладка, посчитанная до прихода шрифта, пережила бы его.
+ */
+export function labelMeasureReady(family) {
+  const key = family || "";
+  if (labelMeasureLoaded.has(key)) return true;
+  const fonts = typeof document !== "undefined" && document ? document.fonts : null;
+  if (!fonts || typeof fonts.check !== "function") return true;
+  let ready = true;
+  try {
+    ready = fonts.check(drawFont(LABEL_MEASURE_PX, null, family));
+  } catch {
+    ready = true;
+  }
+  if (ready) labelMeasureLoaded.add(key);
+  return ready;
+}
+
+/**
+ * Ширина строки подписи на кегле `font`, тем шрифтом, которым она рисуется.
+ *
+ * Было по числу знаков (`LABEL_CHAR_RATIO`) — и рамка выходила почти вдвое
+ * шире текста узкого чертёжного шрифта. Слова заказчика: «у текста меток место
+ * под текст выделяется больше, чем сам текст занимает» — ручки поворота и
+ * поводка стояли у края пустой рамки, плашка комментария была «сильно больше»
+ * текста, а подпись слева от метки отходила от неё на лишнюю ширину.
+ */
+export function labelTextWidth(text, font, family, weight) {
+  const value = String(text == null ? "" : text);
+  const ctx = labelMeasureContext();
+  if (!ctx) return [...value].length * font * LABEL_CHAR_RATIO;
+  const key = (weight || "") + "|" + (family || "") + "|" + value;
+  let unit = labelMeasureCache.get(key);
+  if (unit === undefined) {
+    ctx.font = drawFont(LABEL_MEASURE_PX, weight, family);
+    unit = ctx.measureText(value).width / LABEL_MEASURE_PX;
+    if (labelMeasureReady(family)) labelMeasureCache.set(key, unit);
+  }
+  return unit * font;
+}
 // Насколько далеко от метки стоит подпись, если её не оттаскивали. Отдан
 // наружу: холст ставит подпись на то же место, когда её берут мышью.
 export const LABEL_GAP = 1.5;
@@ -2869,7 +2937,7 @@ export function labelLead(project, target) {
  */
 function labelFixedPlace(project, target, sizes) {
   if (markIsComment(target) && !markPointer(target)) {
-    const size = commentPlateSize(labelTextOf(project, target), sizes.font);
+    const size = commentPlateSize(labelTextOf(project, target), sizes.font, sizes.family);
     return { dx: -size.width / 2, dy: 0 };
   }
   return labelOffsetOf(project, target);
@@ -2921,9 +2989,9 @@ function labelTextOf(project, target) {
  * шесть точек), но тогда одна и та же подпись переползала бы с этажа на этаж от
  * ползунка величины метки.
  *
- * Мера — знаки, а не пиксели, по той же причине, что у плашки комментария:
- * настоящей ширины текста здесь не измерить, `labelBox` зовут и попадание по
- * клику, и тесты без холста.
+ * Мера — знаки, а не пиксели, как и перенос плашки комментария: ширину рамки
+ * меряет шрифт (`labelTextWidth`), а складывать ли подпись — нет, иначе одна
+ * и та же подпись складывалась бы по-разному на экране и в выгрузке.
  */
 const LABEL_WRAP_CHARS = 8;
 // Высота строки подписи в долях кегля. Та же, что у габарита одной строки:
@@ -3010,9 +3078,9 @@ function labelLineRuns(runs, line) {
 // `COMMENT_PLATE_ROWS` строк текст обрезается многоточием — целиком он
 // по-прежнему в поле и в карточке метки.
 //
-// Мера — знаки, а не пиксели, и это та же оценка, которой живут подписи
-// (`LABEL_CHAR_RATIO`): настоящей ширины текста здесь не измерить — `labelBox`
-// зовут и попадание по клику, и тесты, у которых холста нет.
+// Перенос — по знакам, а ширина рамки — по самой длинной строке, измеренной
+// шрифтом (`labelTextWidth`): «сделай что бы комментарий растягивался по
+// ширине текста, а то сейчас сильно больше».
 const COMMENT_PLATE_CHARS = 26;
 const COMMENT_PLATE_ROWS = 6;
 // Поля внутри плашки и высота строки — в долях кегля.
@@ -3099,13 +3167,13 @@ export function commentPlateLines(value, limit = COMMENT_PLATE_CHARS, rows = COM
  * счёта намеренно: разойдись они, плашка рисовалась бы одного размера, а
  * ловилась бы другого.
  */
-function commentPlateSize(value, font) {
+function commentPlateSize(value, font, family) {
   const lines = commentPlateLines(value);
-  const longest = lines.reduce((max, line) => Math.max(max, [...line].length), 0);
+  const longest = lines.reduce((max, line) => Math.max(max, labelTextWidth(line, font, family)), 0);
   const pad = font * COMMENT_PLATE_PAD;
   return {
     lines,
-    width: Math.max(font, longest * font * LABEL_CHAR_RATIO) + pad * 2,
+    width: Math.max(font, longest) + pad * 2,
     height: lines.length * font * COMMENT_PLATE_LINE + pad * 2,
     pad,
   };
@@ -3183,12 +3251,12 @@ function labelBoxIn(project, scheme, target, state, layout, stacks) {
   const font = labelFontSize(state);
   const anchor = planToScreen(labelOrigin(project, target, stacks), scheme, state);
   const value = labelTextOf(project, target);
-  const plate = markIsComment(target) ? commentPlateSize(value, font) : null;
+  const plate = markIsComment(target) ? commentPlateSize(value, font, state.fontFamily) : null;
   // Строки подписи — те же, что мерила раскладка: переполнившая потолок
   // подпись блока переносится по запятым (D29). Одна строка — `lines` из
   // одного куска, и всё считается как раньше.
   const lines = plate ? null : labelLinesOf(project, target, value);
-  const size = plate || labelLinesSize(lines, font);
+  const size = plate || labelLinesSize(lines, font, state.fontFamily);
   const place = labelPlaceOf(project, scheme, target, state, layout);
   return {
     text: value,
@@ -3199,8 +3267,8 @@ function labelBoxIn(project, scheme, target, state, layout, stacks) {
     height: size.height,
     font,
     // Семейства едут вместе с кеглем: рисует подпись тот, у кого на руках
-    // только `box`. Габарит от них не зависит — он считается по числу знаков
-    // (`LABEL_CHAR_RATIO`), — поэтому смена шрифта подпись не двигает.
+    // только `box`. Габарит меряется тем же шрифтом (`labelTextWidth`), и
+    // раскладка держит семейство в ключе.
     family: state.fontFamily,
     // Плашка комментария: строки и поля внутри рамки — рисованию и попаданию
     // по клику достаётся один и тот же габарит. У обычной подписи этих полей
@@ -3295,10 +3363,11 @@ const LABEL_ROWS = 3;
 const LABEL_PAD = 2;
 
 // Кегль и отступ в пикселях плана. Те же нижние границы, что у экранных
-// `labelFontSize` и `markRadius` при единичном масштабе.
+// `labelFontSize` и `markRadius` при единичном масштабе. Семейства — те же,
+// что у кадра: ширина подписи меряется тем шрифтом, которым она рисуется.
 function labelPlanSizes(state) {
   const radius = Math.max(2, state.markSize);
-  return { font: Math.max(6, state.labelSize), gap: radius * LABEL_GAP, radius };
+  return { font: Math.max(6, state.labelSize), gap: radius * LABEL_GAP, radius, family: state.fontFamily };
 }
 
 // Куда уходить подписи линии. У точки подпись встаёт справа и ни с чем не
@@ -3402,10 +3471,10 @@ function labelReach(project, target, stacks) {
 
 // Габарит подписи по её строкам: ширина — самая длинная строка, высота — их
 // число. Одной строкой выходит ровно то, что выходило всегда.
-function labelLinesSize(lines, font) {
-  const longest = lines.reduce((max, line) => Math.max(max, line.text.length), 0);
+function labelLinesSize(lines, font, family) {
+  const longest = lines.reduce((max, line) => Math.max(max, labelTextWidth(line.text, font, family, 600)), 0);
   return {
-    width: Math.max(font * 0.8, longest * font * LABEL_CHAR_RATIO),
+    width: Math.max(font * 0.8, longest),
     height: lines.length * font * LABEL_LINE,
   };
 }
@@ -3421,11 +3490,11 @@ function labelPlanBox(project, scheme, target, sizes, stacks) {
   // Плашка комментария шире и выше строки: её габарит считает `commentPlateSize`
   // по тем же знакам и тому же кеглю. Раскладке она от этого не чужая — место
   // ей ищется тем же перебором, и соседние подписи её обходят.
-  const plate = markIsComment(target) ? commentPlateSize(text, sizes.font) : null;
+  const plate = markIsComment(target) ? commentPlateSize(text, sizes.font, sizes.family) : null;
   // Перенесённая подпись блока занимает две строки и половину прежней ширины —
   // раскладка обязана мерить то же, что рисуется, иначе подписи наедут.
   const lines = plate ? null : labelLinesOf(project, target, text);
-  const size = plate || labelLinesSize(lines, sizes.font);
+  const size = plate || labelLinesSize(lines, sizes.font, sizes.family);
   return {
     text,
     lines,
@@ -3561,7 +3630,9 @@ export function labelLayout(project, scheme, filter, view) {
   if (!project || !scheme) return new Map();
   const state = renderView(view);
   const sizes = labelPlanSizes(state);
-  const key = [scheme.id, sizes.font, sizes.gap, labelFilterKey(filter)].join("|");
+  // Шрифт в ключе: ширина подписи меряется им, а до прихода файла шрифта —
+  // запасным, и такая раскладка обязана смениться, когда файл дойдёт.
+  const key = [scheme.id, sizes.font, sizes.gap, sizes.family, labelMeasureReady(sizes.family), labelFilterKey(filter)].join("|");
   let byKey = labelLayoutCache.get(project);
   if (!byKey) {
     byKey = new Map();
@@ -4044,7 +4115,7 @@ export function outlineLabelBox(project, scheme, outline, view) {
   const dy = offset ? offset.dy : 0;
   const center = planToScreen(outlineCenter(outline.points), scheme, state);
   const at = { x: center.x + dx * state.zoom, y: center.y + dy * state.zoom };
-  const width = Math.max(font * 0.8, room.name.length * font * LABEL_CHAR_RATIO);
+  const width = Math.max(font * 0.8, labelTextWidth(room.name, font, state.fontFamily, 600));
   const anchor = angle === 90 ? { x: at.x, y: at.y + width / 2 } : { x: at.x - width / 2, y: at.y };
   return {
     text: room.name,

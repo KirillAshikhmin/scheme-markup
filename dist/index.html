@@ -22744,6 +22744,52 @@ return Promise.resolve(false);
 const STAR_INNER = 0.45;
 const HIT_SLACK_PX = 4;
 const LABEL_CHAR_RATIO = 0.75;
+const LABEL_MEASURE_PX = 100;
+const labelMeasureCache = new Map();
+const labelMeasureLoaded = new Set();
+let labelMeasureCtx = null;
+function labelMeasureContext() {
+if (labelMeasureCtx) return labelMeasureCtx;
+try {
+let ctx = null;
+if (typeof OffscreenCanvas === "function") ctx = new OffscreenCanvas(1, 1).getContext("2d");
+else if (typeof document !== "undefined" && document && typeof document.createElement === "function") {
+const canvas = document.createElement("canvas");
+ctx = canvas && typeof canvas.getContext === "function" ? canvas.getContext("2d") : null;
+}
+if (ctx && typeof ctx.measureText === "function") labelMeasureCtx = ctx;
+} catch {
+labelMeasureCtx = null;
+}
+return labelMeasureCtx;
+}
+function labelMeasureReady(family) {
+const key = family || "";
+if (labelMeasureLoaded.has(key)) return true;
+const fonts = typeof document !== "undefined" && document ? document.fonts : null;
+if (!fonts || typeof fonts.check !== "function") return true;
+let ready = true;
+try {
+ready = fonts.check(drawFont(LABEL_MEASURE_PX, null, family));
+} catch {
+ready = true;
+}
+if (ready) labelMeasureLoaded.add(key);
+return ready;
+}
+function labelTextWidth(text, font, family, weight) {
+const value = String(text == null ? "" : text);
+const ctx = labelMeasureContext();
+if (!ctx) return [...value].length * font * LABEL_CHAR_RATIO;
+const key = (weight || "") + "|" + (family || "") + "|" + value;
+let unit = labelMeasureCache.get(key);
+if (unit === undefined) {
+ctx.font = drawFont(LABEL_MEASURE_PX, weight, family);
+unit = ctx.measureText(value).width / LABEL_MEASURE_PX;
+if (labelMeasureReady(family)) labelMeasureCache.set(key, unit);
+}
+return unit * font;
+}
 const LABEL_GAP = 1.5;
 const GOST_TEXT_MM = 3.5;
 const HANDLE_GAP = BLOCK_STEP_RATIO;
@@ -24488,7 +24534,7 @@ return lead || null;
 }
 function labelFixedPlace(project, target, sizes) {
 if (markIsComment(target) && !markPointer(target)) {
-const size = commentPlateSize(labelTextOf(project, target), sizes.font);
+const size = commentPlateSize(labelTextOf(project, target), sizes.font, sizes.family);
 return { dx: -size.width / 2, dy: 0 };
 }
 return labelOffsetOf(project, target);
@@ -24593,13 +24639,13 @@ const last = kept[rows - 1];
 kept[rows - 1] = (last.length >= limit ? last.slice(0, Math.max(0, limit - 1)) : last) + "…";
 return kept;
 }
-function commentPlateSize(value, font) {
+function commentPlateSize(value, font, family) {
 const lines = commentPlateLines(value);
-const longest = lines.reduce((max, line) => Math.max(max, [...line].length), 0);
+const longest = lines.reduce((max, line) => Math.max(max, labelTextWidth(line, font, family)), 0);
 const pad = font * COMMENT_PLATE_PAD;
 return {
 lines,
-width: Math.max(font, longest * font * LABEL_CHAR_RATIO) + pad * 2,
+width: Math.max(font, longest) + pad * 2,
 height: lines.length * font * COMMENT_PLATE_LINE + pad * 2,
 pad,
 };
@@ -24649,9 +24695,9 @@ function labelBoxIn(project, scheme, target, state, layout, stacks) {
 const font = labelFontSize(state);
 const anchor = planToScreen(labelOrigin(project, target, stacks), scheme, state);
 const value = labelTextOf(project, target);
-const plate = markIsComment(target) ? commentPlateSize(value, font) : null;
+const plate = markIsComment(target) ? commentPlateSize(value, font, state.fontFamily) : null;
 const lines = plate ? null : labelLinesOf(project, target, value);
-const size = plate || labelLinesSize(lines, font);
+const size = plate || labelLinesSize(lines, font, state.fontFamily);
 const place = labelPlaceOf(project, scheme, target, state, layout);
 return {
 text: value,
@@ -24713,7 +24759,7 @@ const LABEL_ROWS = 3;
 const LABEL_PAD = 2;
 function labelPlanSizes(state) {
 const radius = Math.max(2, state.markSize);
-return { font: Math.max(6, state.labelSize), gap: radius * LABEL_GAP, radius };
+return { font: Math.max(6, state.labelSize), gap: radius * LABEL_GAP, radius, family: state.fontFamily };
 }
 function labelLeadSide(project, scheme, target) {
 const lead = labelLead(project, target);
@@ -24772,10 +24818,10 @@ left = Math.max(left, origin.x - point.x);
 }
 return { left, right };
 }
-function labelLinesSize(lines, font) {
-const longest = lines.reduce((max, line) => Math.max(max, line.text.length), 0);
+function labelLinesSize(lines, font, family) {
+const longest = lines.reduce((max, line) => Math.max(max, labelTextWidth(line.text, font, family, 600)), 0);
 return {
-width: Math.max(font * 0.8, longest * font * LABEL_CHAR_RATIO),
+width: Math.max(font * 0.8, longest),
 height: lines.length * font * LABEL_LINE,
 };
 }
@@ -24785,9 +24831,9 @@ const text = labelTextOf(project, target);
 const reach = labelReach(project, target, stacks);
 const lead = labelLeadSide(project, scheme, target);
 const width = schemeWidthPx(scheme);
-const plate = markIsComment(target) ? commentPlateSize(text, sizes.font) : null;
+const plate = markIsComment(target) ? commentPlateSize(text, sizes.font, sizes.family) : null;
 const lines = plate ? null : labelLinesOf(project, target, text);
-const size = plate || labelLinesSize(lines, sizes.font);
+const size = plate || labelLinesSize(lines, sizes.font, sizes.family);
 return {
 text,
 lines,
@@ -24884,7 +24930,7 @@ function labelLayout(project, scheme, filter, view) {
 if (!project || !scheme) return new Map();
 const state = renderView(view);
 const sizes = labelPlanSizes(state);
-const key = [scheme.id, sizes.font, sizes.gap, labelFilterKey(filter)].join("|");
+const key = [scheme.id, sizes.font, sizes.gap, sizes.family, labelMeasureReady(sizes.family), labelFilterKey(filter)].join("|");
 let byKey = labelLayoutCache.get(project);
 if (!byKey) {
 byKey = new Map();
@@ -25194,7 +25240,7 @@ const dx = offset ? offset.dx : 0;
 const dy = offset ? offset.dy : 0;
 const center = planToScreen(outlineCenter(outline.points), scheme, state);
 const at = { x: center.x + dx * state.zoom, y: center.y + dy * state.zoom };
-const width = Math.max(font * 0.8, room.name.length * font * LABEL_CHAR_RATIO);
+const width = Math.max(font * 0.8, labelTextWidth(room.name, font, state.fontFamily, 600));
 const anchor = angle === 90 ? { x: at.x, y: at.y + width / 2 } : { x: at.x - width / 2, y: at.y };
 return {
 text: room.name,
@@ -51858,10 +51904,8 @@ return;
 }
 canvasSaySilent(state, drag, tap);
 if (event.pointerType === "touch") return;
-if (drag.kind === "done") {
 canvasRedraw();
-return;
-}
+if (drag.kind === "done") return;
 const scheme = canvasScheme(state);
 const plan = screenToPlan(point, scheme, canvasViewOf(state));
 if (drag.kind === "scale") {
