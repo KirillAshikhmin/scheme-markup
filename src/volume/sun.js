@@ -4,7 +4,7 @@
 // переименований: снаружи модуль читают через дверь `volume.js`, а соседи по
 // `src/volume/` — напрямую. Зависимости идут только вниз по слоям (порядок —
 // в шапке `volume.js`), циклов нет. Решения и доводы — в шапках разделов ниже.
-import { openingGlazed, openingOpens, openingsInWall, wallVectors, wallsOnScheme } from "../model.js";
+import { openingGlazed, openingOpens, wallVectors, wallsOnScheme } from "../model.js";
 import { DEG, VOLUME_FLOOR_RGB, VOLUME_NIGHT_RGB, VOLUME_WALL_RGB } from "./measures.js";
 import { volumeAt, volumeFace, volumeShade, volumeShare01 } from "./faces.js";
 import {
@@ -17,7 +17,7 @@ import {
   volumeRoomKey,
   volumeShiftPoints,
 } from "./shapes.js";
-import { volumeDoorOpen, volumeOpeningFaceMm, volumeWallPaintRgb, volumeWallTiles } from "./walls.js";
+import { volumeDoorOpen, volumeLightOpenings, volumeOpeningFaceMm, volumeWallPaintRgb, volumeWallTiles } from "./walls.js";
 
 // ——— солнце в комнате (таск 196, дефект D51, требование G301) —————————————
 //
@@ -403,7 +403,8 @@ export function volumeSunOpenings(project, schemeId, rooms, places, heightOf, op
     const light = volumeRoomLight(room, {
       walls,
       heightOf,
-      openingsOf: (wall) => openingsInWall(project, wall.id),
+      // Стеклянная стена — проём во всю стену (`volumeLightOpenings`).
+      openingsOf: (wall) => volumeLightOpenings(project, wall, rooms),
       roomAt,
       shutOf,
       steps,
@@ -416,7 +417,7 @@ export function volumeSunOpenings(project, schemeId, rooms, places, heightOf, op
   for (const wall of walls) {
     const vectors = wallVectors(wall);
     if (!vectors) continue;
-    const openings = openingsInWall(project, wall.id);
+    const openings = volumeLightOpenings(project, wall, rooms);
     if (openings.length === 0) continue;
     const { u, n, len } = vectors;
     const half = Number(wall.thicknessMm) / 2;

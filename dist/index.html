@@ -34388,6 +34388,32 @@ if (!wallGlassOf(wall)) return faces;
 for (let index = from; index < faces.length; index += 1) volumeGlassFace(faces[index]);
 return faces;
 }
+const VOLUME_GLASS_LIGHT_MM = 1e6;
+const VOLUME_GLASS_PIECE_MM = 50;
+function volumeLightOpenings(project, wall, rooms = null) {
+if (!wallGlassOf(wall)) return openingsInWall(project, wall.id);
+const vectors = wallVectors(wall);
+if (!vectors) return [];
+const stops = rooms ? [...volumeSideStops(wall, 1, rooms), ...volumeSideStops(wall, -1, rooms)].sort((a, b) => a - b) : [];
+const cuts = [0];
+for (const stop of stops) {
+if (stop - cuts[cuts.length - 1] >= VOLUME_GLASS_PIECE_MM && vectors.len - stop >= VOLUME_GLASS_PIECE_MM) cuts.push(stop);
+}
+cuts.push(vectors.len);
+const out = [];
+for (let index = 0; index + 1 < cuts.length; index += 1) {
+out.push({
+id: null,
+kind: "window",
+atMm: cuts[index],
+widthMm: cuts[index + 1] - cuts[index],
+heightMm: VOLUME_GLASS_LIGHT_MM,
+heightAboveFloorMm: 0,
+glassWall: wall.id,
+});
+}
+return out;
+}
 function volumeGlassFace(face) {
 face.rgb = VOLUME_GLASS_RGB;
 face.clear = true;
@@ -35359,7 +35385,7 @@ if (held && held.steps >= steps) return held.light;
 const light = volumeRoomLight(room, {
 walls,
 heightOf,
-openingsOf: (wall) => openingsInWall(project, wall.id),
+openingsOf: (wall) => volumeLightOpenings(project, wall, rooms),
 roomAt,
 shutOf,
 steps,
@@ -35372,7 +35398,7 @@ const lightAt = (point) => lightOf(roomAt(point), VOLUME_SUN_STEPS - 1);
 for (const wall of walls) {
 const vectors = wallVectors(wall);
 if (!vectors) continue;
-const openings = openingsInWall(project, wall.id);
+const openings = volumeLightOpenings(project, wall, rooms);
 if (openings.length === 0) continue;
 const { u, n, len } = vectors;
 const half = Number(wall.thicknessMm) / 2;

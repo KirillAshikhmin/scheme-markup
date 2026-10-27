@@ -21,6 +21,7 @@ import {
   openingVentCell,
   openingVents,
   openingWalkThrough,
+  openingsInWall,
   wallGlassOf,
   wallHeightMm,
   wallPaintOf,
@@ -74,6 +75,56 @@ export function volumeGlassed(wall, faces, from = 0) {
   if (!wallGlassOf(wall)) return faces;
   for (let index = from; index < faces.length; index += 1) volumeGlassFace(faces[index]);
   return faces;
+}
+
+/** Высота «проёма» стеклянной стены: выше любой стены, кусок по ней срезает высота стены. */
+const VOLUME_GLASS_LIGHT_MM = 1e6;
+/** Кусок стеклянной стены короче этого для света не делится: это стык, а не комната. */
+const VOLUME_GLASS_PIECE_MM = 50;
+
+/**
+ * **Проёмы стены глазами света** (правка 2026-10-27): «стеклянные стены поправь
+ * что бы проходил свет и от светил и от ламп».
+ *
+ * Свет знает о стене одно — её проёмы: сквозь них солнце и луна кладут пятна
+ * (`volumeSunOpenings`), небо светит комнату, а лампа светит клином к соседке
+ * (`volumeLampOpenings`, `volumeSkyWindows` — все берут проёмы у солнца).
+ * Стеклянная стена для света — **один проём во всю стену**: окно от пола до
+ * верха, без полотна, со шторами, как у окна. Её настоящие проёмы свету уже
+ * ничего не добавляют, и второго пятна поверх первого не будет.
+ *
+ * Пятно солнца на самом стекле не лежит: куски стены под пятно считаются по
+ * тем же проёмам (`volumeRoomLight` → `volumeWallTiles`), и у стеклянной стены
+ * их нет.
+ *
+ * С помещениями (`rooms`) «проём» режется там, где по любую сторону стены
+ * меняется помещение (`volumeSideStops`): фасад вдоль трёх комнат светит в
+ * каждую, а не только в ту, что у его середины, — помещение проёму свет ищет
+ * по его середине.
+ */
+export function volumeLightOpenings(project, wall, rooms = null) {
+  if (!wallGlassOf(wall)) return openingsInWall(project, wall.id);
+  const vectors = wallVectors(wall);
+  if (!vectors) return [];
+  const stops = rooms ? [...volumeSideStops(wall, 1, rooms), ...volumeSideStops(wall, -1, rooms)].sort((a, b) => a - b) : [];
+  const cuts = [0];
+  for (const stop of stops) {
+    if (stop - cuts[cuts.length - 1] >= VOLUME_GLASS_PIECE_MM && vectors.len - stop >= VOLUME_GLASS_PIECE_MM) cuts.push(stop);
+  }
+  cuts.push(vectors.len);
+  const out = [];
+  for (let index = 0; index + 1 < cuts.length; index += 1) {
+    out.push({
+      id: null,
+      kind: "window",
+      atMm: cuts[index],
+      widthMm: cuts[index + 1] - cuts[index],
+      heightMm: VOLUME_GLASS_LIGHT_MM,
+      heightAboveFloorMm: 0,
+      glassWall: wall.id,
+    });
+  }
+  return out;
 }
 
 function volumeGlassFace(face) {

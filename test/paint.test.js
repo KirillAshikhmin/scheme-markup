@@ -33,7 +33,9 @@ import {
   volumeIsCeiling,
   volumeIsFloor,
   volumeIsWall,
+  volumeLightOpenings,
   volumeLiveLight,
+  volumeMood,
   volumePaintRgb,
   volumeScene,
   volumeSunSpotFaces,
@@ -293,4 +295,37 @@ test("на плане стеклянная стена — голубой пол�
   };
   assert.ok(!colours(box.project).includes(DRAWING_GLASS));
   assert.ok(colours(project).includes(DRAWING_GLASS), "стеклянная стена нарисована стеной");
+});
+
+test("сквозь стеклянную стену идёт свет: солнце и небо в каждую комнату фасада, лампа — в соседку", () => {
+  // «Стеклянные стены поправь что бы проходил свет и от светил и от ламп».
+  const box = flat();
+  const top = findWall(box.project, box.top);
+  // Глухая стена свету — её проёмы, стеклянная — проём во всю стену, разрезанный
+  // по помещениям, чтобы фасад вдоль трёх комнат светил в каждую.
+  assert.deepEqual(volumeLightOpenings(box.project, top), []);
+  const glassTop = setWallGlass(box.project, box.top, true).project;
+  const scene = volumeScene(glassTop, box.schemeId);
+  const pieces = scene.sunSpots.filter((spot) => spot.wallId === box.top && Boolean(spot.left) !== Boolean(spot.right));
+  assert.equal(pieces.length, 3, "фасад вдоль трёх комнат светит не в три");
+  assert.ok(pieces.every((spot) => !spot.shut), "стекло закрыто, как глухая дверь");
+  const covered = pieces.reduce((sum, spot) => sum + spot.toMm - spot.fromMm, 0);
+  assert.ok(covered > 8000, "свет проходит не по всей стене: " + covered);
+  // Небо светит комнаты сквозь фасад: колец окон стало больше.
+  const day = volumeMood({ minutes: 12 * 60 }).tint;
+  const windows = (project) => volumeLiveLight(volumeScene(project, box.schemeId), new Map(), { physical: true, tint: day }).skyDecals.size;
+  assert.ok(windows(glassTop) > windows(box.project), "небо сквозь стекло не светит");
+  // Лампы: стеклянная перегородка пропускает их свет к соседке и при закрытой
+  // двери — колец в спальне становится больше.
+  const live = benchLive(box);
+  const night = volumeMood({ minutes: 22 * 60 }).tint;
+  const ringsIn = (project, roomId) => {
+    let count = 0;
+    for (const [face, list] of volumeLiveLight(volumeScene(project, box.schemeId), live, { physical: true, tint: night }).decals) {
+      if (face.room === roomId) count += list.length;
+    }
+    return count;
+  };
+  const glassRight = setWallGlass(box.project, box.right, true).project;
+  assert.ok(ringsIn(glassRight, box.bedroom) > ringsIn(box.project, box.bedroom), "свет ламп сквозь стекло не прошёл");
 });
