@@ -22518,6 +22518,196 @@ if (named.length <= MARK_LIST_SHOWN) return "";
 return named.map((item) => item.label).join(", ");
 }
 
+// src/objectModels/kit.js
+const MODEL_MATERIALS = ["body", "dark", "light", "metal", "glass"];
+const MODEL_CLEARS = ["sheer", "glass"];
+const MODEL_CYL_SIDES = 8;
+function modelPart(kind, name, part) {
+const material = MODEL_MATERIALS.includes(part.material) ? part.material : "body";
+return {
+kind,
+name,
+lit: part.lit === true,
+bulb: Number.isInteger(part.bulb) ? part.bulb : null,
+material,
+toFloor: part.toFloor === true,
+clear: MODEL_CLEARS.includes(part.clear) ? part.clear : null,
+x: part.x === undefined ? -0.5 : part.x,
+y: part.y === undefined ? -0.5 : part.y,
+z: part.z === undefined ? 0 : part.z,
+width: part.width === undefined ? 1 : part.width,
+depth: part.depth === undefined ? 1 : part.depth,
+height: part.height === undefined ? 1 : part.height,
+};
+}
+function modelBox(name, part = {}) {
+return modelPart("box", name, part);
+}
+function modelCyl(name, part = {}) {
+return modelPart("cyl", name, part);
+}
+function modelTube(name, part = {}) {
+return {
+...modelPart("tube", name, part),
+axis: part.axis === "x" ? "x" : "y",
+round: part.round === true,
+};
+}
+function modelCone(name, part = {}) {
+return modelPart("cone", name, part);
+}
+function modelPlate(name, points, part = {}) {
+const xs = points.map((point) => point[0]);
+const ys = points.map((point) => point[1]);
+const x = Math.min(...xs);
+const y = Math.min(...ys);
+return {
+...modelPart("plate", name, { ...part, x, width: Math.max(...xs) - x, y, depth: Math.max(...ys) - y }),
+points: points.map(([px, py]) => [px, py]),
+};
+}
+function modelSlab(name, z, height, material) {
+return modelBox(name, { z, height, material });
+}
+function modelFront(name, depth, material) {
+return modelBox(name, { y: -0.5, depth, material });
+}
+function modelKeys(count, y, depth) {
+return viewKeyRects(count, VIEW_KEYS_FRAME).map((rect, index) => ({
+...modelBox("key" + (index + 1), {
+x: rect.x,
+width: rect.width,
+y,
+depth,
+z: 0.5 - (rect.y + rect.height),
+height: rect.height,
+material: "light",
+}),
+channel: index + 1,
+}));
+}
+function modelParts(...items) {
+return items.flat(Infinity).filter(Boolean);
+}
+
+// src/objectModels/stairs.js
+const OBJECT_STAIR_KEYS = Object.freeze(["stairs", "stairsL", "stairsU", "stairsSpiral"]);
+const OBJECT_STAIR_MIRRORED = Object.freeze(["stairsL", "stairsU", "stairsSpiral"]);
+const STAIR_RISE_MM = 175;
+const STAIR_TREAD_MM = 40;
+const STAIR_TREAD_SHARE = 0.8;
+const STAIR_STEPS_MIN = 4;
+const STAIR_STEPS_MAX = 30;
+const STAIR_RUN_MM = 1100;
+const STAIR_L_SIDE_MM = 2700;
+const STAIR_U_WIDTH_MM = 2300;
+const STAIR_POST_SHARE = 0.16;
+const STAIR_SPIRAL_TURNS = 1;
+function objectStairKey(key) {
+return OBJECT_STAIR_KEYS.includes(key);
+}
+function objectStairSteps(heightMm) {
+const rises = Math.round(Math.max(0, Number(heightMm) || 0) / STAIR_RISE_MM);
+return Math.min(STAIR_STEPS_MAX, Math.max(STAIR_STEPS_MIN, rises - 1));
+}
+function objectStairModel(key, { widthMm, depthMm, heightMm, mirror = false } = {}) {
+const width = Number(widthMm);
+const depth = Number(depthMm);
+const height = Number(heightMm);
+if (!objectStairKey(key) || !(width > 0) || !(depth > 0) || !(height > 0)) return null;
+const steps = objectStairSteps(height);
+const thick = Math.min(STAIR_TREAD_MM, height / (steps + 1) / 2) / height;
+const z = (index) => (index + 1) / (steps + 1) - thick;
+const flip = mirror === true && OBJECT_STAIR_MIRRORED.includes(key);
+const plan = { width, depth, steps, z, thick, flip };
+if (key === "stairsSpiral") return objectStairSpiral(plan);
+const boards = key === "stairsL" ? objectStairL(plan) : key === "stairsU" ? objectStairU(plan) : objectStairStraight(plan);
+return modelParts(
+boards.map((board, index) =>
+modelBox("step" + (index + 1), {
+x: flip ? -(board.x + board.width) : board.x,
+width: board.width,
+y: board.y,
+depth: board.depth,
+z: z(index),
+height: thick,
+material: board.landing ? "light" : index % 2 === 0 ? "body" : "light",
+}),
+),
+);
+}
+function stairTread(axis, middle, span, from, to, landing = false) {
+const narrow = span * STAIR_TREAD_SHARE;
+const low = Math.min(from, to);
+const run = Math.abs(to - from);
+if (axis === "y") return { x: middle - narrow / 2, width: narrow, y: low, depth: run, landing };
+return { x: low, width: run, y: middle - narrow / 2, depth: narrow, landing };
+}
+function objectStairStraight({ steps }) {
+const out = [];
+for (let index = 0; index < steps; index += 1) {
+out.push(stairTread("y", 0, 1, -0.5 + index / steps, -0.5 + (index + 1) / steps));
+}
+return out;
+}
+function stairRun(out, axis, middle, span, from, to, count) {
+for (let index = 0; index < count; index += 1) {
+const a = from + ((to - from) * index) / count;
+const b = from + ((to - from) * (index + 1)) / count;
+out.push(stairTread(axis, middle, span, a, b));
+}
+}
+function stairSplit(steps, first, second) {
+const runs = Math.max(2, steps - 1);
+const one = Math.min(runs - 1, Math.max(1, Math.round((runs * first) / Math.max(1e-9, first + second))));
+return { one, two: runs - one };
+}
+function objectStairL({ width, depth, steps }) {
+const runX = (Math.min(width, depth) * (STAIR_RUN_MM / STAIR_L_SIDE_MM)) / width;
+const runY = (Math.min(width, depth) * (STAIR_RUN_MM / STAIR_L_SIDE_MM)) / depth;
+const split = stairSplit(steps, 1 - runY, 1 - runX);
+const out = [];
+stairRun(out, "y", -0.5 + runX / 2, runX, -0.5, 0.5 - runY, split.one);
+const corner = stairTread("y", -0.5 + runX / 2, runX, 0.5 - runY / 2 - (runY * STAIR_TREAD_SHARE) / 2, 0.5 - runY / 2 + (runY * STAIR_TREAD_SHARE) / 2, true);
+out.push(corner);
+stairRun(out, "x", 0.5 - runY / 2, runY, -0.5 + runX, 0.5, split.two);
+return out;
+}
+function objectStairU({ width, depth, steps }) {
+const run = STAIR_RUN_MM / STAIR_U_WIDTH_MM;
+const runY = Math.min(0.45, (width * run) / depth);
+const split = stairSplit(steps, 1 - runY, 1 - runY);
+const out = [];
+stairRun(out, "y", -0.5 + run / 2, run, -0.5, 0.5 - runY, split.one);
+const narrowY = runY * STAIR_TREAD_SHARE;
+const edge = (run * (1 - STAIR_TREAD_SHARE)) / 2;
+out.push({ x: -0.5 + edge, width: 1 - edge * 2, y: 0.5 - runY / 2 - narrowY / 2, depth: narrowY, landing: true });
+stairRun(out, "y", 0.5 - run / 2, run, 0.5 - runY, -0.5, split.two);
+return out;
+}
+function objectStairSpiral({ steps, z, thick, flip }) {
+const post = STAIR_POST_SHARE / 2;
+const outer = post + (0.5 - post) * STAIR_TREAD_SHARE;
+const turn = (Math.PI * 2 * STAIR_SPIRAL_TURNS) / steps;
+const start = -Math.PI / 2;
+const sign = flip ? 1 : -1;
+const point = (radius, angle) => [Math.cos(angle) * radius, Math.sin(angle) * radius];
+const treads = [];
+for (let index = 0; index < steps; index += 1) {
+const a = start + sign * turn * index;
+const b = start + sign * turn * (index + 1);
+const mid = (a + b) / 2;
+treads.push(
+modelPlate("step" + (index + 1), [point(post, a), point(outer, a), point(outer, mid), point(outer, b), point(post, b)], {
+z: z(index),
+height: thick,
+material: index % 2 === 0 ? "body" : "light",
+}),
+);
+}
+return modelParts(modelCyl("post", { x: -post, width: post * 2, y: -post, depth: post * 2, z: 0, height: 1, material: "metal" }), treads);
+}
+
 // src/render.js
 const SHAPES = SHAPE_NAMES;
 const FONT_DRAFT = "draft";
@@ -26038,6 +26228,7 @@ for (const object of objects) {
 drawDrawingObject(ctx, bridge, options.objectAt ? options.objectAt(object) : object, {
 active: active && active.kind === "object" && active.id === object.id,
 name: labels ? schemeObjectNameOf(project, object) : "",
+stair: drawingStairParts(project, schemeId, object),
 });
 }
 let activeOpening = null;
@@ -26530,7 +26721,66 @@ if (options.ghost) ctx.setLineDash(DRAWING_GHOST_DASH);
 ctx.stroke();
 }
 ctx.setLineDash([]);
+if (options.stair && object.shape !== "polyline") drawDrawingStair(ctx, bridge, object, options.stair, colour);
 drawDrawingCaption(ctx, object, corners, options.name, bridge);
+ctx.restore();
+}
+function drawingStairParts(project, schemeId, object) {
+if (!object || object.shape === "polyline") return null;
+const key = schemeObjectKeyOf(project, object);
+if (!objectStairKey(key)) return null;
+const heightMm = Number(object.heightMm) > 0 ? Number(object.heightMm) : wallHeightShownMm(project, { schemeId }).mm;
+return objectStairModel(key, { widthMm: object.widthMm, depthMm: object.depthMm, heightMm, mirror: object.mirror === true });
+}
+const DRAWING_STAIR_MIN_PX = 24;
+function drawDrawingStair(ctx, bridge, object, parts, colour) {
+const widthMm = Number(object.widthMm);
+const depthMm = Number(object.depthMm);
+if (!(widthMm > 0) || !(depthMm > 0) || !object.atMm) return;
+if (Math.max(widthMm, depthMm) * bridge.pxPerMm < DRAWING_STAIR_MIN_PX) return;
+const angle = ((Number(object.turnDeg) || 0) * Math.PI) / 180;
+const u = { x: Math.cos(angle), y: Math.sin(angle) };
+const f = { x: Math.sin(angle), y: -Math.cos(angle) };
+const at = (fx, fy) =>
+bridge.toScreen({
+x: Number(object.atMm.x) + u.x * fx * widthMm + f.x * fy * depthMm,
+y: Number(object.atMm.y) + u.y * fx * widthMm + f.y * fy * depthMm,
+});
+const steps = parts.filter((part) => /^step\d+$/.test(part.name));
+const middles = [];
+ctx.save();
+ctx.lineWidth = 0.75;
+ctx.strokeStyle = colour;
+ctx.globalAlpha *= 0.7;
+for (const part of steps) {
+const points =
+part.kind === "plate"
+? part.points.map(([fx, fy]) => at(fx, fy))
+: [at(part.x, part.y), at(part.x + part.width, part.y), at(part.x + part.width, part.y + part.depth), at(part.x, part.y + part.depth)];
+ctx.beginPath();
+points.forEach((point, index) => (index === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y)));
+ctx.closePath();
+ctx.stroke();
+middles.push({
+x: points.reduce((sum, point) => sum + point.x, 0) / points.length,
+y: points.reduce((sum, point) => sum + point.y, 0) / points.length,
+});
+}
+if (middles.length >= 2) {
+ctx.lineWidth = 1;
+drawDrawingPath(ctx, middles);
+const tip = middles[middles.length - 1];
+const back = middles[middles.length - 2];
+const length = Math.hypot(tip.x - back.x, tip.y - back.y) || 1;
+const dx = (tip.x - back.x) / length;
+const dy = (tip.y - back.y) / length;
+const size = 6;
+ctx.beginPath();
+ctx.moveTo(tip.x - dx * size - dy * size * 0.6, tip.y - dy * size + dx * size * 0.6);
+ctx.lineTo(tip.x, tip.y);
+ctx.lineTo(tip.x - dx * size + dy * size * 0.6, tip.y - dy * size - dx * size * 0.6);
+ctx.stroke();
+}
 ctx.restore();
 }
 function drawDrawingPath(ctx, points) {
@@ -34950,7 +35200,7 @@ if (opening.id && (openingOpens(opening.kind) || openingVents(opening.kind))) {
 for (let index = reveals; index < out.length; index += 1) out[index].doorway = opening.id;
 }
 if (openingFamilyOf(opening.kind) === "window") {
-volumeWindowFrame(at, from, to, bottom, top, out, openingFaceGrid(opening));
+volumeWindowFrame(at, from, to, bottom, top, out, openingFaceGrid(opening), Math.min(VOLUME_FRAME_MM, half * 2 * 0.8));
 if (opening.id && volumeDoorOpen(openDoorIds, opening.id)) volumeWindowSash(wall, opening, { from, to, bottom, top }, out, rooms);
 return out;
 }
@@ -35035,15 +35285,17 @@ const VOLUME_SASH_DEPTH_MM = VOLUME_FRAME_MM;
 const VOLUME_FOLD_LEAF_MM = 40;
 const VOLUME_FOLD_GAP_MM = 10;
 const VOLUME_SLIDE_GAP_MM = 20;
-function volumeWindowFrame(at, from, to, bottom, top, out, grid) {
+function volumeWindowFrame(at, from, to, bottom, top, out, grid, depth = 0) {
 const half = VOLUME_FRAME_MM / 2;
 const span = to - from;
 const height = top - bottom;
+const low = Math.min(top, bottom + VOLUME_FRAME_MM);
+const high = Math.max(bottom, top - VOLUME_FRAME_MM);
 const bars = [
-{ from, to, bottom, top: Math.min(top, bottom + VOLUME_FRAME_MM) },
-{ from, to, bottom: Math.max(bottom, top - VOLUME_FRAME_MM), top },
-{ from, to: Math.min(to, from + VOLUME_FRAME_MM), bottom, top },
-{ from: Math.max(from, to - VOLUME_FRAME_MM), to, bottom, top },
+{ from, to, bottom, top: low },
+{ from, to, bottom: high, top },
+{ from, to: Math.min(to, from + VOLUME_FRAME_MM), bottom: low, top: high },
+{ from: Math.max(from, to - VOLUME_FRAME_MM), to, bottom: low, top: high },
 ];
 const xs = grid && Array.isArray(grid.xs) ? grid.xs : [];
 const ys = grid && Array.isArray(grid.ys) ? grid.ys : [];
@@ -35064,10 +35316,14 @@ for (let index = 0; index + 1 < gaps.length; index += 2) {
 bars.push({ from: gaps[index], to: gaps[index + 1], bottom: middle - half, top: middle + half });
 }
 }
+const origin = at(0, 0);
+const step = at(1, 0);
+const along = { x: step.x - origin.x, y: step.y - origin.y };
 for (const bar of bars) {
 if (!(bar.to > bar.from) || !(bar.top > bar.bottom)) continue;
 const first = at(bar.from, 0);
 const second = at(bar.to, 0);
+if (!(depth > 2)) {
 out.push(
 volumeFace(
 [volumeAt(first, bar.bottom), volumeAt(second, bar.bottom), volumeAt(second, bar.top), volumeAt(first, bar.top)],
@@ -35075,6 +35331,10 @@ VOLUME_FRAME_RGB,
 { both: true },
 ),
 );
+continue;
+}
+const centre = at((bar.from + bar.to) / 2, 0);
+volumePrismFaces(volumeBoxCorners(centre, along, bar.to - bar.from, depth), bar.bottom, bar.top, VOLUME_FRAME_RGB, out);
 }
 }
 const VOLUME_SASH_DEG = 75;
@@ -35874,78 +36134,6 @@ const glow = VOLUME_MOON_GLOW * moon;
 return { rgb: volumeMix((tint && tint.rgb) || VOLUME_NIGHT_RGB, VOLUME_MOON_LIGHT_RGB, glow / (dark + glow)), share: dark + glow };
 }
 
-// src/objectModels/kit.js
-const MODEL_MATERIALS = ["body", "dark", "light", "metal", "glass"];
-const MODEL_CLEARS = ["sheer", "glass"];
-const MODEL_CYL_SIDES = 8;
-function modelPart(kind, name, part) {
-const material = MODEL_MATERIALS.includes(part.material) ? part.material : "body";
-return {
-kind,
-name,
-lit: part.lit === true,
-bulb: Number.isInteger(part.bulb) ? part.bulb : null,
-material,
-toFloor: part.toFloor === true,
-clear: MODEL_CLEARS.includes(part.clear) ? part.clear : null,
-x: part.x === undefined ? -0.5 : part.x,
-y: part.y === undefined ? -0.5 : part.y,
-z: part.z === undefined ? 0 : part.z,
-width: part.width === undefined ? 1 : part.width,
-depth: part.depth === undefined ? 1 : part.depth,
-height: part.height === undefined ? 1 : part.height,
-};
-}
-function modelBox(name, part = {}) {
-return modelPart("box", name, part);
-}
-function modelCyl(name, part = {}) {
-return modelPart("cyl", name, part);
-}
-function modelTube(name, part = {}) {
-return {
-...modelPart("tube", name, part),
-axis: part.axis === "x" ? "x" : "y",
-round: part.round === true,
-};
-}
-function modelCone(name, part = {}) {
-return modelPart("cone", name, part);
-}
-function modelPlate(name, points, part = {}) {
-const xs = points.map((point) => point[0]);
-const ys = points.map((point) => point[1]);
-const x = Math.min(...xs);
-const y = Math.min(...ys);
-return {
-...modelPart("plate", name, { ...part, x, width: Math.max(...xs) - x, y, depth: Math.max(...ys) - y }),
-points: points.map(([px, py]) => [px, py]),
-};
-}
-function modelSlab(name, z, height, material) {
-return modelBox(name, { z, height, material });
-}
-function modelFront(name, depth, material) {
-return modelBox(name, { y: -0.5, depth, material });
-}
-function modelKeys(count, y, depth) {
-return viewKeyRects(count, VIEW_KEYS_FRAME).map((rect, index) => ({
-...modelBox("key" + (index + 1), {
-x: rect.x,
-width: rect.width,
-y,
-depth,
-z: 0.5 - (rect.y + rect.height),
-height: rect.height,
-material: "light",
-}),
-channel: index + 1,
-}));
-}
-function modelParts(...items) {
-return items.flat(Infinity).filter(Boolean);
-}
-
 // src/objectModels/climate.js
 const MODELS_CLIMATE = {
 thermostat: modelParts(
@@ -36132,124 +36320,6 @@ switch2: { build: switchParts, keys: 2, max: MODEL_SWITCH_KEYS_MAX },
 switch3: { build: switchParts, keys: 3, max: MODEL_SWITCH_KEYS_MAX },
 switchToggle: { build: toggleParts, keys: 1, max: MODEL_SWITCH_KEYS_MAX - 1 },
 };
-
-// src/objectModels/stairs.js
-const OBJECT_STAIR_KEYS = Object.freeze(["stairs", "stairsL", "stairsU", "stairsSpiral"]);
-const OBJECT_STAIR_MIRRORED = Object.freeze(["stairsL", "stairsU", "stairsSpiral"]);
-const STAIR_RISE_MM = 175;
-const STAIR_TREAD_MM = 40;
-const STAIR_TREAD_SHARE = 0.8;
-const STAIR_STEPS_MIN = 4;
-const STAIR_STEPS_MAX = 30;
-const STAIR_RUN_MM = 1100;
-const STAIR_L_SIDE_MM = 2700;
-const STAIR_U_WIDTH_MM = 2300;
-const STAIR_POST_SHARE = 0.16;
-const STAIR_SPIRAL_TURNS = 1;
-function objectStairKey(key) {
-return OBJECT_STAIR_KEYS.includes(key);
-}
-function objectStairSteps(heightMm) {
-const rises = Math.round(Math.max(0, Number(heightMm) || 0) / STAIR_RISE_MM);
-return Math.min(STAIR_STEPS_MAX, Math.max(STAIR_STEPS_MIN, rises - 1));
-}
-function objectStairModel(key, { widthMm, depthMm, heightMm, mirror = false } = {}) {
-const width = Number(widthMm);
-const depth = Number(depthMm);
-const height = Number(heightMm);
-if (!objectStairKey(key) || !(width > 0) || !(depth > 0) || !(height > 0)) return null;
-const steps = objectStairSteps(height);
-const thick = Math.min(STAIR_TREAD_MM, height / (steps + 1) / 2) / height;
-const z = (index) => (index + 1) / (steps + 1) - thick;
-const flip = mirror === true && OBJECT_STAIR_MIRRORED.includes(key);
-const plan = { width, depth, steps, z, thick, flip };
-if (key === "stairsSpiral") return objectStairSpiral(plan);
-const boards = key === "stairsL" ? objectStairL(plan) : key === "stairsU" ? objectStairU(plan) : objectStairStraight(plan);
-return modelParts(
-boards.map((board, index) =>
-modelBox("step" + (index + 1), {
-x: flip ? -(board.x + board.width) : board.x,
-width: board.width,
-y: board.y,
-depth: board.depth,
-z: z(index),
-height: thick,
-material: board.landing ? "light" : index % 2 === 0 ? "body" : "light",
-}),
-),
-);
-}
-function stairTread(axis, middle, span, from, to, landing = false) {
-const narrow = span * STAIR_TREAD_SHARE;
-const low = Math.min(from, to);
-const run = Math.abs(to - from);
-if (axis === "y") return { x: middle - narrow / 2, width: narrow, y: low, depth: run, landing };
-return { x: low, width: run, y: middle - narrow / 2, depth: narrow, landing };
-}
-function objectStairStraight({ steps }) {
-const out = [];
-for (let index = 0; index < steps; index += 1) {
-out.push(stairTread("y", 0, 1, -0.5 + index / steps, -0.5 + (index + 1) / steps));
-}
-return out;
-}
-function stairRun(out, axis, middle, span, from, to, count) {
-for (let index = 0; index < count; index += 1) {
-const a = from + ((to - from) * index) / count;
-const b = from + ((to - from) * (index + 1)) / count;
-out.push(stairTread(axis, middle, span, a, b));
-}
-}
-function stairSplit(steps, first, second) {
-const runs = Math.max(2, steps - 1);
-const one = Math.min(runs - 1, Math.max(1, Math.round((runs * first) / Math.max(1e-9, first + second))));
-return { one, two: runs - one };
-}
-function objectStairL({ width, depth, steps }) {
-const runX = (Math.min(width, depth) * (STAIR_RUN_MM / STAIR_L_SIDE_MM)) / width;
-const runY = (Math.min(width, depth) * (STAIR_RUN_MM / STAIR_L_SIDE_MM)) / depth;
-const split = stairSplit(steps, 1 - runY, 1 - runX);
-const out = [];
-stairRun(out, "y", -0.5 + runX / 2, runX, -0.5, 0.5 - runY, split.one);
-const corner = stairTread("y", -0.5 + runX / 2, runX, 0.5 - runY / 2 - (runY * STAIR_TREAD_SHARE) / 2, 0.5 - runY / 2 + (runY * STAIR_TREAD_SHARE) / 2, true);
-out.push(corner);
-stairRun(out, "x", 0.5 - runY / 2, runY, -0.5 + runX, 0.5, split.two);
-return out;
-}
-function objectStairU({ width, depth, steps }) {
-const run = STAIR_RUN_MM / STAIR_U_WIDTH_MM;
-const runY = Math.min(0.45, (width * run) / depth);
-const split = stairSplit(steps, 1 - runY, 1 - runY);
-const out = [];
-stairRun(out, "y", -0.5 + run / 2, run, -0.5, 0.5 - runY, split.one);
-const narrowY = runY * STAIR_TREAD_SHARE;
-const edge = (run * (1 - STAIR_TREAD_SHARE)) / 2;
-out.push({ x: -0.5 + edge, width: 1 - edge * 2, y: 0.5 - runY / 2 - narrowY / 2, depth: narrowY, landing: true });
-stairRun(out, "y", 0.5 - run / 2, run, 0.5 - runY, -0.5, split.two);
-return out;
-}
-function objectStairSpiral({ steps, z, thick, flip }) {
-const post = STAIR_POST_SHARE / 2;
-const outer = post + (0.5 - post) * STAIR_TREAD_SHARE;
-const turn = (Math.PI * 2 * STAIR_SPIRAL_TURNS) / steps;
-const start = -Math.PI / 2;
-const sign = flip ? 1 : -1;
-const point = (radius, angle) => [Math.cos(angle) * radius, Math.sin(angle) * radius];
-const treads = [];
-for (let index = 0; index < steps; index += 1) {
-const a = start + sign * turn * index;
-const b = start + sign * turn * (index + 1);
-const mid = (a + b) / 2;
-treads.push(
-modelPlate("step" + (index + 1), [point(post, a), point(outer, a), point(outer, mid), point(outer, b), point(post, b)], {
-z: z(index),
-height: thick,
-material: index % 2 === 0 ? "body" : "light",
-}),
-);
-}
-return modelParts(modelCyl("post", { x: -post, width: post * 2, y: -post, depth: post * 2, z: 0, height: 1, material: "metal" }), treads);
-}
 
 // src/objectModels/objects.js
 const MODEL_STAIR_FLOOR_MM = 2800;
@@ -64591,7 +64661,18 @@ class: "ui-btn volume__airNow",
 title: strings.volume.clockNowHint,
 on: { click: () => clock && clock.now() },
 });
+const dateField = uiEl("input", {
+class: "tools__date volume__airDate",
+type: "date",
+title: strings.volume.clockDateHint,
+attrs: { "aria-label": strings.volume.clockDate },
+});
+uiTimeApply(dateField, () => {
+const own = volumeDateParse(dateField.value);
+if (own !== null && clock && typeof clock.setDay === "function") clock.setDay(own);
+});
 const clockRow = uiEl("div", { class: "volume__airClock" }, [timeField, nowButton]);
+const dateRow = uiEl("div", { class: "volume__airClock" }, [dateField]);
 const closeButton = uiIconButton("close", {
 class: "ui-btn volume__airClose",
 label: strings.volume.airClose,
@@ -64617,7 +64698,7 @@ close(true);
 },
 },
 },
-[uiEl("div", { class: "volume__airHead" }, [title, closeButton]), clockRow, rowsNode, autoButton],
+[uiEl("div", { class: "volume__airHead" }, [title, closeButton]), clockRow, dateRow, rowsNode, autoButton],
 );
 let place = null;
 let said = null;
@@ -64680,11 +64761,17 @@ rowsNode.title = place.kind === "room" ? "" : strings.volume.airStreetHint;
 }
 function refreshClock() {
 if (!clock) return;
-const focused = typeof document !== "undefined" && document.activeElement === timeField;
-if (focused) return;
+const active = typeof document !== "undefined" ? document.activeElement : null;
+if (active !== timeField) {
 const minutes = clock.minutes();
 const value = Number.isFinite(minutes) ? volumeClockText(minutes) : "";
 if (timeField.value !== value) timeField.value = value;
+}
+if (active !== dateField && typeof clock.day === "function") {
+const day = clock.day();
+const value = Number.isFinite(day) ? volumeDateText(day) : "";
+if (dateField.value !== value) dateField.value = value;
+}
 }
 function refresh() {
 refreshClock();
@@ -65497,6 +65584,11 @@ return volumeClockStamp(volumeParamsClock(at), at).minutes;
 },
 set: (minutes) => volumeParamsFix(minutes, Date.now()),
 now: () => volumeParamsNow(Date.now()),
+day: () => {
+const at = Date.now();
+return volumeClockStamp(volumeParamsClock(at), at).day;
+},
+setDay: (day) => volumeParamsDay(day, Date.now()),
 },
 placed: (box) => {
 if (!stage || typeof stage.getBoundingClientRect !== "function") return;

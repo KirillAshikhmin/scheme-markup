@@ -52,6 +52,7 @@ import {
   VOLUME_DOOR_LEAF_MM,
   VOLUME_FOLD_GAP_MM,
   VOLUME_FOLD_LEAF_MM,
+  VOLUME_FRAME_RGB,
   VOLUME_SLIDE_GAP_MM,
   VOLUME_ROLL_MM,
   volumeDoorOpen,
@@ -336,8 +337,10 @@ test("на развёртке у двустворчатой двери две з
 test("импосты окна стоят и в объёме: тройное — три поля, балконное — шесть", () => {
   const bars = (kind) => {
     const scene = one(kind);
+    // Брусок с правки 2026-10-27 объёмный: у каждого ровно одно лицо в сторону
+    // нормали стены (стена стенда идёт вдоль x).
     return volumeScene(scene.project, scene.schemeId).faces.filter(
-      (face) => face.both && !face.doorId && face.rgb && face.rgb[0] === 240,
+      (face) => !face.doorId && face.rgb && face.rgb[0] === 240 && face.n.y > 0.9,
     ).length;
   };
   // Рама — четыре бруска; каждая стойка и каждая перекладина добавляют свои.
@@ -683,9 +686,11 @@ test("G329: в объёме у арки появились свод и пазу�
   }));
   assert.equal(built.doors.length, VOLUME_BEFORE.doors, "дверей в сцене столько же");
   // Полотна дверей с правки 2026-10-27 объёмные — слово заказчика «полотно
-  // двери имеет толщину в 1 пиксель, сделай нормальные». Отпечатки сверяются
-  // без граней полотен (`door`), сами полотна проверяют тесты дверей.
-  const still = (list) => list.filter((face) => face.door === null);
+  // двери имеет толщину в 1 пиксель, сделай нормальные», — и рама окна вслед
+  // за ними. Отпечатки сверяются без граней полотен (`door`) и брусков рамы
+  // (её цвет), сами они проверяются тестами дверей и импостов.
+  const frame = (face) => Array.isArray(face.rgb) && face.rgb.join(",") === VOLUME_FRAME_RGB.join(",");
+  const still = (list) => list.filter((face) => face.door === null && !frame(face));
   assert.deepEqual(still(print), still(VOLUME_AFTER.volume.print), "кадр сцены разошёлся с отпечатком таска 219");
   // Арка стоит пятой, на отступе 5000 шириной 1200, в стене по y = 0 толщиной
   // 200. Её грани — те, что целиком лежат в этой коробке; всё остальное к арке

@@ -39,6 +39,7 @@ import {
   createVolumeParamsFields,
   volumeParamsArrive,
   volumeParamsClock,
+  volumeParamsDay,
   volumeParamsFix,
   volumeParamsHome,
   volumeParamsLine,
@@ -1762,6 +1763,11 @@ function createVolume({ api, hosts }) {
       },
       set: (minutes) => volumeParamsFix(minutes, Date.now()),
       now: () => volumeParamsNow(Date.now()),
+      day: () => {
+        const at = Date.now();
+        return volumeClockStamp(volumeParamsClock(at), at).day;
+      },
+      setDay: (day) => volumeParamsDay(day, Date.now()),
     },
     // Окошко — над полосой, а где над ней тесно — слева от неё
     // (`volumeAirPlacement`): пальцем полоса поднята над кнопками, и в

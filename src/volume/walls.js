@@ -914,7 +914,7 @@ function volumeOpeningFaces(wall, opening, heightMm, out, openDoorIds, rooms = n
     for (let index = reveals; index < out.length; index += 1) out[index].doorway = opening.id;
   }
   if (openingFamilyOf(opening.kind) === "window") {
-    volumeWindowFrame(at, from, to, bottom, top, out, openingFaceGrid(opening));
+    volumeWindowFrame(at, from, to, bottom, top, out, openingFaceGrid(opening), Math.min(VOLUME_FRAME_MM, half * 2 * 0.8));
     if (opening.id && volumeDoorOpen(openDoorIds, opening.id)) volumeWindowSash(wall, opening, { from, to, bottom, top }, out, rooms);
     return out;
   }
@@ -1097,19 +1097,26 @@ export const VOLUME_SLIDE_GAP_MM = 20;
 // Рама — четыре бруска по краю проёма, в середине толщины стены. Стекла нет:
 // сквозь окно видно фон, и это ровно то, чего просил заказчик.
 //
+// **Бруски — объёмом** (правка 2026-10-27, вслед за полотнами дверей и
+// створкой): глубина рамы `VOLUME_FRAME_MM`, в тонкой стене — не толще её
+// (`depth`). Боковые бруски стоят между нижним и верхним: у объёмных брусков
+// наложение на углу дало бы две грани в одной плоскости.
+//
 // **Импосты** (таск 215) — те же бруски по долям `openingFaceGrid`: двойное
 // окно получает стойку посередине, тройное две, балконное две стойки и
 // перекладину пояса. Своей сетки объём не считает: разойдись она с листом —
 // окно на развёртке делилось бы на три, а в объёме на две.
-function volumeWindowFrame(at, from, to, bottom, top, out, grid) {
+function volumeWindowFrame(at, from, to, bottom, top, out, grid, depth = 0) {
   const half = VOLUME_FRAME_MM / 2;
   const span = to - from;
   const height = top - bottom;
+  const low = Math.min(top, bottom + VOLUME_FRAME_MM);
+  const high = Math.max(bottom, top - VOLUME_FRAME_MM);
   const bars = [
-    { from, to, bottom, top: Math.min(top, bottom + VOLUME_FRAME_MM) },
-    { from, to, bottom: Math.max(bottom, top - VOLUME_FRAME_MM), top },
-    { from, to: Math.min(to, from + VOLUME_FRAME_MM), bottom, top },
-    { from: Math.max(from, to - VOLUME_FRAME_MM), to, bottom, top },
+    { from, to, bottom, top: low },
+    { from, to, bottom: high, top },
+    { from, to: Math.min(to, from + VOLUME_FRAME_MM), bottom: low, top: high },
+    { from: Math.max(from, to - VOLUME_FRAME_MM), to, bottom: low, top: high },
   ];
   // Импосты встают **внутрь** рамы, а перекладина — отрезками между стойками:
   // наложенных коплоскостных граней в сцене быть не должно (правило таска 180),
@@ -1133,17 +1140,27 @@ function volumeWindowFrame(at, from, to, bottom, top, out, grid) {
       bars.push({ from: gaps[index], to: gaps[index + 1], bottom: middle - half, top: middle + half });
     }
   }
+  const origin = at(0, 0);
+  const step = at(1, 0);
+  const along = { x: step.x - origin.x, y: step.y - origin.y };
   for (const bar of bars) {
     if (!(bar.to > bar.from) || !(bar.top > bar.bottom)) continue;
     const first = at(bar.from, 0);
     const second = at(bar.to, 0);
-    out.push(
-      volumeFace(
-        [volumeAt(first, bar.bottom), volumeAt(second, bar.bottom), volumeAt(second, bar.top), volumeAt(first, bar.top)],
-        VOLUME_FRAME_RGB,
-        { both: true },
-      ),
-    );
+    // Стена-линия без толщины — рама прежней гранью: брусок в ноль толщиной
+    // выродился бы в отрезки.
+    if (!(depth > 2)) {
+      out.push(
+        volumeFace(
+          [volumeAt(first, bar.bottom), volumeAt(second, bar.bottom), volumeAt(second, bar.top), volumeAt(first, bar.top)],
+          VOLUME_FRAME_RGB,
+          { both: true },
+        ),
+      );
+      continue;
+    }
+    const centre = at((bar.from + bar.to) / 2, 0);
+    volumePrismFaces(volumeBoxCorners(centre, along, bar.to - bar.from, depth), bar.bottom, bar.top, VOLUME_FRAME_RGB, out);
   }
 }
 

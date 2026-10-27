@@ -121,6 +121,9 @@ function mount() {
       minutes: () => minutes,
       set: (value) => calls.clock.push(["set", value]),
       now: () => calls.clock.push(["now"]),
+      // 27 октября 2026 года — номер дня от 1970-01-01.
+      day: () => 20753,
+      setDay: (value) => calls.clock.push(["day", value]),
     },
   });
   return { air, calls, tick: (ms) => (clock += ms), setMinutes: (value) => (minutes = value) };
@@ -267,6 +270,17 @@ test("строка часов открывает то же окошко; ряд 
   assert.deepEqual(calls.clock[1], ["set", 7 * 60 + 10]);
   withClass(air.box, "volume__airNow")[0].click();
   assert.deepEqual(calls.clock[2], ["now"]);
+  // Дата — второй строкой («добей мелочи»): поле даты, по уходу — новый день.
+  document.activeElement = null;
+  air.sync(null);
+  const [date] = withClass(air.box, "volume__airDate");
+  assert.equal(date.type, "date");
+  assert.equal(date.value, "2026-10-27");
+  date.fire("keydown", { key: "1" });
+  date.value = "2026-12-31";
+  date.fire("blur");
+  assert.equal(calls.clock[3][0], "day");
+  assert.equal(calls.clock[3][1], 20753 + 65, "день не тот");
   // С климатом ряд часов стоит над ползунками.
   document.activeElement = null;
   air.sync(kitchen);

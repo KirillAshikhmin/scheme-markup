@@ -55,6 +55,7 @@ import {
   roomHasFloor,
   schemeHeightPx,
   schemeObjectCorners,
+  schemeObjectKeyOf,
   schemeObjectNameOf,
   schemeObjectTopMm,
   schemeObjectsOnScheme,
@@ -65,6 +66,7 @@ import {
   typeKindOf,
   typesInOrder,
   wallGlassOf,
+  wallHeightShownMm,
   wallNames,
   wallVectors,
   wallOwnHeightMm,
@@ -75,6 +77,7 @@ import { markBoxMm } from "./markBox.js";
 import { lightFadeLive, lightFadeMemo, lightFadeOf } from "./lightFade.js";
 import { markSpareLine } from "./markSpare.js";
 import { drawObjectView, objectViewByName, objectViewForShape } from "./objectViews/registry.js";
+import { objectStairKey, objectStairModel } from "./objectModels/stairs.js";
 
 export const SHAPES = SHAPE_NAMES;
 
@@ -5581,6 +5584,7 @@ export function drawDrawing(ctx, options = {}) {
       // Имя вещи спрашивается у модели: у вещи каталога оно каталожное, у
       // прежней — её собственное из справочника объекта (таск 154).
       name: labels ? schemeObjectNameOf(project, object) : "",
+      stair: drawingStairParts(project, schemeId, object),
     });
   }
   // Проём, который сейчас правят: его створку ручками показывает последний
@@ -6304,11 +6308,87 @@ export function drawDrawingObject(ctx, bridge, object, options = {}) {
   }
   // Подпись пунктиром не пишется: штрихом держится только контур.
   ctx.setLineDash([]);
+  if (options.stair && object.shape !== "polyline") drawDrawingStair(ctx, bridge, object, options.stair, colour);
   drawDrawingCaption(ctx, object, corners, options.name, bridge);
   ctx.restore();
   // Ручек здесь нет: углы выделенной вещи рисует последний слой чертежа
   // (`drawDrawingHandles`, дефект D45) — вещи лежат под стенами, и ручка вместе
   // с ними уходила под линию стены.
+}
+
+/**
+ * **Ступени лестницы на плане** (правка 2026-10-27): та же сборка, что в
+ * «Объёме» (`objectStairModel`), — ступени по подъёму и отражение. Слова
+ * заказчика про отражение были о «Объёме», но на плане лестница оставалась
+ * прямоугольником, и с какой стороны у неё низ, видно не было. `null` — вещь
+ * не лестница или полоса.
+ */
+export function drawingStairParts(project, schemeId, object) {
+  if (!object || object.shape === "polyline") return null;
+  const key = schemeObjectKeyOf(project, object);
+  if (!objectStairKey(key)) return null;
+  const heightMm = Number(object.heightMm) > 0 ? Number(object.heightMm) : wallHeightShownMm(project, { schemeId }).mm;
+  return objectStairModel(key, { widthMm: object.widthMm, depthMm: object.depthMm, heightMm, mirror: object.mirror === true });
+}
+
+/** Меньше этого на экране ступени не рисуются: кашу из штрихов не читают. */
+const DRAWING_STAIR_MIN_PX = 24;
+
+/**
+ * Ступени — тонкими контурами, стрелка подъёма — по серединам ступеней от
+ * первой к последней, как на плане этажа. Доли модели переводятся тем же
+ * правилом, что тела вещи в «Объёме» (`volumeObjectFrame`): поперёк лица по
+ * повороту, вглубь — от лица к заднику.
+ */
+function drawDrawingStair(ctx, bridge, object, parts, colour) {
+  const widthMm = Number(object.widthMm);
+  const depthMm = Number(object.depthMm);
+  if (!(widthMm > 0) || !(depthMm > 0) || !object.atMm) return;
+  if (Math.max(widthMm, depthMm) * bridge.pxPerMm < DRAWING_STAIR_MIN_PX) return;
+  const angle = ((Number(object.turnDeg) || 0) * Math.PI) / 180;
+  const u = { x: Math.cos(angle), y: Math.sin(angle) };
+  const f = { x: Math.sin(angle), y: -Math.cos(angle) };
+  const at = (fx, fy) =>
+    bridge.toScreen({
+      x: Number(object.atMm.x) + u.x * fx * widthMm + f.x * fy * depthMm,
+      y: Number(object.atMm.y) + u.y * fx * widthMm + f.y * fy * depthMm,
+    });
+  const steps = parts.filter((part) => /^step\d+$/.test(part.name));
+  const middles = [];
+  ctx.save();
+  ctx.lineWidth = 0.75;
+  ctx.strokeStyle = colour;
+  ctx.globalAlpha *= 0.7;
+  for (const part of steps) {
+    const points =
+      part.kind === "plate"
+        ? part.points.map(([fx, fy]) => at(fx, fy))
+        : [at(part.x, part.y), at(part.x + part.width, part.y), at(part.x + part.width, part.y + part.depth), at(part.x, part.y + part.depth)];
+    ctx.beginPath();
+    points.forEach((point, index) => (index === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y)));
+    ctx.closePath();
+    ctx.stroke();
+    middles.push({
+      x: points.reduce((sum, point) => sum + point.x, 0) / points.length,
+      y: points.reduce((sum, point) => sum + point.y, 0) / points.length,
+    });
+  }
+  if (middles.length >= 2) {
+    ctx.lineWidth = 1;
+    drawDrawingPath(ctx, middles);
+    const tip = middles[middles.length - 1];
+    const back = middles[middles.length - 2];
+    const length = Math.hypot(tip.x - back.x, tip.y - back.y) || 1;
+    const dx = (tip.x - back.x) / length;
+    const dy = (tip.y - back.y) / length;
+    const size = 6;
+    ctx.beginPath();
+    ctx.moveTo(tip.x - dx * size - dy * size * 0.6, tip.y - dy * size + dx * size * 0.6);
+    ctx.lineTo(tip.x, tip.y);
+    ctx.lineTo(tip.x - dx * size + dy * size * 0.6, tip.y - dy * size - dx * size * 0.6);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 function drawDrawingPath(ctx, points) {

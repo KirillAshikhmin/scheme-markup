@@ -24,9 +24,10 @@
 // ползунки климата — если дом идёт и климат есть. Без климата окошко
 // говорит только про время. Ряд пишет туда же, куда поле «Своё время» в
 // параметрах (`volumeParamsFix`, `volumeParamsNow`): второго пути перевести
-// часы в сборке нет. Дата в окошко не вошла нарочно: «компактно» — это одна
-// строка, а дата с часами в 264 точки одной строкой не ложатся.
-import { volumeClockParse, volumeClockText } from "../clockMath.js";
+// часы в сборке нет. Дата — второй строкой под часами (правка «добей мелочи»):
+// с часами в 264 точки одной строкой она не ложится, а без неё рассвет и
+// закат в окошке не сдвинуть.
+import { volumeClockParse, volumeClockText, volumeDateParse, volumeDateText } from "../clockMath.js";
 import { strings, text } from "../strings.js";
 import { uiButton, uiEl, uiIconButton, uiTimeApply } from "./ui.js";
 import { volumeAirLine, volumeTempText } from "./volumeParams.js";
@@ -131,7 +132,8 @@ export function volumeAirSaid(place) {
  * климата, `box` — окошко; все три поле ставит в полосу часов. `sync(place)`
  * поле зовёт на каждый кадр и на каждый шаг климата — пишется только то, что
  * изменилось. Двери: `setRoom(roomId, patch)`, `setStreet(patch)`, `clock:
- * {minutes(), set(minutes), now()}` — часы поля, `now()` для тестов.
+ * {minutes(), set(minutes), now(), day(), setDay(day)}` — часы поля, `now()`
+ * для тестов.
  */
 export function createVolumeAir(doors = {}) {
   const now = typeof doors.now === "function" ? doors.now : () => Date.now();
@@ -165,7 +167,18 @@ export function createVolumeAir(doors = {}) {
     title: strings.volume.clockNowHint,
     on: { click: () => clock && clock.now() },
   });
+  const dateField = uiEl("input", {
+    class: "tools__date volume__airDate",
+    type: "date",
+    title: strings.volume.clockDateHint,
+    attrs: { "aria-label": strings.volume.clockDate },
+  });
+  uiTimeApply(dateField, () => {
+    const own = volumeDateParse(dateField.value);
+    if (own !== null && clock && typeof clock.setDay === "function") clock.setDay(own);
+  });
   const clockRow = uiEl("div", { class: "volume__airClock" }, [timeField, nowButton]);
+  const dateRow = uiEl("div", { class: "volume__airClock" }, [dateField]);
   const closeButton = uiIconButton("close", {
     class: "ui-btn volume__airClose",
     label: strings.volume.airClose,
@@ -193,7 +206,7 @@ export function createVolumeAir(doors = {}) {
         },
       },
     },
-    [uiEl("div", { class: "volume__airHead" }, [title, closeButton]), clockRow, rowsNode, autoButton],
+    [uiEl("div", { class: "volume__airHead" }, [title, closeButton]), clockRow, dateRow, rowsNode, autoButton],
   );
 
   let place = null;
@@ -265,11 +278,17 @@ export function createVolumeAir(doors = {}) {
   // держит человек.
   function refreshClock() {
     if (!clock) return;
-    const focused = typeof document !== "undefined" && document.activeElement === timeField;
-    if (focused) return;
-    const minutes = clock.minutes();
-    const value = Number.isFinite(minutes) ? volumeClockText(minutes) : "";
-    if (timeField.value !== value) timeField.value = value;
+    const active = typeof document !== "undefined" ? document.activeElement : null;
+    if (active !== timeField) {
+      const minutes = clock.minutes();
+      const value = Number.isFinite(minutes) ? volumeClockText(minutes) : "";
+      if (timeField.value !== value) timeField.value = value;
+    }
+    if (active !== dateField && typeof clock.day === "function") {
+      const day = clock.day();
+      const value = Number.isFinite(day) ? volumeDateText(day) : "";
+      if (dateField.value !== value) dateField.value = value;
+    }
   }
 
   function refresh() {
