@@ -17,13 +17,17 @@ import {
   roomWallsPaint,
   setRoomPaint,
   setRoomWallsPaint,
+  setWallGlass,
   setWallPaint,
   splitWall,
+  wallGlassOf,
   wallPaintOf,
 } from "../src/model.js";
 import {
   VOLUME_CEILING_RGB,
   VOLUME_FLOOR_RGB,
+  VOLUME_CLEAR_ALPHAS,
+  VOLUME_GLASS_RGB,
   VOLUME_WALL_RGB,
   volumeFrame,
   volumeIsCeiling,
@@ -35,6 +39,7 @@ import {
   volumeSunSpotFaces,
 } from "../src/volume.js";
 import { benchFlat, benchLive } from "../tools/bench/scenes.mjs";
+import { DRAWING_GLASS, drawDrawing, drawingUnitBridge } from "../src/render.js";
 
 // Квартира стенда: гостиная (x < −1000), коридор, спальня (x > 1000);
 // перегородки по x = ±1000 начерчены снизу вверх, их левая сторона смотрит
@@ -220,4 +225,72 @@ test("«Объём»: сверху крашеный потолок не пере
   const camera = { at: { x: 0, y: 6000, z: 9000 }, yaw: -Math.PI / 2, pitch: -0.9 };
   const fills = (item) => volumeFrame(volumeScene(item, box.schemeId), camera, box2).map((polygon) => polygon.fill);
   assert.deepEqual(fills(project), fills(box.project));
+});
+
+// ——— стеклянная стена (правка 2026-10-27) —————————————————————————————————
+//
+// «Стены тоже добавь возможность сделать стеклянными, например в меню цвета».
+
+test("стеклянная стена: ключ только у стеклянной, краска сторон переживает стекло (G68)", () => {
+  const box = flat();
+  assert.equal(wallGlassOf(findWall(box.project, box.right)), false);
+  const painted = setWallPaint(box.project, box.right, "left", BLUE).project;
+  const glass = setWallGlass(painted, box.right, true);
+  assert.equal(glass.changed, true);
+  assert.equal(glass.wall.glass, true);
+  assert.equal(wallPaintOf(glass.wall, "left"), BLUE, "стекло сняло краску");
+  assert.equal(setWallGlass(glass.project, box.right, true).changed, false);
+  // Деление стены: оба куска стеклянные.
+  const pieces = splitWall(glass.project, box.right, 1000);
+  assert.ok(pieces.project.walls.filter((wall) => wall.aMm.x === 1000 && wall.bMm.x === 1000).every((wall) => wall.glass === true));
+  const back = setWallGlass(glass.project, box.right, false);
+  assert.ok(!Object.prototype.hasOwnProperty.call(back.wall, "glass"), "снятое стекло осталось ключом");
+  assert.equal(wallPaintOf(back.wall, "left"), BLUE);
+});
+
+test("в «Объёме» стеклянная стена — стекло: прозрачна, не стена для пятен ламп и без тени дома", () => {
+  const box = flat();
+  const before = volumeScene(box.project, box.schemeId);
+  const project = setWallGlass(setWallPaint(box.project, box.right, "left", BLUE).project, box.right, true).project;
+  const scene = volumeScene(project, box.schemeId);
+  // Стороны, торцы, верх стены x = 1000 и откосы её двери — стекло, ни одной
+  // стены. Толщина стены 200 мм.
+  const onWall = (face) => face.p.every((point) => Math.abs(point.x - 1000) <= 100.01) && !face.doorId;
+  const own = scene.faces.filter((face) => face.glass);
+  assert.ok(own.length >= 4, "у стены нет стеклянных граней");
+  for (const face of own) {
+    assert.deepEqual(face.rgb, VOLUME_GLASS_RGB);
+    assert.equal(face.clear, true);
+    assert.equal(face.alpha, VOLUME_CLEAR_ALPHAS.glass, "стекло стены плотнее стекла двери");
+    assert.equal(volumeIsWall(face), false, "стекло осталось стеной для пятен ламп");
+  }
+  assert.ok(own.every(onWall), "стеклом стало что-то кроме этой стены");
+  // Граней столько же: стекло — та же стена другого вида.
+  assert.equal(scene.faces.length, before.faces.length);
+  assert.equal(scene.shadowBoxes.length, before.shadowBoxes.length - 1, "стеклянная стена бросает тень дома");
+  // Остальные стены — прежние.
+  assert.equal(scene.faces.filter((face) => face.glass).length, own.length);
+});
+
+test("на плане стеклянная стена — голубой полосой с кромками", () => {
+  const box = flat();
+  const project = setWallGlass(box.project, box.right, true).project;
+  const colours = (source) => {
+    const log = [];
+    const ctx = new Proxy(
+      {},
+      {
+        get: (target, key) => (key in target ? target[key] : typeof key === "string" && /^(save|restore|beginPath|moveTo|lineTo|stroke|fill|closePath|arc|setLineDash|fillText|strokeText|rect|clip|translate|rotate|scale|setTransform|drawImage|fillRect|strokeRect|measureText|createLinearGradient|quadraticCurveTo|bezierCurveTo|ellipse)$/.test(key) ? (...args) => (key === "measureText" ? { width: 10 } : undefined) : undefined),
+        set: (target, key, value) => {
+          if (key === "strokeStyle") log.push(value);
+          target[key] = value;
+          return true;
+        },
+      },
+    );
+    drawDrawing(ctx, { project: source, schemeId: box.schemeId, bridge: drawingUnitBridge({ zoom: 0.1, offsetX: 400, offsetY: 300 }) });
+    return log;
+  };
+  assert.ok(!colours(box.project).includes(DRAWING_GLASS));
+  assert.ok(colours(project).includes(DRAWING_GLASS), "стеклянная стена нарисована стеной");
 });

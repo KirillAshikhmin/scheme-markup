@@ -60,16 +60,28 @@ test("выбор характеристики: сервис и характер�
   assert.deepEqual(scenarioEditorCharChoices(null), []);
 });
 
-test("для действия — только то, что можно записать (датчик ничего не принимает)", () => {
+test("для действия — все характеристики, у «только чтение» пометка, записываемые первыми (правка 2026-10-27)", () => {
+  // «Позволь блочными сценариями управлять характеристиками только для чтения
+  // у устройств, просто делай пометку что они только для чтения, но менять
+  // можно». Было: у датчика список действия пустой.
   const sensor = scenarioEditorCharChoices(accessoryOf("ДД1"), { write: true });
-  assert.deepEqual(sensor, []);
+  assert.deepEqual(
+    sensor.map((item) => [item.char, item.readOnly]),
+    [["MotionDetected", true]],
+  );
+  assert.match(sensor[0].label, /только чтение/);
   const read = scenarioEditorCharChoices(accessoryOf("ДД1"));
   assert.deepEqual(
     read.map((item) => item.char),
     ["MotionDetected"],
   );
+  assert.doesNotMatch(read[0].label, /только чтение/, "в условии пометка не нужна: читать можно всё");
   const lamp = scenarioEditorCharChoices(accessoryOf("С1"), { write: true });
-  assert.equal(lamp.length, 2);
+  assert.deepEqual(lamp.map((item) => item.readOnly), [false, false]);
+  // У выключателя «Выключатель» записывается, номер клавиши — нет: он в конце.
+  const duo = scenarioEditorCharChoices(accessoryOf("ВВ1"), { write: true });
+  const firstRead = duo.findIndex((item) => item.readOnly);
+  assert.ok(firstRead > 0 && duo.slice(firstRead).every((item) => item.readOnly), "записываемые не первыми");
 });
 
 test("клавиши выключателя различаются номером: «Кнопка 1», «Кнопка 2»", () => {

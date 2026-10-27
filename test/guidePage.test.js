@@ -119,7 +119,7 @@ test("числа каталогов на странице и в AGENTS.md — и
   const objects = objectCatalogKeys().length;
   for (const [name, text] of [["web/guide.html", guide], ["AGENTS.md", memo]]) {
     const kinds = text.match(/на (\d+) видов/);
-    const things = text.match(/на (\d+) предметов/);
+    const things = text.match(/на (\d+) предмет/);
     assert.ok(kinds && things, "в " + name + " пропали числа каталогов — их сверять нечем");
     assert.equal(Number(kinds[1]), openings, name + ": видов проёмов в каталоге " + openings);
     assert.equal(Number(things[1]), objects, name + ": предметов в каталоге " + objects);

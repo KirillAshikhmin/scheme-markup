@@ -64,6 +64,7 @@ import {
   labelOf,
   typeKindOf,
   typesInOrder,
+  wallGlassOf,
   wallNames,
   wallVectors,
   wallOwnHeightMm,
@@ -5161,6 +5162,9 @@ export const DRAWING_WALL = "#30363d";
 // меток.
 export const DRAWING_WALL_FILL = "rgba(48, 54, 61, 0.12)";
 export const DRAWING_EDGE = "#0f1419";
+// Стеклянная стена на плане (правка 2026-10-27): голубая полоса в толщину
+// стены и тонкие кромки — так стекло и рисуют.
+export const DRAWING_GLASS = "#9fc9db";
 export const DRAWING_PAPER = "#f6f8fa";
 export const DRAWING_OBJECT = "#6639ba";
 export const DRAWING_OBJECT_FILL = "rgba(102, 57, 186, 0.12)";
@@ -5750,6 +5754,28 @@ function drawDrawingWall(ctx, bridge, wall, active) {
     ctx.lineTo(to.x - nx, to.y - ny);
     ctx.stroke();
     ctx.restore();
+    return;
+  }
+  if (wallGlassOf(wall)) {
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const length = Math.hypot(dx, dy) || 1;
+    const nx = (dy / length) * (width / 2);
+    const ny = (-dx / length) * (width / 2);
+    ctx.lineWidth = width;
+    ctx.strokeStyle = DRAWING_GLASS;
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(to.x, to.y);
+    ctx.stroke();
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = active ? DRAWING_ACTIVE : DRAWING_WALL;
+    ctx.beginPath();
+    ctx.moveTo(from.x + nx, from.y + ny);
+    ctx.lineTo(to.x + nx, to.y + ny);
+    ctx.moveTo(from.x - nx, from.y - ny);
+    ctx.lineTo(to.x - nx, to.y - ny);
+    ctx.stroke();
     return;
   }
   ctx.lineWidth = width;

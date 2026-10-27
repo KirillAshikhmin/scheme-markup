@@ -119,6 +119,37 @@ export const MODELS_OBJECTS = {
     modelBox("door", { x: -0.46, width: 0.92, y: -0.5, depth: 0.15, z: 0.03, height: 0.94, material: "light" }),
     modelBox("case", { y: -0.35, depth: 0.85 }),
   ),
+  // ——— гардеробная, обувница и вешалка (правка 2026-10-27) ———
+  //
+  // Гардеробная система — открытая: стойка делит её на две секции, слева
+  // штанга и одежда на плечиках под ней, справа полки, сверху общая полка во
+  // всю ширину. Корпуса и фасада нет — этим она и отличается от шкафа. Полок
+  // справа одна: пятое тело ушло на одежду, а без неё штанга читалась бы
+  // перекладиной.
+  wardrobeOpen: modelParts(
+    modelBox("shelfTop", { z: 0.86, height: 0.03, material: "light" }),
+    modelBox("post", { x: -0.015, width: 0.03, z: 0, height: 0.86, material: "dark" }),
+    modelBox("rod", { x: -0.48, width: 0.46, y: -0.02, depth: 0.04, z: 0.78, height: 0.02, material: "metal" }),
+    modelBox("clothes", { x: -0.45, width: 0.4, y: -0.3, depth: 0.6, z: 0.38, height: 0.4, material: "body" }),
+    modelBox("shelf", { x: 0.015, width: 0.485, z: 0.45, height: 0.03, material: "light" }),
+  ),
+  // Обувница: две боковины и три открытые полки — нижняя, средняя и верх.
+  shoeRack: modelParts(
+    modelBox("sideLeft", { x: -0.5, width: 0.04, z: 0, height: 1 }),
+    modelBox("sideRight", { x: 0.46, width: 0.04, z: 0, height: 1 }),
+    modelBox("shelfLow", { x: -0.46, width: 0.92, z: 0.08, height: 0.06, material: "light" }),
+    modelBox("shelfMid", { x: -0.46, width: 0.92, z: 0.48, height: 0.06, material: "light" }),
+    modelBox("top", { x: -0.46, width: 0.92, z: 0.92, height: 0.08 }),
+  ),
+  // Вешалка для курток: планка на стене, полка над ней и крючки. Крючков три
+  // телами — четвёртое и пятое ушли на планку и полку.
+  coatRack: modelParts(
+    modelBox("board", { y: 0.38, depth: 0.12, z: 0.3, height: 0.4, material: "dark" }),
+    modelBox("shelf", { z: 0.9, height: 0.1, material: "light" }),
+    [-0.3, 0, 0.3].map((x, index) =>
+      modelBox("hook" + (index + 1), { x: x - 0.025, width: 0.05, y: -0.1, depth: 0.48, z: 0.36, height: 0.06, material: "metal" }),
+    ),
+  ),
 
   // ——— тринадцать вещей из брифа ———
   //

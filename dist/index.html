@@ -7082,6 +7082,7 @@ wallOwnHeight: "высота стены",
 wallSplit: "деление стены",
 roomCeiling: "потолок помещения",
 wallPaint: "покраска стены",
+wallGlass: "стеклянная стена",
 roomPaint: "покраска помещения",
 schemeFloor: "этаж схемы",
 schemeAnchor: "точка привязки схемы",
@@ -7782,6 +7783,8 @@ paintHint:
 "Цвет каждой стороны этого отрезка в «Объёме». Сторона — слева или справа по ходу стены, рядом — помещение за ней. Откосы проёмов красятся половиной своей стороны. Все стены помещения разом, пол и потолок — кнопкой краски в «Помещениях»",
 paintSide: "{side} · {room}",
 paintStreet: "улица",
+wallGlass: "Стекло",
+wallGlassHint: "Стеклянная стена: в «Объёме» сквозь неё видно, тени дома она не бросает, а пройти сквозь неё нельзя. Краска сторон остаётся и вернётся, если снять отметку",
 wallSplit: "Разделить стену",
 wallSplitHint: "Разрезать стену на два отрезка — у каждого своя высота. Проёмы и метки остаются на своих местах",
 removeWallTitle: "Удалить стену вместе с проёмами?",
@@ -8462,6 +8465,9 @@ radiator: "Радиатор",
 counter: "Столешница",
 plumbing: "Сантехника",
 cabinet: "Шкаф",
+wardrobeOpen: "Гардеробная система",
+shoeRack: "Обувница",
+coatRack: "Вешалка для курток",
 table: "Стол",
 bed: "Кровать",
 dresser: "Тумба",
@@ -9330,7 +9336,8 @@ pickClose: "Закрыть",
 fromPlan: "Взять устройство, выбранное на плане",
 fromPlanNone: "Щёлкните по метке на плане — и она подставится сюда",
 deviceGone: "Устройство удалено или у него нет такой характеристики — блок будет пропущен",
-noWritable: "У этого устройства нечего записать",
+noWritable: "У этого устройства нет характеристик",
+readOnlyChar: "{char} (только чтение)",
 service: "Сервис",
 char: "Характеристика",
 op: "Оператор",
@@ -10348,6 +10355,39 @@ depthMm: 600,
 heightMm: 2200,
 heightAboveFloorMm: 0,
 words: ["шкаф"],
+},
+{
+key: "wardrobeOpen",
+category: "furniture",
+mount: "floor",
+shape: "rect",
+widthMm: 1800,
+depthMm: 500,
+heightMm: 2200,
+heightAboveFloorMm: 0,
+words: ["гардеробная систем", "открытый гардероб", "открытая гардероб"],
+},
+{
+key: "shoeRack",
+category: "furniture",
+mount: "floor",
+shape: "rect",
+widthMm: 800,
+depthMm: 300,
+heightMm: 500,
+heightAboveFloorMm: 0,
+words: ["обувниц", "подставка для обув", "полка для обув"],
+},
+{
+key: "coatRack",
+category: "furniture",
+mount: "wall",
+shape: "rect",
+widthMm: 800,
+depthMm: 250,
+heightMm: 300,
+heightAboveFloorMm: 1500,
+words: ["вешалк"],
 },
 {
 key: "kitchenIsland",
@@ -11530,6 +11570,42 @@ viewRect(-0.46, -0.28, 0.92, 0.56, 0.03),
 viewLine(-0.46, 0.12, 0.46, 0.12),
 viewLine(-0.15, -0.28, -0.15, 0.12),
 viewLine(0.15, -0.28, 0.15, 0.12),
+),
+},
+wardrobeOpen: {
+shapes: [],
+parts: viewParts(
+viewRect(-0.48, -0.3, 0.96, 0.6, 0.02),
+viewLine(0, -0.3, 0, 0.3),
+viewLine(-0.44, -0.16, -0.04, -0.16),
+[-0.34, -0.22, -0.1].map((x) =>
+viewPoly(
+[
+[x - 0.05, -0.02],
+[x, -0.16],
+[x + 0.05, -0.02],
+],
+true,
+),
+),
+[-0.12, 0.06, 0.2].map((y) => viewLine(0.04, y, 0.44, y)),
+),
+},
+shoeRack: {
+shapes: [],
+parts: viewParts(
+viewRect(-0.44, -0.3, 0.88, 0.6, 0.02),
+viewLine(-0.44, 0, 0.44, 0),
+[-0.26, 0.04, 0.3].flatMap((x) => [viewRect(x - 0.1, -0.16, 0.08, 0.12, 0.04), viewRect(x, -0.16, 0.08, 0.12, 0.04)]),
+[-0.26, 0.04, 0.3].map((x) => viewRect(x - 0.1, 0.12, 0.18, 0.1, 0.04)),
+),
+},
+coatRack: {
+shapes: [],
+parts: viewParts(
+viewRect(-0.46, -0.3, 0.92, 0.12, 0.02),
+viewLine(-0.46, -0.06, 0.46, -0.06),
+[-0.3, -0.1, 0.1, 0.3].flatMap((x) => [viewLine(x, -0.06, x, 0.12), viewCircle(x, 0.16, 0.04)]),
 ),
 },
 kitchenIsland: {
@@ -17180,6 +17256,19 @@ if (!WALL_PAINT_SIDES.includes(side)) throw modelError("paintPartInvalid");
 const color = paintColorValue(value);
 if (color === wallPaintOf(wall, side)) return { project, wall, changed: false };
 const next = paintWith(wall, side, color);
+const walls = wallsOf(project).map((item) => (item.id === wallId ? next : item));
+return { project: withProject(project, { walls }), wall: next, changed: true };
+}
+function wallGlassOf(wall) {
+return Boolean(wall && wall.glass === true);
+}
+function setWallGlass(project, wallId, on) {
+const wall = requireWall(project, wallId);
+const glass = on === true;
+if (glass === wallGlassOf(wall)) return { project, wall, changed: false };
+const next = { ...wall };
+if (glass) next.glass = true;
+else delete next.glass;
 const walls = wallsOf(project).map((item) => (item.id === wallId ? next : item));
 return { project: withProject(project, { walls }), wall: next, changed: true };
 }
@@ -25682,6 +25771,7 @@ ctx.restore();
 const DRAWING_WALL = "#30363d";
 const DRAWING_WALL_FILL = "rgba(48, 54, 61, 0.12)";
 const DRAWING_EDGE = "#0f1419";
+const DRAWING_GLASS = "#9fc9db";
 const DRAWING_PAPER = "#f6f8fa";
 const DRAWING_OBJECT = "#6639ba";
 const DRAWING_OBJECT_FILL = "rgba(102, 57, 186, 0.12)";
@@ -26063,6 +26153,28 @@ ctx.moveTo(from.x - nx, from.y - ny);
 ctx.lineTo(to.x - nx, to.y - ny);
 ctx.stroke();
 ctx.restore();
+return;
+}
+if (wallGlassOf(wall)) {
+const dx = to.x - from.x;
+const dy = to.y - from.y;
+const length = Math.hypot(dx, dy) || 1;
+const nx = (dy / length) * (width / 2);
+const ny = (-dx / length) * (width / 2);
+ctx.lineWidth = width;
+ctx.strokeStyle = DRAWING_GLASS;
+ctx.beginPath();
+ctx.moveTo(from.x, from.y);
+ctx.lineTo(to.x, to.y);
+ctx.stroke();
+ctx.lineWidth = 1;
+ctx.strokeStyle = active ? DRAWING_ACTIVE : DRAWING_WALL;
+ctx.beginPath();
+ctx.moveTo(from.x + nx, from.y + ny);
+ctx.lineTo(to.x + nx, to.y + ny);
+ctx.moveTo(from.x - nx, from.y - ny);
+ctx.lineTo(to.x - nx, to.y - ny);
+ctx.stroke();
 return;
 }
 ctx.lineWidth = width;
@@ -34271,6 +34383,19 @@ function volumeWallPaintRgb(wall, sign) {
 if (!(sign === 1 || sign === -1)) return null;
 return volumePaintRgb(wallPaintOf(wall, sign > 0 ? "left" : "right"));
 }
+function volumeGlassed(wall, faces, from = 0) {
+if (!wallGlassOf(wall)) return faces;
+for (let index = from; index < faces.length; index += 1) volumeGlassFace(faces[index]);
+return faces;
+}
+function volumeGlassFace(face) {
+face.rgb = VOLUME_GLASS_RGB;
+face.clear = true;
+face.alpha = volumeClearAlpha("glass");
+face.paint = null;
+face.glass = true;
+return face;
+}
 function volumeOpeningWalkable(opening) {
 if (!opening || !openingWalkThrough(opening.kind)) return false;
 return Number(opening.heightAboveFloorMm || 0) <= VOLUME_STEP_MM;
@@ -34460,6 +34585,7 @@ const vectors = wallVectors(wall);
 if (!vectors || !(heightMm > 0)) return out;
 const half = Number(wall.thicknessMm) / 2;
 const { u, n, len } = vectors;
+const own = out.length;
 const at = (along, across) => ({
 x: Number(wall.aMm.x) + u.x * along + n.x * across,
 y: Number(wall.aMm.y) + u.y * along + n.y * across,
@@ -34546,10 +34672,14 @@ VOLUME_WALL_RGB,
 { normal: { x: 0, y: 0, z: 1 } },
 ),
 );
+volumeGlassed(wall, out, own);
 for (const opening of openings || []) {
 const from = out.length;
 volumeOpeningFaces(wall, opening, heightMm, out, openDoorIds, rooms);
 if (rooms && rooms.length > 0) volumeTagSides(wall, opening, out, from, rooms);
+if (wallGlassOf(wall)) {
+for (let index = from; index < out.length; index += 1) if (volumeIsWall(out[index])) volumeGlassFace(out[index]);
+}
 }
 return out;
 }
@@ -36105,6 +36235,27 @@ modelBox("tap", { x: -0.47, width: 0.08, y: -0.06, depth: 0.12, z: 0.9, height: 
 cabinet: modelParts(
 modelBox("door", { x: -0.46, width: 0.92, y: -0.5, depth: 0.15, z: 0.03, height: 0.94, material: "light" }),
 modelBox("case", { y: -0.35, depth: 0.85 }),
+),
+wardrobeOpen: modelParts(
+modelBox("shelfTop", { z: 0.86, height: 0.03, material: "light" }),
+modelBox("post", { x: -0.015, width: 0.03, z: 0, height: 0.86, material: "dark" }),
+modelBox("rod", { x: -0.48, width: 0.46, y: -0.02, depth: 0.04, z: 0.78, height: 0.02, material: "metal" }),
+modelBox("clothes", { x: -0.45, width: 0.4, y: -0.3, depth: 0.6, z: 0.38, height: 0.4, material: "body" }),
+modelBox("shelf", { x: 0.015, width: 0.485, z: 0.45, height: 0.03, material: "light" }),
+),
+shoeRack: modelParts(
+modelBox("sideLeft", { x: -0.5, width: 0.04, z: 0, height: 1 }),
+modelBox("sideRight", { x: 0.46, width: 0.04, z: 0, height: 1 }),
+modelBox("shelfLow", { x: -0.46, width: 0.92, z: 0.08, height: 0.06, material: "light" }),
+modelBox("shelfMid", { x: -0.46, width: 0.92, z: 0.48, height: 0.06, material: "light" }),
+modelBox("top", { x: -0.46, width: 0.92, z: 0.92, height: 0.08 }),
+),
+coatRack: modelParts(
+modelBox("board", { y: 0.38, depth: 0.12, z: 0.3, height: 0.4, material: "dark" }),
+modelBox("shelf", { z: 0.9, height: 0.1, material: "light" }),
+[-0.3, 0, 0.3].map((x, index) =>
+modelBox("hook" + (index + 1), { x: x - 0.025, width: 0.05, y: -0.1, depth: 0.48, z: 0.36, height: 0.06, material: "metal" }),
+),
 ),
 table: modelParts(
 modelBox("top", { z: 0.88, height: 0.12, material: "light" }),
@@ -38261,6 +38412,7 @@ land ? VOLUME_LAND_RGB : VOLUME_FLOOR_RGB,
 const shadowBoxes = [];
 if (rooms.length > 0) {
 for (const wall of walls) {
+if (wallGlassOf(wall)) continue;
 const vectors = wallVectors(wall);
 if (!vectors) continue;
 const height = wallHeights.get(wall.id) || 0;
@@ -38353,6 +38505,7 @@ const face = faces[index];
 const across = face.n.x * vectors.n.x + face.n.y * vectors.n.y;
 if (Math.abs(across) > 0.9) volumePainted(face, volumeWallPaintRgb(wall, Math.sign(across)), "wall");
 }
+volumeGlassed(wall, faces, from);
 }
 }
 if (rooms.length > 0) {
@@ -63057,17 +63210,19 @@ let name = strings.sim.services[service.type] || service.type;
 if (same.length > 1) name += " " + (Number.isInteger(service.channel) ? service.channel : same.indexOf(service) + 1);
 for (const char of Array.isArray(service.chars) ? service.chars : []) {
 const meta = char.meta || null;
-if (write && !(meta && Array.isArray(meta.perms) && meta.perms.includes("write"))) continue;
+const readOnly = write && !(meta && Array.isArray(meta.perms) && meta.perms.includes("write"));
+const charLabel = strings.sim.chars[char.type] || char.type;
 out.push({
 key: service.index + ":" + char.type,
 service: service.index,
 char: char.type,
-label: name + " · " + (strings.sim.chars[char.type] || char.type),
+label: name + " · " + (readOnly ? text("scenarios.editor.readOnlyChar", { char: charLabel }) : charLabel),
 meta,
+readOnly,
 });
 }
 }
-return out;
+return write ? [...out.filter((item) => !item.readOnly), ...out.filter((item) => item.readOnly)] : out;
 }
 function scenarioEditorValueSpec(meta, char) {
 if (!meta) return { kind: "none" };
@@ -63841,6 +63996,7 @@ const fid = block.id + ":";
 const writable = scenarioEditorCharChoices(accessory, { write: true });
 const services = [];
 for (const choice of writable) if (!services.some((item) => item.service === choice.service)) services.push(choice);
+services.sort((a, b) => a.service - b.service);
 const pick = (markId) => {
 const target = env.byMark.get(markId);
 const first = scenarioEditorCharChoices(target, { write: true })[0];
@@ -63857,7 +64013,7 @@ if (accessory && services.length > 1) {
 const options = services.map((item) => ({ value: item.service, label: item.label.split(" · ")[0] }));
 body.push(
 sedSelect(options, serviceKey, (raw) => {
-const first = writable.find((item) => String(item.service) === raw);
+const first = writable.find((item) => String(item.service) === raw && !item.readOnly) || writable.find((item) => String(item.service) === raw);
 if (!first) return;
 env.update(block.id, label, (current) => ({ ...current, ref: { markId: ref.markId, service: first.service }, items: [scenarioEditorItemChar({ char: "", verb: "set" }, first.char, first.meta)] }));
 }, { fid: fid + "service", title: SED_WORDS.service, className: "sed-select--service" }),
@@ -63867,7 +64023,12 @@ const own = writable.filter((item) => item.service === ref.service);
 items.forEach((item, index) => {
 const row = uiEl("div", { class: "sed-row sed-item" });
 const meta = env.meta({ markId: ref.markId, service: ref.service, char: item.char });
-const charOptions = own.map((choice) => ({ value: choice.char, label: strings.sim.chars[choice.char] || choice.char }));
+const charOptions = own.map((choice) => ({
+value: choice.char,
+label: choice.readOnly
+? text("scenarios.editor.readOnlyChar", { char: strings.sim.chars[choice.char] || choice.char })
+: strings.sim.chars[choice.char] || choice.char,
+}));
 const edit = (build) =>
 env.update(block.id, label, (current) => ({ ...current, items: current.items.map((entry, at) => (at === index ? build(entry) : entry)) }));
 if (accessory) {
@@ -68230,6 +68391,9 @@ onPick: (color) => applyWallPaint(side, color),
 return { side, label, field, row: uiEl("div", { class: "workshop__paintRow" }, [label, field.node]) };
 });
 let wallPaintShown = { project: null, wallId: null, labels: [] };
+const glassWallBox = uiEl("input", { type: "checkbox" });
+glassWallBox.addEventListener("change", () => applyWallGlass(glassWallBox.checked));
+const glassWallRow = uiCheckRow(glassWallBox, strings.workshop.wallGlass, strings.workshop.wallGlassHint);
 const wallDetail = uiEl("div", { class: "workshop__detail ui-fields" }, [
 uiField(strings.workshop.thickness, thicknessInput),
 uiField(strings.workshop.wallHeight, wallHeightInput),
@@ -68239,6 +68403,7 @@ wallNote,
 uiEl("div", { class: "workshop__paint", title: strings.workshop.paintHint }, [
 uiEl("span", { class: "ui-field__label", text: strings.workshop.paint }),
 ...wallPaint.map((item) => item.row),
+glassWallRow,
 ]),
 splitButton,
 removeButton(),
@@ -68630,6 +68795,18 @@ fail(error);
 return;
 }
 if (result.changed) commit(result.project, strings.history.wallPaint);
+}
+function applyWallGlass(on) {
+const wall = selectedWall();
+if (!wall) return;
+let result;
+try {
+result = setWallGlass(project(), wall.id, on);
+} catch (error) {
+fail(error);
+return;
+}
+if (result.changed) commit(result.project, strings.history.wallGlass);
 }
 function startSplitPick() {
 const wall = selectedWall();
@@ -70209,8 +70386,9 @@ wallPaint.forEach((item, index) => {
 const label = wallPaintShown.labels[index];
 item.label.textContent = label;
 item.label.title = label;
-item.field.set(wallPaintOf(wall, item.side), { label });
+item.field.set(wallPaintOf(wall, item.side), { label, disabled: wallGlassOf(wall) });
 });
+glassWallBox.checked = wallGlassOf(wall);
 }
 function syncOpening(opening) {
 const kind = opening.kind;

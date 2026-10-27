@@ -21,6 +21,7 @@ import {
   openingVentCell,
   openingVents,
   openingWalkThrough,
+  wallGlassOf,
   wallHeightMm,
   wallPaintOf,
   wallVectors,
@@ -36,8 +37,9 @@ import {
   VOLUME_MITER_MAX,
   VOLUME_STEP_MM,
   VOLUME_WALL_RGB,
+  volumeClearAlpha,
 } from "./measures.js";
-import { volumeAt, volumeFace, volumePaintRgb, volumePainted } from "./faces.js";
+import { volumeAt, volumeFace, volumeIsWall, volumePaintRgb, volumePainted } from "./faces.js";
 import {
   VOLUME_SUN_PROBE_MM,
   volumeBoxCorners,
@@ -57,6 +59,32 @@ import { volumeMiddleOf } from "./order.js";
 export function volumeWallPaintRgb(wall, sign) {
   if (!(sign === 1 || sign === -1)) return null;
   return volumePaintRgb(wallPaintOf(wall, sign > 0 ? "left" : "right"));
+}
+
+/**
+ * **Стеклянная стена** (правка 2026-10-27): грани стены с `from` — стеклом,
+ * тем же, что у стеклянной двери (`VOLUME_GLASS_RGB`, плотность `"glass"`).
+ * Краска сторон не видна: стекло не красят. Стеклом грань перестаёт быть
+ * стеной для пятен ламп (`volumeIsWall` по цвету и краске), и кольцо света на
+ * прозрачном не ложится; прицел смотрит сквозь неё, как сквозь стекло двери.
+ * Тени дома стеклянная стена не бросает (`volumeScene`); держит человека по-
+ * прежнему: сквозь стекло не ходят.
+ */
+export function volumeGlassed(wall, faces, from = 0) {
+  if (!wallGlassOf(wall)) return faces;
+  for (let index = from; index < faces.length; index += 1) volumeGlassFace(faces[index]);
+  return faces;
+}
+
+function volumeGlassFace(face) {
+  face.rgb = VOLUME_GLASS_RGB;
+  // Признак и доля — как у грани, собранной с `clear` (`volumeFace`): кадр
+  // смешивает по доле, взгляд смотрит сквозь по признаку.
+  face.clear = true;
+  face.alpha = volumeClearAlpha("glass");
+  face.paint = null;
+  face.glass = true;
+  return face;
 }
 
 /**
@@ -397,6 +425,7 @@ export function volumeWallFaces(wall, openings, heightMm, out = [], openDoorIds 
   if (!vectors || !(heightMm > 0)) return out;
   const half = Number(wall.thicknessMm) / 2;
   const { u, n, len } = vectors;
+  const own = out.length;
   const at = (along, across) => ({
     x: Number(wall.aMm.x) + u.x * along + n.x * across,
     y: Number(wall.aMm.y) + u.y * along + n.y * across,
@@ -512,10 +541,16 @@ export function volumeWallFaces(wall, openings, heightMm, out = [], openDoorIds 
       { normal: { x: 0, y: 0, z: 1 } },
     ),
   );
+  // Стекло — сама стена; проёмы в ней остаются проёмами со своими рамами.
+  volumeGlassed(wall, out, own);
   for (const opening of openings || []) {
     const from = out.length;
     volumeOpeningFaces(wall, opening, heightMm, out, openDoorIds, rooms);
     if (rooms && rooms.length > 0) volumeTagSides(wall, opening, out, from, rooms);
+    // Откосы и перемычка проёма в стеклянной стене — то же стекло.
+    if (wallGlassOf(wall)) {
+      for (let index = from; index < out.length; index += 1) if (volumeIsWall(out[index])) volumeGlassFace(out[index]);
+    }
   }
   return out;
 }

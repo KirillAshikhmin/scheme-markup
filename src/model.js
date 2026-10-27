@@ -7561,6 +7561,29 @@ export function setWallPaint(project, wallId, side, value) {
   return { project: withProject(project, { walls }), wall: next, changed: true };
 }
 
+/**
+ * **Стеклянная стена** (правка 2026-10-27): «Стены тоже добавь возможность
+ * сделать стеклянными, например в меню цвета». Стекло — свойство всей стены, а
+ * не стороны: у стекла сторон нет. Ключ необязательный: `wall.glass = true`
+ * лежит только у стеклянной, снятое удаляет ключ (G68 — прежний объект не
+ * меняется). Краска сторон при этом остаётся в объекте и вернётся, когда
+ * стекло снимут.
+ */
+export function wallGlassOf(wall) {
+  return Boolean(wall && wall.glass === true);
+}
+
+export function setWallGlass(project, wallId, on) {
+  const wall = requireWall(project, wallId);
+  const glass = on === true;
+  if (glass === wallGlassOf(wall)) return { project, wall, changed: false };
+  const next = { ...wall };
+  if (glass) next.glass = true;
+  else delete next.glass;
+  const walls = wallsOf(project).map((item) => (item.id === wallId ? next : item));
+  return { project: withProject(project, { walls }), wall: next, changed: true };
+}
+
 /** Покрасить пол или потолок помещения или снять краску (`null`, `""`). */
 export function setRoomPaint(project, roomId, part, value) {
   const room = findRoom(project, roomId);

@@ -73,9 +73,16 @@ function editorNumeric(meta) {
 
 /**
  * Что выбрать у устройства: `[{key: "сервис:характеристика", service, char,
- * label, meta}]` — сервис и характеристика одним списком, как в карточке
- * Sprut. С `{write: true}` — только то, что можно записать (для действия).
- * Одинаковые сервисы (клавиши выключателя) различаются номером.
+ * label, meta, readOnly}]` — сервис и характеристика одним списком, как в
+ * карточке Sprut. Одинаковые сервисы (клавиши выключателя) различаются номером.
+ *
+ * С `{write: true}` (для действия) список **тот же целиком**, а
+ * характеристика без записи помечена `readOnly` и пометкой в подписи (правка
+ * 2026-10-27). Слова заказчика: «Позволь блочными сценариями управлять
+ * характеристиками только для чтения у устройств, просто делай пометку что они
+ * только для чтения, но менять можно». В имитации это и нужно: датчик
+ * температуры или движения сценарий ставит сам, проверяя ответ дома. Записываемые
+ * идут первыми — их и подставляет выбор устройства.
  */
 export function scenarioEditorCharChoices(accessory, { write = false } = {}) {
   const services = accessory && Array.isArray(accessory.services) ? accessory.services : [];
@@ -86,17 +93,20 @@ export function scenarioEditorCharChoices(accessory, { write = false } = {}) {
     if (same.length > 1) name += " " + (Number.isInteger(service.channel) ? service.channel : same.indexOf(service) + 1);
     for (const char of Array.isArray(service.chars) ? service.chars : []) {
       const meta = char.meta || null;
-      if (write && !(meta && Array.isArray(meta.perms) && meta.perms.includes("write"))) continue;
+      const readOnly = write && !(meta && Array.isArray(meta.perms) && meta.perms.includes("write"));
+      const charLabel = strings.sim.chars[char.type] || char.type;
       out.push({
         key: service.index + ":" + char.type,
         service: service.index,
         char: char.type,
-        label: name + " · " + (strings.sim.chars[char.type] || char.type),
+        label: name + " · " + (readOnly ? text("scenarios.editor.readOnlyChar", { char: charLabel }) : charLabel),
         meta,
+        readOnly,
       });
     }
   }
-  return out;
+  // Записываемые — первыми; внутри своих — прежний порядок карточки.
+  return write ? [...out.filter((item) => !item.readOnly), ...out.filter((item) => item.readOnly)] : out;
 }
 
 /**
@@ -1011,6 +1021,9 @@ function sedActionDevice(env, block, place) {
   const writable = scenarioEditorCharChoices(accessory, { write: true });
   const services = [];
   for (const choice of writable) if (!services.some((item) => item.service === choice.service)) services.push(choice);
+  // Сервисы — в порядке карточки, а не «сначала записываемые»: список сервисов
+  // не про запись.
+  services.sort((a, b) => a.service - b.service);
   const pick = (markId) => {
     const target = env.byMark.get(markId);
     const first = scenarioEditorCharChoices(target, { write: true })[0];
@@ -1027,7 +1040,7 @@ function sedActionDevice(env, block, place) {
     const options = services.map((item) => ({ value: item.service, label: item.label.split(" · ")[0] }));
     body.push(
       sedSelect(options, serviceKey, (raw) => {
-        const first = writable.find((item) => String(item.service) === raw);
+        const first = writable.find((item) => String(item.service) === raw && !item.readOnly) || writable.find((item) => String(item.service) === raw);
         if (!first) return;
         env.update(block.id, label, (current) => ({ ...current, ref: { markId: ref.markId, service: first.service }, items: [scenarioEditorItemChar({ char: "", verb: "set" }, first.char, first.meta)] }));
       }, { fid: fid + "service", title: SED_WORDS.service, className: "sed-select--service" }),
@@ -1037,7 +1050,12 @@ function sedActionDevice(env, block, place) {
   items.forEach((item, index) => {
     const row = uiEl("div", { class: "sed-row sed-item" });
     const meta = env.meta({ markId: ref.markId, service: ref.service, char: item.char });
-    const charOptions = own.map((choice) => ({ value: choice.char, label: strings.sim.chars[choice.char] || choice.char }));
+    const charOptions = own.map((choice) => ({
+      value: choice.char,
+      label: choice.readOnly
+        ? text("scenarios.editor.readOnlyChar", { char: strings.sim.chars[choice.char] || choice.char })
+        : strings.sim.chars[choice.char] || choice.char,
+    }));
     const edit = (build) =>
       env.update(block.id, label, (current) => ({ ...current, items: current.items.map((entry, at) => (at === index ? build(entry) : entry)) }));
     if (accessory) {

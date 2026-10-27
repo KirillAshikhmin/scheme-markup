@@ -147,6 +147,7 @@ import {
   setSchemeAnchor,
   setSchemeWallHeight,
   setWallHeight,
+  setWallGlass,
   setWallPaint,
   splitWall,
   updateOpening,
@@ -160,6 +161,7 @@ import {
   wallLengthMm,
   wallName,
   wallOwnHeightMm,
+  wallGlassOf,
   wallPaintOf,
   wallRoomId,
   wallSplitStops,
@@ -2327,6 +2329,13 @@ function createWorkshop({ api, hosts }) {
   // Помещения за сторонами спрашиваются щупом по контурам — не на каждое
   // движение мыши, а когда сменились объект или стена.
   let wallPaintShown = { project: null, wallId: null, labels: [] };
+  // Стеклянная стена (правка 2026-10-27): «Стены тоже добавь возможность сделать
+  // стеклянными, например в меню цвета». Отметка — в том же блоке краски: стекло
+  // — тоже «чем стена выглядит». Пока она стоит, краска сторон не видна, и поля
+  // краски гаснут, но краска в объекте остаётся.
+  const glassWallBox = uiEl("input", { type: "checkbox" });
+  glassWallBox.addEventListener("change", () => applyWallGlass(glassWallBox.checked));
+  const glassWallRow = uiCheckRow(glassWallBox, strings.workshop.wallGlass, strings.workshop.wallGlassHint);
   const wallDetail = uiEl("div", { class: "workshop__detail ui-fields" }, [
     uiField(strings.workshop.thickness, thicknessInput),
     uiField(strings.workshop.wallHeight, wallHeightInput),
@@ -2336,6 +2345,7 @@ function createWorkshop({ api, hosts }) {
     uiEl("div", { class: "workshop__paint", title: strings.workshop.paintHint }, [
       uiEl("span", { class: "ui-field__label", text: strings.workshop.paint }),
       ...wallPaint.map((item) => item.row),
+      glassWallRow,
     ]),
     splitButton,
     removeButton(),
@@ -2918,6 +2928,20 @@ function createWorkshop({ api, hosts }) {
       return;
     }
     if (result.changed) commit(result.project, strings.history.wallPaint);
+  }
+
+  /** Сделать выделенную стену стеклянной или вернуть ей стену. */
+  function applyWallGlass(on) {
+    const wall = selectedWall();
+    if (!wall) return;
+    let result;
+    try {
+      result = setWallGlass(project(), wall.id, on);
+    } catch (error) {
+      fail(error);
+      return;
+    }
+    if (result.changed) commit(result.project, strings.history.wallGlass);
   }
 
   // ——— деление стены (правка после сборки сценариев) ———
@@ -5394,8 +5418,9 @@ function createWorkshop({ api, hosts }) {
       const label = wallPaintShown.labels[index];
       item.label.textContent = label;
       item.label.title = label;
-      item.field.set(wallPaintOf(wall, item.side), { label });
+      item.field.set(wallPaintOf(wall, item.side), { label, disabled: wallGlassOf(wall) });
     });
+    glassWallBox.checked = wallGlassOf(wall);
   }
 
   function syncOpening(opening) {

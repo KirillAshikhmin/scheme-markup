@@ -138,9 +138,10 @@ function place(scene, catalogKey, patch = {}) {
 
 // ——— состав каталога ————————————————————————————————————————————————————
 
-test("в каталоге пятьдесят девять вещей, и каждая стоит ровно в одной категории", () => {
+test("в каталоге шестьдесят две вещи, и каждая стоит ровно в одной категории", () => {
   const keys = objectCatalogKeys();
-  assert.equal(keys.length, 59, "вещей в каталоге стало другое число: " + keys.length);
+  // Гардеробная, обувница и вешалка — правка 2026-10-27.
+  assert.equal(keys.length, 62, "вещей в каталоге стало другое число: " + keys.length);
   assert.equal(new Set(keys).size, keys.length, "ключ занят дважды");
   // Тринадцать из брифа заказчика — поимённо: список называли словами, и
   // пропажа любой из них должна краснеть, а не теряться в числе.
@@ -497,7 +498,7 @@ test("раскладка названа: девять разделов, и «Л�
     "transport",
   ]);
   const sizes = OBJECT_CATEGORIES.map((category) => objectCatalogCategory(category).length);
-  assert.deepEqual(sizes, [14, 6, 7, 6, 6, 7, 5, 7, 1], "вещи переехали между разделами: " + sizes.join(","));
+  assert.deepEqual(sizes, [17, 6, 7, 6, 6, 7, 5, 7, 1], "вещи переехали между разделами: " + sizes.join(","));
   assert.equal(sizes.reduce((sum, value) => sum + value, 0), objectCatalogKeys().length);
   // **Раздел «Лестницы» и лестничная клетка — одно и то же.** Это не
   // совпадение, а то, ради чего раздел и заведён: по этим же ключам объём

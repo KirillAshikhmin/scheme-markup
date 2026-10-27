@@ -13,6 +13,7 @@ import {
   openingsInWall,
   outlinesInOrder,
   schemeObjectsOnScheme,
+  wallGlassOf,
   wallOwnHeightMm,
   wallPlaceBands,
   wallVectors,
@@ -42,6 +43,7 @@ import {
   volumeSideParts,
   volumeSideStops,
   volumeWallFaces,
+  volumeGlassed,
   volumeWallPaintRgb,
   volumeWallLintels,
   volumeWallMiters,
@@ -488,6 +490,8 @@ export function volumeScene(project, schemeId, options = {}) {
   const shadowBoxes = [];
   if (rooms.length > 0) {
     for (const wall of walls) {
+      // Стеклянная стена тени дома не бросает (правка 2026-10-27).
+      if (wallGlassOf(wall)) continue;
       const vectors = wallVectors(wall);
       if (!vectors) continue;
       const height = wallHeights.get(wall.id) || 0;
@@ -639,6 +643,7 @@ export function volumeScene(project, schemeId, options = {}) {
           const across = face.n.x * vectors.n.x + face.n.y * vectors.n.y;
           if (Math.abs(across) > 0.9) volumePainted(face, volumeWallPaintRgb(wall, Math.sign(across)), "wall");
         }
+        volumeGlassed(wall, faces, from);
       }
     }
     // **Пол под стеной** (дефект D37). Слова заказчика: «под дверными проёмами
