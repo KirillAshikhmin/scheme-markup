@@ -95,9 +95,13 @@ test("стены названы по-человечески, и выбор ид�
   assert.equal(marksWallText(put.project, findMark(put.project, put.markId)), "На стене ВГ, 2 м от угла");
 
   // Выбор для руки — все четыре стены схемы, каждая с именем, отступом и, если
-  // стена далеко, с расстоянием до неё.
+  // стена далеко, с расстоянием до неё. Порядок — по расстоянию, ближняя
+  // первой (правка 2026-10-27: «сортируй их по расстоянию по возрастанию»):
+  // нижняя в 10 см, две боковые на равном — в порядке модели, верхняя дальше
+  // всех.
   const choices = marksWallChoices(put.project, findMark(put.project, put.markId));
-  assert.deepEqual(choices.map((item) => item.name), ["АБ", "БВ", "ВГ", "АГ"]);
+  assert.deepEqual(choices.map((item) => item.name), ["ВГ", "БВ", "АГ", "АБ"]);
+  assert.ok(choices.every((item, index) => index === 0 || choices[index - 1].gapMm <= item.gapMm), "не по возрастанию");
   const near = choices.find((item) => item.wallId === box.wallIds[2]);
   assert.deepEqual({ atMm: near.atMm, gapMm: near.gapMm }, { atMm: 2000, gapMm: 100 });
   assert.equal(near.text, "ВГ · 2 м");

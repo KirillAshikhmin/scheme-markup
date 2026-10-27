@@ -58550,7 +58550,7 @@ text: !name
 : text("marks.wallOption", { name, at }),
 });
 }
-return out;
+return out.sort((a, b) => a.gapMm - b.gapMm);
 }
 function marksRowModel(project, row, options = {}) {
 const mark = row.mark;
