@@ -342,6 +342,7 @@ import {
   volumeMarkAnchor,
   volumeMarkPlace,
   volumeScene,
+  volumeStackRoomAlias,
   volumeStackScene,
 } from "./volume/scene.js";
 import {
@@ -755,6 +756,7 @@ export {
   volumeSlabFaces,
   volumeSolidBlocks,
   volumeSplitFace,
+  volumeStackRoomAlias,
   volumeStackScene,
   volumeStairLanding,
   volumeStairNear,

@@ -41,7 +41,7 @@ import {
   volumeRoomKey,
   volumeRoomKeyAt,
 } from "./shapes.js";
-import { volumeMiddleOf } from "./order.js";
+import { volumeMiddleOf, volumeOrderAll } from "./order.js";
 import { VOLUME_NIGHT_SHARE } from "./sky.js";
 import { volumeClipPolygon, volumeMoonTint } from "./sun.js";
 import { VOLUME_MARK_CEILING, volumeMarkProbe } from "./marks.js";
@@ -826,15 +826,6 @@ function volumeSourcePools(decals, byRoom, ways, key, id, source, shade = null) 
       for (const host of byRoom.get(into) || []) volumeLampPool(decals, host, id, point, { near, far, n: way.n }, share);
     }
   }
-}
-
-/** Все грани дерева порядка — куски, как они лежат в узлах. */
-function volumeOrderAll(node, out) {
-  if (!node) return out;
-  for (const face of node.same) out.push(face);
-  volumeOrderAll(node.front, out);
-  volumeOrderAll(node.back, out);
-  return out;
 }
 
 /**

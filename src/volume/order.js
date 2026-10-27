@@ -467,6 +467,15 @@ export function volumeOrderRank(tree, eye, point) {
   return rank;
 }
 
+/** Все грани дерева порядка — куски, как они лежат в узлах. */
+export function volumeOrderAll(node, out = []) {
+  if (!node) return out;
+  for (const face of node.same) out.push(face);
+  volumeOrderAll(node.front, out);
+  volumeOrderAll(node.back, out);
+  return out;
+}
+
 /** Грань яруса тел — та, что лежит в дереве порядка. */
 export function volumeInTree(face) {
   return !face.line && (face.layer === undefined || face.layer === VOLUME_LAYER_BODY);

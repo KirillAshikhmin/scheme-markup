@@ -25,6 +25,7 @@ import {
   VOLUME_LAND_OUT_MM,
   VOLUME_LAND_RGB,
   VOLUME_LAYER_BASE,
+  VOLUME_SLAB_RGB,
   VOLUME_WALL_RGB,
 } from "./measures.js";
 import { volumeAt, volumeClockwise, volumeFace, volumePainted, volumeShadowShift } from "./faces.js";
@@ -33,12 +34,13 @@ import {
   VOLUME_SUN_PROBE_MM,
   volumeBoxCorners,
   volumeOccluder,
+  volumePointInside,
   volumePrismFaces,
   volumeRoomKey,
   volumeRoomKeyAt,
   volumeShiftPoints,
 } from "./shapes.js";
-import { volumeMiddleOf, volumeOrderStack, volumeOrderTree } from "./order.js";
+import { volumeMiddleOf, volumeOrderAll, volumeOrderStack, volumeOrderTree } from "./order.js";
 import {
   volumeSideParts,
   volumeSideStops,
@@ -60,6 +62,7 @@ import {
   volumeHeightMm,
   volumeObjectFaces,
   volumeObjectPrisms,
+  volumePolysOverlap,
   volumePrismBlocks,
   volumePrismSolid,
   volumeRooms,
@@ -273,10 +276,17 @@ export function volumeStackScene(project, plan, optionsOf, was = null) {
     bottomMm = Math.min(bottomMm, item.baseMm);
     topMm = Math.max(topMm, item.baseMm + item.heightMm);
   }
+  // Двусвет — одно помещение для света: и у граней, и у кусков дерева порядка
+  // (куски — копии граней, и у этажа, взятого готовым, они прежние).
+  const alias = volumeStackRoomAlias(project, floors);
+  const under = volumeStackUnder(project, floors);
+  volumeStackRoomsJoin(faces, alias, under);
+  const order = volumeOrderStack(groups, boxes);
+  volumeStackRoomsJoin(volumeOrderAll(order, []), alias, under);
   return {
     ...base,
     faces,
-    order: volumeOrderStack(groups, boxes),
+    order,
     // Та же сцена, разобранная на этажи: из них она и сложена, и из них
     // следующая сборка возьмёт всё, что не изменилось (таск 232). Это не второй
     // ответ о сцене — это её же части, и живут они ровно её срок.
@@ -306,6 +316,123 @@ export function volumeStackScene(project, plan, optionsOf, was = null) {
         : null,
     },
   };
+}
+
+// ——— двусвет — одно помещение для света (правка 2026-10-27) ————————————————
+//
+// Слова заказчика: «метки освещения правильно расставились, с гостиной
+// наверху, но вот освещение работает неверно» и «там, где одна стена не должно
+// быть видно стыка этажей… Стена должна быть ровной».
+//
+// Двусветная гостиная начерчена двумя помещениями: своим на первом этаже и
+// помещением **без пола** на втором (дыра, таск 229). Свет же знает помещение
+// по ключу грани (`face.room`): лампы гостиной светят её пол и низ стен, а
+// верх стен и потолок над дырой числятся за помещением второго этажа, у
+// которого ламп нет, — и стена делилась пополам по перекрытию: снизу свет,
+// сверху ночь.
+//
+// Для света это **одно помещение**: дыра этажом выше получает ключ того
+// помещения, над которым стоит. Тогда лампы гостиной кладут пятна и на верх
+// стен, и на потолок двусвета, а тон ночи у обеих частей один. Какие помещения
+// и стены — не трогается: ходят, падают и выделяют по-прежнему по своим.
+//
+// Связь считается **на каждой сборке стопки**: этажи берутся готовыми из
+// прошлой сцены (таск 232), а сосед снизу мог перемениться. Поэтому свой ключ
+// грань хранит в `roomOwn`, а `room` — ключ после связи.
+
+/**
+ * Связь «дыра → помещение под ней»: `Map<ключ дыры, ключ помещения>`. Дыра —
+ * помещение без пола этажом выше; под ней — помещение этажа ниже, в котором
+ * лежит середина дыры, или первое, с которым она пересекается. Дыра над дырой
+ * (три этажа света) сводится к нижнему помещению.
+ */
+export function volumeStackRoomAlias(project, floors) {
+  const alias = new Map();
+  for (let at = 0; at + 1 < (floors || []).length; at += 1) {
+    const lower = floors[at];
+    const upper = floors[at + 1];
+    const dx = upper.shiftMm.x - lower.shiftMm.x;
+    const dy = upper.shiftMm.y - lower.shiftMm.y;
+    const below = volumeRooms(project, lower.schemeId);
+    for (const room of volumeRooms(project, upper.schemeId)) {
+      if (room.hasFloor !== false) continue;
+      const key = volumeRoomKey(room);
+      if (!key) continue;
+      const hole = volumeShiftPoints(room.pointsMm, { x: dx, y: dy });
+      const middle = volumeMiddleOf(hole.map((point) => ({ x: point.x, y: point.y, z: 0 })));
+      const under =
+        below.find((item) => volumePointInside(middle, item.pointsMm)) ||
+        below.find((item) => volumePolysOverlap(item.pointsMm, hole)) ||
+        null;
+      const target = under ? volumeRoomKey(under) : null;
+      if (target && target !== key) alias.set(key, target);
+    }
+  }
+  // Цепочки — к самому нижнему: дыра третьего этажа над дырой второго.
+  for (const [key, target] of alias) {
+    let end = target;
+    for (let step = 0; step < 16 && alias.has(end); step += 1) end = alias.get(end);
+    alias.set(key, end);
+  }
+  return alias;
+}
+
+/**
+ * **Низ плиты — потолок комнаты под ней.** У комнаты под дырой двусвета своего
+ * потолка нет (`volumeCeilingUnderVoid`), и над её частью у галереи потолком
+ * служит низ перекрытия этажа выше. Помещения у него не было — лампы гостиной
+ * его не светили, и ночью над головой висела чёрная плита. Теперь низ плиты
+ * этажа выше берёт помещение этажа ниже, в котором лежит его середина:
+ * `Map<схема этажа выше, помещения этажа ниже в общих миллиметрах стопки>`.
+ */
+function volumeStackUnder(project, floors) {
+  const out = new Map();
+  for (let at = 0; at + 1 < (floors || []).length; at += 1) {
+    const lower = floors[at];
+    const rooms = volumeRooms(project, lower.schemeId)
+      .filter((room) => volumeRoomKey(room))
+      .map((room) => ({ key: volumeRoomKey(room), pointsMm: volumeShiftPoints(room.pointsMm, lower.shiftMm) }));
+    out.set(floors[at + 1].schemeId, rooms);
+  }
+  return out;
+}
+
+/** Ключи помещений граней — после связи (`volumeStackRoomAlias`); свой ключ — в `roomOwn`. */
+function volumeStackRoomsJoin(faces, alias, under = null) {
+  const join = (key) => (key && alias.has(key) ? alias.get(key) : key);
+  for (const face of faces) {
+    // Низ плиты этажа выше: помещение — по середине, у этажа ниже (см.
+    // `volumeStackUnder`). Считается каждый раз: этаж ниже мог перемениться.
+    // Торец перекрытия над двусветом (край галереи) — так же, по месту перед
+    // ним: смотрит он в комнату этажа ниже, и светит его её свет.
+    const own = face.roomOwn === undefined ? (face.room === undefined ? null : face.room) : face.roomOwn;
+    const slab = face.n && ((face.n.z < -0.9 && face.rgb === VOLUME_CEILING_RGB) || (Math.abs(face.n.z) < 0.1 && face.rgb === VOLUME_SLAB_RGB));
+    const below = under && face.floor && own === null && slab ? under.get(face.floor) : null;
+    if (below) {
+      const centre = volumeMiddleOf(face.p);
+      const middle = face.n.z < -0.9 ? centre : { x: centre.x + face.n.x * VOLUME_SUN_PROBE_MM, y: centre.y + face.n.y * VOLUME_SUN_PROBE_MM };
+      const found = below.find((room) => volumePointInside(middle, room.pointsMm));
+      if (face.roomOwn === undefined) face.roomOwn = null;
+      if (found) face.room = join(found.key);
+      else delete face.room;
+      continue;
+    }
+    if (face.roomOwn === undefined) {
+      face.roomOwn = face.room === undefined ? null : face.room;
+      face.backRoomOwn = face.backRoom === undefined ? null : face.backRoom;
+      face.sidesOwn = face.sides === undefined ? null : face.sides;
+    }
+    if (face.roomOwn) face.room = join(face.roomOwn);
+    if (face.backRoomOwn) face.backRoom = join(face.backRoomOwn);
+    const sides = face.sidesOwn;
+    if (sides && (alias.has(sides.a) || alias.has(sides.b))) {
+      const a = join(sides.a);
+      const b = join(sides.b);
+      face.sides = { ...sides, a, b, key: (a || "") + "|" + (b || "") };
+    } else if (sides) {
+      face.sides = sides;
+    }
+  }
 }
 
 // ——— сцена ———————————————————————————————————————————————————————————————
@@ -388,6 +515,9 @@ export function volumeScene(project, schemeId, options = {}) {
   // Краска пола по ключу помещения: её берут и полосы пола под стенами.
   const floorRgbOf = new Map();
   for (const room of rooms) if (room.floorRgb) floorRgbOf.set(volumeRoomKey(room), room.floorRgb);
+  // Помещения без пола — дыры двусвета: у стены над ними полоса пола не
+  // торчит (см. «пол под стеной» ниже).
+  const holeKeys = new Set(rooms.filter((room) => room.hasFloor === false).map(volumeRoomKey).filter(Boolean));
   const schemeHeight = volumeHeightMm(project, schemeId, null);
   if (!schemeHeight.known && !rooms.some((room) => room.heightKnown)) notes.push("noHeight");
   const faces = [];
@@ -691,10 +821,26 @@ export function volumeScene(project, schemeId, options = {}) {
         x: Number(wall.aMm.x) + vectors.u.x * along + vectors.n.x * across,
         y: Number(wall.aMm.y) + vectors.u.y * along + vectors.n.y * across,
       });
+      // **Сторона дыры двусвета** (правка 2026-10-27): «там, где одна стена не
+      // должно быть видно стыка этажей в виде части пола в стене. Стена должна
+      // быть ровной». В помещении без пола напуск полосы торчал из стены
+      // торцом перекрытия — тёмным поясом во всю стену на высоте этажа. Там
+      // полосы нет вовсе, а тело перекрытия кончается заподлицо со стеной, и
+      // торца у него с этой стороны нет: там продолжается сама стена.
+      const sideParts = new Map();
+      let holes = false;
       for (const side of [1, -1]) {
         const roomAt = (along) => volumeRoomKeyAt(rooms, spot(along, (halfT + VOLUME_SUN_PROBE_MM) * side));
+        const list = volumeSideParts(-VOLUME_FLOOR_LAP, vectors.len + VOLUME_FLOOR_LAP, volumeSideStops(wall, side, rooms), roomAt).map(
+          (part) => ({ ...part, hole: Boolean(part.room && holeKeys.has(part.room)) }),
+        );
+        if (list.some((part) => part.hole)) holes = true;
+        sideParts.set(side, list);
+      }
+      for (const side of [1, -1]) {
         const outer = (halfT + VOLUME_FLOOR_LAP) * side;
-        for (const part of volumeSideParts(-VOLUME_FLOOR_LAP, vectors.len + VOLUME_FLOOR_LAP, volumeSideStops(wall, side, rooms), roomAt)) {
+        for (const part of sideParts.get(side)) {
+          if (part.hole) continue;
           const piece = volumeFace(
             volumeClockwise([spot(part.fromMm, 0), spot(part.toMm, 0), spot(part.toMm, outer), spot(part.fromMm, outer)]).map((point) =>
               volumeAt(point, 0),
@@ -716,7 +862,28 @@ export function volumeScene(project, schemeId, options = {}) {
       // Тело у полосы — такое же, как у пола комнаты (таск 209): иначе
       // перекрытие кончалось бы у контура помещения, а под стеной верхнего
       // этажа на фасаде оставалась бы щель ровно в толщину плиты.
-      volumeSlabFaces(strip, 0, faces);
+      if (!holes) volumeSlabFaces(strip, 0, faces);
+      else {
+        // У стены над дырой — по половинам, как и пол: у дыры половина
+        // кончается гранью стены.
+        for (const side of [1, -1]) {
+          for (const part of sideParts.get(side)) {
+            const reach = (part.hole ? halfT : halfT + VOLUME_FLOOR_LAP) * side;
+            const from = faces.length;
+            volumeSlabFaces(volumeClockwise([spot(part.fromMm, 0), spot(part.toMm, 0), spot(part.toMm, reach), spot(part.fromMm, reach)]), 0, faces);
+            if (!part.hole) continue;
+            // Торец в плоскости стены не рисуется: там стоит сама стена этажа
+            // ниже, и вторая грань в той же плоскости давала шов в точку по
+            // всей стене. Низ плиты остаётся — им снизу закрыта стена этажа
+            // выше, если своей стены под ней нет.
+            for (let index = faces.length - 1; index >= from; index -= 1) {
+              const face = faces[index];
+              const facing = face.n.x * vectors.n.x * side + face.n.y * vectors.n.y * side;
+              if (facing >= 0.99) faces.splice(index, 1);
+            }
+          }
+        }
+      }
     }
     // Сплошные участки стены — во всю её высоту; низкая перемычка над проёмом
     // (G234) — своим куском от верха проёма до верха стены. У препятствия

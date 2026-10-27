@@ -239,6 +239,7 @@ import {
   volumeCeilingUnderVoid,
   volumePolysOverlap,
   volumeSchemeOriginMm,
+  volumeStackRoomAlias,
   volumeStackScene,
   volumeOrderStack,
   VOLUME_SLAB_MM,
@@ -6927,6 +6928,35 @@ test("двусвет слипает этажи в одно дерево — и �
   sameStack(after, stackOf(project, house.second, open), "двусвет: открыли дверь");
 });
 
+test("двусвет — одно помещение для света: дыра этажом выше получает ключ комнаты под ней (правка 2026-10-27)", () => {
+  // «Метки освещения правильно расставились, с гостиной наверху, но вот
+  // освещение работает неверно»: лампы комнаты под дырой не светили верх стен
+  // и потолок двусвета — они числились за помещением этажа выше.
+  const house = houseScene();
+  const solid = houseStack(house.project, house.first);
+  assert.ok(solid.faces.some((face) => face.room === house.secondRoomId), "у второго этажа нет своих граней");
+  const off = setRoomFloor(house.project, house.secondRoomId, false).project;
+  const plan = volumeFloorPlan(off, house.first);
+  assert.deepEqual([...volumeStackRoomAlias(off, plan.floors)], [[house.secondRoomId, house.firstRoomId]]);
+  const holed = houseStack(off, house.first);
+  const upper = holed.faces.filter((face) => face.roomOwn === house.secondRoomId);
+  assert.ok(upper.length > 0, "граней дыры нет");
+  assert.ok(upper.every((face) => face.room === house.firstRoomId), "верх двусвета остался чужим помещением");
+  // Куски дерева порядка — те же ключи: на них ложатся пятна ламп.
+  const pieces = [];
+  const walk = (node) => {
+    if (!node) return;
+    pieces.push(...node.same);
+    walk(node.front);
+    walk(node.back);
+  };
+  walk(holed.order);
+  assert.ok(!pieces.some((face) => face.room === house.secondRoomId), "у кусков дерева остался ключ дыры");
+  // Вернули пол — связь снята, этаж взят готовым, а ключи свои.
+  const back = volumeStackScene(house.project, volumeFloorPlan(house.project, house.first), () => ({}), holed);
+  assert.ok(back.faces.filter((face) => face.roomOwn === house.secondRoomId).every((face) => face.room === house.secondRoomId));
+});
+
 test("G68: сцена из готовых этажей не меняет объект ни одним полем (таск 232)", () => {
   const house = stackCacheScene();
   const before = JSON.stringify(house.project);
@@ -7212,7 +7242,25 @@ test("снятый пол — дыра в перекрытии, и край её
   assert.equal(floors(withFloor).length, 1 + 4 * 2, "пол комнаты и четыре полосы под стенами");
   const off = setRoomFloor(scene.project, scene.roomId, false).project;
   const holed = volumeScene(off, scene.schemeId);
-  assert.equal(floors(holed).length, 4 * 2, "пола комнаты нет — остались только полосы под стенами");
+  // Со стороны дыры у полосы нет и половины (правка 2026-10-27: «не должно быть
+  // видно стыка этажей в виде части пола в стене») — остались наружные.
+  assert.equal(floors(holed).length, 4, "пола комнаты нет — остались только наружные половины полос под стенами");
+  // А торца перекрытия, смотрящего в дыру, нет вовсе: плита кончается
+  // заподлицо со стеной, и стена от пола нижнего этажа до потолка двусвета
+  // ровная. Смотрящие наружу торцы на месте.
+  const centre = { x: 0, y: 0 };
+  const edges = holed.faces.filter((face) => face.rgb === VOLUME_SLAB_RGB && Math.abs(face.n.z) < 0.1);
+  // Торчит — значит стоит в комнате ближе к её середине, чем грань стены
+  // (стены по ±2000 и ±1500, толщина у стенда своя).
+  const halfT = Number(holed.walls[0].thicknessMm) / 2;
+  const intoHole = edges.filter((face) => {
+    const middle = face.p.reduce((sum, point) => ({ x: sum.x + point.x / face.p.length, y: sum.y + point.y / face.p.length }), { x: 0, y: 0 });
+    const facing = face.n.x * (centre.x - middle.x) + face.n.y * (centre.y - middle.y) > 0;
+    const inside = Math.abs(face.n.y) > 0.5 ? Math.abs(middle.y) < 1500 - halfT - 1 : Math.abs(middle.x) < 2000 - halfT - 1;
+    return facing && inside;
+  });
+  assert.deepEqual(intoHole, [], "торец перекрытия торчит в дыру двусвета");
+  assert.ok(edges.length >= 4, "наружные торцы плиты пропали");
   // Потолок остаётся: он не перекрытие, а верх этой комнаты.
   assert.equal(
     holed.faces.filter((face) => face.n.z < 0 && face.p[0].z > 0).length,

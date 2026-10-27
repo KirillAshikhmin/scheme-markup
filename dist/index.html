@@ -33968,6 +33968,13 @@ node = second;
 }
 return rank;
 }
+function volumeOrderAll(node, out = []) {
+if (!node) return out;
+for (const face of node.same) out.push(face);
+volumeOrderAll(node.front, out);
+volumeOrderAll(node.back, out);
+return out;
+}
 function volumeInTree(face) {
 return !face.line && (face.layer === undefined || face.layer === VOLUME_LAYER_BODY);
 }
@@ -38371,10 +38378,15 @@ baseMm: item.baseMm,
 bottomMm = Math.min(bottomMm, item.baseMm);
 topMm = Math.max(topMm, item.baseMm + item.heightMm);
 }
+const alias = volumeStackRoomAlias(project, floors);
+const under = volumeStackUnder(project, floors);
+volumeStackRoomsJoin(faces, alias, under);
+const order = volumeOrderStack(groups, boxes);
+volumeStackRoomsJoin(volumeOrderAll(order, []), alias, under);
 return {
 ...base,
 faces,
-order: volumeOrderStack(groups, boxes),
+order,
 stackParts: boxes,
 ownFloor: floors[mineAt].schemeId,
 shadowBoxes,
@@ -38389,6 +38401,78 @@ boundsMm: stackBox
 : null,
 },
 };
+}
+function volumeStackRoomAlias(project, floors) {
+const alias = new Map();
+for (let at = 0; at + 1 < (floors || []).length; at += 1) {
+const lower = floors[at];
+const upper = floors[at + 1];
+const dx = upper.shiftMm.x - lower.shiftMm.x;
+const dy = upper.shiftMm.y - lower.shiftMm.y;
+const below = volumeRooms(project, lower.schemeId);
+for (const room of volumeRooms(project, upper.schemeId)) {
+if (room.hasFloor !== false) continue;
+const key = volumeRoomKey(room);
+if (!key) continue;
+const hole = volumeShiftPoints(room.pointsMm, { x: dx, y: dy });
+const middle = volumeMiddleOf(hole.map((point) => ({ x: point.x, y: point.y, z: 0 })));
+const under =
+below.find((item) => volumePointInside(middle, item.pointsMm)) ||
+below.find((item) => volumePolysOverlap(item.pointsMm, hole)) ||
+null;
+const target = under ? volumeRoomKey(under) : null;
+if (target && target !== key) alias.set(key, target);
+}
+}
+for (const [key, target] of alias) {
+let end = target;
+for (let step = 0; step < 16 && alias.has(end); step += 1) end = alias.get(end);
+alias.set(key, end);
+}
+return alias;
+}
+function volumeStackUnder(project, floors) {
+const out = new Map();
+for (let at = 0; at + 1 < (floors || []).length; at += 1) {
+const lower = floors[at];
+const rooms = volumeRooms(project, lower.schemeId)
+.filter((room) => volumeRoomKey(room))
+.map((room) => ({ key: volumeRoomKey(room), pointsMm: volumeShiftPoints(room.pointsMm, lower.shiftMm) }));
+out.set(floors[at + 1].schemeId, rooms);
+}
+return out;
+}
+function volumeStackRoomsJoin(faces, alias, under = null) {
+const join = (key) => (key && alias.has(key) ? alias.get(key) : key);
+for (const face of faces) {
+const own = face.roomOwn === undefined ? (face.room === undefined ? null : face.room) : face.roomOwn;
+const slab = face.n && ((face.n.z < -0.9 && face.rgb === VOLUME_CEILING_RGB) || (Math.abs(face.n.z) < 0.1 && face.rgb === VOLUME_SLAB_RGB));
+const below = under && face.floor && own === null && slab ? under.get(face.floor) : null;
+if (below) {
+const centre = volumeMiddleOf(face.p);
+const middle = face.n.z < -0.9 ? centre : { x: centre.x + face.n.x * VOLUME_SUN_PROBE_MM, y: centre.y + face.n.y * VOLUME_SUN_PROBE_MM };
+const found = below.find((room) => volumePointInside(middle, room.pointsMm));
+if (face.roomOwn === undefined) face.roomOwn = null;
+if (found) face.room = join(found.key);
+else delete face.room;
+continue;
+}
+if (face.roomOwn === undefined) {
+face.roomOwn = face.room === undefined ? null : face.room;
+face.backRoomOwn = face.backRoom === undefined ? null : face.backRoom;
+face.sidesOwn = face.sides === undefined ? null : face.sides;
+}
+if (face.roomOwn) face.room = join(face.roomOwn);
+if (face.backRoomOwn) face.backRoom = join(face.backRoomOwn);
+const sides = face.sidesOwn;
+if (sides && (alias.has(sides.a) || alias.has(sides.b))) {
+const a = join(sides.a);
+const b = join(sides.b);
+face.sides = { ...sides, a, b, key: (a || "") + "|" + (b || "") };
+} else if (sides) {
+face.sides = sides;
+}
+}
 }
 function volumeScene(project, schemeId, options = {}) {
 const scheme = findScheme(project, schemeId);
@@ -38427,6 +38511,7 @@ const wallBands = wallPlaceBands(walls);
 const where = { rooms, walls: wallBands };
 const floorRgbOf = new Map();
 for (const room of rooms) if (room.floorRgb) floorRgbOf.set(volumeRoomKey(room), room.floorRgb);
+const holeKeys = new Set(rooms.filter((room) => room.hasFloor === false).map(volumeRoomKey).filter(Boolean));
 const schemeHeight = volumeHeightMm(project, schemeId, null);
 if (!schemeHeight.known && !rooms.some((room) => room.heightKnown)) notes.push("noHeight");
 const faces = [];
@@ -38573,10 +38658,20 @@ const spot = (along, across) => ({
 x: Number(wall.aMm.x) + vectors.u.x * along + vectors.n.x * across,
 y: Number(wall.aMm.y) + vectors.u.y * along + vectors.n.y * across,
 });
+const sideParts = new Map();
+let holes = false;
 for (const side of [1, -1]) {
 const roomAt = (along) => volumeRoomKeyAt(rooms, spot(along, (halfT + VOLUME_SUN_PROBE_MM) * side));
+const list = volumeSideParts(-VOLUME_FLOOR_LAP, vectors.len + VOLUME_FLOOR_LAP, volumeSideStops(wall, side, rooms), roomAt).map(
+(part) => ({ ...part, hole: Boolean(part.room && holeKeys.has(part.room)) }),
+);
+if (list.some((part) => part.hole)) holes = true;
+sideParts.set(side, list);
+}
+for (const side of [1, -1]) {
 const outer = (halfT + VOLUME_FLOOR_LAP) * side;
-for (const part of volumeSideParts(-VOLUME_FLOOR_LAP, vectors.len + VOLUME_FLOOR_LAP, volumeSideStops(wall, side, rooms), roomAt)) {
+for (const part of sideParts.get(side)) {
+if (part.hole) continue;
 const piece = volumeFace(
 volumeClockwise([spot(part.fromMm, 0), spot(part.toMm, 0), spot(part.toMm, outer), spot(part.fromMm, outer)]).map((point) =>
 volumeAt(point, 0),
@@ -38589,7 +38684,22 @@ if (!part.room) piece.indoor = true;
 faces.push(piece);
 }
 }
-volumeSlabFaces(strip, 0, faces);
+if (!holes) volumeSlabFaces(strip, 0, faces);
+else {
+for (const side of [1, -1]) {
+for (const part of sideParts.get(side)) {
+const reach = (part.hole ? halfT : halfT + VOLUME_FLOOR_LAP) * side;
+const from = faces.length;
+volumeSlabFaces(volumeClockwise([spot(part.fromMm, 0), spot(part.toMm, 0), spot(part.toMm, reach), spot(part.fromMm, reach)]), 0, faces);
+if (!part.hole) continue;
+for (let index = faces.length - 1; index >= from; index -= 1) {
+const face = faces[index];
+const facing = face.n.x * vectors.n.x * side + face.n.y * vectors.n.y * side;
+if (facing >= 0.99) faces.splice(index, 1);
+}
+}
+}
+}
 }
 const spans = !(height > 0)
 ? []
@@ -39167,13 +39277,6 @@ const point = { ...source, at };
 for (const host of byRoom.get(into) || []) volumeLampPool(decals, host, id, point, { near, far, n: way.n }, share);
 }
 }
-}
-function volumeOrderAll(node, out) {
-if (!node) return out;
-for (const face of node.same) out.push(face);
-volumeOrderAll(node.front, out);
-volumeOrderAll(node.back, out);
-return out;
 }
 function volumeLampFacing(n, source, distanceMm) {
 if (source.wall && n.x * source.wall.x + n.y * source.wall.y > 0.9 && distanceMm < 300) return 1;
@@ -66378,6 +66481,7 @@ around.pitch,
 );
 }
 function fallFloor() {
+if (screenMode() !== "volume") return null;
 if (fallAt && volumeStanceFalling(stance)) return fallAt;
 if (fallSnap && fallSnap.scene === scene && fallSnap.x === person.x && fallSnap.y === person.y) {
 fallAt = fallSnap.floor;
