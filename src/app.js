@@ -7,6 +7,7 @@ import { getSetting, setSetting } from "./store.js";
 // 193). Каркас только кладёт его в настройки и достаёт обратно: второго счёта
 // у памяти вида нет.
 import {
+  screenPlaceCarry,
   screenPlaceForget,
   screenPlaceOf,
   screenPlaceRestore,
@@ -757,6 +758,8 @@ function saveViewMemory() {
 
 export function setState(patch) {
   if (!patch) return getState();
+  const schemeBefore = appState.schemeId;
+  const projectBefore = appState.project ? appState.project.id : null;
   const changed = {};
   for (const [key, value] of Object.entries(patch)) {
     if (appState[key] !== value) {
@@ -773,6 +776,12 @@ export function setState(patch) {
   // оповещения: к мигу, когда поверхности узнают о новом режиме, хозяин записи
   // уже новый, и погасшее поле своим кадром места не отнимет.
   if ("screen" in changed) screenPlaceScreen(appState.screen);
+  // Сменили схему того же объекта — место и масштаб едут на неё по точке
+  // привязки (правка 2026-10-27), **до** оповещения: поля читают место на
+  // смене схемы. Другой объект — место забыто выше (`syncViewMemory`).
+  if ("schemeId" in changed && projectBefore && appState.project && appState.project.id === projectBefore) {
+    screenPlaceCarry(appState.project, schemeBefore, appState.schemeId);
+  }
   if ("screen" in changed || "schemeId" in changed) saveViewMemory();
   if (Object.keys(changed).length === 0) return getState();
   const snapshot = getState();

@@ -86,7 +86,7 @@
 // Поэтому у записи есть хозяин: **пишет только то поле, которое на экране**.
 // Правило одно на три вида и живёт здесь, а не тремя уговорами в трёх файлах:
 // уговор можно забыть, заводя четвёртую поверхность, а отказ в записи — нет.
-import { findScheme, planFractionToMm, planMmToFraction, planPixelsPerMeter } from "./model.js";
+import { findScheme, planFractionToMm, planMmToFraction, planPixelsPerMeter, schemeAnchorOriginMm } from "./model.js";
 import { planToScreen, screenToPlan } from "./render.js";
 
 /** Общее место: `{schemeId, x, y, pxPerMm, stamp}` или `null`. */
@@ -170,6 +170,52 @@ export function screenPlaceSet(from, schemeId, pointMm, options = {}) {
       listener(place);
     } catch (error) {
       // Слушатель — память вида; его беда не повод ронять кадр поля.
+    }
+  }
+  return placeStamp;
+}
+
+/**
+ * **Перенести место на другую схему того же объекта** (правка 2026-10-27).
+ *
+ * Слова заказчика: «при переключении видов между Чертёж-схема и т.д. мы
+ * пофиксили, что бы оставились на одном месте и зуме, теперь при
+ * переключении схем это же пофиксь, у нас же один масштаб. и точка привязки
+ * есть тоже».
+ *
+ * Место дома одно на все схемы: у каждой свой ноль, а разницу знает точка
+ * привязки (`schemeAnchorOriginMm`, таск 205) — та же арифметика, которой
+ * объём переносит человека по лестнице и по списку схем (`sameSpotOn`). Без
+ * привязки разница нулевая: те же миллиметры. Масштаб — экранных точек на
+ * миллиметр — общий и переносится как есть; взгляд камеры тоже. Открытые двери
+ * и шторы не переносятся: ключи у каждой схемы свои.
+ *
+ * Зовёт это каркас **до** того, как поверхности узнают о новой схеме: они
+ * читают место на смене `schemeId` (план — `canvasPullPlace`, чертёж —
+ * `pullPlace` при вписывании), и к этому мигу оно уже лежит у новой схемы. У
+ * плана без моста в миллиметры (нет калибровки или привязки подложки) место не
+ * применится, и он, как прежде, впишет схему.
+ */
+export function screenPlaceCarry(project, fromSchemeId, toSchemeId) {
+  if (!place || !toSchemeId || fromSchemeId === toSchemeId || place.schemeId !== fromSchemeId) return placeStamp;
+  if (!findScheme(project, toSchemeId)) return placeStamp;
+  const from = schemeAnchorOriginMm(project, fromSchemeId);
+  const to = schemeAnchorOriginMm(project, toSchemeId);
+  placeStamp += 1;
+  place = {
+    schemeId: toSchemeId,
+    x: place.x + from.x - to.x,
+    y: place.y + from.y - to.y,
+    pxPerMm: place.pxPerMm,
+    look: place.look,
+    open: null,
+    stamp: placeStamp,
+  };
+  for (const listener of [...listeners]) {
+    try {
+      listener(place);
+    } catch (error) {
+      // Слушатель — память вида; его беда не повод ронять смену схемы.
     }
   }
   return placeStamp;

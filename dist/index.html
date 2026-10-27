@@ -27030,6 +27030,29 @@ listener(place);
 }
 return placeStamp;
 }
+function screenPlaceCarry(project, fromSchemeId, toSchemeId) {
+if (!place || !toSchemeId || fromSchemeId === toSchemeId || place.schemeId !== fromSchemeId) return placeStamp;
+if (!findScheme(project, toSchemeId)) return placeStamp;
+const from = schemeAnchorOriginMm(project, fromSchemeId);
+const to = schemeAnchorOriginMm(project, toSchemeId);
+placeStamp += 1;
+place = {
+schemeId: toSchemeId,
+x: place.x + from.x - to.x,
+y: place.y + from.y - to.y,
+pxPerMm: place.pxPerMm,
+look: place.look,
+open: null,
+stamp: placeStamp,
+};
+for (const listener of [...listeners]) {
+try {
+listener(place);
+} catch (error) {
+}
+}
+return placeStamp;
+}
 function screenPlaceOf(schemeId) {
 if (!place || !schemeId || place.schemeId !== schemeId) return null;
 return {
@@ -43214,6 +43237,8 @@ Promise.resolve(setSetting(VIEW_SETTING, next)).catch(() => {});
 }
 function setState(patch) {
 if (!patch) return getState();
+const schemeBefore = appState.schemeId;
+const projectBefore = appState.project ? appState.project.id : null;
 const changed = {};
 for (const [key, value] of Object.entries(patch)) {
 if (appState[key] !== value) {
@@ -43225,6 +43250,9 @@ syncHiddenObjects(changed);
 syncViewMemory(changed);
 if ("project" in changed) simSync(appState.project);
 if ("screen" in changed) screenPlaceScreen(appState.screen);
+if ("schemeId" in changed && projectBefore && appState.project && appState.project.id === projectBefore) {
+screenPlaceCarry(appState.project, schemeBefore, appState.schemeId);
+}
 if ("screen" in changed || "schemeId" in changed) saveViewMemory();
 if (Object.keys(changed).length === 0) return getState();
 const snapshot = getState();

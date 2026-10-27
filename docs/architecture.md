@@ -77,7 +77,7 @@ GitHub Actions: npm test → npm run build → GitHub Pages
 
 - **Каталоги — данные сборки, не объекта:** `objectCatalog.js` (вещи чертежа), `openingCatalog.js` (виды проёмов), `sim/catalog.js` + `sim/hubTypes.js` (сервисы и характеристики, `hubTypes` собран `tools/hub-types.mjs`). Ключ вещи общий для трёх реестров: каталог, `objectViews/objects.js` (изображение на развёртке), `objectModels/objects.js` (тело в «Объёме»).
 - **Чистые помощники:** `markBox.js` (габарит в мм), `markSpare.js` (запасной габарит), `colorName.js`, `gestures.js`, `lightFade.js`, `history.js`, `imagePrep.js`, `roomTrace.js`, `scenarioTree.js`, `clockMath.js`, `weather.js`.
-- **Общие сеансовые хозяева:** `appClock.js` (одни часы, ADR 016), `appWeather.js` (выбор погоды), `screenPlace.js` (одно место и масштаб на три режима), `planNav.js` (ход по плану на все поля).
+- **Общие сеансовые хозяева:** `appClock.js` (одни часы, ADR 016), `appWeather.js` (выбор погоды), `screenPlace.js` (одно место и масштаб на три режима и на все схемы объекта: смену схемы место переживает по точке привязки — `screenPlaceCarry` из `setState`), `planNav.js` (ход по плану на все поля).
 - **Панели** (`src/panels/`) монтируются `registerPanel(PANEL_IDS.x, mountFn)` в точки `src/index.html` и друг друга не импортируют. Импортировать панель некому: в бандл попадает каждый файл `src/**/*.js`. Общие кирпичи — `panels/ui.js`.
 
 ## 4. Состояние и поток правки

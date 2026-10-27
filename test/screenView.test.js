@@ -37,11 +37,13 @@ import {
   planMmToFraction,
   setPlanOrigin,
   setPlanScale,
+  setSchemeAnchor,
 } from "../src/model.js";
 import { drawDrawingGrid, drawRuler, drawScheme, drawingBridge, drawingUnitBridge, planToScreen, rulerTicks } from "../src/render.js";
 import {
   SCREEN_LOOK_VIEWS,
   SCREEN_OPEN_MAX,
+  screenPlaceCarry,
   screenPlaceForget,
   screenPlaceFrom,
   screenPlaceLookFrom,
@@ -714,4 +716,44 @@ test("G352: открытое ложится в память и поднимае�
   assert.equal("open" in entry, false, "открытое завело вторую запись рядом с местом");
   screenPlaceForget();
   screenPlaceScreen(null);
+});
+
+// ——— смена схемы (правка 2026-10-27) ——————————————————————————————————————
+//
+// «При переключении схем это же пофиксь, у нас же один масштаб. и точка
+// привязки есть тоже».
+
+test("смена схемы: место едет по точке привязки, масштаб и взгляд — те же, двери — нет", () => {
+  screenPlaceForget();
+  screenPlaceScreen(null);
+  const first = planScene();
+  const second = addScheme(first.project, { name: "2 этаж", imageId: "plan-2", width: 1200, height: 800 });
+  // Лестница первого этажа в (2000, 1000), выход второго — в (500, -300).
+  let project = setSchemeAnchor(second.project, first.schemeId, { x: 2000, y: 1000 }).project;
+  project = setSchemeAnchor(project, second.scheme.id, { x: 500, y: -300 }).project;
+  screenPlaceSet("volume", first.schemeId, { x: 2600, y: 1400 }, {
+    look: { view: "person", yaw: 1, pitch: -0.2 },
+    open: { doors: ["d1"], sheers: [] },
+  });
+  screenPlaceSet("scheme", first.schemeId, { x: 2600, y: 1400 }, { pxPerMm: 0.35 });
+  screenPlaceCarry(project, first.schemeId, second.scheme.id);
+  assert.equal(screenPlaceOf(first.schemeId), null, "место осталось у прежней схемы");
+  const carried = screenPlaceOf(second.scheme.id);
+  // В шестистах миллиметрах вправо и в четырёхстах вниз от лестницы — там же
+  // от выхода наверху.
+  assert.deepEqual({ x: carried.x, y: carried.y }, { x: 500 + 600, y: -300 + 400 });
+  assert.equal(carried.pxPerMm, 0.35, "масштаб не доехал");
+  assert.deepEqual(carried.look, { view: "person", yaw: 1, pitch: -0.2 }, "взгляд не доехал");
+  assert.equal(carried.open, null, "двери прежней схемы уехали на новую");
+  // Без привязок — те же миллиметры (G68: прежние объекты без привязки).
+  screenPlaceSet("scheme", second.scheme.id, { x: 10, y: 20 }, { pxPerMm: 0.5 });
+  const plain = addScheme(createProject(), { name: "A", imageId: null, width: 100, height: 100 });
+  const two = addScheme(plain.project, { name: "B", imageId: null, width: 100, height: 100 });
+  screenPlaceSet("scheme", plain.scheme.id, { x: 10, y: 20 }, { pxPerMm: 0.5 });
+  screenPlaceCarry(two.project, plain.scheme.id, two.scheme.id);
+  assert.deepEqual({ x: screenPlaceOf(two.scheme.id).x, y: screenPlaceOf(two.scheme.id).y }, { x: 10, y: 20 });
+  // Отметка новая — поверхности читают перенесённое как чужое место.
+  const stamp = screenPlaceOf(two.scheme.id).stamp;
+  assert.equal(screenPlaceCarry(two.project, plain.scheme.id, two.scheme.id), stamp, "перенос не со своей схемы что-то сдвинул");
+  screenPlaceForget();
 });
