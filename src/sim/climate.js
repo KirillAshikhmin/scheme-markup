@@ -35,10 +35,20 @@ export const CLIMATE_HEAT_TARGET_C = 22;
 const CLIMATE_TAU_WINDOW_H = 8;
 const CLIMATE_TAU_INNER_H = 20;
 /**
- * Батареи: сколько градусов в час они могут дать на объём 40 м³. С запасом на
- * мороз за −30 при закрытых дверях — и без запаса на открытую настежь дверь.
+ * Батареи: сколько градусов в час они могут дать помещению. С запасом на мороз
+ * за −30 при закрытых дверях и на обычный воздухообмен — вытяжки и бризер
+ * (около одного объёма в час при −25; правка 2026-10-27, было 10 — только на
+ * закрытый дом, и квартира с работающей вытяжкой в мороз остывала), — и без
+ * запаса на открытую настежь дверь.
+ *
+ * **Число на помещение любого размера** (правка 2026-10-27): отопление
+ * рассчитывают на помещение, и в большой комнате батарей больше. Прежде это
+ * были градусы на 40 м³ — одна батарея на всё, — и двусветная гостиная в
+ * 440 м³ в мороз за два часа остывала до +11, хотя её никто не проветривал.
+ * Кондиционер и тёплый пол остались мерой прибора: это одна вещь своей
+ * мощности, сколько бы ни было вокруг воздуха.
  */
-const CLIMATE_HEAT_C_H = 10;
+const CLIMATE_HEAT_C_H = 14;
 /**
  * Тепло держит не воздух, а стены и вещи: на один градус воздуха — столько
  * его объёмов. Влага и CO₂ меняются с воздухом целиком, температура — в это
@@ -133,6 +143,46 @@ export function climateStep(state, outdoor, geometry, open, effects, heating, dt
     add(id, "ah", (ah - item.ah) * share);
     add(id, "co2", (co2 - item.co2) * share);
   };
+  // Соседи по проёмам — куда вытяжка тянет воздух (`pull` ниже). Проём берётся
+  // и закрытый: воздух к вытяжке идёт щелью под дверью или переточной
+  // решёткой, на то они и ставятся.
+  const neighbours = new Map();
+  for (const way of (geometry && geometry.ways) || []) {
+    if (!way.a || !way.b || way.a === way.b) continue;
+    if (!neighbours.has(way.a)) neighbours.set(way.a, new Set());
+    if (!neighbours.has(way.b)) neighbours.set(way.b, new Set());
+    neighbours.get(way.a).add(way.b);
+    neighbours.get(way.b).add(way.a);
+  }
+  /**
+   * **Вытяжка забирает воздух комнаты, а замещает его воздух соседей**
+   * (правка 2026-10-27, вопрос заказчика «физика верно рассчитана для них?»).
+   * Было: на место вытянутого в ту же комнату сразу шёл уличный, и ванная с
+   * вентилятором в мороз остывала к нескольким градусам тепла. На деле воздух
+   * к вытяжке тянется из соседних помещений, а дом в целом добирает его с улицы
+   * неплотностями — всеми помещениями понемногу. Поэтому уличный воздух тем же
+   * расходом делится на все остальные помещения по объёму: у квартиры это доли
+   * процента в час на комнату, и батареи их покрывают. Соседей нет (комната
+   * только на улицу) — замещает улица прямо в неё, как прежде.
+   */
+  const pull = (id, flow) => {
+    const near = [...(neighbours.get(id) || [])].filter((other) => was.has(other));
+    if (near.length === 0) {
+      exchange(id, flow, tOut, ahOut, CLIMATE_CO2_OUT);
+      return;
+    }
+    const mix = { t: 0, ah: 0, co2: 0 };
+    for (const other of near) {
+      const item = was.get(other);
+      mix.t += item.t / near.length;
+      mix.ah += item.ah / near.length;
+      mix.co2 += item.co2 / near.length;
+    }
+    exchange(id, flow, mix.t, mix.ah, mix.co2);
+    const others = [...was.keys()].filter((other) => other !== id && volume.has(other));
+    const total = others.reduce((sum, other) => sum + volume.get(other), 0);
+    for (const other of others) exchange(other, (flow * volume.get(other)) / total, tOut, ahOut, CLIMATE_CO2_OUT);
+  };
   for (const way of (geometry && geometry.ways) || []) {
     // Окно — пока не распахнули створку, и воздух идёт её площадью (`ventMm2`):
     // открытое окно проветривает, а не становится дырой во всю стену. Дверь —
@@ -175,7 +225,7 @@ export function climateStep(state, outdoor, geometry, open, effects, heating, dt
     }
     const own = (effects && effects.get(room.id)) || null;
     if (own) {
-      if (own.exhaust > 0) exchange(room.id, own.exhaust, tOut, ahOut, CLIMATE_CO2_OUT);
+      if (own.exhaust > 0) pull(room.id, own.exhaust);
       for (const supply of own.supply || []) exchange(room.id, supply.flow, supply.tempC, ahOut, CLIMATE_CO2_OUT);
       // Кондиционер и обогрев тянут к своей уставке, не дальше её.
       if (own.cool !== null && own.cool !== undefined && item.t > own.cool) {
@@ -192,9 +242,9 @@ export function climateStep(state, outdoor, geometry, open, effects, heating, dt
       if (own.dry) item.ah = Math.max(0, item.ah - ((CLIMATE_DRY_G_H * scale) / 3600) * dt);
     }
     // Центральное отопление: в сезон батареи греют своей мощностью до уставки;
-    // теплее уставки — молчат.
+    // теплее уставки — молчат. Мощность — по помещению, а не на 40 м³.
     if (heating && item.t < CLIMATE_HEAT_TARGET_C) {
-      item.t = Math.min(CLIMATE_HEAT_TARGET_C, item.t + ((CLIMATE_HEAT_C_H * scale) / 3600) * dt);
+      item.t = Math.min(CLIMATE_HEAT_TARGET_C, item.t + (CLIMATE_HEAT_C_H / 3600) * dt);
     }
     // Роса: воздух не держит больше насыщения.
     const most = climateAbsolute(item.t, 100);

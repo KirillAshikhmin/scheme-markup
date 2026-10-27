@@ -290,6 +290,15 @@ test("живое состояние: что дует, что звучит, чт�
   assert.equal(simLiveOf(of("breezer"), {}).flow, null, "выключенный бризер дует");
   const fan = simLiveOf(of("breezer"), { "0.Active": "ACTIVE", "0.RotationSpeed": 50 });
   assert.deepEqual(fan.flow, { kind: "air", level: 0.5 });
+  // Вытяжка и вентиляция воздух забирают (правка 2026-10-27): поток у них —
+  // «в себя», как и в климате, где они вытяжка, а приток — только у бризера.
+  put(box, "hood", "ВЫТ", { x: 0.4, y: 0.2 });
+  put(box, "vent", "ВЕНТ", { x: 0.5, y: 0.2 });
+  for (const name of ["hood", "vent"]) {
+    const accessory = of(name);
+    const index = accessory.services.find((service) => service.type === "Fan").index;
+    assert.deepEqual(simLiveOf(accessory, { [index + ".Active"]: "ACTIVE", [index + ".RotationSpeed"]: 100 }).flow, { kind: "intake", level: 1 }, name);
+  }
   // Кондиционер — термостат (правка после сборки сценариев): дует, пока режим
   // не «Выкл»; в «Авто» — тем, что делает сейчас.
   assert.deepEqual(simLiveOf(of("ac"), { "0.TargetHeatingCoolingState": "COOL" }).flow, { kind: "cool", level: 1 });

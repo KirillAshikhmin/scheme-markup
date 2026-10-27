@@ -92,6 +92,50 @@ test("люди дышат: CO₂ растёт по числу людей; бри
   assert.ok(vented.get("living").co2 < two.get("living").co2 - 150, "вытяжка не снимает CO₂");
 });
 
+test("вытяжка тянет воздух из соседей: ванная в мороз не остывает, влагу и CO₂ уносит (правка 2026-10-27)", () => {
+  // Вопрос заказчика: «физика верно рассчитана для них?». Было: на место
+  // вытянутого в ту же комнату сразу шёл уличный, и маленькая ванная с
+  // вентилятором в мороз остывала к нескольким градусам тепла.
+  // Квартира: ванная, коридор и гостиная — вытяжка в 108 м³/ч для неё
+  // обычный обмен, а не сквозняк.
+  const geo = {
+    rooms: [
+      { id: "bath", areaMm2: 5e6, heightMm: 2700, windowsMm2: 0 },
+      { id: "hall", areaMm2: 10e6, heightMm: 2700, windowsMm2: 0 },
+      { id: "living", areaMm2: 40e6, heightMm: 2700, windowsMm2: 5e6 },
+    ],
+    ways: [
+      { id: "bathDoor", a: "bath", b: "hall", areaMm2: 1.6e6, window: false, leaf: true },
+      { id: "livingDoor", a: "hall", b: "living", areaMm2: 1.6e6, window: false, leaf: true },
+      { id: "front", a: "hall", b: null, areaMm2: 1.9e6, window: false, leaf: true },
+    ],
+  };
+  const frost = { tempC: -20, humidity: 85, sun: 0 };
+  const fan = new Map([["bath", { exhaust: 0.03, supply: [], cool: null, warm: null, heat: [], dry: false }]]);
+  const state = new Map([["bath", room(24, 90, 600)], ["hall", room(22)], ["living", room(22)]]);
+  for (let minute = 0; minute < 60; minute += 1) climateStep(state, frost, geo, new Set(), fan, true, 60, 0);
+  const bath = state.get("bath");
+  assert.ok(bath.t > 18, "ванная с вытяжкой выстыла: " + bath.t.toFixed(1));
+  assert.ok(climateRelative(bath.t, bath.ah) < 70, "вытяжка не сняла влажность: " + climateRelative(bath.t, bath.ah).toFixed(0));
+  assert.ok(bath.co2 < 520, "вытяжка не сменила воздух: " + bath.co2.toFixed(0));
+  // Дом добирает воздух с улицы неплотностями всех помещений — батареи это
+  // покрывают: ни коридор, ни гостиная не выстывают.
+  for (const id of ["hall", "living"]) assert.ok(state.get(id).t > 20, id + " выстыл: " + state.get(id).t.toFixed(1));
+  // Но уличный воздух в дом пришёл: CO₂ у соседей ниже, чем без вытяжки.
+  const still = new Map([["bath", room(24, 90, 600)], ["hall", room(22, 45, 600)], ["living", room(22, 45, 600)]]);
+  const aired = new Map([["bath", room(24, 90, 600)], ["hall", room(22, 45, 600)], ["living", room(22, 45, 600)]]);
+  for (let minute = 0; minute < 60; minute += 1) {
+    climateStep(still, frost, geo, new Set(), new Map(), true, 60, 0);
+    climateStep(aired, frost, geo, new Set(), fan, true, 60, 0);
+  }
+  assert.ok(aired.get("living").co2 < still.get("living").co2, "уличный воздух в доме ниоткуда не пришёл");
+  // Комната без соседей, только на улицу, — замещает улица, как прежде.
+  const alone = { rooms: [geo.rooms[0]], ways: [] };
+  const lone = new Map([["bath", room(24, 90, 600)]]);
+  for (let minute = 0; minute < 60; minute += 1) climateStep(lone, frost, alone, new Set(), fan, true, 60, 0);
+  assert.ok(lone.get("bath").t < bath.t - 3, "одинокая комната с вытяжкой не холоднее: " + lone.get("bath").t.toFixed(1));
+});
+
 test("бризер зимой: без подогрева холодит, с подогревом — нет", () => {
   const cold = new Map([["living", { exhaust: 0, supply: [{ flow: 0.035, tempC: WINTER.tempC }], cool: null, warm: null, heat: [], dry: false }]]);
   const warm = new Map([["living", { exhaust: 0, supply: [{ flow: 0.035, tempC: CLIMATE_BREEZER_HEAT_C }], cool: null, warm: null, heat: [], dry: false }]]);

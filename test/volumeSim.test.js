@@ -666,6 +666,19 @@ test("признаки работы: диод под каждой клавише
     const out = (end.x - breezerPlace.face.origin.x) * breezerPlace.face.normal.x + (end.y - breezerPlace.face.origin.y) * breezerPlace.face.normal.y;
     assert.ok(out > 500, "струя не ушла от лица: " + out);
   }
+  // Вытяжка — наоборот (правка 2026-10-27): струи начинаются в комнате, а
+  // стрелка упирается в лицо — воздух уходит в решётку.
+  const intake = new Map(live);
+  intake.set(box.marks.breezer, { ...live.get(box.marks.breezer), flow: { kind: "intake", level: 1 } });
+  const outOf = (point) =>
+    (point.x - breezerPlace.face.origin.x) * breezerPlace.face.normal.x + (point.y - breezerPlace.face.origin.y) * breezerPlace.face.normal.y;
+  const drawn = volumeLiveSigns(scene, intake).filter((face) => face.line);
+  assert.equal(drawn.length, 3);
+  for (const flow of drawn) {
+    assert.equal(flow.arrow, true);
+    assert.ok(outOf(flow.p[0]) > 500, "струя вытяжки не из комнаты");
+    assert.ok(outOf(flow.p[flow.p.length - 1]) < 50, "стрелка вытяжки не у решётки");
+  }
   // Свет, экран и штора своё показывают сами — признаков у них нет.
   for (const key of ["lamp", "tv", "curtain"]) assert.equal(ledsOf(signs, box.marks[key]).length, 0, key);
   // Горящий диод светится своим цветом и ночью: в кадре он без тона часа.
