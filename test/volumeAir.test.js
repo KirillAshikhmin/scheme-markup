@@ -109,15 +109,21 @@ const kitchen = { kind: "room", roomId: "r1", name: "Кухня", t: 22.4, rh: 4
 
 function mount() {
   globalThis.document = fakeDocument();
-  const calls = { room: [], street: [], placed: 0 };
+  const calls = { room: [], street: [], placed: 0, clock: [] };
   let clock = 1000;
+  let minutes = 12 * 60;
   const air = createVolumeAir({
     setRoom: (roomId, patch) => calls.room.push({ roomId, patch }),
     setStreet: (patch) => calls.street.push(patch),
     placed: () => (calls.placed += 1),
     now: () => clock,
+    clock: {
+      minutes: () => minutes,
+      set: (value) => calls.clock.push(["set", value]),
+      now: () => calls.clock.push(["now"]),
+    },
   });
-  return { air, calls, tick: (ms) => (clock += ms) };
+  return { air, calls, tick: (ms) => (clock += ms), setMinutes: (value) => (minutes = value) };
 }
 
 test("ряды: у помещения температура, влажность и CO₂, у улицы — температура и влажность", () => {
@@ -218,12 +224,56 @@ test("окошко идёт за человеком: другое помещен
   air.sync({ kind: "room", roomId: "r2", name: "", t: 19, rh: 50, co2: 500 });
   assert.equal(withClass(air.box, "volume__airTitle")[0].textContent, strings.volume.climateRoomUnnamed);
   assert.equal(withClass(air.box, "volume__airSlider")[0].value, "19");
+  // Ушёл в обзор: климата нет, а время осталось — окошко про одно время.
   air.sync(null);
-  assert.equal(air.isOpen(), false, "строки нет, а окошко висит");
+  assert.equal(air.isOpen(), true, "ушёл в обзор — время закрылось вместе с климатом");
   assert.equal(air.line.hidden, true);
-  // Места нет — и открыть нечего.
-  air.open();
-  assert.equal(air.isOpen(), false);
+  assert.equal(withClass(air.box, "volume__airSlider").length, 0, "ползунки климата без климата");
+  assert.equal(withClass(air.box, "volume__airTitle")[0].textContent, strings.volume.airTime);
+});
+
+test("строка часов открывает то же окошко; ряд часов — поле времени и «Сейчас» (правка 2026-10-27)", () => {
+  const { air, calls, setMinutes } = mount();
+  air.sync(null);
+  assert.equal(air.timeLine.tagName, "BUTTON", "строка часов не кнопка");
+  air.timeLine.click();
+  assert.equal(air.isOpen(), true, "строка часов не открыла окошко без климата");
+  assert.equal(air.timeLine.getAttribute("aria-expanded"), "true");
+  const [field] = withClass(air.box, "volume__airTime");
+  assert.equal(field.type, "time");
+  assert.equal(field.value, "12:00");
+  // Время идёт — поле за ним, пока его не держат фокусом.
+  setMinutes(12 * 60 + 5);
+  air.sync(null);
+  assert.equal(field.value, "12:05");
+  document.activeElement = field;
+  setMinutes(12 * 60 + 6);
+  air.sync(null);
+  assert.equal(field.value, "12:05", "живое время переписало поле под набором");
+  // Набор с клавиатуры: «3», затем «5» — применяется по уходу из поля, а не на
+  // первую цифру (`uiTimeApply`).
+  field.fire("keydown", { key: "3" });
+  field.value = "12:03";
+  field.fire("change");
+  assert.deepEqual(calls.clock, [], "первая цифра уже перевела часы");
+  field.fire("keydown", { key: "5" });
+  field.value = "12:35";
+  field.fire("change");
+  field.fire("blur");
+  assert.deepEqual(calls.clock, [["set", 12 * 60 + 35]]);
+  // Колесо телефона: клавиш нет — сразу.
+  field.value = "07:10";
+  field.fire("change");
+  assert.deepEqual(calls.clock[1], ["set", 7 * 60 + 10]);
+  withClass(air.box, "volume__airNow")[0].click();
+  assert.deepEqual(calls.clock[2], ["now"]);
+  // С климатом ряд часов стоит над ползунками.
+  document.activeElement = null;
+  air.sync(kitchen);
+  assert.equal(withClass(air.box, "volume__airSlider").length, 3);
+  assert.equal(withClass(air.box, "volume__airTime").length, 1);
+  air.timeLine.click();
+  assert.equal(air.isOpen(), false, "повторный тап по часам не закрыл окошко");
 });
 
 test("на улице два ползунка — ручные значения погоды; «Как по погоде» только при своих значениях", () => {
@@ -281,6 +331,7 @@ test("место окошка: над полосой, а где тесно — �
 test("стили: полоса часов кликов по-прежнему не берёт, строка климата и окошко — берут", () => {
   assert.equal(prop(ruleBody(VOLUME_CSS, ".volume__clock"), "pointer-events"), "none");
   assert.equal(prop(ruleBody(VOLUME_CSS, ".volume__clockAir"), "pointer-events"), "auto");
+  assert.equal(prop(ruleBody(VOLUME_CSS, ".volume__clockTime"), "pointer-events"), "auto");
   const box = ruleBody(VOLUME_CSS, ".volume__airBox");
   assert.equal(prop(box, "pointer-events"), "auto");
   assert.equal(prop(box, "white-space"), "normal", "окошко унаследовало «не переносить строк» полосы");

@@ -49,6 +49,7 @@ import { openingCatalogDefaults } from "../src/openingCatalog.js";
 import { drawDrawingOpening, drawElevation, drawOpeningFace, drawingBridge, drawingDoorLeaves } from "../src/render.js";
 import {
   VOLUME_ARCH_SEGMENTS,
+  VOLUME_DOOR_LEAF_MM,
   VOLUME_FOLD_GAP_MM,
   VOLUME_FOLD_LEAF_MM,
   VOLUME_SLIDE_GAP_MM,
@@ -166,6 +167,28 @@ function elevationLog(scene) {
 }
 
 const leafOf = (built, doorId) => built.faces.filter((face) => face.doorId === doorId);
+
+/**
+ * Полотна двери: с правки 2026-10-27 («полотно двери имеет толщину в 1
+ * пиксель, сделай нормальные») каждое — призма в толщину полотна, шесть граней
+ * подряд (`volumePrismFaces`: четыре бока, верх, низ). `{faces, xs, ys,
+ * x, y}` — точки и середина полотна; по середине сверяются места, как прежде
+ * по единственной грани.
+ */
+function boardsOf(faces) {
+  const own = faces.filter((face) => face.rgb[0] === 176);
+  const boards = [];
+  for (let index = 0; index + 6 <= own.length; index += 6) {
+    const group = own.slice(index, index + 6);
+    const xs = group.flatMap((face) => face.p.map((point) => point.x));
+    const ys = group.flatMap((face) => face.p.map((point) => point.y));
+    const mid = (list) => (Math.min(...list) + Math.max(...list)) / 2;
+    boards.push({ faces: group, xs, ys, x: mid(xs), y: mid(ys) });
+  }
+  assert.equal(own.length, boards.length * 6, "полотно не призмой");
+  return boards;
+}
+const spanOf = (list) => Math.max(...list) - Math.min(...list);
 
 // ——— все виды рисуются, и ни один не похож на другой ——————————————————————
 
@@ -429,42 +452,40 @@ test("двустворчатая дверь — две створки с руч�
   const scene = one("doorDouble", { hinge: "start", swing: "left" });
   const built = volumeScene(scene.project, scene.schemeId);
   const leaf = leafOf(built, scene.ids[0]);
-  const panels = leaf.filter((face) => face.both && face.rgb[0] === 176);
+  const panels = boardsOf(leaf);
   assert.equal(panels.length, 2, "две створки");
   const handles = leaf.filter((face) => face.rgb[0] === 186);
   assert.ok(handles.length >= 10, "по ручке на створку: " + handles.length);
   assert.ok(built.doors.includes(scene.ids[0]), "двустворчатая открывается");
-  const away = (faces) => Math.max(...faces.flatMap((face) => face.p.map((point) => Math.abs(point.y))));
-  assert.ok(away(panels) < 1, "закрытые стоят в проёме");
+  const away = (boards) => Math.max(...boards.flatMap((board) => board.ys.map(Math.abs)));
+  assert.ok(away(panels) <= VOLUME_DOOR_LEAF_MM / 2 + 0.01, "закрытые стоят в проёме");
+  for (const panel of panels) assert.ok(Math.abs(spanOf(panel.ys) - VOLUME_DOOR_LEAF_MM) < 0.01, "у створки нет толщины");
   const open = volumeScene(scene.project, scene.schemeId, { openDoorIds: new Set(scene.ids) });
-  const spread = leafOf(open, scene.ids[0]).filter((face) => face.both && face.rgb[0] === 176);
+  const spread = boardsOf(leafOf(open, scene.ids[0]));
   assert.ok(away(spread) > 600, "раскрытые уходят от стены: " + away(spread));
 });
 
 test("сдвижное полотно съезжает за косяк, портальное прячется в стену", () => {
-  const along = (faces) => faces.flatMap((face) => face.p.map((point) => point.x));
   // Гармошки здесь нет нарочно: с таска 226 она не съезжает, а складывается
   // пакетом звеньев — у неё свой тест ниже (G338).
   const scene = one("doorSliding", { hinge: "start", swing: "left" });
   const shut = volumeScene(scene.project, scene.schemeId);
   const open = volumeScene(scene.project, scene.schemeId, { openDoorIds: new Set(scene.ids) });
-  const closed = leafOf(shut, scene.ids[0]).filter((face) => face.both);
-  const moved = leafOf(open, scene.ids[0]).filter((face) => face.both);
-  assert.equal(closed.length, 1, "закрытое полотно — одна грань");
-  assert.equal(moved.length, 1, "уехавшее полотно — та же одна грань");
-  assert.ok(Math.min(...along(moved)) < Math.min(...along(closed)) - 100, "сдвижное не съехало");
+  const [closed, ...moreClosed] = boardsOf(leafOf(shut, scene.ids[0]));
+  const [moved, ...moreMoved] = boardsOf(leafOf(open, scene.ids[0]));
+  assert.equal(moreClosed.length, 0, "закрытое полотно — одно");
+  assert.equal(moreMoved.length, 0, "уехавшее полотно — то же одно");
+  assert.ok(Math.min(...moved.xs) < Math.min(...closed.xs) - 100, "сдвижное не съехало");
   // Съехало **вдоль** стены, а не распахнулось: длина полотна по стене та же.
-  const span = (faces) => Math.max(...along(faces)) - Math.min(...along(faces));
-  assert.ok(Math.abs(span(moved) - span(closed)) < 1, "уехавшее полотно другой длины");
+  assert.ok(Math.abs(spanOf(moved.xs) - spanOf(closed.xs)) < 1, "уехавшее полотно другой длины");
   // И уехало **по стороне стены**, а не внутри неё (дефект D78): закрытое
   // стоит в середине толщины, уехавшее — за гранью стены, на зазоре.
-  const across = (faces) => faces.flatMap((face) => face.p.map((point) => point.y));
-  assert.ok(Math.max(...across(closed).map(Math.abs)) < 1, "закрытое полотно ушло из проёма");
+  assert.ok(Math.max(...closed.ys.map(Math.abs)) <= VOLUME_DOOR_LEAF_MM / 2 + 0.01, "закрытое полотно ушло из проёма");
   const wall = Number(scene.wall.thicknessMm) / 2;
-  for (const y of across(moved)) {
-    assert.ok(Math.abs(y) > wall, "уехавшее полотно осталось в стене: " + y);
-    assert.ok(Math.abs(Math.abs(y) - (wall + VOLUME_SLIDE_GAP_MM)) < 1, "полотно встало не на зазор: " + y);
-  }
+  for (const y of moved.ys) assert.ok(Math.abs(y) > wall, "уехавшее полотно осталось в стене: " + y);
+  const inner = Math.min(...moved.ys.map(Math.abs));
+  assert.ok(Math.abs(inner - (wall + VOLUME_SLIDE_GAP_MM)) < 1, "полотно встало не на зазор: " + inner);
+  assert.ok(Math.abs(spanOf(moved.ys) - VOLUME_DOOR_LEAF_MM) < 0.01, "у уехавшего полотна нет толщины");
   // Портальная уезжает в стену, и открытой её не видно вовсе — это самый
   // честный вид «открыто», какой у неё бывает.
   const pocket = one("doorPocket", { hinge: "start", swing: "left" });
@@ -492,23 +513,22 @@ test("G338: раскрытая гармошка складывается пак�
   // Второго числа для гармошки в сборке нет, и это ровно решение таска 215.
   assert.equal(links, openingFaceGrid(opening).xs.length + 1, "у объёма своё число звеньев");
   assert.equal(links, 4, "у гармошки каталога звеньев не четыре");
-  const shut = leafOf(volumeScene(scene.project, scene.schemeId), scene.ids[0]).filter((face) => face.both);
+  const shut = boardsOf(leafOf(volumeScene(scene.project, scene.schemeId), scene.ids[0]));
   const open = leafOf(volumeScene(scene.project, scene.schemeId, { openDoorIds: new Set(scene.ids) }), scene.ids[0]);
-  const boards = open.filter((face) => face.both);
-  assert.equal(shut.length, 1, "закрытая гармошка стоит в проёме одной гранью");
+  const boards = boardsOf(open);
+  assert.equal(shut.length, 1, "закрытая гармошка стоит в проёме одним полотном");
   assert.equal(boards.length, links, "звеньев в пакете не столько, сколько секций: " + boards.length);
-  // Каждое звено — поперёк стены и шириной в свою секцию: 900 / 4 = 225 мм.
+  // Каждое звено — поперёк стены, толщиной в звено и шириной в свою секцию:
+  // 900 / 4 = 225 мм.
   const link = opening.widthMm / links;
   for (const board of boards) {
-    const xs = board.p.map((point) => point.x);
-    const ys = board.p.map((point) => point.y);
-    assert.ok(Math.max(...xs) - Math.min(...xs) < 1, "звено легло вдоль стены, а не поперёк");
-    assert.ok(Math.abs(Math.max(...ys) - Math.min(...ys) - link) < 1, "звено не в секцию шириной");
+    assert.ok(Math.abs(spanOf(board.xs) - VOLUME_FOLD_LEAF_MM) < 0.01, "звено легло вдоль стены, а не поперёк");
+    assert.ok(Math.abs(spanOf(board.ys) - link) < 1, "звено не в секцию шириной");
   }
   // Пакет стоит у того косяка, где петли (проём начинается на 1000), и толщина
   // его считается, а не пишется: звено на звено плюс зазор. Четыре звена по 40
   // и три зазора по 10 — 190 мм.
-  const planes = boards.map((board) => board.p[0].x).sort((one, two) => one - two);
+  const planes = boards.map((board) => board.x).sort((one, two) => one - two);
   const pack = links * VOLUME_FOLD_LEAF_MM + (links - 1) * VOLUME_FOLD_GAP_MM;
   assert.equal(pack, 190);
   assert.ok(Math.abs(planes[0] - (1000 + VOLUME_FOLD_LEAF_MM / 2)) < 1, "пакет не у косяка: " + planes[0]);
@@ -530,9 +550,8 @@ test("G338: раскрытая гармошка складывается пак�
   // Петли у другого косяка — пакет собирается у него, а не ломится сквозь
   // стену: на знаке здесь легко ошибиться, и видно это было бы только глазом.
   const other = one("doorFolding", { hinge: "end", swing: "left" });
-  const far = leafOf(volumeScene(other.project, other.schemeId, { openDoorIds: new Set(other.ids) }), other.ids[0])
-    .filter((face) => face.both)
-    .map((face) => face.p[0].x)
+  const far = boardsOf(leafOf(volumeScene(other.project, other.schemeId, { openDoorIds: new Set(other.ids) }), other.ids[0]))
+    .map((board) => board.x)
     .sort((one, two) => one - two);
   assert.ok(Math.abs(far[links - 1] - (1900 - VOLUME_FOLD_LEAF_MM / 2)) < 1, "пакет не у второго косяка: " + far[links - 1]);
   assert.ok(far[0] > 1000, "пакет от второго косяка ушёл за первый");
@@ -544,9 +563,9 @@ test("G338: пакет у́же проёма — а проём у́же паке
   // остаются в проёме: нарисовать их сквозь косяк было бы хуже всего.
   const scene = one("doorFolding", { widthMm: 160, hinge: "start", swing: "left" });
   const open = leafOf(volumeScene(scene.project, scene.schemeId, { openDoorIds: new Set(scene.ids) }), scene.ids[0]);
-  const boards = open.filter((face) => face.both);
+  const boards = boardsOf(open);
   assert.equal(boards.length, 4, "звеньев всё те же четыре");
-  const xs = boards.flatMap((board) => board.p.map((point) => point.x));
+  const xs = boards.flatMap((board) => board.xs);
   assert.ok(Math.min(...xs) >= 1000 - 1 && Math.max(...xs) <= 1160 + 1, "звенья ушли в стену");
 });
 
@@ -663,7 +682,11 @@ test("G329: в объёме у арки появились свод и пазу�
     p: face.p.map((point) => [round(point.x), round(point.y), round(point.z)]),
   }));
   assert.equal(built.doors.length, VOLUME_BEFORE.doors, "дверей в сцене столько же");
-  assert.deepEqual(print, VOLUME_AFTER.volume.print, "кадр сцены разошёлся с отпечатком таска 219");
+  // Полотна дверей с правки 2026-10-27 объёмные — слово заказчика «полотно
+  // двери имеет толщину в 1 пиксель, сделай нормальные». Отпечатки сверяются
+  // без граней полотен (`door`), сами полотна проверяют тесты дверей.
+  const still = (list) => list.filter((face) => face.door === null);
+  assert.deepEqual(still(print), still(VOLUME_AFTER.volume.print), "кадр сцены разошёлся с отпечатком таска 219");
   // Арка стоит пятой, на отступе 5000 шириной 1200, в стене по y = 0 толщиной
   // 200. Её грани — те, что целиком лежат в этой коробке; всё остальное к арке
   // отношения не имеет и обязано совпасть с прежним отпечатком **грань в
@@ -671,8 +694,8 @@ test("G329: в объёме у арки появились свод и пазу�
   const archy = (face) =>
     face.p.every((point) => point[0] >= 4999.99 && point[0] <= 6200.01 && Math.abs(point[1]) <= 100.01);
   assert.deepEqual(
-    print.filter((face) => !archy(face)),
-    VOLUME_BEFORE.print.filter((face) => !archy(face)),
+    still(print).filter((face) => !archy(face)),
+    still(VOLUME_BEFORE.print).filter((face) => !archy(face)),
     "G329 тронул что-то кроме арки",
   );
   // Чем именно стала арка — числами. Было пять граней: перемычка, два откоса и
@@ -681,7 +704,7 @@ test("G329: в объёме у арки появились свод и пазу�
   // теперь кончаются на пяте.
   assert.equal(VOLUME_BEFORE.print.filter(archy).length, 5);
   assert.equal(print.filter(archy).length, 2 + VOLUME_ARCH_SEGMENTS * 3);
-  assert.equal(print.length - VOLUME_BEFORE.faces, 33);
+  assert.equal(still(print).length - still(VOLUME_BEFORE.print).length, 33);
 });
 
 test("G68: стеклянная дверь прежней разметки рисуется ровно как распашная с отметкой", () => {

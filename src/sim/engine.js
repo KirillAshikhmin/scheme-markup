@@ -225,6 +225,9 @@ export function createSimEngine({ emit, owners = [] } = {}) {
   let home = null;
   const devices = new Map();
   let keyLinks = new Map();
+  // Обратная связь «чем управляет»: нагрузка → выключатели, которые ею
+  // управляют (`mirrorRelays`).
+  let loadOwners = new Map();
   let doorSensors = new Map();
   let roomSensors = new Map();
   const present = new Set();
@@ -439,6 +442,15 @@ export function createSimEngine({ emit, owners = [] } = {}) {
       if (!keyLinks.has(link.markId)) keyLinks.set(link.markId, new Map());
       const channel = Number.isInteger(link.channel) ? link.channel : null;
       keyLinks.get(link.markId).set(channel, simEngineList(link.targets));
+    }
+    loadOwners = new Map();
+    for (const [markId, links] of keyLinks) {
+      for (const targets of links.values()) {
+        for (const target of targets) {
+          if (!loadOwners.has(target)) loadOwners.set(target, new Set());
+          loadOwners.get(target).add(markId);
+        }
+      }
     }
     doorSensors = new Map();
     for (const door of home.doors) {
@@ -754,6 +766,7 @@ export function createSimEngine({ emit, owners = [] } = {}) {
     const device = devices.get(event.markId);
     const service = device ? device.services[event.service] : null;
     if (!service || service.type !== event.serviceType) return;
+    if (event.char === loadChar(service)) mirrorRelays(device, service, event.chain);
     switch (service.type) {
       case "StatelessProgrammableSwitch":
         // Кнопка без своего «Выключателя» (профиль до G11): одиночное нажатие
@@ -763,8 +776,11 @@ export function createSimEngine({ emit, owners = [] } = {}) {
         }
         break;
       case "Switch":
-        // «Выключатель» клавиши ведёт нагрузки канала — кто бы его ни поставил.
-        if (event.char === "On" && service.key) followLoads(device, service, event.value === true, event.chain);
+        // «Выключатель» клавиши ведёт нагрузки канала — кто бы его ни поставил,
+        // кроме самих нагрузок (`mirrorRelays`).
+        if (event.char === "On" && service.key && !mirrored(device, service, event.chain)) {
+          followLoads(device, service, event.value === true, event.chain);
+        }
         break;
       case "Lightbulb":
         lampFollow(device, service, event);
@@ -1019,6 +1035,64 @@ export function createSimEngine({ emit, owners = [] } = {}) {
       default:
         return false;
     }
+  }
+
+  // Характеристика, которой нагрузка включена (`loadIsOn`), — или `null`.
+  function loadChar(service) {
+    switch (loadRole(service)) {
+      case "on":
+        return "On";
+      case "active":
+        return "Active";
+      case "curtain":
+        return "TargetPosition";
+      case "mode":
+        return "TargetHeatingCoolingState";
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * **Связь «чем управляет» двусторонняя** (правка 2026-10-27). Слова
+   * заказчика: «при включении лампы тоже должен включаться выключатель, связь
+   * двусторонняя, сейчас только лампа реагирует на включение выключателя».
+   *
+   * Нагрузку включили мимо клавиши — карточкой, сценарием, щелчком по самой
+   * лампе, — и «Выключатель» её канала встаёт во «вкл»; погасла последняя
+   * нагрузка канала — в «выкл». Правило то же, что у настоящего выключателя с
+   * обратной связью: клавиша показывает, горит ли то, чем она управляет.
+   *
+   * К остальным нагрузкам канала это не возвращается (`mirrored`): включили
+   * одну лампу из двух — вторая остаётся погашенной, хотя «Выключатель» её
+   * канала теперь включён. Иначе лампа, включённая одна, зажигала бы всю
+   * группу, а этого никто не просил. Следующее нажатие клавиши гасит канал
+   * целиком — она и показывает «вкл».
+   */
+  function mirrorRelays(device, service, chain) {
+    const owners = loadOwners.get(device.markId);
+    if (!owners) return;
+    for (const ownerId of owners) {
+      const owner = devices.get(ownerId);
+      if (!owner) continue;
+      for (const relay of owner.services) {
+        if (relay.type !== "Switch" || !relay.key) continue;
+        const loads = channelLoads(owner, channelOf(relay));
+        if (!loads.some((load) => load.device === device && load.service === service)) continue;
+        const on = loads.some((load) => loadIsOn(load.device, load.service));
+        if ((read(owner, relay, "On") === true) !== on) apply(owner.markId, relay.index, "On", on, chain);
+      }
+    }
+  }
+
+  // «Выключатель» встал вслед за своей же нагрузкой (`mirrorRelays`): первое
+  // звено причины после его собственного — изменение нагрузки его канала.
+  function mirrored(device, relay, chain) {
+    const cause = Array.isArray(chain) ? chain[1] : null;
+    if (!cause || cause.k !== "char") return false;
+    return channelLoads(device, channelOf(relay)).some(
+      (load) => load.device.markId === cause.markId && load.service.index === cause.service,
+    );
   }
 
   // Группа нагрузок: что-то включено — выключить всё, иначе включить всё.

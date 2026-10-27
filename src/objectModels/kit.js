@@ -207,6 +207,24 @@ export function modelCone(name, part = {}) {
   return modelPart("cone", name, part);
 }
 
+/**
+ * **Плита по контуру** (правка 2026-10-27): ступень винтовой лестницы.
+ * `points` — вершины в долях плана `[[x, y], …]`, `z` и `height` — ярус, как у
+ * коробки. Коробку повернуть нечем, а клин ступени вокруг столба — это и есть
+ * повёрнутая плита. Прямоугольник тела (`x`, `width`, `y`, `depth`) — её
+ * охват: им тело и проверяют на выход из габарита.
+ */
+export function modelPlate(name, points, part = {}) {
+  const xs = points.map((point) => point[0]);
+  const ys = points.map((point) => point[1]);
+  const x = Math.min(...xs);
+  const y = Math.min(...ys);
+  return {
+    ...modelPart("plate", name, { ...part, x, width: Math.max(...xs) - x, y, depth: Math.max(...ys) - y }),
+    points: points.map(([px, py]) => [px, py]),
+  };
+}
+
 /** Пластина во весь габарит в плане: `z` и `height` — её ярус. */
 export function modelSlab(name, z, height, material) {
   return modelBox(name, { z, height, material });

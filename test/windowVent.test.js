@@ -37,9 +37,13 @@ test("в «Объёме» окно в своём списке, закрытое 
   assert.ok(!closed.doors.includes(box.windowId), "окно попало в «все двери»");
   const open = volumeScene(box.project, box.schemeId, { roofOff: true, openDoorIds: new Set([box.windowId]) });
   const sash = open.faces.filter((face) => face.doorId === box.windowId);
-  assert.equal(sash.length, 4, "у открытой створки четыре бруска");
+  // Четыре бруска — объёмом, по шесть граней (правка 2026-10-27: «так же и
+  // полотно окна тоже 1 пиксель»).
+  assert.equal(sash.length, 4 * 6, "у открытой створки четыре бруска");
+  const ys = sash.flatMap((face) => face.p.map((point) => point.y));
+  assert.ok(Math.max(...ys) - Math.min(...ys) > 100, "створка плоская");
   assert.equal(closed.faces.filter((face) => face.doorId === box.windowId).length, 0, "закрытое окно получило створку");
-  assert.equal(open.faces.length, closed.faces.length + 4, "открытое окно изменило что-то кроме створки");
+  assert.equal(open.faces.length, closed.faces.length + 4 * 6, "открытое окно изменило что-то кроме створки");
   // Откосы окна помечены им: глядя в проём, E находит окно.
   assert.ok(closed.faces.some((face) => face.doorway === box.windowId));
   // Створка — внутри комнаты: бруски не выходят за стену наружу.

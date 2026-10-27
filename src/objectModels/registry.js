@@ -91,7 +91,8 @@ export function objectModelClashes() {
 export function objectModelFaceCount(model) {
   let faces = 0;
   for (const part of (model && model.parts) || []) {
-    faces += part.kind === "cyl" || part.kind === "tube" ? MODEL_CYL_SIDES + 2 : part.kind === "cone" ? MODEL_CYL_SIDES + 1 : 6;
+    if (part.kind === "plate") faces += part.points.length + 2;
+    else faces += part.kind === "cyl" || part.kind === "tube" ? MODEL_CYL_SIDES + 2 : part.kind === "cone" ? MODEL_CYL_SIDES + 1 : 6;
   }
   return faces;
 }

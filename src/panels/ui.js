@@ -338,6 +338,42 @@ export function uiApply(input, run) {
   return input;
 }
 
+/**
+ * **Поле даты или часов** — `uiApply` для `type=time` и `type=date` (правка
+ * 2026-10-27). Слова заказчика: «при изменении времени в поле в параметрах объёма при вводе первой
+ * цифры сразу применяется и сбрасывается фокус и 2 цифры (например 35 минут)
+ * уже не получается. С мобилки открывается пикер, всё норм там, а с пк с
+ * клавиатуры баг».
+ *
+ * `change` у поля `type=time` и `type=date` приходит **на каждую набранную
+ * часть**: «3» в минутах — уже значение. Применённое перерисовывает окно, и
+ * поле теряет фокус посреди набора. Поэтому набор с клавиатуры применяется по
+ * Enter и по уходу из поля, а выбор колесом телефона — клавиш у него нет —
+ * сразу, как прежде. `commit` читает значение поля сам.
+ */
+export function uiTimeApply(field, commit) {
+  let typing = false;
+  const done = () => {
+    if (!typing) return;
+    typing = false;
+    commit();
+  };
+  field.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      typing = true;
+      done();
+      return;
+    }
+    if (event.key === "Tab" || event.key === "Escape" || event.key === "Shift") return;
+    typing = true;
+  });
+  field.addEventListener("change", () => {
+    if (!typing) commit();
+  });
+  field.addEventListener("blur", done);
+  return field;
+}
+
 // ——— негодное число в поле ————————————————————————————————————————————
 //
 // **Один ответ на негодное число** (находка 9 разбора механик). Ответов было

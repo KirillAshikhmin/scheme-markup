@@ -209,6 +209,33 @@ export function volumeChannelAt(polygons, x, y) {
   return null;
 }
 
+/**
+ * **Ближайшая клавиша метки** к точке кадра: `{markId, channel}` или `null`,
+ * если клавиш у неё не нарисовано (правка 2026-10-27).
+ *
+ * Слова заказчика: «почему-то не все выключатели реагируют на нажатие Е в
+ * объёме». Не реагировали многоклавишные: прицел в рамке между клавишами не
+ * находил ни одной (`volumeChannelAt` промаха не прощает), а без клавиши
+ * нажимать нечего. Нажатие при запущенном доме — не выбор канала: человек
+ * целился в выключатель и ждёт, что он щёлкнет. Поэтому здесь, и только здесь,
+ * промах прощается — ближайшей клавишей той же метки. Выбор канала щелчком
+ * при остановленном доме остаётся строгим.
+ */
+export function volumeChannelNear(polygons, markId, x, y) {
+  let best = null;
+  let bestDistance = Infinity;
+  for (const polygon of polygons) {
+    if (polygon.stroke || polygon.pick !== markId || !polygon.channel) continue;
+    const centre = volumePolygonCentre(polygon.xy);
+    const distance = (centre.x - x) ** 2 + (centre.y - y) ** 2;
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = { markId, channel: polygon.channel };
+    }
+  }
+  return best;
+}
+
 function volumePolygonHit(xy, x, y) {
   let inside = false;
   for (let i = 0, j = xy.length - 2; i < xy.length; j = i, i += 2) {

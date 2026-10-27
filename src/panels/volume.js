@@ -39,8 +39,10 @@ import {
   createVolumeParamsFields,
   volumeParamsArrive,
   volumeParamsClock,
+  volumeParamsFix,
   volumeParamsHome,
   volumeParamsLine,
+  volumeParamsNow,
   volumeParamsRead,
   volumeParamsReady,
   volumeParamsWatch,
@@ -91,6 +93,7 @@ import {
   volumeBasis,
   volumeCanStand,
   volumeChannelAt,
+  volumeChannelNear,
   volumeChannelLines,
   volumeChannelLinks,
   volumeDoorAt,
@@ -1456,8 +1459,6 @@ function createVolume({ api, hosts }) {
   // лишь на схемах со шторами.
   let aimedMark = null;
   const aimedSheer = () => Boolean(aimedMark && (scene.sheers || []).includes(aimedMark));
-  // Alt отпустил мышь, и по отпусканию Alt её надо забрать обратно (G211).
-  let altFree = false;
   // Зашли пальцем (таск 149). Догадка по виду указателя — сразу, точный ответ —
   // по первому касанию: мышь площадку ходьбы не увидит никогда.
   let touching = volumeTouchLikely();
@@ -1748,10 +1749,20 @@ function createVolume({ api, hosts }) {
   // плашке с текущей температурой, влажностью и co2 открывай небольшое окошко
   // с ползунками этих 3 характеристик». Окошко лежит в той же полосе, над ней
   // (`volumeAir.js`), и пишет туда же, куда «Климат помещений» в параметрах.
-  const clockTime = uiEl("span", { class: "volume__clockTime" });
+  //
+  // Строка часов — тоже кнопка того же окошка (правка 2026-10-27): в нём
+  // сверху ряд часов, «так же там сделай изменение времени, но компактно».
   const air = createVolumeAir({
     setRoom: (roomId, patch) => simClimateSet(roomId, patch),
     setStreet: (patch) => appWeatherSet(patch),
+    clock: {
+      minutes: () => {
+        const at = Date.now();
+        return volumeClockStamp(volumeParamsClock(at), at).minutes;
+      },
+      set: (minutes) => volumeParamsFix(minutes, Date.now()),
+      now: () => volumeParamsNow(Date.now()),
+    },
     // Окошко — над полосой, а где над ней тесно — слева от неё
     // (`volumeAirPlacement`): пальцем полоса поднята над кнопками, и в
     // лежачем телефоне места над ней на одну строку.
@@ -1765,6 +1776,7 @@ function createVolume({ api, hosts }) {
       if (box.style.maxHeight !== most) box.style.maxHeight = most;
     },
   });
+  const clockTime = air.timeLine;
   const clockNode = uiEl("div", { class: "volume__clock", attrs: { hidden: "hidden" } }, [clockTime, air.line, air.box]);
   // Что на полосе уже написано: с плавными светилами снимок часа считается
   // тридцать раз в секунду, а минута на полосе столько раз не меняется.
@@ -2397,6 +2409,9 @@ function createVolume({ api, hosts }) {
     if (clockSaid.value === value && clockSaid.line === line) return;
     clockSaid = { value, line };
     clockTime.textContent = value;
+    // Строка часов — кнопка со своей подсказкой, и без этого она закрыла бы
+    // подсказку полосы: почему время стоит и как быстро идёт.
+    clockTime.title = line;
     clockNode.title = line;
     clockNode.setAttribute("aria-label", line);
   }
@@ -3163,10 +3178,18 @@ function createVolume({ api, hosts }) {
     return true;
   }
 
-  /** Клавиша этой метки под точкой кадра — или `null`, если рука мимо клавиш. */
+  /**
+   * Клавиша этой метки под рукой. Рука мимо клавиш многоклавишного
+   * выключателя — ближайшая его клавиша (`volumeChannelNear`): нажатие при
+   * запущенном доме прощает промах, выбор канала — нет. `null` — у метки
+   * клавиш не нарисовано.
+   */
   function homeKeyAt(markId, at) {
     const found = channelAt(at);
-    return found && found.markId === markId ? found : null;
+    if (found && found.markId === markId) return found;
+    if (!at || scene.empty) return null;
+    if (deviceClickPlan(markAccessory(getState().project, markId)).kind !== "keys") return null;
+    return volumeChannelNear(shown, markId, at.x, at.y);
   }
 
   /** Есть ли у метки дело для руки в этой точке — то же правило, что у `homeAct`. */
@@ -3195,8 +3218,7 @@ function createVolume({ api, hosts }) {
     const at = atEvent(event);
     const choice = aimChoiceAt(at, volumeDoorAt(shown, at.x, at.y));
     if (choice.kind !== "mark") return;
-    const found = channelAt(at);
-    const mine = found && found.markId === choice.id ? found : null;
+    const mine = homeKeyAt(choice.id, at);
     const action = volumeSimAction(markAccessory(getState().project, choice.id), mine ? mine.channel : null);
     if (action.kind !== "hold") return;
     const presser = devicePresserOf(choice.id, action.index);
@@ -4344,7 +4366,7 @@ function createVolume({ api, hosts }) {
   /** Лестница, у которой стоит человек, или `null`. */
   function stairHere() {
     if (scene.empty || view !== "person") return null;
-    const near = volumeStairNear(scene.stairs, person);
+    const near = volumeStairNear(scene.stairs, person, undefined, scene);
     return near ? near.stair : null;
   }
 
@@ -4700,6 +4722,17 @@ function createVolume({ api, hosts }) {
       floorByHand();
       return;
     }
+    // Esc закрывает окно метки (правка 2026-10-27): «Сделай что бы по Esc
+    // закрывалось окно о метке, которое открывается по нажатию Q». Делает то
+    // же, что крестик окна, — снимает выделение. Под захватом мышь браузер
+    // отпускает сам: Esc у захвата отнять нельзя.
+    if (event.key === "Escape" && !card.hidden) {
+      event.preventDefault();
+      event.stopPropagation();
+      select(null);
+      if (locked && typeof document.exitPointerLock === "function") document.exitPointerLock();
+      return;
+    }
     // Esc при захвате отпускает мышь и окна не закрывает: человек жмёт его,
     // чтобы вернуть курсор, а не чтобы уйти. Перехват в фазе погружения —
     // слушатель диалогов стоит на всплытии.
@@ -4708,18 +4741,17 @@ function createVolume({ api, hosts }) {
       if (typeof document.exitPointerLock === "function") document.exitPointerLock();
       return;
     }
-    // Alt (на Mac — Option) отпускает мышь, пока его держат (G211): «Показывай
-    // курсор не только по Esc но и по Alt\Option кнопкам». Отпустили — захват
-    // просится обратно, и щёлкать по полю для этого не надо.
+    // Alt (на Mac — Option) отпускает мышь, как Esc (G211): «Показывай
+    // курсор не только по Esc но и по Alt\Option кнопкам». С правки
+    // 2026-10-27 — насовсем, а не пока держат: «сейчас курсор есть только пока
+    // держишь, переделай просто что бы отпускалась привязка курсора». Вернуть
+    // захват — щелчком по полю, как после Esc.
     //
     // `preventDefault` здесь не ставится нарочно: Alt — системный модификатор
     // ввода, и перехватывать его целиком значило бы ломать набор в других
     // полях страницы. Нам нужно его нажатие, а не его смысл.
     if (volumeAltKey(event)) {
-      if (locked) {
-        altFree = true;
-        if (typeof document.exitPointerLock === "function") document.exitPointerLock();
-      }
+      if (locked && typeof document.exitPointerLock === "function") document.exitPointerLock();
       return;
     }
     // Присед и прыжок (G234). Разбор — `volumeStanceKey`: Control приседает сам
@@ -4797,14 +4829,6 @@ function createVolume({ api, hosts }) {
       homeRelease();
       return;
     }
-    // Отпустили Alt — мышь возвращается виду (G211). Если захвата и не было,
-    // просить его по отпусканию Alt нельзя: человек не звал его вовсе.
-    if (volumeAltKey(event)) {
-      if (!altFree) return;
-      altFree = false;
-      grabPointer();
-      return;
-    }
     // Отпустили Control — встаём (G234). Спрашивать `ours()` здесь не нужно и
     // нельзя: человек мог уйти в другой режим, не отпустив клавишу, и присед
     // остался бы висеть.
@@ -4839,9 +4863,6 @@ function createVolume({ api, hosts }) {
     crouchStop();
     // То же с пробелом в обзоре: подниматься до следующего нажатия он не просил.
     riseStop();
-    // Ушли с окна с зажатым Alt — его отпускание до нас не дойдёт, и ждать
-    // его нечего: иначе следующий Alt оказался бы «уже нажатым».
-    altFree = false;
   }
 
   function onResize() {

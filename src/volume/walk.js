@@ -160,11 +160,21 @@ export function volumeStairLanding(scene, atMm = null, headMm = VOLUME_HEAD_MM, 
 /**
  * Лестница, к которой подошли, или `null`. Ближайшая, если их рядом несколько:
  * спрашивают про ту, у которой стоят.
+ *
+ * `where` — сцена (её помещения и стены): с ней лестница зовёт только **из
+ * своего помещения** (правка 2026-10-27, «проходишь мимо даже через стену, а
+ * оно окно показывает»). Помещение лестницы — то, где лежит середина её
+ * габарита; лестница вне контуров зовёт отовсюду, как прежде.
  */
-export function volumeStairNear(stairs, at, reach = VOLUME_STAIR_REACH_MM) {
+export function volumeStairNear(stairs, at, reach = VOLUME_STAIR_REACH_MM, where = null) {
   let near = null;
   let gap = reach;
+  const mine = where ? volumeRoomKeyAt(where, at) : null;
   for (const stair of stairs || []) {
+    if (where) {
+      const own = stair.atMm ? volumeRoomKeyAt(where, stair.atMm) : null;
+      if (own && own !== mine) continue;
+    }
     let own = Infinity;
     for (const polygon of stair.polygons) own = Math.min(own, volumePolygonGap(at, polygon));
     if (own > gap) continue;

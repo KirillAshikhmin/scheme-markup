@@ -6931,7 +6931,7 @@ function schemeObjectShapeFields(shape, source, current) {
  */
 export function addSchemeObject(
   project,
-  { schemeId, catalogKey, kindId, shape = "rect", heightMm, heightAboveFloorMm = 0, ...rest } = {},
+  { schemeId, catalogKey, kindId, shape = "rect", heightMm, heightAboveFloorMm = 0, mirror = false, ...rest } = {},
 ) {
   requireScheme(project, schemeId);
   if (catalogKey) requireSchemeObjectKey(catalogKey);
@@ -6945,6 +6945,7 @@ export function addSchemeObject(
     ...schemeObjectShapeFields(shape, rest, null),
     heightMm: drawingHeightMm(heightMm),
     heightAboveFloorMm: drawingOffsetMm(heightAboveFloorMm),
+    ...schemeObjectMirrorField(shape, mirror),
   };
   return { project: withProject(project, { schemeObjects: [...schemeObjectsOf(project), object] }), schemeObject: object };
 }
@@ -6979,9 +6980,29 @@ export function updateSchemeObject(project, objectId, patch = {}) {
     heightAboveFloorMm: Object.prototype.hasOwnProperty.call(patch, "heightAboveFloorMm")
       ? drawingOffsetMm(patch.heightAboveFloorMm)
       : current.heightAboveFloorMm,
+    ...schemeObjectMirrorField(
+      shape,
+      Object.prototype.hasOwnProperty.call(patch, "mirror") ? patch.mirror : current.mirror,
+    ),
   };
   const schemeObjects = schemeObjectsOf(project).map((object) => (object.id === objectId ? next : object));
   return { project: withProject(project, { schemeObjects }), schemeObject: next };
+}
+
+/**
+ * **Отражение вещи** (правка 2026-10-27): `mirror: true` меняет у её модели
+ * лево и право. Заведено ради лестниц — слова заказчика: «сделай у ней опцию
+ * поворота вокруг оси, например сейчас у G-образной если смотреть на неё
+ * спереди нижняя ступень слева, а надо что бы справа». Поворотом этого не
+ * сделать: Г-образный марш, развёрнутый на полоборота, ставит нижнюю ступень
+ * к заднику, а не вправо.
+ *
+ * Ключ необязательный и лежит только тогда, когда вещь отражена: у вещи
+ * прежней разметки его нет, и она остаётся какой была (G68). У полосы
+ * отражать нечего — её форма задана точками.
+ */
+function schemeObjectMirrorField(shape, mirror) {
+  return shape !== "polyline" && mirror === true ? { mirror: true } : {};
 }
 
 export function deleteSchemeObject(project, objectId) {

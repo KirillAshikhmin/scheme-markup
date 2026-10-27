@@ -960,6 +960,18 @@ const VOLUME_HANDLE_TALL_MM = 90;
 const VOLUME_HANDLE_EDGE_MM = 70;
 
 /**
+ * **Толщина полотна двери** (правка 2026-10-27): «полотно двери имеет толщину
+ * в 1 пиксель, сделай нормальные». Полотно было одной двусторонней гранью, и
+ * раскрытая дверь, на которую смотрят с торца, была линией. Сорок
+ * миллиметров — межкомнатное полотно (35–40 мм), то же число, что звено
+ * гармошки. В тонкой перегородке полотно не толще половины стены: закрытое
+ * стоит в её середине и из откосов не вылезает.
+ */
+export const VOLUME_DOOR_LEAF_MM = 40;
+/** Глубина брусков створки окна — та же, что у бруска рамы. */
+export const VOLUME_SASH_DEPTH_MM = VOLUME_FRAME_MM;
+
+/**
  * **Сложенная гармошка** (таск 226, требование G338): два числа, из которых
  * выходит толщина пакета.
  *
@@ -1078,17 +1090,28 @@ function volumeWindowSash(wall, opening, span, out, rooms) {
   const inner = volumeInnerSide(wall, rooms, (from + to) / 2) || 1;
   const turn = (VOLUME_SASH_DEG * Math.PI) / 180;
   const dir = { x: u.x * Math.cos(turn) + n.x * inner * Math.sin(turn), y: u.y * Math.cos(turn) + n.y * inner * Math.sin(turn) };
-  const hinge = { x: Number(wall.aMm.x) + u.x * from, y: Number(wall.aMm.y) + u.y * from };
-  const at = (along, z) => volumeAt({ x: hinge.x + dir.x * along, y: hinge.y + dir.y * along }, z);
-  const bar = VOLUME_FRAME_MM * 0.8;
-  const quad = (fromAlong, toAlong, low, high) => {
-    if (!(toAlong > fromAlong) || !(high > low)) return;
-    out.push(volumeFace([at(fromAlong, low), at(toAlong, low), at(toAlong, high), at(fromAlong, high)], VOLUME_FRAME_RGB, { both: true, doorId: opening.id }));
+  // Петля — на оси стены, а бруски объёмные: их середина отодвинута в
+  // комнату на полглубины, чтобы створка не вылезала наружу.
+  const inset = VOLUME_SASH_DEPTH_MM / 2;
+  const hinge = {
+    x: Number(wall.aMm.x) + u.x * from + n.x * inner * inset,
+    y: Number(wall.aMm.y) + u.y * from + n.y * inner * inset,
   };
-  quad(0, sash, bottom, bottom + bar);
-  quad(0, sash, top - bar, top);
-  quad(0, bar, bottom + bar, top - bar);
-  quad(sash - bar, sash, bottom + bar, top - bar);
+  const bar = VOLUME_FRAME_MM * 0.8;
+  // Бруски — объёмом, а не гранью (правка 2026-10-27): «так же и полотно окна
+  // тоже 1 пиксель, надо поправить, особенно на открытом видно». Распахнутая
+  // створка стоит к комнате ребром, и плоская рамка с торца была линией.
+  const block = (fromAlong, toAlong, low, high) => {
+    if (!(toAlong > fromAlong) || !(high > low)) return;
+    const centre = { x: hinge.x + dir.x * ((fromAlong + toAlong) / 2), y: hinge.y + dir.y * ((fromAlong + toAlong) / 2) };
+    volumePrismFaces(volumeBoxCorners(centre, dir, toAlong - fromAlong, VOLUME_SASH_DEPTH_MM), low, high, VOLUME_FRAME_RGB, out, {
+      doorId: opening.id,
+    });
+  };
+  block(0, sash, bottom, bottom + bar);
+  block(0, sash, top - bar, top);
+  block(0, bar, bottom + bar, top - bar);
+  block(sash - bar, sash, bottom + bar, top - bar);
   return out;
 }
 
@@ -1124,6 +1147,9 @@ function volumeFoldPack(root, into, across, width, links) {
       at: { x: root.x + into.x * away, y: root.y + into.y * away },
       along: across,
       width: link,
+      // Толщина звена жмётся вместе с шагом: иначе крайние звенья вылезли бы
+      // из проёма на полтолщины.
+      thick: VOLUME_FOLD_LEAF_MM * squeeze,
     });
   }
   return boards;
@@ -1163,6 +1189,9 @@ function volumeDoorLeaf(wall, opening, span, out, open, sided = false) {
   // одна. Стороны открывания у двух створок общие — ровно как на плане.
   const twin = motion === "swing" && openingLeavesOf(opening.kind) > 1;
   const width = twin ? whole / 2 : whole;
+  // Толщина полотна (правка 2026-10-27): в тонкой перегородке — не толще
+  // половины стены, у звена гармошки — своя (`VOLUME_FOLD_LEAF_MM`).
+  const thick = Math.min(VOLUME_DOOR_LEAF_MM, Math.abs(Number(wall.thicknessMm) || 0) / 2);
   const leaves = twin
     ? [
         { along: span.from, out: 1 },
@@ -1186,8 +1215,9 @@ function volumeDoorLeaf(wall, opening, span, out, open, sided = false) {
     const packed = open && motion === "fold";
     const slid = open && motion === "slide";
     const leaf = open && motion === "swing" ? { x: n.x * side, y: n.y * side } : { x: u.x * plan.out, y: u.y * plan.out };
-    // Сколько полотно отстоит от оси стены, когда уехало: полстены плюс зазор.
-    const away = slid ? Math.abs(Number(wall.thicknessMm) || 0) / 2 + VOLUME_SLIDE_GAP_MM : 0;
+    // Сколько полотно отстоит от оси стены, когда уехало: полстены, зазор и
+    // полтолщины самого полотна — его середина.
+    const away = slid ? Math.abs(Number(wall.thicknessMm) || 0) / 2 + VOLUME_SLIDE_GAP_MM + thick / 2 : 0;
     const boards = packed
       ? volumeFoldPack(root, leaf, { x: n.x * side, y: n.y * side }, width, openingFoldLinks(opening))
       : [
@@ -1200,22 +1230,11 @@ function volumeDoorLeaf(wall, opening, span, out, open, sided = false) {
           },
         ];
     for (const board of boards) {
-      const tip = { x: board.at.x + board.along.x * board.width, y: board.at.y + board.along.y * board.width };
+      const own = board.thick === undefined ? thick : board.thick;
       if (openingGlazed(opening)) {
-        volumeGlassLeaf(board.at, board.along, board.width, span, out, doorId);
+        volumeGlassLeaf(board.at, board.along, board.width, span, out, doorId, own);
       } else {
-        out.push(
-          volumeFace(
-            [
-              volumeAt(board.at, span.bottom),
-              volumeAt(tip, span.bottom),
-              volumeAt(tip, span.top),
-              volumeAt(board.at, span.top),
-            ],
-            VOLUME_DOOR_RGB,
-            { both: true, doorId },
-          ),
-        );
+        volumeLeafBoard(board.at, board.along, board.width, own, span.bottom, span.top, VOLUME_DOOR_RGB, out, doorId);
       }
     }
     // Ручка у свободного края полотна, на высоте, на которой её берут рукой
@@ -1224,6 +1243,7 @@ function volumeDoorLeaf(wall, opening, span, out, open, sided = false) {
     // край — у **последнего** звена пакета: ручка едет вместе с ним и в воздухе
     // не остаётся.
     const edge = boards[boards.length - 1];
+    const boardThick = edge.thick === undefined ? thick : edge.thick;
     const handleAt = {
       x: edge.at.x + edge.along.x * (edge.width - VOLUME_HANDLE_EDGE_MM),
       y: edge.at.y + edge.along.y * (edge.width - VOLUME_HANDLE_EDGE_MM),
@@ -1232,7 +1252,7 @@ function volumeDoorLeaf(wall, opening, span, out, open, sided = false) {
     const top = Math.min(span.top, bottom + VOLUME_HANDLE_TALL_MM);
     if (top > bottom && !sided) {
       volumePrismFaces(
-        volumeBoxCorners(handleAt, edge.along, VOLUME_HANDLE_LONG_MM, VOLUME_HANDLE_OUT_MM * 2),
+        volumeBoxCorners(handleAt, edge.along, VOLUME_HANDLE_LONG_MM, VOLUME_HANDLE_OUT_MM * 2 + boardThick),
         bottom,
         top,
         VOLUME_HANDLE_RGB,
@@ -1246,7 +1266,8 @@ function volumeDoorLeaf(wall, opening, span, out, open, sided = false) {
       // светилась ручка закрытой двери (`volumeTagSides`).
       const across = { x: edge.along.y, y: -edge.along.x };
       for (const sign of [1, -1]) {
-        const shift = (VOLUME_HANDLE_OUT_MM / 2) * sign;
+        // Половина ручки — от своей стороны полотна наружу.
+        const shift = (boardThick / 2 + VOLUME_HANDLE_OUT_MM / 2) * sign;
         volumePrismFaces(
           volumeBoxCorners({ x: handleAt.x + across.x * shift, y: handleAt.y + across.y * shift }, edge.along, VOLUME_HANDLE_LONG_MM, VOLUME_HANDLE_OUT_MM),
           bottom,
@@ -1259,6 +1280,24 @@ function volumeDoorLeaf(wall, opening, span, out, open, sided = false) {
     }
   }
   return out;
+}
+
+/**
+ * Полотно или брусок рамы толщиной `thick`: призма от `from` на `width` вдоль
+ * `along`, середина толщины — на линии полотна. Без толщины (стена-линия) —
+ * прежняя двусторонняя грань.
+ */
+function volumeLeafBoard(from, along, width, thick, bottom, top, rgb, out, doorId) {
+  if (!(width > 0) || !(top > bottom)) return out;
+  if (!(thick > 1)) {
+    const tip = { x: from.x + along.x * width, y: from.y + along.y * width };
+    out.push(
+      volumeFace([volumeAt(from, bottom), volumeAt(tip, bottom), volumeAt(tip, top), volumeAt(from, top)], rgb, { both: true, doorId }),
+    );
+    return out;
+  }
+  const centre = { x: from.x + (along.x * width) / 2, y: from.y + (along.y * width) / 2 };
+  return volumePrismFaces(volumeBoxCorners(centre, along, width, thick), bottom, top, rgb, out, { doorId });
 }
 
 /**
@@ -1290,7 +1329,7 @@ function volumeDoorLeaf(wall, opening, span, out, open, sided = false) {
  * низкой двери (меньше трёх рам) стекла не остаётся, и полотно рисуется глухим
  * одной гранью рамы: врать про стекло там, где его негде нарисовать, незачем.
  */
-function volumeGlassLeaf(hinge, leaf, width, span, out, doorId) {
+function volumeGlassLeaf(hinge, leaf, width, span, out, doorId, thick = 0) {
   const at = (along, z) => volumeAt({ x: hinge.x + leaf.x * along, y: hinge.y + leaf.y * along }, z);
   const quad = (fromAlong, toAlong, bottom, top, rgb, clear) => {
     if (!(toAlong > fromAlong) || !(top > bottom)) return;
@@ -1300,20 +1339,27 @@ function volumeGlassLeaf(hinge, leaf, width, span, out, doorId) {
       clear,
     }));
   };
+  // Рама — брусками в толщину полотна (правка 2026-10-27), стекло — гранью
+  // посередине: у стекла толщины нет и на кадре.
+  const bar = (fromAlong, toAlong, bottom, top) => {
+    if (!(toAlong > fromAlong) || !(top > bottom)) return;
+    const from = { x: hinge.x + leaf.x * fromAlong, y: hinge.y + leaf.y * fromAlong };
+    volumeLeafBoard(from, leaf, toAlong - fromAlong, thick, bottom, top, VOLUME_FRAME_RGB, out, doorId);
+  };
   const frame = OPENING_GLASS_FRAME_MM;
   const height = span.top - span.bottom;
   if (!(width > frame * 3) || !(height > frame * 3)) {
-    quad(0, width, span.bottom, span.top, VOLUME_FRAME_RGB, false);
+    bar(0, width, span.bottom, span.top);
     return out;
   }
   const inner = { from: frame, to: width - frame, bottom: span.bottom + frame, top: span.top - frame };
   // Низ, верх и две стойки — рама; стойки встают между низом и верхом, чтобы
   // бруски не легли друг на друга: наложенных коплоскостных граней в сцене
   // быть не должно.
-  quad(0, width, span.bottom, inner.bottom, VOLUME_FRAME_RGB, false);
-  quad(0, width, inner.top, span.top, VOLUME_FRAME_RGB, false);
-  quad(0, inner.from, inner.bottom, inner.top, VOLUME_FRAME_RGB, false);
-  quad(inner.to, width, inner.bottom, inner.top, VOLUME_FRAME_RGB, false);
+  bar(0, width, span.bottom, inner.bottom);
+  bar(0, width, inner.top, span.top);
+  bar(0, inner.from, inner.bottom, inner.top);
+  bar(inner.to, width, inner.bottom, inner.top);
   // Плотность стекла названа, а не задана числом (таск 189): `volumeClearAlpha`
   // переводит имя в долю, и второго числа у двери нет.
   quad(inner.from, inner.to, inner.bottom, inner.top, VOLUME_GLASS_RGB, "glass");

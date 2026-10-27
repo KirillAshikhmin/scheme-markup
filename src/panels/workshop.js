@@ -236,6 +236,7 @@ import {
   objectCatalogKeyByName,
   objectCatalogName,
 } from "../objectCatalog.js";
+import { OBJECT_STAIR_MIRRORED } from "../objectModels/stairs.js";
 import { openingCatalogDefaults } from "../openingCatalog.js";
 import { objectTileIcon, openObjectPicker } from "./objectPicker.js";
 import { openOpeningPicker, openingTileIcon } from "./openingPicker.js";
@@ -2439,6 +2440,12 @@ function createWorkshop({ api, hosts }) {
     turnRightButton,
     turnWallButton,
   ]);
+  // Отражение лестницы (правка 2026-10-27): «у G-образной если смотреть на неё
+  // спереди нижняя ступень слева, а надо что бы справа». Видна отметка только у
+  // маршей, у которых есть лево и право (`OBJECT_STAIR_MIRRORED`).
+  const mirrorBox = uiEl("input", { type: "checkbox" });
+  mirrorBox.addEventListener("change", () => applyMirror(mirrorBox.checked));
+  const mirrorRow = uiCheckRow(mirrorBox, strings.workshop.objectMirror, strings.workshop.objectMirrorHint);
   // Где вещь стоит и где её верх — одной строкой: «На полу · верх 650 мм».
   // Двумя строками это занимало в колонке вдвое больше, отвечая на один вопрос.
   const objectNote = uiEl("p", { class: "workshop__note" });
@@ -2449,6 +2456,7 @@ function createWorkshop({ api, hosts }) {
     depthField,
     turnField,
     turnChips,
+    mirrorRow,
     uiField(strings.workshop.objectHeight, objectHeight, { title: strings.workshop.objectHeightHint }),
     uiField(strings.workshop.objectFloor, objectFloor),
     objectBad,
@@ -3594,6 +3602,19 @@ function createWorkshop({ api, hosts }) {
     if (turnDeg === workshopTurnDeg(object.turnDeg)) return;
     try {
       commit(updateSchemeObject(project(), object.id, { turnDeg }).project, strings.history.objectTurn);
+    } catch (error) {
+      fail(error);
+      sync();
+    }
+  }
+
+  /** Отразить выделенную лестницу — правкой через историю. */
+  function applyMirror(on) {
+    const object = selectedObject();
+    if (!object || object.shape === "polyline") return;
+    if ((object.mirror === true) === Boolean(on)) return;
+    try {
+      commit(updateSchemeObject(project(), object.id, { mirror: Boolean(on) }).project, strings.history.objectMirror);
     } catch (error) {
       fail(error);
       sync();
@@ -5452,6 +5473,8 @@ function createWorkshop({ api, hosts }) {
     widthField.hidden = band;
     turnField.hidden = band;
     turnChips.hidden = band;
+    mirrorRow.hidden = band || !OBJECT_STAIR_MIRRORED.includes(key);
+    mirrorBox.checked = object.mirror === true;
     const depthLabel = depthField.querySelector(".ui-field__label");
     if (depthLabel) depthLabel.textContent = band ? strings.workshop.objectBand : strings.workshop.objectDepth;
     fieldValue(objectWidth, object.widthMm);

@@ -16,8 +16,19 @@
 // другое помещение, и ползунки уже его. Ползунок, который ведут, живым
 // значением не переписывается, а только что отпущенный — недолго ещё ждёт,
 // пока дом пришлёт новое значение: иначе на кадр он прыгнул бы назад.
+//
+// **Время — в том же окошке** (правка 2026-10-27): «при клике по плашке с
+// временем и климатом уже открывается ввод климата, так же там сделай
+// изменение времени, но компактно». Строка часов тоже кнопка, и обе строки
+// открывают одно окошко: сверху ряд часов (поле времени и «Сейчас»), под ним
+// ползунки климата — если дом идёт и климат есть. Без климата окошко
+// говорит только про время. Ряд пишет туда же, куда поле «Своё время» в
+// параметрах (`volumeParamsFix`, `volumeParamsNow`): второго пути перевести
+// часы в сборке нет. Дата в окошко не вошла нарочно: «компактно» — это одна
+// строка, а дата с часами в 264 точки одной строкой не ложатся.
+import { volumeClockParse, volumeClockText } from "../clockMath.js";
 import { strings, text } from "../strings.js";
-import { uiButton, uiEl, uiIconButton } from "./ui.js";
+import { uiButton, uiEl, uiIconButton, uiTimeApply } from "./ui.js";
 import { volumeAirLine, volumeTempText } from "./volumeParams.js";
 
 /**
@@ -113,22 +124,48 @@ export function volumeAirSaid(place) {
 }
 
 /**
- * Строка климата и окошко за ней: `{line, box, sync, open, close, isOpen}`.
+ * Строки часов и климата и окошко за ними: `{timeLine, line, box, sync, open,
+ * close, isOpen}`.
  *
- * `line` — кнопка-строка плашки, `box` — окошко; оба ставит поле в полосу
- * часов. `sync(place)` поле зовёт на каждый кадр и на каждый шаг климата —
- * пишется только то, что изменилось. Двери: `setRoom(roomId, patch)`,
- * `setStreet(patch)`, `now()` для тестов.
+ * `timeLine` — кнопка-строка часов (текст ей пишет поле), `line` — кнопка-строка
+ * климата, `box` — окошко; все три поле ставит в полосу часов. `sync(place)`
+ * поле зовёт на каждый кадр и на каждый шаг климата — пишется только то, что
+ * изменилось. Двери: `setRoom(roomId, patch)`, `setStreet(patch)`, `clock:
+ * {minutes(), set(minutes), now()}` — часы поля, `now()` для тестов.
  */
 export function createVolumeAir(doors = {}) {
   const now = typeof doors.now === "function" ? doors.now : () => Date.now();
+  const clock = doors.clock || null;
+  const toggle = () => (opened ? close() : open());
+  const timeLine = uiEl("button", {
+    class: "volume__clockTime",
+    type: "button",
+    attrs: { "aria-haspopup": "dialog", "aria-expanded": "false" },
+    on: { click: toggle },
+  });
   const line = uiEl("button", {
     class: "volume__clockAir",
     type: "button",
     attrs: { hidden: "hidden", "aria-haspopup": "dialog", "aria-expanded": "false" },
-    on: { click: () => (opened ? close() : open()) },
+    on: { click: toggle },
   });
   const title = uiEl("span", { class: "volume__airTitle" });
+  const timeField = uiEl("input", {
+    class: "tools__time volume__airTime",
+    type: "time",
+    title: strings.volume.clockOwnHint,
+    attrs: { "aria-label": strings.volume.clockOwn },
+  });
+  uiTimeApply(timeField, () => {
+    const own = volumeClockParse(timeField.value);
+    if (own !== null && clock) clock.set(own);
+  });
+  const nowButton = uiButton(strings.volume.clockNow, {
+    class: "ui-btn volume__airNow",
+    title: strings.volume.clockNowHint,
+    on: { click: () => clock && clock.now() },
+  });
+  const clockRow = uiEl("div", { class: "volume__airClock" }, [timeField, nowButton]);
   const closeButton = uiIconButton("close", {
     class: "ui-btn volume__airClose",
     label: strings.volume.airClose,
@@ -156,7 +193,7 @@ export function createVolumeAir(doors = {}) {
         },
       },
     },
-    [uiEl("div", { class: "volume__airHead" }, [title, closeButton]), rowsNode, autoButton],
+    [uiEl("div", { class: "volume__airHead" }, [title, closeButton]), clockRow, rowsNode, autoButton],
   );
 
   let place = null;
@@ -210,6 +247,13 @@ export function createVolumeAir(doors = {}) {
     held = null;
     settle.clear();
     shownKey = volumeAirPlaceKey(place);
+    if (!place) {
+      title.textContent = strings.volume.airTime;
+      box.setAttribute("aria-label", strings.volume.airTime);
+      rowsNode.replaceChildren();
+      rowsNode.title = "";
+      return;
+    }
     const name = place.kind === "room" ? place.name || strings.volume.climateRoomUnnamed : strings.volume.airStreet;
     title.textContent = name;
     box.setAttribute("aria-label", text("volume.airTitle", { name }));
@@ -217,7 +261,23 @@ export function createVolumeAir(doors = {}) {
     rowsNode.title = place.kind === "room" ? "" : strings.volume.airStreetHint;
   }
 
+  // Поле часов идёт за временем, пока в нём не набирают: под фокусом его
+  // держит человек.
+  function refreshClock() {
+    if (!clock) return;
+    const focused = typeof document !== "undefined" && document.activeElement === timeField;
+    if (focused) return;
+    const minutes = clock.minutes();
+    const value = Number.isFinite(minutes) ? volumeClockText(minutes) : "";
+    if (timeField.value !== value) timeField.value = value;
+  }
+
   function refresh() {
+    refreshClock();
+    if (!place) {
+      if (!autoButton.hidden) autoButton.hidden = true;
+      return;
+    }
     const at = now();
     for (const row of volumeAirRows(place)) {
       const own = rows.get(row.key);
@@ -238,9 +298,10 @@ export function createVolumeAir(doors = {}) {
   }
 
   function open() {
-    if (!place || opened) return;
+    if (opened) return;
     opened = true;
     line.setAttribute("aria-expanded", "true");
+    timeLine.setAttribute("aria-expanded", "true");
     box.hidden = false;
     rebuild();
     refresh();
@@ -256,8 +317,10 @@ export function createVolumeAir(doors = {}) {
     held = null;
     settle.clear();
     line.setAttribute("aria-expanded", "false");
+    timeLine.setAttribute("aria-expanded", "false");
     box.hidden = true;
-    if (focusLine && !line.hidden && typeof line.focus === "function") line.focus({ preventScroll: true });
+    const back = line.hidden ? timeLine : line;
+    if (focusLine && typeof back.focus === "function") back.focus({ preventScroll: true });
   }
 
   function sync(next) {
@@ -270,17 +333,15 @@ export function createVolumeAir(doors = {}) {
       line.title = !place ? "" : place.kind === "room" ? strings.volume.airOpen : strings.volume.airOpenStreet;
     }
     if (!opened) return;
-    // Строки нет — нет и окошка: человек ушёл в обзор или дом остановили.
-    if (!place) {
-      close();
-      return;
-    }
+    // Климата нет — человек ушёл в обзор или дом остановили, — и окошко
+    // остаётся про одно время.
     if (volumeAirPlaceKey(place) !== shownKey) rebuild();
     refresh();
     if (typeof doors.placed === "function") doors.placed(box);
   }
 
   return {
+    timeLine,
     line,
     box,
     sync,

@@ -80,6 +80,7 @@ import {
   VOLUME_LAYER_SUN,
   VOLUME_SHEER_SHARE,
   VOLUME_SUN_PROBE_MM,
+  VOLUME_DOOR_LEAF_MM,
   VOLUME_DOOR_RGB,
   VOLUME_PLANE_EPS_MM,
   VOLUME_HANDLE_RGB,
@@ -159,6 +160,7 @@ import {
   volumeHeightMm,
   volumeHorizon,
   volumeChannelAt,
+  volumeChannelNear,
   volumeChannelLines,
   volumeChannelLinks,
   volumeModelKeys,
@@ -1722,16 +1724,22 @@ function doorScene() {
   return { ...scene, project, doorId };
 }
 
-const doorLeafOf = (built) => built.faces.find((face) => face.both && face.rgb[0] === VOLUME_DOOR_RGB[0]);
+// Полотно двери — все грани её цвета: с правки 2026-10-27 это призма в
+// толщину полотна (`VOLUME_DOOR_LEAF_MM`), а не одна двусторонняя грань.
+const doorLeafOf = (built) => {
+  const faces = built.faces.filter((face) => face.rgb[0] === VOLUME_DOOR_RGB[0] && face.doorId);
+  return { faces, doorId: faces[0].doorId, p: faces.flatMap((face) => face.p) };
+};
 
 test("дверь закрыта по умолчанию: полотно стоит в проёме, а не поперёк комнаты", () => {
   const scene = doorScene();
   const built = volumeScene(scene.project, scene.schemeId);
-  // Двусторонних граней шесть: полотно двери, четыре бруска рамы окна и
-  // **потолок** — с таска 211 он смотрит в обе стороны (снизу потолок, сверху
-  // крыша), иначе сверху дом просматривался насквозь (D62).
+  // Двусторонних граней пять: четыре бруска рамы окна и **потолок** — с таска
+  // 211 он смотрит в обе стороны (снизу потолок, сверху крыша), иначе сверху
+  // дом просматривался насквозь (D62). Полотно двери с правки 2026-10-27 —
+  // призма: у неё две настоящие стороны, а не изнанка.
   const twoSided = built.faces.filter((face) => face.both);
-  assert.equal(twoSided.length, 6, "полотно двери, четыре бруска рамы окна и потолок");
+  assert.equal(twoSided.length, 5, "четыре бруска рамы окна и потолок");
   assert.equal(
     twoSided.filter((face) => face.rgb === VOLUME_CEILING_RGB).length,
     1,
@@ -1741,7 +1749,8 @@ test("дверь закрыта по умолчанию: полотно стои
   // Стена идёт по y = −1500. Закрытое полотно лежит вдоль неё: от стены оно не
   // отходит, а проём перекрывает по всей ширине.
   const away = Math.max(...leaf.p.map((point) => Math.abs(point.y + 1500)));
-  assert.ok(away < 1, "закрытое полотно стоит в проёме: " + away);
+  assert.ok(away <= VOLUME_DOOR_LEAF_MM / 2 + 0.01, "закрытое полотно стоит в проёме: " + away);
+  assert.equal(leaf.faces.length, 6, "полотно — призма: четыре бока, верх и низ");
   const along = Math.max(...leaf.p.map((point) => point.x)) - Math.min(...leaf.p.map((point) => point.x));
   assert.ok(Math.abs(along - 900) < 1, "перекрывает проём во всю ширину: " + along);
   assert.equal(leaf.doorId, scene.doorId, "полотно знает свою дверь — ею распоряжается E");
@@ -1767,10 +1776,11 @@ test("названная дверь раскрывается, остальные
   const open = doorLeafOf(volumeScene(scene.project, scene.schemeId, { openDoorIds: new Set([scene.doorId]) }));
   const spread = Math.max(...open.p.map((point) => Math.abs(point.y + 1500)));
   assert.ok(spread > 800, "раскрытое полотно уходит от стены на четверть оборота: " + spread);
-  assert.ok(Math.max(...closed.p.map((point) => Math.abs(point.y + 1500))) < 1, "закрытое — нет");
+  const shut = VOLUME_DOOR_LEAF_MM / 2 + 0.01;
+  assert.ok(Math.max(...closed.p.map((point) => Math.abs(point.y + 1500))) <= shut, "закрытое — нет");
   // Чужое имя двери ничего не раскрывает: список — именной, а не «открыть всё».
   const other = doorLeafOf(volumeScene(scene.project, scene.schemeId, { openDoorIds: new Set(["нет такой"]) }));
-  assert.ok(Math.max(...other.p.map((point) => Math.abs(point.y + 1500))) < 1);
+  assert.ok(Math.max(...other.p.map((point) => Math.abs(point.y + 1500))) <= shut);
   assert.deepEqual(volumeScene(scene.project, scene.schemeId).doors, [scene.doorId], "сцена знает все двери схемы");
 });
 
@@ -2207,6 +2217,62 @@ test("дерево порядка выкладывает грани от дал�
   // Пол и потолок в дерево не попадают: у них свой ярус.
   const floor = { ...across, layer: VOLUME_LAYER_GROUND };
   assert.equal(volumeOrderWalk(volumeOrderTree([floor]), { x: 0, y: 0, z: 0 }).length, 0);
+});
+
+test("дерево неподвижных граней живёт из сборки в сборку, двери вставляются в него (правка 2026-10-27)", () => {
+  // «При открытии любой двери микрофриз есть»: дерево порядка строилось заново
+  // на каждую дверь. Теперь неподвижные грани, совпавшие с прежними поле в
+  // поле, берут готовое дерево, а полотно двери в него вставляется.
+  const wall = (atX, id) => ({
+    p: [
+      { x: atX, y: -500, z: 0 },
+      { x: atX, y: 500, z: 0 },
+      { x: atX, y: 500, z: 1000 },
+      { x: atX, y: -500, z: 1000 },
+    ],
+    n: { x: -1, y: 0, z: 0 },
+    rgb: VOLUME_WALL_RGB,
+    layer: VOLUME_LAYER_BODY,
+    markId: id,
+  });
+  // Полотно поперёк обеих стенок: вставленное, оно режется ими, как при сборке.
+  const leaf = (y) => ({
+    p: [
+      { x: 0, y, z: 0 },
+      { x: 5000, y, z: 0 },
+      { x: 5000, y, z: 1000 },
+      { x: 0, y, z: 1000 },
+    ],
+    n: { x: 0, y: -1, z: 0 },
+    rgb: VOLUME_DOOR_RGB,
+    layer: VOLUME_LAYER_BODY,
+    doorId: "дверь",
+  });
+  const eye = { x: 0, y: -2000, z: 500 };
+  const first = [wall(1000, "ближняя"), wall(3000, "дальняя")];
+  const shut = volumeOrderWalk(volumeOrderTree([...first, leaf(0)]), eye);
+  assert.equal(shut.filter((face) => face.doorId).length, 3, "полотно не разрезано стенками");
+  // Та же сцена собрана заново — новые объекты, те же поля — и дверь открыта.
+  const again = [wall(1000, "ближняя"), wall(3000, "дальняя")];
+  const open = volumeOrderWalk(volumeOrderTree([...again, leaf(200)]), eye);
+  const walls = open.filter((face) => !face.doorId);
+  assert.ok(walls.every((face) => first.includes(face)), "неподвижные грани не взяты из готового дерева");
+  assert.deepEqual(open.filter((face) => face.doorId).map((face) => face.p[0].y), [200, 200, 200], "в дереве осталось прежнее полотно");
+  // Вставка готового дерева не трогает: закрытое полотно на месте, лишнего нет.
+  const closedAgain = volumeOrderWalk(volumeOrderTree([wall(1000, "ближняя"), wall(3000, "дальняя"), leaf(0)]), eye);
+  assert.equal(closedAgain.length, shut.length);
+  // Неподвижная грань сдвинулась — дерево строится заново из новых граней.
+  const moved = [wall(1000, "ближняя"), wall(3500, "дальняя")];
+  const rebuilt = volumeOrderWalk(volumeOrderTree([...moved, leaf(0)]), eye);
+  assert.ok(rebuilt.filter((face) => !face.doorId).every((face) => moved.includes(face) || moved.some((one) => one.markId === face.markId)));
+  assert.ok(!rebuilt.some((face) => first.includes(face)), "сдвинутая сцена взяла прежнее дерево");
+  // Порядок с обеих сторон верен и после вставки.
+  assert.deepEqual(
+    volumeOrderWalk(volumeOrderTree([...again, leaf(200)]), { x: 0, y: 0, z: 500 })
+      .filter((face) => !face.doorId)
+      .map((face) => face.markId),
+    ["дальняя", "ближняя"],
+  );
 });
 
 test("порядок кадра совпадает с истиной в каждом пикселе", () => {
@@ -5596,6 +5662,17 @@ test("щелчок по клавише попадает в её канал, а �
   assert.equal(volumeChannelAt(covered, 15, 5), null);
 });
 
+test("нажатие при запущенном доме прощает промах по клавишам: ближайшая клавиша той же метки (правка 2026-10-27)", () => {
+  // «Не все выключатели реагируют на нажатие Е»: прицел в рамке двухклавишного
+  // выключателя не находил клавиши, и нажимать было нечего.
+  const key = (channel, x, pick = "мет") => ({ xy: [x, 0, x + 10, 0, x + 10, 10, x, 10], pick, channel, fill: "rgb(0,0,0)" });
+  const polygons = [{ xy: [0, 0, 100, 0, 100, 100, 0, 100], pick: "мет", channel: null }, key(1, 10), key(2, 30), key(1, 52, "чужая")];
+  assert.equal(volumeChannelAt(polygons, 22, 30), null, "строгий выбор канала стал прощать промах");
+  assert.deepEqual(volumeChannelNear(polygons, "мет", 18, 30), { markId: "мет", channel: 1 });
+  assert.deepEqual(volumeChannelNear(polygons, "мет", 60, 5), { markId: "мет", channel: 2 }, "взята клавиша чужой метки");
+  assert.equal(volumeChannelNear(polygons, "нет", 18, 30), null);
+});
+
 test("выбранный канал оставляет стрелки только своей клавиши", () => {
   const links = {
     lines: [
@@ -5951,12 +6028,24 @@ test("лестница чертежа попадает в сцену своей 
   assert.equal(JSON.stringify(scene.project), before);
 });
 
-test("подход к лестнице виден с метра, а из другого конца комнаты — нет", () => {
+test("подход к лестнице — вплотную и из её помещения, а не мимо и не сквозь стену", () => {
   const scene = stairScene();
   const stairs = volumeScene(scene.project, scene.schemeId).stairs;
-  // Лестница занимает x от −1750 до −650. Встали в полуметре от её края.
-  assert.ok(volumeStairNear(stairs, { x: -150, y: 0 }), "в полуметре от края — подошли");
+  // Лестница занимает x от −1750 до −650. Правка 2026-10-27: «показывай только
+  // в помещении с лестницей и только когда на неё наступили или подошли почти
+  // вплотную». В полуметре от края — уже мимо.
+  assert.ok(volumeStairNear(stairs, { x: -650 + VOLUME_BODY_MM, y: 0 }), "упёрлись в лестницу — не спросили");
+  assert.equal(volumeStairNear(stairs, { x: -150, y: 0 }), null, "в полуметре от края — спросили");
   assert.equal(volumeStairNear(stairs, { x: 1500, y: 0 }), null, "через комнату — не подошли");
+  // Сквозь стену не зовут: лестница в одном помещении, человек — в соседнем,
+  // в двух десятках сантиметров от неё за перегородкой.
+  const rooms = [
+    { roomId: "лестничная", pointsMm: [{ x: -3000, y: -2000 }, { x: -560, y: -2000 }, { x: -560, y: 2000 }, { x: -3000, y: 2000 }] },
+    { roomId: "соседняя", pointsMm: [{ x: -440, y: -2000 }, { x: 3000, y: -2000 }, { x: 3000, y: 2000 }, { x: -440, y: 2000 }] },
+  ];
+  assert.ok(volumeStairNear(stairs, { x: -400, y: 0 }), "без помещений вопрос задаётся по одному расстоянию");
+  assert.equal(volumeStairNear(stairs, { x: -400, y: 0 }, VOLUME_STAIR_REACH_MM, rooms), null, "позвали сквозь стену");
+  assert.ok(volumeStairNear(stairs, { x: -600, y: 0 }, VOLUME_STAIR_REACH_MM, rooms), "из своего помещения не позвали");
   // Ровно на границе досягаемости и чуть дальше.
   assert.ok(volumeStairNear(stairs, { x: -650 + VOLUME_STAIR_REACH_MM - 1, y: 0 }));
   assert.equal(volumeStairNear(stairs, { x: -650 + VOLUME_STAIR_REACH_MM + 1, y: 0 }), null);

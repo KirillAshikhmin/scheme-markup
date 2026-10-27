@@ -274,13 +274,105 @@ export function volumeSplitFace(face, plane, cuts = null) {
  * построенным деревом (таск 232).
  */
 export function volumeOrderTree(faces, cuts = null) {
-  const items = [];
+  const statics = [];
+  const doors = [];
   for (const face of faces || []) {
     if (!face || face.line) continue;
     if (face.layer !== undefined && face.layer !== VOLUME_LAYER_BODY) continue;
-    items.push(face);
+    (face.doorId ? doors : statics).push(face);
   }
-  return volumeOrderNode(items, cuts);
+  // Память — только у сцены одной схемы (`cuts` пуст): у этажа стопки точки
+  // граней переезжают на месте, и сверять их с прежними нечем.
+  let base = null;
+  const kept = cuts === null ? volumeOrderKept : null;
+  if (kept && volumeFacesSame(kept.statics, statics)) base = kept.tree;
+  else {
+    base = volumeOrderNode(statics, cuts);
+    if (cuts === null) volumeOrderKept = { statics, tree: base };
+  }
+  return volumeOrderInsert(base, doors, cuts);
+}
+
+// ——— дерево неподвижных граней (правка 2026-10-27) ————————————————————————
+//
+// Слова заказчика: «почему-то при открытии любой двери микрофриз есть». Дверь
+// пересобирает сцену целиком (`rebuildScene` в `panels/volume.js`), и дороже
+// всего в пересборке — дерево порядка: на объекте заказчика в 13 тысяч граней
+// две трети из 65 мс счёта. А от двери в дереве меняются только грани с
+// `doorId` — полотна, створки окон, ворота, — и их десяток.
+//
+// Поэтому дерево строится **по неподвижным граням**, а двери вставляются в
+// него потом (`volumeOrderInsert`). Неподвижные грани новой сборки сверяются с
+// прежними (`volumeFacesSame`): совпали поле в поле — дерево берётся готовым,
+// и дверь стоит вставки десятка граней. Не совпали — строится заново, как
+// прежде. Сверка честная, а не по признаку «объект тот же»: в дерево попадает
+// ровно то, что собрала сцена, и врать порядку здесь нечем.
+//
+// Порядок в каждом пикселе от этого не меняется: дерево с гранями, вставленными
+// после, — такое же дерево разбиения, просто плоскости дверей в нём лежат
+// ниже. Вставка не трогает готового дерева — меняются копии узлов на её пути,
+// и прежнее дерево остаётся годным для следующей двери.
+
+/** Неподвижные грани последней сборки и их дерево: `{statics, tree}`. */
+let volumeOrderKept = null;
+
+/** Грани поле в поле те же, в том же порядке. */
+function volumeFacesSame(was, now) {
+  if (was.length !== now.length) return false;
+  for (let index = 0; index < was.length; index += 1) {
+    if (!volumeOrderValueSame(was[index], now[index], 3)) return false;
+  }
+  return true;
+}
+
+// Сверка значений вглубь на `depth` уровней: грань → точки → координаты.
+// Глубже — «не те же», и дерево строится заново: промах здесь стоит времени,
+// а не картинки.
+function volumeOrderValueSame(a, b, depth) {
+  if (a === b) return true;
+  if (!a || !b || typeof a !== "object" || typeof b !== "object" || depth <= 0) return false;
+  if (Array.isArray(a)) {
+    if (!Array.isArray(b) || a.length !== b.length) return false;
+    for (let index = 0; index < a.length; index += 1) if (!volumeOrderValueSame(a[index], b[index], depth - 1)) return false;
+    return true;
+  }
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  for (const key of keys) if (!volumeOrderValueSame(a[key], b[key], depth - 1)) return false;
+  return true;
+}
+
+/**
+ * Вставить грани в готовое дерево. Готовое не меняется: узлы на пути
+ * вставки — копии. Грань, которую плоскость узла пересекает, режется по ней,
+ * как при сборке; в пустое место встаёт дерево вставленных граней.
+ */
+export function volumeOrderInsert(node, faces, cuts = null) {
+  if (!faces || faces.length === 0) return node;
+  if (!node) return volumeOrderNode(faces, cuts);
+  const same = [];
+  const front = [];
+  const back = [];
+  for (const face of faces) {
+    const side = volumeFaceSide(node.plane, face);
+    if (side === 0) same.push(face);
+    else if (side === 1) front.push(face);
+    else if (side === -1) back.push(face);
+    else {
+      const cut = volumeSplitFace(face, node.plane, cuts);
+      if (cut.front) front.push(cut.front);
+      if (cut.back) back.push(cut.back);
+    }
+  }
+  const next = {
+    plane: node.plane,
+    same: same.length > 0 ? [...node.same, ...same] : node.same,
+    front: volumeOrderInsert(node.front, front, cuts),
+    back: volumeOrderInsert(node.back, back, cuts),
+    count: 0,
+  };
+  next.count = next.same.length + (next.front ? next.front.count : 0) + (next.back ? next.back.count : 0);
+  return next;
 }
 
 /**

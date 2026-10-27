@@ -729,7 +729,12 @@ function volumeFindSeams(hosts) {
         volumeSharedEdges(a, b);
       }
     }
-    for (const item of group) if (item.joins.size > 0) volumeSeamMemo.set(item.host, [...item.joins].sort((x, y) => x - y));
+    // Кусок без швов снимает и прежние: неподвижные куски живут из сборки в
+    // сборку (`volumeOrderTree`), а их сосед-полотно — уже другой.
+    for (const item of group) {
+      if (item.joins.size > 0) volumeSeamMemo.set(item.host, [...item.joins].sort((x, y) => x - y));
+      else volumeSeamMemo.delete(item.host);
+    }
   }
 }
 

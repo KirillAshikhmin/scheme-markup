@@ -55,6 +55,7 @@ import {
 import { drawDrawingOpening, drawElevation, drawingBridge, drawingDoorLeaf } from "../src/render.js";
 import {
   VOLUME_CLEAR_ALPHAS,
+  VOLUME_DOOR_LEAF_MM,
   VOLUME_EYE_MM,
   VOLUME_FRAME_RGB,
   VOLUME_GLASS_RGB,
@@ -440,13 +441,15 @@ const GLASS_DOOR = {
   swing: "left",
 };
 
-const leafOf = (built, doorId) => built.faces.filter((face) => face.doorId === doorId && face.both);
+// Полотно — всё, что помечено дверью, кроме ручки. С правки 2026-10-27 у
+// полотна толщина: бруски рамы — призмы по шесть граней, стекло — грань.
+const leafOf = (built, doorId) => built.faces.filter((face) => face.doorId === doorId && face.rgb !== VOLUME_HANDLE_RGB);
 
 test("полотно стеклянной двери — четыре бруска рамы и стекло в середине", () => {
   const scene = room([GLASS_DOOR]);
   const built = volumeScene(scene.project, scene.schemeId);
   const leaf = leafOf(built, scene.ids[0]);
-  assert.equal(leaf.length, 5, "четыре бруска рамы и одно стекло: " + leaf.length);
+  assert.equal(leaf.length, 4 * 6 + 1, "четыре бруска рамы и одно стекло: " + leaf.length);
   const glass = leaf.filter((face) => face.clear);
   assert.equal(glass.length, 1, "стекло одно");
   assert.deepEqual(glass[0].rgb, VOLUME_GLASS_RGB);
@@ -473,28 +476,30 @@ test("полотно стеклянной двери — четыре бруск
   for (const face of handle) assert.equal(face.clear, false);
 });
 
-test("рама и стекло лежат в одной плоскости и друг на друга не налезают", () => {
+test("стекло — в середине толщины полотна, бруски рамы вокруг него и на него не налезают", () => {
   const scene = room([GLASS_DOOR]);
   const leaf = leafOf(volumeScene(scene.project, scene.schemeId), scene.ids[0]);
-  // Коплоскостность — не прихоть: дерево порядка (таск 151) порядок внутри
-  // плоскости не обещает, и прозрачному стеклу он нужен только относительно
-  // того, что **за** полотном. Поэтому пять граней обязаны стоять в одной
-  // плоскости и не перекрывать друг друга — тогда их взаимный порядок не
-  // значит ничего.
+  // С правки 2026-10-27 полотно толщиной `VOLUME_DOOR_LEAF_MM`: рама —
+  // брусками в эту толщину, стекло — гранью в её середине. Стекло ни с чем не
+  // коплоскостно, и порядок ему нужен только относительно того, что **за**
+  // ним: это дерево порядка и даёт.
   const ys = leaf.flatMap((face) => face.p.map((point) => point.y));
-  assert.ok(Math.max(...ys) - Math.min(...ys) < 1, "полотно плоское: " + (Math.max(...ys) - Math.min(...ys)));
-  const boxes = leaf.map((face) => ({
+  assert.ok(Math.max(...ys) - Math.min(...ys) <= VOLUME_DOOR_LEAF_MM + 0.01, "полотно толще своей толщины");
+  assert.ok(Math.max(...ys) - Math.min(...ys) >= VOLUME_DOOR_LEAF_MM - 0.01, "у полотна нет толщины");
+  const [glass] = leaf.filter((face) => face.clear);
+  assert.ok(glass.p.every((point) => Math.abs(point.y + 1500) < 0.01), "стекло не в середине толщины");
+  const box = (face) => ({
     x0: Math.min(...face.p.map((point) => point.x)),
     x1: Math.max(...face.p.map((point) => point.x)),
     z0: Math.min(...face.p.map((point) => point.z)),
     z1: Math.max(...face.p.map((point) => point.z)),
-  }));
-  for (let i = 0; i < boxes.length; i += 1) {
-    for (let j = i + 1; j < boxes.length; j += 1) {
-      const over = Math.min(boxes[i].x1, boxes[j].x1) - Math.max(boxes[i].x0, boxes[j].x0);
-      const up = Math.min(boxes[i].z1, boxes[j].z1) - Math.max(boxes[i].z0, boxes[j].z0);
-      assert.ok(over <= 0.01 || up <= 0.01, "грани " + i + " и " + j + " налезли друг на друга");
-    }
+  });
+  const pane = box(glass);
+  for (const face of leaf.filter((item) => !item.clear)) {
+    const bar = box(face);
+    const over = Math.min(pane.x1, bar.x1) - Math.max(pane.x0, bar.x0);
+    const up = Math.min(pane.z1, bar.z1) - Math.max(pane.z0, bar.z0);
+    assert.ok(over <= 0.01 || up <= 0.01, "брусок рамы налез на стекло");
   }
 });
 
@@ -503,8 +508,8 @@ test("на узкое полотно рама не влезает — и сте�
   // нарисовать полотно глухим, чем обещать стекло.
   const scene = room([{ ...GLASS_DOOR, widthMm: OPENING_GLASS_FRAME_MM * 3 }]);
   const leaf = leafOf(volumeScene(scene.project, scene.schemeId), scene.ids[0]);
-  assert.equal(leaf.length, 1, "одно глухое полотно");
-  assert.equal(leaf[0].clear, false);
+  assert.equal(leaf.length, 6, "одно глухое полотно — брусок в толщину полотна");
+  assert.ok(leaf.every((face) => face.clear === false));
 });
 
 test("стеклянная дверь открывается, закрывается и попадает в «все двери»", () => {
@@ -516,7 +521,9 @@ test("стеклянная дверь открывается, закрывает
   // Обе двери в списке сцены — по нему `R` открывает все разом (G210).
   assert.deepEqual(built.doors, scene.ids, "сцена знает обе двери");
   const away = (faces) => Math.max(...faces.flatMap((face) => face.p.map((point) => Math.abs(point.y + 1500))));
-  assert.ok(away(leafOf(built, scene.ids[0])) < 1, "закрытая стоит в проёме");
+  const shut = VOLUME_DOOR_LEAF_MM / 2 + 1;
+  assert.ok(away(leafOf(built, scene.ids[0])) < shut, "закрытая стоит в проёме");
+  assert.ok(away(leafOf(built, scene.ids[1])) < shut, "глухая закрытая стоит в проёме");
   const open = volumeScene(scene.project, scene.schemeId, { openDoorIds: new Set([scene.ids[0]]) });
   const spread = away(leafOf(open, scene.ids[0]));
   assert.ok(spread > 800, "раскрытая уходит от стены на четверть оборота: " + spread);
@@ -525,7 +532,7 @@ test("стеклянная дверь открывается, закрывает
   assert.equal(glass.length, 1);
   assert.ok(Math.min(...glass[0].p.map((point) => Math.abs(point.y + 1500))) > 80, "стекло уехало со створкой");
   // Соседняя глухая дверь при этом закрыта: список двери именной.
-  assert.ok(away(leafOf(open, scene.ids[1])) < 1, "глухая осталась закрытой");
+  assert.ok(away(leafOf(open, scene.ids[1])) < shut, "глухая осталась закрытой");
   // Сквозь проём стеклянной двери ходят, как сквозь дверной (решение таска 150).
   assert.equal(volumeOpeningWalkable(scene.project.openings[0]), true);
 });

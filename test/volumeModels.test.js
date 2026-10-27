@@ -50,6 +50,13 @@ import { MODEL_CLEARS, MODEL_CYL_SIDES, MODEL_MATERIALS, modelBox } from "../src
 import { objectCatalogDefaults, objectCatalogKeys, objectCatalogRetiredKeys } from "../src/objectCatalog.js";
 import { LINE_SPOT_MAX } from "../src/objectModels/lines.js";
 import {
+  OBJECT_STAIR_KEYS,
+  STAIR_RISE_MM,
+  STAIR_TREAD_SHARE,
+  objectStairModel,
+  objectStairSteps,
+} from "../src/objectModels/stairs.js";
+import {
   OBJECT_MODEL_BODY_MAX,
   OBJECT_MODEL_FACE_MAX,
   objectModelByKey,
@@ -381,20 +388,72 @@ test("у четырёх вещей таска 204 своё тело, и экра
   const stairsTop = objectModelByKey("stairs").parts[objectModelByKey("stairs").parts.length - 1];
   assert.ok(exitStep.y > 0, "ступень выхода ушла к лицу");
   assert.ok(stairsTop.y > 0, "верхняя ступень лестницы ушла к лицу — выход считался не с той стороны");
-  // А саму лестницу таск 204 не трогал: её тело то же, что было (таск 149
-  // узнаёт её по ключу, и кадр прежнего чертежа не меняется).
-  assert.equal(objectModelByKey("stairs").parts.length, 5);
-  assert.deepEqual(
-    objectModelByKey("stairs").parts.map((part) => part.name),
-    ["step1", "step2", "step3", "step4", "step5"],
-  );
+});
+
+// ——— лестницы — сборкой по габариту (правка 2026-10-27) ————————————————————
+//
+// «Лестницу сделай минималистичней, только ступени плоские, а не блоки от пола
+// и количество ступеней увеличь, особенно в п-образной, а сами ступени поменьше
+// в ширину процентов на 20». И: «сделай у ней опцию поворота вокруг оси,
+// например сейчас у G-образной если смотреть на неё спереди нижняя ступень
+// слева, а надо что бы справа».
+
+test("ступени лестниц — плоские плиты на своей высоте, по подъёму в 175 мм", () => {
+  const sizes = { stairs: [1100, 2700], stairsL: [2700, 2700], stairsU: [2300, 2700], stairsSpiral: [1600, 1600] };
+  for (const key of OBJECT_STAIR_KEYS) {
+    const [widthMm, depthMm] = sizes[key];
+    const parts = objectStairModel(key, { widthMm, depthMm, heightMm: 2800 });
+    const steps = parts.filter((part) => /^step\d+$/.test(part.name));
+    assert.equal(steps.length, objectStairSteps(2800), key + ": ступеней не по подъёму");
+    assert.equal(objectStairSteps(2800), 2800 / STAIR_RISE_MM - 1);
+    // Плоские, а не от пола: плита в 40 мм, и каждая выше предыдущей.
+    let last = -1;
+    for (const step of steps) {
+      assert.ok(step.z > 0.01, key + "." + step.name + ": ступень стоит на полу");
+      assert.ok(Math.abs(step.height * 2800 - 40) < 0.5, key + "." + step.name + ": не плита в 40 мм");
+      assert.ok(step.z > last, key + "." + step.name + ": ниже предыдущей");
+      last = step.z;
+    }
+  }
+  // П-образная — уже не две ступени, площадка и ещё одна, а полный марш.
+  assert.ok(objectStairModel("stairsU", { widthMm: 2300, depthMm: 2700, heightMm: 2800 }).length >= 15);
+  // Прямой марш: ступень на пятую часть уже марша и стоит посередине.
+  const [first] = objectStairModel("stairs", { widthMm: 1100, depthMm: 2700, heightMm: 2800 });
+  assert.ok(Math.abs(first.width - STAIR_TREAD_SHARE) < 1e-9 && Math.abs(first.x + first.width / 2) < 1e-9, "ступень не по середине марша");
+  // Ступеней больше на высоком этаже.
+  assert.ok(objectStairSteps(3500) > objectStairSteps(2800));
+  assert.equal(objectStairModel("stairs", { widthMm: 0, depthMm: 2700, heightMm: 2800 }), null);
+  assert.equal(objectStairModel("cabinet", { widthMm: 900, depthMm: 600, heightMm: 2000 }), null);
+});
+
+test("отражение лестницы: нижняя ступень Г-образной — справа, прямой отражать нечего", () => {
+  const sizes = { widthMm: 2700, depthMm: 2700, heightMm: 2800 };
+  const plain = objectStairModel("stairsL", sizes);
+  const mirrored = objectStairModel("stairsL", { ...sizes, mirror: true });
+  const middleX = (part) => part.x + part.width / 2;
+  assert.ok(middleX(plain[0]) < 0, "без отражения нижняя ступень не слева");
+  assert.ok(middleX(mirrored[0]) > 0, "с отражением нижняя ступень не справа");
+  for (let index = 0; index < plain.length; index += 1) {
+    assert.ok(Math.abs(middleX(plain[index]) + middleX(mirrored[index])) < 1e-9, "отражение не зеркальное");
+    assert.equal(plain[index].z, mirrored[index].z);
+  }
+  const straight = { widthMm: 1100, depthMm: 2700, heightMm: 2800 };
+  assert.deepEqual(objectStairModel("stairs", { ...straight, mirror: true }), objectStairModel("stairs", straight));
+  // Спиральная закручивается в другую сторону.
+  const spiral = { widthMm: 1600, depthMm: 1600, heightMm: 2800 };
+  const second = (parts) => parts.find((part) => part.name === "step2");
+  assert.ok(middleX(second(objectStairModel("stairsSpiral", spiral))) < 0);
+  assert.ok(middleX(second(objectStairModel("stairsSpiral", { ...spiral, mirror: true }))) > 0);
 });
 
 // ——— предел тел и граней ——————————————————————————————————————————————————
 
 test("у модели не больше пяти тел и тридцати граней", () => {
   const worst = [];
-  for (const key of objectModelKeys()) {
+  // Лестницы — исключение по слову заказчика (правка 2026-10-27): ступени по
+  // подъёму не влезают в пять тел. Их на объекте одна-две, и предел у них свой
+  // — тест ниже.
+  for (const key of objectModelKeys().filter((one) => !OBJECT_STAIR_KEYS.includes(one))) {
     const model = objectModelByKey(key);
     const faces = objectModelFaceCount(model);
     assert.ok(
@@ -420,6 +479,14 @@ test("у модели не больше пяти тел и тридцати гр
   // стоили 6–18 граней, так и стоят.
   const average = worst.reduce((sum, value) => sum + value, 0) / worst.length;
   assert.ok(average < 20, "средняя цена модели в гранях: " + average.toFixed(1));
+});
+
+test("лестница держит свой предел: не больше тридцати ступеней и двухсот граней", () => {
+  for (const key of OBJECT_STAIR_KEYS) {
+    const parts = objectStairModel(key, { widthMm: 2700, depthMm: 2700, heightMm: 20000 });
+    assert.ok(parts.filter((part) => part.name.startsWith("step")).length <= 30, key + ": ступеней больше предела");
+    assert.ok(objectModelFaceCount({ parts }) <= 30 * 7 + 10, key + ": граней больше предела");
+  }
 });
 
 test("клавишная модель держится предела на любом числе каналов", () => {
@@ -527,7 +594,8 @@ test("у каждого тела есть имя и материал из наб
       // Видов тела четыре: коробка, стоячий цилиндр, лежачий (таск 177) и
       // конус (хвоя ели, правка после сборки сценариев). У лежачего
       // обязательна ось — без неё непонятно, где у него круг.
-      assert.ok(["box", "cyl", "tube", "cone"].includes(part.kind), key + "." + part.name + ": вид тела " + part.kind);
+      // Плита по контуру — ступень винтовой лестницы (правка 2026-10-27).
+      assert.ok(["box", "cyl", "tube", "cone", "plate"].includes(part.kind), key + "." + part.name + ": вид тела " + part.kind);
       if (part.kind === "tube") {
         assert.ok(["x", "y"].includes(part.axis), key + "." + part.name + ": ось лежачего цилиндра " + part.axis);
       }

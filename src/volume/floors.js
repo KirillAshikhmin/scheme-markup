@@ -34,6 +34,7 @@ import {
   wallsOnScheme,
 } from "../model.js";
 import { objectModelByKey } from "../objectModels/registry.js";
+import { objectStairKey, objectStairModel } from "../objectModels/stairs.js";
 import {
   DEG,
   VOLUME_CEILING_RGB,
@@ -385,7 +386,12 @@ export function volumeObjectFaces(project, schemeId, object, fallbackHeightMm, o
   const own = clear !== false;
   const model = volumeObjectModel(project, object);
   const frame = model ? volumeObjectFrame(project, schemeId, object, fallbackHeightMm) : null;
-  if (frame) return volumeModelFaces(frame, model, VOLUME_OBJECT_RGB, out, { clear: own });
+  // Лестница собирается по своему габариту и отражению (правка 2026-10-27):
+  // ступеней столько, сколько подъёмов в её высоте (`objectModels/stairs.js`).
+  const stair = frame && objectStairKey(model.key)
+    ? objectStairModel(model.key, { widthMm: frame.widthMm, depthMm: frame.depthMm, heightMm: frame.heightMm, mirror: object.mirror === true })
+    : null;
+  if (frame) return volumeModelFaces(frame, stair ? { key: model.key, parts: stair } : model, VOLUME_OBJECT_RGB, out, { clear: own });
   for (const prism of volumeObjectPrisms(project, schemeId, object, fallbackHeightMm)) {
     volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, VOLUME_OBJECT_RGB, out, { clear: own });
   }

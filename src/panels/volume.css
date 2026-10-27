@@ -438,6 +438,45 @@
   inset: -14px -12px;
 }
 
+/* Строка часов — тоже дверь в окошко (правка 2026-10-27): «так же там сделай
+   изменение времени, но компактно». Кнопка без своего вида — та же строка,
+   что была, только берёт клик. */
+.volume__clockTime {
+  position: relative;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.volume__clockTime::after {
+  content: "";
+  position: absolute;
+  inset: -6px -10px;
+}
+
+.volume__clock--touch .volume__clockTime::after {
+  inset: -14px -12px;
+}
+
+.volume__clockTime:hover,
+.volume__clockTime[aria-expanded="true"] {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+.volume__clockTime:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
 .volume__clockAir:hover,
 .volume__clockAir[aria-expanded="true"] {
   color: #ffffff;
@@ -507,6 +546,18 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 600;
+}
+
+/* Ряд часов — одна строка: поле времени и «Сейчас». */
+.volume__airClock {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.volume__airTime {
+  flex: 0 0 auto;
 }
 
 .volume__airRows {

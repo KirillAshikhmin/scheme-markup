@@ -730,6 +730,9 @@ export function volumeModelPrisms(frame, parts) {
         const angle = ((index + 0.5) * Math.PI * 2) / MODEL_CYL_SIDES;
         corners.push(at(cx + (Math.cos(angle) * part.width) / 2, cy + (Math.sin(angle) * part.depth) / 2));
       }
+    } else if (part.kind === "plate") {
+      // Плита по контуру (ступень винтовой лестницы): вершины — свои.
+      for (const [fx, fy] of part.points) corners.push(at(fx, fy));
     } else {
       corners.push(at(part.x, part.y));
       corners.push(at(part.x + part.width, part.y));

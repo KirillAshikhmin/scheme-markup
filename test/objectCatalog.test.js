@@ -516,6 +516,39 @@ test("раскладка названа: девять разделов, и «Л�
   assert.ok(!JSON.stringify(put.project).includes('"category"'), "категория появилась в файле объекта");
 });
 
+test("отражение лестницы — необязательный ключ: стоит только у отражённой, прежняя вещь без него (G68)", () => {
+  const scene = room();
+  const put = place(scene, "stairsL");
+  assert.ok(!Object.prototype.hasOwnProperty.call(put.object, "mirror"), "у неотражённой вещи появился ключ");
+  const flipped = updateSchemeObject(put.project, put.object.id, { mirror: true });
+  assert.equal(flipped.schemeObject.mirror, true);
+  // Другая правка отражения не снимает.
+  const moved = updateSchemeObject(flipped.project, put.object.id, { turnDeg: 90 });
+  assert.equal(moved.schemeObject.mirror, true, "поворот снял отражение");
+  const back = updateSchemeObject(moved.project, put.object.id, { mirror: false });
+  assert.ok(!Object.prototype.hasOwnProperty.call(back.schemeObject, "mirror"), "снятое отражение осталось ключом");
+  // В объёме отражённая лестница — другая: нижняя ступень на другой стороне.
+  const faces = (project) =>
+    volumeScene(project, scene.schemeId).faces.filter((face) => face.thing !== undefined && face.p.some((point) => point.z < 300) && face.p.every((point) => point.z > 50));
+  const lowX = (project) => {
+    const xs = faces(project).flatMap((face) => face.p.map((point) => point.x));
+    return (Math.min(...xs) + Math.max(...xs)) / 2;
+  };
+  assert.ok(lowX(put.project) < 2000, "нижняя ступень Г-образной не слева");
+  assert.ok(lowX(flipped.project) > 2000, "отражённая — не справа");
+  // Полосе отражать нечего.
+  const band = addSchemeObject(scene.project, {
+    schemeId: scene.schemeId,
+    catalogKey: "counter",
+    shape: "polyline",
+    pointsMm: [{ x: 100, y: 100 }, { x: 1000, y: 100 }],
+    depthMm: 600,
+    heightMm: 900,
+    mirror: true,
+  });
+  assert.ok(!Object.prototype.hasOwnProperty.call(band.schemeObject, "mirror"));
+});
+
 test("пара лестница — выход стала точкой привязки сама, без правки привязки", () => {
   // Таск 205 положил ключи заранее и написал у себя: «придёт запись в каталог
   // — выход начнёт предлагаться сам». Проверяю, что пришла именно та запись:

@@ -89,8 +89,17 @@ test("значение вне диапазона зажимается по ме�
   assert.deepEqual(home.recorder.log(), [], "то же значение попало в журнал");
 });
 
+// Дом, где у света нет клавиш: запись в лампу не трогает «Выключатель» (связь
+// двусторонняя, правка 2026-10-27), и в сообщении остаётся одно изменение.
+function unlinkedHouse() {
+  const box = simHouse();
+  simLink(box, "В1", []);
+  simLink(box, "ВВ1", []);
+  return box;
+}
+
 test("изменения уходят наружу сообщением changes, журнал — сообщением log", () => {
-  const home = setup();
+  const home = setup({ box: unlinkedHouse() });
   home.recorder.clear();
   home.set("С1", "On", true);
   const [changes, log] = home.recorder.messages;
@@ -145,7 +154,6 @@ test("профиль до G11 (одни кнопки): щелчок включа
 
 test("нагрузки следуют за «Выключателем» (G11): включился — все вкл, выключился — все выкл; штора — открыть и закрыть", () => {
   const home = setup();
-  home.set("Т1", "On", true);
   home.press("ВВ1", "single", DUO_KEY1);
   assert.deepEqual([home.value("С2", "On"), home.value("Т1", "On")], [true, true], "включённый «Выключатель» не включил всё");
   home.press("ВВ1", "single", DUO_KEY1);
@@ -157,6 +165,31 @@ test("нагрузки следуют за «Выключателем» (G11): �
   assert.deepEqual([home.value("С2", "On"), home.value("Т1", "On")], [false, false], "вторая клавиша тронула первый канал");
   home.press("ВВ1", "single", DUO_KEY2);
   assert.equal(home.value("КШ1", "TargetPosition"), 0);
+});
+
+test("связь двусторонняя (правка 2026-10-27): включили нагрузку мимо клавиши — «Выключатель» её канала встаёт во «вкл», погасла последняя — в «выкл»", () => {
+  const home = setup();
+  home.set("Т1", "On", true);
+  assert.equal(home.value("ВВ1", "On", 0), true, "включённая лампа не включила «Выключатель» своего канала");
+  assert.equal(home.value("С2", "On"), false, "лампа, включённая одна, зажгла весь канал");
+  assert.equal(home.value("ВВ1", "On", 1), false, "лампа тронула чужой канал");
+  const [mirror] = home.entries("ВВ1", "On");
+  assert.deepEqual(kinds(mirror.chain), ["char", "web"], "у «Выключателя» нет причины «лампа»");
+  assert.equal(mirror.chain[0].markId, home.id("Т1"));
+  home.set("С2", "On", true);
+  home.set("Т1", "On", false);
+  assert.equal(home.value("ВВ1", "On", 0), true, "погасла одна из двух — «Выключатель» выключился");
+  home.set("С2", "On", false);
+  assert.equal(home.value("ВВ1", "On", 0), false, "погасли все — «Выключатель» остался включён");
+  // Клавиша показывает «вкл» — нажатие гасит канал целиком.
+  home.set("Т1", "On", true);
+  home.press("ВВ1", "single", DUO_KEY1);
+  assert.deepEqual([home.value("ВВ1", "On", 0), home.value("С2", "On"), home.value("Т1", "On")], [false, false, false]);
+  // Штора второго канала: открыли карточкой — клавиша включилась.
+  home.set("КШ1", "TargetPosition", 100);
+  assert.equal(home.value("ВВ1", "On", 1), true, "открытая штора не включила свою клавишу");
+  home.set("КШ1", "TargetPosition", 0);
+  assert.equal(home.value("ВВ1", "On", 1), false);
 });
 
 test("профиль до G11: в канале что-то включено — щелчок выключает все нагрузки, иначе включает все", () => {
@@ -609,7 +642,7 @@ test("предохранитель: цепочка глубже 50 обрыва�
     },
   };
   const ids = {};
-  const home = setup({ owners: [owner], start: false });
+  const home = setup({ owners: [owner], start: false, box: unlinkedHouse() });
   ids.С1 = home.id("С1");
   ids.С2 = home.id("С2");
   home.engine.start();
@@ -734,7 +767,7 @@ test("дверь: фильтры подписки, отписка, запись 
       return write.char === "Brightness" && write.value > 80 ? 80 : undefined;
     },
   };
-  const home = setup({ owners: [owner] });
+  const home = setup({ owners: [owner], box: unlinkedHouse() });
   home.set("С1", "On", true);
   home.set("ДТВ1", "CurrentRelativeHumidity", 50, 1);
   assert.deepEqual(seen, [

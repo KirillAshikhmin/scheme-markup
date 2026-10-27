@@ -32,6 +32,7 @@ import {
   setSchemeWallHeight,
 } from "../src/model.js";
 import {
+  VOLUME_DOOR_RGB,
   VOLUME_FLOOR_RGB,
   VOLUME_LAMP_BOUNCE,
   VOLUME_LAMP_RINGS,
@@ -335,10 +336,18 @@ test("откосы, перемычка и порог — пополам по с�
       assert.equal(face.room, sideRoom(box, (Math.min(...xs) + Math.max(...xs)) / 2), "половина полосы не своей стороны");
     }
   }
-  // Полотно закрытой двери — лицом в одну комнату, изнанкой в другую.
-  const leaf = sceneOf(box, false).faces.find((face) => face.doorId === box.doorId && face.both && face.rgb !== VOLUME_WALL_RGB);
-  assert.ok(leaf, "у закрытой двери нет полотна");
-  assert.deepEqual(new Set([leaf.room, leaf.backRoom]), new Set([box.rooms.living, box.rooms.hall]));
+  // Полотно закрытой двери — одной стороной в одну комнату, другой в другую.
+  // С правки 2026-10-27 у полотна толщина, и стороны — две грани призмы, а не
+  // лицо и изнанка одной.
+  const leaf = sceneOf(box, false).faces.filter(
+    (face) => face.doorId === box.doorId && face.rgb === VOLUME_DOOR_RGB && Math.abs(face.n.x) > 0.5,
+  );
+  assert.equal(leaf.length, 2, "у закрытой двери нет двух сторон полотна");
+  for (const face of leaf) {
+    const middle = face.p.reduce((sum, point) => sum + point.x, 0) / face.p.length;
+    assert.equal(face.room, sideRoom(box, middle), "сторона полотна не своей комнаты");
+  }
+  assert.deepEqual(new Set(leaf.map((face) => face.room)), new Set([box.rooms.living, box.rooms.hall]));
 });
 
 test("закрытая дверь в коридор не светит: из коридора свет гостиной не виден ничем", () => {

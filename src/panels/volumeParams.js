@@ -62,7 +62,7 @@ import {
   appClockSpeed,
   appClockWatch,
 } from "../appClock.js";
-import { uiButton, uiCheckRow, uiEl, uiIconButton, uiModal } from "./ui.js";
+import { uiButton, uiCheckRow, uiEl, uiIconButton, uiModal, uiTimeApply } from "./ui.js";
 import { WEATHER_AUTO, WEATHER_SEASONS, WEATHER_SKIES } from "../weather.js";
 import { appWeatherRead, appWeatherSet, appWeatherWatch } from "../appWeather.js";
 import { simClimate, simClimateSet, simWatch } from "../simulation.js";
@@ -1059,16 +1059,14 @@ export function createVolumeParamsFields(options) {
       value: volumeDateText(day),
       title: strings.volume.clockDateHint,
       attrs: { "aria-label": strings.volume.clockDate },
-      on: {
-        change: () => {
-          const own = volumeDateParse(field.value);
-          if (own === null) {
-            field.value = volumeDateText(dayOf(hour()));
-            return;
-          }
-          volumeParamsDay(own, now());
-        },
-      },
+    });
+    uiTimeApply(field, () => {
+      const own = volumeDateParse(field.value);
+      if (own === null) {
+        field.value = volumeDateText(dayOf(hour()));
+        return;
+      }
+      volumeParamsDay(own, now());
     });
     return field;
   }
@@ -1080,13 +1078,11 @@ export function createVolumeParamsFields(options) {
       value: volumeClockText(minutes),
       title: strings.volume.clockOwnHint,
       attrs: { "aria-label": strings.volume.clockOwn },
-      on: {
-        change: () => {
-          const own = volumeClockParse(field.value);
-          if (own === null) return;
-          volumeParamsFix(own, now());
-        },
-      },
+    });
+    uiTimeApply(field, () => {
+      const own = volumeClockParse(field.value);
+      if (own === null) return;
+      volumeParamsFix(own, now());
     });
     return field;
   }
