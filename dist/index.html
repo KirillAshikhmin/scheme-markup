@@ -44878,6 +44878,94 @@ points.push(converted);
 return { ok: true, points, areaMm2: region.areaMm2, cell: region.cell };
 }
 
+// src/measure.js
+const MEASURE_FIELDS = ["drawing", "scheme", "volume"];
+const MEASURE_COLOR = "#d6336c";
+const measureHeld = new Map();
+function measureKeyOf(state) {
+const projectId = state && state.project ? state.project.id : null;
+const schemeId = state && state.schemeId ? state.schemeId : null;
+if (!projectId || !schemeId) return null;
+return projectId + "|" + schemeId;
+}
+function measureSlot(field, key) {
+if (!key) return null;
+const held = measureHeld.get(field);
+if (!held || held.key !== key) return null;
+return held;
+}
+function measureAdd(field, key, point) {
+if (!key || !point) return null;
+const held = measureSlot(field, key);
+const next = held && held.a && !held.b ? { key, a: held.a, b: point, aim: null } : { key, a: point, b: null, aim: null };
+measureHeld.set(field, next);
+return next;
+}
+function measureAim(field, key, point) {
+const held = measureSlot(field, key);
+if (!held || !held.a || held.b) return false;
+const was = held.aim;
+if (point && was && was.x === point.x && was.y === point.y && (was.z || 0) === (point.z || 0)) return false;
+if (!point && !was) return false;
+held.aim = point || null;
+return true;
+}
+function measureDrop(field) {
+if (!measureHeld.has(field)) return false;
+measureHeld.delete(field);
+return true;
+}
+function measureDropAll() {
+if (measureHeld.size === 0) return false;
+measureHeld.clear();
+return true;
+}
+function measureEnds(field, key) {
+const held = measureSlot(field, key);
+if (!held || !held.a) return null;
+if (held.b) return { from: held.a, to: held.b, live: false };
+return { from: held.a, to: held.aim || null, live: true };
+}
+function measureStarted(field, key) {
+const held = measureSlot(field, key);
+return Boolean(held && held.a && !held.b);
+}
+function measureSpan(a, b) {
+if (!a || !b) return 0;
+const dx = Number(b.x) - Number(a.x);
+const dy = Number(b.y) - Number(a.y);
+const dz = (Number(b.z) || 0) - (Number(a.z) || 0);
+return Math.sqrt(dx * dx + dy * dy + dz * dz);
+}
+function measureParts(a, b) {
+if (!a || !b) return { straight: 0, floor: 0, rise: 0 };
+const dx = Number(b.x) - Number(a.x);
+const dy = Number(b.y) - Number(a.y);
+const dz = (Number(b.z) || 0) - (Number(a.z) || 0);
+return { straight: Math.sqrt(dx * dx + dy * dy + dz * dz), floor: Math.hypot(dx, dy), rise: Math.abs(dz) };
+}
+function measureMmText(value) {
+return text("measure.mm", { value: Math.round(Number(value) || 0) });
+}
+function measureDrawingLines(fromMm, toMm) {
+if (!fromMm || !toMm) return [];
+return [measureMmText(measureSpan(fromMm, toMm))];
+}
+function measurePlanLines(project, schemeId, from, to) {
+if (!from || !to) return [];
+const meters = planLengthMeters(project, schemeId, [from, to]);
+if (meters === null) return [strings.measure.noMeters];
+return [text("scale.meters", { value: formatMeters(meters) })];
+}
+function measureVolumeLines(from, to) {
+if (!from || !to) return [];
+const parts = measureParts(from, to);
+return [
+measureMmText(parts.straight),
+text("measure.volumeParts", { floor: measureMmText(parts.floor), rise: measureMmText(parts.rise) }),
+];
+}
+
 // src/history.js
 const HISTORY_DEPTH = 100;
 const historyDone = [];
@@ -49884,8 +49972,12 @@ return CANVAS_ROOM_TRACE_SAID[reason] || strings.roomTrace.noWalls;
 }
 const CANVAS_SCALE_COLOR = "#0969da";
 function canvasHandlesShown(state) {
+if (state && state.measuring) return false;
 if (!canvasEditAllowed(state)) return false;
 return state.mode !== CANVAS_MODE_SCALE && state.mode !== CANVAS_MODE_ROOM_TRACE;
+}
+function canvasMeasuring(state) {
+return Boolean(state && state.measuring) && canvasOnScreen(state);
 }
 function canvasAddKind(state) {
 if (!state || state.mode !== "add") return null;
@@ -49903,6 +49995,7 @@ return screen === SCREEN_DEFAULT;
 function canvasHintText(state) {
 if (!state || !state.schemeId) return null;
 if (!canvasOnScreen(state)) return null;
+if (state.measuring) return strings.measure.hintPlan;
 if (!canvasEditAllowed(state)) return canvasSimLocked(state) ? strings.sim.bar.editLocked : strings.mobile.viewOnly;
 if (state.editPathId && state.project) {
 if (findMark(state.project, state.editPathId)) return strings.canvas.hintLineEdit;
@@ -50274,6 +50367,7 @@ drawHandles(canvasCtx, scheme, mark, view, canvasHandleColor(state, mark), canva
 }
 }
 if (guidesOn) drawRuler(canvasCtx, scheme, view, box);
+if (canvasMeasuring(state)) canvasPaintMeasure(state, scheme, view);
 if (canvasPress) {
 const held = canvasPress.pick && canvasPress.pick.markId ? findMark(project, canvasPress.pick.markId) : null;
 const color = held ? styleOf(project, held.typeId).color : "#0969da";
@@ -51068,6 +51162,39 @@ canvasDraft.guides = [];
 canvasRedraw();
 canvasScaleAsk();
 }
+function canvasMeasureSnap(state, scheme, plan, free) {
+const ends = measureEnds("scheme", measureKeyOf(state));
+const points = ends && ends.live && ends.from ? [ends.from] : [];
+return draftSnap(points, plan, scheme, canvasViewOf(state), {
+free: Boolean(free),
+planGuides: canvasSchemeGuides(state, scheme),
+}).point;
+}
+function canvasMeasureClick(plan, screen, free) {
+const state = canvasState();
+const scheme = canvasScheme(state);
+const key = measureKeyOf(state);
+if (!scheme || !key) return;
+measureAdd("scheme", key, canvasMeasureSnap(state, scheme, plan, free));
+canvasRedraw();
+}
+function canvasMeasureHover(state, point, free) {
+const scheme = canvasScheme(state);
+const key = measureKeyOf(state);
+if (!scheme || !key) return;
+const plan = screenToPlan(point, scheme, canvasViewOf(state));
+if (measureAim("scheme", key, canvasMeasureSnap(state, scheme, plan, free))) canvasRedraw();
+}
+function canvasPaintMeasure(state, scheme, view) {
+const ends = measureEnds("scheme", measureKeyOf(state));
+if (!ends) return;
+const from = planToScreen(ends.from, scheme, view);
+const to = ends.to ? planToScreen(ends.to, scheme, view) : null;
+drawMeasure(canvasCtx, from, to, measurePlanLines(state.project, state.schemeId, ends.from, ends.to), {
+color: MEASURE_COLOR,
+live: ends.live,
+});
+}
 async function canvasScaleAsk() {
 const draft = canvasDraft;
 if (!draft || draft.kind !== "scale" || draft.points.length < 2) return;
@@ -51420,6 +51547,7 @@ function canvasHitSlack(touch) {
 return touch ? CANVAS_TOUCH_HIT_PX : 0;
 }
 function canvasTapKind(state, pick = {}) {
+if (state && state.measuring) return "measurePoint";
 if (!canvasEditAllowed(state)) return "select";
 if (state && state.mode === CANVAS_MODE_SCALE) return "scalePoint";
 if (state && state.mode === CANVAS_MODE_ROOM_TRACE) return "roomTrace";
@@ -51433,6 +51561,7 @@ if (canvasPlacesByClick(state)) return "place";
 return "select";
 }
 function canvasGrabKind(state, pick = {}) {
+if (state && state.measuring) return null;
 if (!canvasEditAllowed(state)) return null;
 if (state.mode === CANVAS_MODE_SCALE || state.mode === CANVAS_MODE_ROOM_TRACE) return null;
 if (state.mode === "room" || canvasAddKind(state) === "line") return null;
@@ -51604,6 +51733,7 @@ before: state.project,
 screenToPlan({ x: handle.x, y: handle.y }, scheme, view),
 );
 } else if (kind === "block") canvasBlockPoint(state.selectedMarkIds[0], pick.blockSide);
+else if (kind === "measurePoint") canvasMeasureClick(plan, point, false);
 else if (kind === "scalePoint") canvasScaleClick(plan, point, false);
 else if (kind === "roomTrace") canvasRoomTraceClick(plan);
 else if (kind === "vertex") {
@@ -51709,6 +51839,10 @@ at: canvasGuideAt(axis, point, scheme, view),
 start: point,
 moved: false,
 };
+return;
+}
+if (canvasMeasuring(state)) {
+canvasDrag = { kind: "measure", start: point, view: { ...state.view }, moved: false };
 return;
 }
 if (editable && state.mode === CANVAS_MODE_SCALE) {
@@ -51998,6 +52132,7 @@ canvasNav.pinchMove(canvasPointers.values());
 return;
 }
 const state = canvasState();
+if (canvasMeasuring(state) && event.pointerType !== "touch") canvasMeasureHover(state, point, event.altKey);
 if (canvasDraft) {
 const scheme = canvasScheme(state);
 const snap = canvasDraftSnap(screenToPlan(point, scheme, canvasViewOf(state)), event.altKey);
@@ -52116,6 +52251,10 @@ canvasRedraw();
 if (drag.kind === "done") return;
 const scheme = canvasScheme(state);
 const plan = screenToPlan(point, scheme, canvasViewOf(state));
+if (drag.kind === "measure") {
+canvasMeasureClick(plan, point, event.altKey);
+return;
+}
 if (drag.kind === "scale") {
 canvasScaleClick(plan, point, event.altKey);
 return;
@@ -52278,6 +52417,11 @@ canvasSyncCursor();
 return;
 }
 if (event.key === "Escape") {
+if (canvasMeasuring(state)) {
+measureDropAll();
+canvasApi.setState({ measuring: false });
+return;
+}
 if (canvasCancelDraft()) return;
 if (state.editPathId) {
 canvasApi.setState({ editPathId: null });
@@ -52514,6 +52658,7 @@ if (
 "layout" in changed ||
 "screen" in changed ||
 "guidesShown" in changed ||
+"measuring" in changed ||
 "editPathId" in changed ||
 "simRunning" in changed ||
 "project" in changed
@@ -52945,94 +53090,6 @@ return { blob: out, width: size.width, height: size.height };
 } finally {
 releasePlanImage(decoded);
 }
-}
-
-// src/measure.js
-const MEASURE_FIELDS = ["drawing", "scheme", "volume"];
-const MEASURE_COLOR = "#d6336c";
-const measureHeld = new Map();
-function measureKeyOf(state) {
-const projectId = state && state.project ? state.project.id : null;
-const schemeId = state && state.schemeId ? state.schemeId : null;
-if (!projectId || !schemeId) return null;
-return projectId + "|" + schemeId;
-}
-function measureSlot(field, key) {
-if (!key) return null;
-const held = measureHeld.get(field);
-if (!held || held.key !== key) return null;
-return held;
-}
-function measureAdd(field, key, point) {
-if (!key || !point) return null;
-const held = measureSlot(field, key);
-const next = held && held.a && !held.b ? { key, a: held.a, b: point, aim: null } : { key, a: point, b: null, aim: null };
-measureHeld.set(field, next);
-return next;
-}
-function measureAim(field, key, point) {
-const held = measureSlot(field, key);
-if (!held || !held.a || held.b) return false;
-const was = held.aim;
-if (point && was && was.x === point.x && was.y === point.y && (was.z || 0) === (point.z || 0)) return false;
-if (!point && !was) return false;
-held.aim = point || null;
-return true;
-}
-function measureDrop(field) {
-if (!measureHeld.has(field)) return false;
-measureHeld.delete(field);
-return true;
-}
-function measureDropAll() {
-if (measureHeld.size === 0) return false;
-measureHeld.clear();
-return true;
-}
-function measureEnds(field, key) {
-const held = measureSlot(field, key);
-if (!held || !held.a) return null;
-if (held.b) return { from: held.a, to: held.b, live: false };
-return { from: held.a, to: held.aim || null, live: true };
-}
-function measureStarted(field, key) {
-const held = measureSlot(field, key);
-return Boolean(held && held.a && !held.b);
-}
-function measureSpan(a, b) {
-if (!a || !b) return 0;
-const dx = Number(b.x) - Number(a.x);
-const dy = Number(b.y) - Number(a.y);
-const dz = (Number(b.z) || 0) - (Number(a.z) || 0);
-return Math.sqrt(dx * dx + dy * dy + dz * dz);
-}
-function measureParts(a, b) {
-if (!a || !b) return { straight: 0, floor: 0, rise: 0 };
-const dx = Number(b.x) - Number(a.x);
-const dy = Number(b.y) - Number(a.y);
-const dz = (Number(b.z) || 0) - (Number(a.z) || 0);
-return { straight: Math.sqrt(dx * dx + dy * dy + dz * dz), floor: Math.hypot(dx, dy), rise: Math.abs(dz) };
-}
-function measureMmText(value) {
-return text("measure.mm", { value: Math.round(Number(value) || 0) });
-}
-function measureDrawingLines(fromMm, toMm) {
-if (!fromMm || !toMm) return [];
-return [measureMmText(measureSpan(fromMm, toMm))];
-}
-function measurePlanLines(project, schemeId, from, to) {
-if (!from || !to) return [];
-const meters = planLengthMeters(project, schemeId, [from, to]);
-if (meters === null) return [strings.measure.noMeters];
-return [text("scale.meters", { value: formatMeters(meters) })];
-}
-function measureVolumeLines(from, to) {
-if (!from || !to) return [];
-const parts = measureParts(from, to);
-return [
-measureMmText(parts.straight),
-text("measure.volumeParts", { floor: measureMmText(parts.floor), rise: measureMmText(parts.rise) }),
-];
 }
 
 // src/panels/colorPicker.js

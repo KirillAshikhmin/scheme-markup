@@ -135,6 +135,7 @@ import {
   pathEditHandles,
   samePathHandle,
   hitPathHandle,
+  drawMeasure,
   drawPathHandles,
   drawPressRing,
   drawRuler,
@@ -154,6 +155,15 @@ import {
   visibleOutlines,
   drawFontReady,
 } from "./render.js";
+import {
+  MEASURE_COLOR,
+  measureAdd,
+  measureAim,
+  measureDropAll,
+  measureEnds,
+  measureKeyOf,
+  measurePlanLines,
+} from "./measure.js";
 import { canRedo, canUndo, clearHistory, pushCommand, redo, undo } from "./history.js";
 import { getSetting, setSetting } from "./store.js";
 import { uiConfirm, uiDialogDepth, uiEl, uiFieldTarget, uiIcon, uiPrompt, uiSpaceTarget, uiTypingTarget } from "./panels/ui.js";
@@ -413,8 +423,23 @@ const CANVAS_SCALE_COLOR = "#0969da";
 // ручка под курсором отобрала бы у него клик. Одно правило на рисование и на
 // попадание — разойдись они, пользователь нажимал бы на то, чего не видит.
 function canvasHandlesShown(state) {
+  // Линейка — то же самое: рука показывает концы отрезка, и ручка под ней
+  // отобрала бы у мерки клик. Правка при этом не спрашивается — линейка ничего
+  // не правит и работает в просмотре, где ручек нет и так.
+  if (state && state.measuring) return false;
   if (!canvasEditAllowed(state)) return false;
   return state.mode !== CANVAS_MODE_SCALE && state.mode !== CANVAS_MODE_ROOM_TRACE;
+}
+
+/**
+ * Мерят ли сейчас на плане (таск 237, G356).
+ *
+ * Спрашивается и про отметку, и про поле: отметка одна на три поля, и в
+ * чертеже с объёмом её читают их собственные обработчики — холст о чужом клике
+ * знать не должен.
+ */
+export function canvasMeasuring(state) {
+  return Boolean(state && state.measuring) && canvasOnScreen(state);
 }
 
 // ——— что ставит режим добавления ——————————————————————————————————————
@@ -461,6 +486,9 @@ export function canvasOnScreen(state) {
 export function canvasHintText(state) {
   if (!state || !state.schemeId) return null;
   if (!canvasOnScreen(state)) return null;
+  // Линейка — поверх всего остального и раньше вопроса о правке: рука занята
+  // отрезком, про метки рассказывать нечего, а работает она и в просмотре.
+  if (state.measuring) return strings.measure.hintPlan;
   if (!canvasEditAllowed(state)) return canvasSimLocked(state) ? strings.sim.bar.editLocked : strings.mobile.viewOnly;
   // Правка ломаной — это режим руки, и подсказка обязана сказать, что сейчас
   // делает двойной клик: он здесь занят вершинами, а не выделением.
@@ -1162,8 +1190,13 @@ function canvasPaint() {
       drawHandles(canvasCtx, scheme, mark, view, canvasHandleColor(state, mark), canvasStacks(state, scheme));
     }
   }
-  // Линейка — последней: она поверх всего, и с неё тянут направляющие.
+  // Шкала — последней: она поверх всего, и с неё тянут направляющие.
   if (guidesOn) drawRuler(canvasCtx, scheme, view, box);
+
+  // Отрезок линейки — поверх и шкалы: это мерка, а не часть плана. В
+  // `drawScheme` его нет вовсе, значит в PNG, в печать и в лист «Схема» он не
+  // попадёт ни при каких отметках — ровно как направляющие.
+  if (canvasMeasuring(state)) canvasPaintMeasure(state, scheme, view);
 
   // Кольцо ожидания под пальцем — поверх и линейки: это ответ руке, а не часть
   // чертежа. Цвет — у того, что сейчас возьмут: по нему видно, что именно
@@ -2508,6 +2541,62 @@ function canvasScaleClick(plan, screen, free) {
   canvasScaleAsk();
 }
 
+// ——— линейка на плане (таск 237, G356) ————————————————————————————————————
+//
+// Жест тот же, что у калибровки: показали два конца. Магниты тоже **те же** —
+// своих линейка не заводит (`canvasDraftSnap` для калибровки и рисования,
+// `canvasMeasureSnap` здесь): направляющие пользователя, направляющие по уже
+// поставленному концу и ровный угол кратно 15°, Alt снимает всё. Второго
+// набора притяжек на одном поле быть не должно — человек целится так, как
+// привык целиться.
+//
+// Разница с калибровкой одна и она по существу: калибровка **записывает** в
+// объект (масштаб), а линейка не записывает ничего. Поэтому у неё нет ни
+// вопроса о коротком отрезке, ни шага истории, ни отказа в просмотре.
+
+/** Куда сядет конец отрезка: те же магниты, что у рисования и калибровки. */
+function canvasMeasureSnap(state, scheme, plan, free) {
+  const ends = measureEnds("scheme", measureKeyOf(state));
+  // Цепочка магнита — уже поставленный конец, и только он: готовый отрезок
+  // следующему не родня, третий клик начинает мерку заново.
+  const points = ends && ends.live && ends.from ? [ends.from] : [];
+  return draftSnap(points, plan, scheme, canvasViewOf(state), {
+    free: Boolean(free),
+    planGuides: canvasSchemeGuides(state, scheme),
+  }).point;
+}
+
+/** Клик линейкой: первый конец, второй конец, третий — новый отрезок. */
+function canvasMeasureClick(plan, screen, free) {
+  const state = canvasState();
+  const scheme = canvasScheme(state);
+  const key = measureKeyOf(state);
+  if (!scheme || !key) return;
+  measureAdd("scheme", key, canvasMeasureSnap(state, scheme, plan, free));
+  canvasRedraw();
+}
+
+/** Второй конец идёт за рукой: число живое, пока тянут. */
+function canvasMeasureHover(state, point, free) {
+  const scheme = canvasScheme(state);
+  const key = measureKeyOf(state);
+  if (!scheme || !key) return;
+  const plan = screenToPlan(point, scheme, canvasViewOf(state));
+  if (measureAim("scheme", key, canvasMeasureSnap(state, scheme, plan, free))) canvasRedraw();
+}
+
+/** Отрезок мерки поверх кадра: экранные точки и подпись в метрах по масштабу. */
+function canvasPaintMeasure(state, scheme, view) {
+  const ends = measureEnds("scheme", measureKeyOf(state));
+  if (!ends) return;
+  const from = planToScreen(ends.from, scheme, view);
+  const to = ends.to ? planToScreen(ends.to, scheme, view) : null;
+  drawMeasure(canvasCtx, from, to, measurePlanLines(state.project, state.schemeId, ends.from, ends.to), {
+    color: MEASURE_COLOR,
+    live: ends.live,
+  });
+}
+
 // Вопрос о расстоянии. Короткий отрезок не проходит молча: сперва
 // предупреждение, и только потом цифра.
 async function canvasScaleAsk() {
@@ -2980,6 +3069,10 @@ export function canvasHitSlack(touch) {
  * выделяет (таск 106).
  */
 export function canvasTapKind(state, pick = {}) {
+  // Линейка забирает тап раньше всех — и раньше вопроса о правке: она ничего
+  // не правит, работает в просмотре и в запущенном доме, а ручка выделенной
+  // метки под пальцем не должна отбирать жест у мерки.
+  if (state && state.measuring) return "measurePoint";
   if (!canvasEditAllowed(state)) return "select";
   // Калибровка забирает тап себе целиком и раньше всех ручек: рука показывает
   // точку отрезка, и ручка выделенной метки под пальцем не должна отбирать
@@ -3012,6 +3105,9 @@ export function canvasTapKind(state, pick = {}) {
  * посреди линии — не то, чего ждут.
  */
 export function canvasGrabKind(state, pick = {}) {
+  // Пока мерят, долгое нажатие не берёт ничего: ведение остаётся панорамой, а
+  // кольца ожидания под пальцем нет вовсе (`canvasPressStart`).
+  if (state && state.measuring) return null;
   if (!canvasEditAllowed(state)) return null;
   if (state.mode === CANVAS_MODE_SCALE || state.mode === CANVAS_MODE_ROOM_TRACE) return null;
   if (state.mode === "room" || canvasAddKind(state) === "line") return null;
@@ -3308,6 +3404,7 @@ function canvasTouchUp(state, drag, point, cancelled) {
       screenToPlan({ x: handle.x, y: handle.y }, scheme, view),
     );
   } else if (kind === "block") canvasBlockPoint(state.selectedMarkIds[0], pick.blockSide);
+  else if (kind === "measurePoint") canvasMeasureClick(plan, point, false);
   else if (kind === "scalePoint") canvasScaleClick(plan, point, false);
   else if (kind === "roomTrace") canvasRoomTraceClick(plan);
   else if (kind === "vertex") {
@@ -3464,9 +3561,17 @@ function canvasPointerDown(event) {
     return;
   }
 
+  // Линейка забирает клик себе — раньше ручек, метки, контура и калибровки, и
+  // **без вопроса о правке**: она ничего не правит и работает в просмотре.
+  // Шкала выше не случайно: с неё тянут направляющую, по которой и мерят.
+  if (canvasMeasuring(state)) {
+    canvasDrag = { kind: "measure", start: point, view: { ...state.view }, moved: false };
+    return;
+  }
+
   // Калибровка забирает клик себе — раньше ручек, метки и контура: рука
   // показывает точку отрезка, и всё, что обычно ловит клик, сейчас не при
-  // деле. Линейка выше не случайно: направляющую вдоль стены ставят как раз
+  // деле. Шкала выше не случайно: направляющую вдоль стены ставят как раз
   // затем, чтобы по ней откалибровать.
   if (editable && state.mode === CANVAS_MODE_SCALE) {
     canvasDrag = { kind: "scale", start: point, view: { ...state.view }, moved: false };
@@ -3962,6 +4067,10 @@ function canvasPointerMove(event) {
   }
 
   const state = canvasState();
+  // Второй конец мерки идёт за рукой: число живое, пока тянут (таск 237).
+  // Пальцем этого хода нет — палец на экране означает панораму, а мерку он
+  // ставит тапом; потому и спрашивается тип указателя.
+  if (canvasMeasuring(state) && event.pointerType !== "touch") canvasMeasureHover(state, point, event.altKey);
   if (canvasDraft) {
     const scheme = canvasScheme(state);
     const snap = canvasDraftSnap(screenToPlan(point, scheme, canvasViewOf(state)), event.altKey);
@@ -4129,6 +4238,10 @@ function canvasPointerUp(event) {
   if (drag.kind === "done") return;
   const scheme = canvasScheme(state);
   const plan = screenToPlan(point, scheme, canvasViewOf(state));
+  if (drag.kind === "measure") {
+    canvasMeasureClick(plan, point, event.altKey);
+    return;
+  }
   if (drag.kind === "scale") {
     canvasScaleClick(plan, point, event.altKey);
     return;
@@ -4392,6 +4505,14 @@ function canvasKeyDown(event) {
     return;
   }
   if (event.key === "Escape") {
+    // Линейка снимается первой — она включена поверх всего остального, и
+    // чужого черновика под ней не бывает: её клик не доходит ни до линии, ни до
+    // контура (`canvasTapKind`, `canvasPointerDown`).
+    if (canvasMeasuring(state)) {
+      measureDropAll();
+      canvasApi.setState({ measuring: false });
+      return;
+    }
     if (canvasCancelDraft()) return;
     // Первый Esc заканчивает правку линии: выделение при этом остаётся — за ним
     // стоят панель свойств и кнопки, и сносить его заодно нельзя.
@@ -4740,8 +4861,10 @@ function mountCanvasHint(host, api) {
       "layout" in changed ||
       // Режим экрана: подсказка про план уходит вместе с планом (таск 153).
       "screen" in changed ||
-      // Линейка пришла или ушла — отступ подсказки меняется вместе с ней.
+      // Шкала пришла или ушла — отступ подсказки меняется вместе с ней.
       "guidesShown" in changed ||
+      // Линейку включили или убрали: подсказка над планом рассказывает о ней.
+      "measuring" in changed ||
       // Правка ломаной — такой же режим руки, как «Добавление»: началась или
       // закончилась, и подсказка обязана это сказать.
       "editPathId" in changed ||
