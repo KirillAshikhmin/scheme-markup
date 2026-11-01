@@ -2715,7 +2715,11 @@ function createWorkshop({ api, hosts }) {
     });
   }
 
-  // ——— линейка (таск 237, G356) ———
+  // ——— линейка измерения (таск 237, G356) ———
+  //
+  // Не путать со шкалой по краям поля (`paintGuides` ниже): слово «Линейка» с
+  // таска 237 значит инструмент измерения, шкала названа «Шкала и
+  // направляющие» (G357), а имена в коде у неё прежние — `ruler*`.
   //
   // Отметка общая на три поля (`state.measuring`), и спрашивается она здесь, в
   // одном месте: клик, ход руки, Esc и кадр читают один ответ.
@@ -4713,7 +4717,7 @@ function createWorkshop({ api, hosts }) {
     if (!layerOn("guidesShown")) return;
     const bridge = drawingUnitBridge(view);
     drawDrawingGuides(ctx, bridge, project(), schemeId, schemeGuides(project(), schemeId), box);
-    // Линейка последней: она поверх всего, как на плане.
+    // Шкала последней: она поверх всего, как на плане.
     drawRuler(ctx, WORKSHOP_UNIT, view, box, { bounded: false });
   }
 
