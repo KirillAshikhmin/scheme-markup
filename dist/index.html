@@ -52292,6 +52292,7 @@ return;
 }
 function canvasDoubleClick(event) {
 if (uiDialogDepth() > 0) return;
+if (canvasMeasuring(canvasState())) return;
 if (canvasNow() - canvasTouchAt < CANVAS_GHOST_MS) return;
 if (canvasDoubleAt(canvasPointOf(event), canvasHitSlack(false))) event.preventDefault();
 }
