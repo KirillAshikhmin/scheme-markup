@@ -40733,6 +40733,7 @@ sumY += xy[index + 1];
 const count = xy.length / 2;
 return { x: sumX / count, y: sumY / count };
 }
+const VOLUME_SURFACE_SAME_MM = 0.5;
 function volumeSurfaceGlass(face) {
 return Boolean(face.glass) || face.rgb === VOLUME_GLASS_RGB;
 }
@@ -40744,8 +40745,13 @@ let near = Infinity;
 for (const face of scene.faces) {
 if (face.line) continue;
 if (face.clear && !volumeSurfaceGlass(face)) continue;
-const away = volumeFaceRayAway(face, ray, near);
+const away = volumeFaceRayAway(face, ray, near + VOLUME_SURFACE_SAME_MM);
 if (away === null) continue;
+if (found && Math.abs(away - near) <= VOLUME_SURFACE_SAME_MM) {
+if (!(face.layer > found.layer)) continue;
+} else if (!(away < near)) {
+continue;
+}
 near = away;
 found = face;
 }

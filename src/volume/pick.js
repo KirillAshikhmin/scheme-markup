@@ -315,6 +315,13 @@ function volumePolygonCentre(xy) {
 // `VOLUME_GLASS_RGB` у остеклённого полотна, всё прочее прозрачное — ткань и
 // вещи каталога.
 
+/**
+ * Насколько две грани считаются лежащими в одной точке луча. Полмиллиметра:
+ * мерить тоньше нечем, а настоящие поверхности так близко друг к другу по
+ * взгляду не стоят — даже полотно двери в 40 мм дальше.
+ */
+const VOLUME_SURFACE_SAME_MM = 0.5;
+
 /** Стекло ли это: стеклянная стена или остеклённое полотно двери и окна. */
 function volumeSurfaceGlass(face) {
   return Boolean(face.glass) || face.rgb === VOLUME_GLASS_RGB;
@@ -338,8 +345,20 @@ export function volumeSurfaceAt(scene, camera, box, x, y) {
     // Линия не поверхность; прозрачное пропускается, кроме стекла.
     if (face.line) continue;
     if (face.clear && !volumeSurfaceGlass(face)) continue;
-    const away = volumeFaceRayAway(face, ray, near);
+    // Запас на совпадающие грани: ближе найденной — или ровно на ней.
+    const away = volumeFaceRayAway(face, ray, near + VOLUME_SURFACE_SAME_MM);
     if (away === null) continue;
+    // **Совпадающие грани разводит ярус, а не расстояние.** Пол помещения лежит
+    // на плите чертежа ровно, в ноль (`VOLUME_LAYER_BASE` под
+    // `VOLUME_LAYER_GROUND`), и по расстоянию они равны до последнего знака.
+    // Кадр в таком споре рисует ту, у которой ярус выше, — она и видна. Возьми
+    // луч первую попавшуюся, и прицел в пол комнаты отвечал бы землёй вокруг
+    // дома: ровно это и случилось при первом прогоне.
+    if (found && Math.abs(away - near) <= VOLUME_SURFACE_SAME_MM) {
+      if (!(face.layer > found.layer)) continue;
+    } else if (!(away < near)) {
+      continue;
+    }
     near = away;
     found = face;
   }
