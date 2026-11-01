@@ -4304,7 +4304,7 @@ const MEASURE_PLATE_PAD = 5;
  */
 export function drawMeasure(ctx, from, to, lines = [], options = {}) {
   if (!ctx || !from) return;
-  const color = options.color || "#d6336c";
+  const color = options.color || "#0b7285";
   ctx.save();
   ctx.lineCap = "round";
   // Белая подложка под линией: мерка ложится и на тёмный пол объёма, и на

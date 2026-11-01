@@ -2817,6 +2817,14 @@ color: #ff7ac0;
 border-color: rgba(191, 57, 137, 0.75);
 background: rgba(191, 57, 137, 0.18);
 }
+#header-measure {
+flex: 0 0 auto;
+}
+.measure__toggle.is-on {
+color: #56d4dd;
+border-color: rgba(11, 114, 133, 0.75);
+background: rgba(11, 114, 133, 0.22);
+}
 #header-warnings {
 position: relative;
 flex: 0 0 auto;
@@ -25386,7 +25394,7 @@ const MEASURE_LINE_PX = 15;
 const MEASURE_PLATE_PAD = 5;
 function drawMeasure(ctx, from, to, lines = [], options = {}) {
 if (!ctx || !from) return;
-const color = options.color || "#d6336c";
+const color = options.color || "#0b7285";
 ctx.save();
 ctx.lineCap = "round";
 if (to) {
@@ -44886,7 +44894,7 @@ return { ok: true, points, areaMm2: region.areaMm2, cell: region.cell };
 
 // src/measure.js
 const MEASURE_FIELDS = ["drawing", "scheme", "volume"];
-const MEASURE_COLOR = "#d6336c";
+const MEASURE_COLOR = "#0b7285";
 const measureHeld = new Map();
 function measureKeyOf(state) {
 const projectId = state && state.project ? state.project.id : null;
