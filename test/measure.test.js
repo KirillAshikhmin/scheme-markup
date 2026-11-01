@@ -33,7 +33,7 @@ import {
   measureVolumeLines,
 } from "../src/measure.js";
 import { measureButtonShown, measureButtonStep } from "../src/panels/measureButton.js";
-import { clearPlanScale, setPlanScale } from "../src/model.js";
+import { clearPlanScale, findScheme, setPlanScale } from "../src/model.js";
 import { strings } from "../src/strings.js";
 import {
   VOLUME_NEAR_MM,
@@ -249,20 +249,34 @@ test("прицел в стену коридора даёт точку на её 
 });
 
 test("прицел в пол и в потолок отвечает полом и потолком", () => {
-  const { scene } = sceneOf();
-  const down = { at: { x: 500, y: 1000, z: 1600 }, yaw: 0, pitch: -Math.PI / 2 + 0.01 };
+  const { box, scene } = sceneOf();
+  // Ровно вниз и ровно вверх: середина поля в этих камерах — отвес, и
+  // расстояние между точками обязано совпасть с высотой стен до миллиметра.
+  const down = { at: { x: 500, y: 1000, z: 1600 }, yaw: 0, pitch: -Math.PI / 2 };
   const floor = volumeSurfaceAt(scene, down, BOX, BOX.width / 2, BOX.height / 2);
   assert.ok(floor);
   assert.equal(floor.kind, "floor");
   assert.ok(Math.abs(floor.point.z) < 1, "пол на нуле: " + floor.point.z);
   // Вверх смотрим из места, где над головой нет лампы: тело светильника —
   // вещь, а не потолок, и ответом была бы она (проверено первым прогоном).
-  const up = { at: { x: 500, y: 1000, z: 1600 }, yaw: 0, pitch: Math.PI / 2 - 0.01 };
+  const up = { at: { x: 500, y: 1000, z: 1600 }, yaw: 0, pitch: Math.PI / 2 };
   const ceiling = volumeSurfaceAt(scene, up, BOX, BOX.width / 2, BOX.height / 2);
   assert.ok(ceiling);
   assert.equal(ceiling.kind, "ceiling");
   assert.ok(ceiling.point.z > 2000, "потолок над головой: " + ceiling.point.z);
   assert.equal(volumeSurfaceHolds(floor.kind) && volumeSurfaceHolds(ceiling.kind), true);
+  // Главная проверка числом: от пола до потолка — ровно высота стен объекта.
+  // Сойдись здесь ошибка хоть на миллиметр, и мерка в «Объёме» врала бы везде.
+  const height = findScheme(box.project, box.schemeId).wallHeightMm;
+  assert.ok(height > 0, "у схемы стенда задана высота стен: " + height);
+  const parts = measureParts(floor.point, ceiling.point);
+  assert.equal(Math.round(parts.rise), height);
+  assert.ok(parts.floor < 0.001, "отвес — по полу ноль: " + parts.floor);
+  assert.equal(Math.round(parts.straight), height);
+  assert.deepEqual(measureVolumeLines(floor.point, ceiling.point), [
+    height + " мм",
+    "по полу 0 мм, по высоте " + height + " мм",
+  ]);
 });
 
 test("взгляд мимо дома не ставит точку вовсе", () => {

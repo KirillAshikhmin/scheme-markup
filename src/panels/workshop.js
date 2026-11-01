@@ -2724,8 +2724,14 @@ function createWorkshop({ api, hosts }) {
   // узел сетки, когда сетка включена, иначе направляющие и ровный угол, Alt
   // снимает. Заказчик просил инструмент, а не второй способ целиться.
 
+  // Отметка держится своим полем, а не спросом у состояния: `measuring()` зовут
+  // и кадр, и каждый ход руки, а `getState()` на каждый зов копирует списки
+  // выделения и фильтры. Обновляется поле в подписке, там же, где о смене
+  // узнают колонки.
+  let measureWanted = getState().measuring === true;
+
   function measuring() {
-    return getState().measuring === true;
+    return measureWanted;
   }
 
   function measureKey() {
@@ -5801,6 +5807,11 @@ function createWorkshop({ api, hosts }) {
     // поверхность о ней не узнавала: проверено живым прогоном.
     if ("wallSide" in changed || "elevationViews" in changed || "elevationGrow" in changed || "elevationShown" in changed)
       sync();
+    // Линейку включили или убрали (таск 237): меняются и подсказка, и кадр.
+    if ("measuring" in changed) {
+      measureWanted = state.measuring === true;
+      sync();
+    }
     // Слои и притяжка живут в «Интерфейсе» (таск 187, G281), а рисует их поле:
     // без этой строки галка меняла бы только себя — ровно та поломка, которую
     // заказчик и просил починить.
@@ -5812,8 +5823,6 @@ function createWorkshop({ api, hosts }) {
       // Шкала и направляющие — тоже из «Интерфейса» и тоже про это поле
       // (таск 193): без этой строки отметка меняла бы только себя.
       "guidesShown" in changed ||
-      // Линейку включили или убрали (таск 237): меняются и подсказка, и кадр.
-      "measuring" in changed ||
       // Шаг сетки принадлежит объекту, но правят его там же, и перерисовать
       // поле на его смену обязан тот же обработчик.
       "project" in changed

@@ -7760,10 +7760,10 @@ hintPlan:
 hintDrawing:
 "Линейка: клик — начало отрезка, второй клик — конец, расстояние в миллиметрах чертежа. Третий клик начинает новый отрезок. Притяжка та же, что при рисовании: узел сетки, направляющие, ровный угол; Alt — свободно. Esc — убрать линейку.",
 hintVolume:
-"Линейка: клик — начало отрезка, второй клик — конец. Концы ложатся на стену, пол, потолок, дверь, окно и откосы проёма — в воздух, в небо и в мебель точка не встанет. Третий клик начинает новый отрезок. Esc — убрать линейку.",
+"Линейка: клик — начало отрезка, второй клик — конец. Концы ложатся на стену, пол, потолок, дверь, окно и откосы проёма; в воздух и в небо точка не встанет, а прозрачную мебель линейка проходит насквозь и мерит до поверхности за ней. Третий клик начинает новый отрезок. Esc — убрать линейку.",
 volumeParts: "по полу {floor}, по высоте {rise}",
 volumeMissNone: "Мимо дома: конец отрезка ложится на стену, пол, потолок, дверь или окно",
-volumeMissOther: "Здесь мебель, а не поверхность: конец отрезка ложится на стену, пол, потолок, дверь или окно",
+volumeMissOther: "Это не стена, не пол и не потолок: конец отрезка ложится на стену, пол, потолок, дверь или окно",
 noMeters: "Масштаб плана не задан",
 scaleAskTitle: "Линейке нужен масштаб",
 scaleLater: "Мерить без метров",
@@ -66765,8 +66765,9 @@ if (!at) return;
 aimNode.style.left = at.x + "px";
 aimNode.style.top = at.y + "px";
 }
+let measureWanted = getState().measuring === true;
 function measuring() {
-return getState().measuring === true;
+return measureWanted;
 }
 function measureKey() {
 return measureKeyOf(getState());
@@ -67431,10 +67432,6 @@ return;
 fieldTap(event);
 }
 function fieldTap(event) {
-if (measuring()) {
-measurePut(atEvent(event));
-return;
-}
 if (!scene.empty) {
 const at = atEvent(event);
 if (view === "person" && !locked) {
@@ -67449,6 +67446,10 @@ stairCheck();
 redraw();
 return;
 }
+}
+if (measuring()) {
+measurePut(at);
+return;
 }
 const door = doorUnder(at);
 const choice = aimChoiceAt(at, door);
@@ -68154,6 +68155,7 @@ homeEnsure();
 }
 if ("selectedMarkIds" in changed || "linksShown" in changed) syncSelection();
 if ("measuring" in changed) {
+measureWanted = state.measuring === true;
 syncHint();
 redraw();
 }
@@ -69453,8 +69455,9 @@ gridMm: gridMm(),
 gridSnap: gridSnap(),
 });
 }
+let measureWanted = getState().measuring === true;
 function measuring() {
-return getState().measuring === true;
+return measureWanted;
 }
 function measureKey() {
 return measureKeyOf(getState());
@@ -71421,13 +71424,16 @@ if ("screen" in changed && state.screen !== "drawing") setMode("select");
 if ("selectedWallId" in changed) adoptWall(state);
 if ("wallSide" in changed || "elevationViews" in changed || "elevationGrow" in changed || "elevationShown" in changed)
 sync();
+if ("measuring" in changed) {
+measureWanted = state.measuring === true;
+sync();
+}
 if (
 "planShown" in changed ||
 "drawingShown" in changed ||
 "gridShown" in changed ||
 "gridSnap" in changed ||
 "guidesShown" in changed ||
-"measuring" in changed ||
 "project" in changed
 ) {
 sync();
