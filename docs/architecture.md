@@ -54,7 +54,7 @@ GitHub Actions: npm test → npm run build → GitHub Pages
       ▼
 имитация             simulation.js (зеркало в странице) ⇄ sim/bridge.js ⇄ Worker: sim/*
       ▼
-данные и правила     model.js · strings.js · каталоги · merge.js · deviceMigrate.js · tables.js   чистые, без DOM
+данные и правила     model.js · strings.js · каталоги · merge.js · deviceMigrate.js · tables.js · measure.js   чистые, без DOM
 хранение и файл      store.js (IndexedDB) · projectFile.js (zip) · autosave.js
 ```
 
@@ -77,6 +77,7 @@ GitHub Actions: npm test → npm run build → GitHub Pages
 
 - **Каталоги — данные сборки, не объекта:** `objectCatalog.js` (вещи чертежа), `openingCatalog.js` (виды проёмов), `sim/catalog.js` + `sim/hubTypes.js` (сервисы и характеристики, `hubTypes` собран `tools/hub-types.mjs`). Ключ вещи общий для трёх реестров: каталог, `objectViews/objects.js` (изображение на развёртке), `objectModels/objects.js` (тело в «Объёме»).
 - **Чистые помощники:** `markBox.js` (габарит в мм), `markSpare.js` (запасной габарит), `colorName.js`, `gestures.js`, `lightFade.js`, `history.js`, `imagePrep.js`, `roomTrace.js`, `scenarioTree.js`, `clockMath.js`, `weather.js`.
+- **Линейка** (таск 237): `measure.js` — отрезок мерки и его арифметика на три поля; рисует его `render.drawMeasure`, точку на грани в «Объёме» даёт `volume/pick.js: volumeSurfaceAt`, кнопку держит `panels/measureButton.js`. В объект не попадает ничем (G68): отметка включённости — `state.measuring`, сам отрезок — в модуле.
 - **Общие сеансовые хозяева:** `appClock.js` (одни часы, ADR 016), `appWeather.js` (выбор погоды), `screenPlace.js` (одно место и масштаб на три режима и на все схемы объекта: смену схемы место переживает по точке привязки — `screenPlaceCarry` из `setState`), `planNav.js` (ход по плану на все поля).
 - **Панели** (`src/panels/`) монтируются `registerPanel(PANEL_IDS.x, mountFn)` в точки `src/index.html` и друг друга не импортируют. Импортировать панель некому: в бандл попадает каждый файл `src/**/*.js`. Общие кирпичи — `panels/ui.js`.
 
@@ -324,3 +325,4 @@ ast-index search LampShade --fuzzy          # по части имени
 | Свет, тени, пятна в «Объёме» | `volume/lamps.js` | замер кадра до и после (§6.4, `npm run bench`) |
 | Новая панель | `panels/x.js` + точка монтирования в `index.html` + `PANEL_IDS` в `app.js` | панели не импортируют друг друга |
 | Новая выгрузка | `exporter.js` / `gostSheet.js` + `panels/export.js`; командная строка — `tools/scheme.mjs` | считать у модели, не своим кодом |
+| Что меряет линейка | `measure.js` (счёт и подписи) · `volume/pick.js` (что считается поверхностью) | единицы брать у поля, своих не заводить; в объект не писать (G68) |
