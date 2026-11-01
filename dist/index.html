@@ -65728,7 +65728,9 @@ return aimed && list.includes(aimed) ? state + " " + strings.volume.windowAimed 
 }
 function volumeHintText(state) {
 if (state.empty) return strings.volume.emptyHint;
-const parts = [state.view === "person" ? strings.volume.hintPerson : strings.volume.hintAround];
+const parts = [];
+if (state.measuring) parts.push(strings.measure.hintVolume);
+parts.push(state.view === "person" ? strings.volume.hintPerson : strings.volume.hintAround);
 if (state.view === "person") {
 parts.push(strings.volume.hintStance);
 parts.push(state.ghost ? strings.volume.hintGhost : strings.volume.hintWalls);
@@ -66561,6 +66563,7 @@ syncRain(at);
 syncAir();
 volumeDrawBackdropNear(ctx, box, spot, at, scene.landMm);
 if (view === "person") paintMinimap(box);
+if (measuring()) paintMeasure(box);
 syncAim();
 if (lights.busy) redraw();
 }
@@ -66748,12 +66751,53 @@ if (!at) return;
 aimNode.style.left = at.x + "px";
 aimNode.style.top = at.y + "px";
 }
+function measuring() {
+return getState().measuring === true;
+}
+function measureKey() {
+return measureKeyOf(getState());
+}
+function measurePut(at) {
+const key = measureKey();
+if (!key || !at || scene.empty) return;
+const found = volumeSurfaceAt(scene, camera(), viewport(), at.x, at.y);
+if (!found) {
+notify(strings.measure.volumeMissNone, "info");
+return;
+}
+if (!volumeSurfaceHolds(found.kind)) {
+notify(strings.measure.volumeMissOther, "info");
+return;
+}
+measureAdd("volume", key, found.point);
+redraw();
+}
+function measureFollow() {
+const key = measureKey();
+if (!key) return;
+const ends = measureEnds("volume", key);
+if (!ends || !ends.live) return;
+const at = aimPoint();
+const found = at && !scene.empty ? volumeSurfaceAt(scene, camera(), viewport(), at.x, at.y) : null;
+const spot = found && volumeSurfaceHolds(found.kind) ? found.point : null;
+if (measureAim("volume", key, spot)) redraw();
+}
+function paintMeasure(box) {
+const ends = measureEnds("volume", measureKey());
+if (!ends) return;
+const spot = camera();
+const from = volumeScreenAt(ends.from, spot, box);
+const to = ends.to ? volumeScreenAt(ends.to, spot, box) : null;
+if (!from) return;
+drawMeasure(ctx, from, to, measureVolumeLines(ends.from, ends.to), { color: MEASURE_COLOR, live: ends.live });
+}
 function doorUnder(at) {
 if (!at || scene.empty) return null;
 return volumeDoorAt(shown, at.x, at.y) || volumeDoorwayAt(shown, at.x, at.y);
 }
 function syncAim() {
 syncAimNode();
+if (measuring() && !touching) measureFollow();
 const at = aimPoint();
 const found = doorUnder(at);
 const sheer =
@@ -67373,6 +67417,10 @@ return;
 fieldTap(event);
 }
 function fieldTap(event) {
+if (measuring()) {
+measurePut(atEvent(event));
+return;
+}
 if (!scene.empty) {
 const at = atEvent(event);
 if (view === "person" && !locked) {
@@ -67788,6 +67836,13 @@ event.stopPropagation();
 floorByHand();
 return;
 }
+if (event.key === "Escape" && measuring()) {
+event.preventDefault();
+event.stopPropagation();
+measureDropAll();
+setState({ measuring: false });
+return;
+}
 if (event.key === "Escape" && !card.hidden) {
 event.preventDefault();
 event.stopPropagation();
@@ -67952,6 +68007,7 @@ back: backFloor(),
 keys: channelKeys(),
 ghost: ghosting(),
 home: homeOn(),
+measuring: measuring(),
 });
 hintPlate.fold(bare());
 hintPlate.update(value);
@@ -68083,6 +68139,10 @@ homePresenceGone();
 homeEnsure();
 }
 if ("selectedMarkIds" in changed || "linksShown" in changed) syncSelection();
+if ("measuring" in changed) {
+syncHint();
+redraw();
+}
 if ("layout" in changed) syncParamsHome();
 const objectsChanged = "objectsShown" in changed || "hiddenObjectIds" in changed;
 const imagesChanged = "marksHighlight" in changed;

@@ -60,7 +60,16 @@ import {
   roomsInOrder,
   schemeObjectsOnScheme,
 } from "../model.js";
-import { drawDrawing, drawingUnitBridge, visibleMarks } from "../render.js";
+import { drawDrawing, drawMeasure, drawingUnitBridge, visibleMarks } from "../render.js";
+import {
+  MEASURE_COLOR,
+  measureAdd,
+  measureAim,
+  measureDropAll,
+  measureEnds,
+  measureKeyOf,
+  measureVolumeLines,
+} from "../measure.js";
 import { lightFadeLive, lightFadeMemo } from "../lightFade.js";
 import { screenPlaceOf, screenPlacePlanRead, screenPlaceSet } from "../screenPlace.js";
 import { clockStampMs, volumeClockStamp, volumeClockText, volumeDateShort, volumeDayDateOf, volumeDayTimes } from "../clockMath.js";
@@ -122,6 +131,9 @@ import {
   volumeRoomAt,
   volumeScene,
   volumeSchemeOriginMm,
+  volumeScreenAt,
+  volumeSurfaceAt,
+  volumeSurfaceHolds,
   volumeStackScene,
   volumeShadowFaces,
   volumeSunSpotFaces,
@@ -922,7 +934,13 @@ export function volumeWindowLine(windows, open, aimed, touching) {
  */
 export function volumeHintText(state) {
   if (state.empty) return strings.volume.emptyHint;
-  const parts = [state.view === "person" ? strings.volume.hintPerson : strings.volume.hintAround];
+  // Линейка (таск 237) — первой строкой, перед рассказом про ходьбу и двери:
+  // пока она включена, щелчок ставит концы отрезка, а не открывает дверь и не
+  // выделяет вещь. Остальное остаётся: ходить, смотреть и летать линейка не
+  // мешает, и строки про это по-прежнему нужны.
+  const parts = [];
+  if (state.measuring) parts.push(strings.measure.hintVolume);
+  parts.push(state.view === "person" ? strings.volume.hintPerson : strings.volume.hintAround);
   // Подсказка **меняется по виду**, а не дописывается (правило таска 192,
   // G292): человеку в первом лице не пишут про полёт, летящему в обзоре — про
   // прыжок, а снявший столкновения не должен читать «сквозь стены нельзя».
@@ -2640,6 +2658,9 @@ function createVolume({ api, hosts }) {
     volumeDrawBackdropNear(ctx, box, spot, at, scene.landMm);
     // Миникарта — поверх кадра и после него: это накладка, а не часть сцены.
     if (view === "person") paintMinimap(box);
+    // Отрезок линейки — тоже накладка, и поверх миникарты: мерку читают
+    // числом, и прятать её под картой нельзя (таск 237).
+    if (measuring()) paintMeasure(box);
     syncAim();
     // Лампа ещё разгорается или гаснет — нужен следующий кадр. Улеглось —
     // кадров больше не заказывается, и поле снова молчит до события.
@@ -2978,6 +2999,73 @@ function createVolume({ api, hosts }) {
     aimNode.style.top = at.y + "px";
   }
 
+  // ——— линейка (таск 237, G356, G358) ———
+  //
+  // Отметка общая на три поля (`state.measuring`); здесь она решает, что делает
+  // щелчок и касание: ставят концы отрезка, а не открывают дверь и не выделяют
+  // вещь.
+  //
+  // **Концы ложатся только на поверхность** — слова заказчика. Что ею считается,
+  // решает `volumeSurfaceAt` (стена, пол, потолок, полотно, створка, рама,
+  // откос, стекло); промах молчать не имеет права, и у него свои слова.
+  //
+  // **Отрезок рисуется поверх кадра, а не гранями сцены.** Так его видно и
+  // сквозь стену — мерят как раз то, что по разные стороны, — и кадр не платит
+  // ни одной новой заливки: сцена, порядок и свет остаются как были, а рисунок
+  // мерки тот же, что на плане и в чертеже (`render.drawMeasure`).
+
+  function measuring() {
+    return getState().measuring === true;
+  }
+
+  function measureKey() {
+    return measureKeyOf(getState());
+  }
+
+  /** Поставить конец отрезка туда, куда показали. Промах говорит, почему. */
+  function measurePut(at) {
+    const key = measureKey();
+    if (!key || !at || scene.empty) return;
+    const found = volumeSurfaceAt(scene, camera(), viewport(), at.x, at.y);
+    if (!found) {
+      notify(strings.measure.volumeMissNone, "info");
+      return;
+    }
+    if (!volumeSurfaceHolds(found.kind)) {
+      notify(strings.measure.volumeMissOther, "info");
+      return;
+    }
+    measureAdd("volume", key, found.point);
+    redraw();
+  }
+
+  /**
+   * Второй конец идёт за прицелом: число живое, пока ведут руку. Пальцем этого
+   * хода нет — там взгляд водят свайпом, а конец ставят касанием.
+   */
+  function measureFollow() {
+    const key = measureKey();
+    if (!key) return;
+    const ends = measureEnds("volume", key);
+    if (!ends || !ends.live) return;
+    const at = aimPoint();
+    const found = at && !scene.empty ? volumeSurfaceAt(scene, camera(), viewport(), at.x, at.y) : null;
+    const spot = found && volumeSurfaceHolds(found.kind) ? found.point : null;
+    if (measureAim("volume", key, spot)) redraw();
+  }
+
+  /** Отрезок мерки поверх кадра: прямое расстояние и разложение под ним. */
+  function paintMeasure(box) {
+    const ends = measureEnds("volume", measureKey());
+    if (!ends) return;
+    const spot = camera();
+    const from = volumeScreenAt(ends.from, spot, box);
+    const to = ends.to ? volumeScreenAt(ends.to, spot, box) : null;
+    // Конец за спиной экранной точки не имеет — отрезок в этот кадр не идёт.
+    if (!from) return;
+    drawMeasure(ctx, from, to, measureVolumeLines(ends.from, ends.to), { color: MEASURE_COLOR, live: ends.live });
+  }
+
   /** Дверь в точке кадра: её полотно, а мимо полотна — её проём. */
   function doorUnder(at) {
     if (!at || scene.empty) return null;
@@ -2987,6 +3075,9 @@ function createVolume({ api, hosts }) {
   /** Дверь под рукой — по последнему нарисованному кадру. */
   function syncAim() {
     syncAimNode();
+    // Мерят — второй конец идёт за прицелом. Луч считается здесь, по событию, а
+    // не в кадре: кадр за линейку не платит ничего (разбор — у `measurePut`).
+    if (measuring() && !touching) measureFollow();
     const at = aimPoint();
     const found = doorUnder(at);
     // Штора под прицелом (G332) спрашивается **только там, где шторы есть**: на
@@ -4069,6 +4160,12 @@ function createVolume({ api, hosts }) {
     // точки поля у него новое правило не отняло. Дверь и до таска 159
     // забирала щелчок себе (запоминала его), только проку от этого мышью не
     // было никакого.
+    // Линейка забирает щелчок себе раньше всего (таск 237) — и раньше
+    // миникарты: пока мерят, переносить себя щелчком было бы не к делу.
+    if (measuring()) {
+      measurePut(atEvent(event));
+      return;
+    }
     if (!scene.empty) {
       const at = atEvent(event);
       // ——— щелчок по миникарте переносит (G270) ———
@@ -4738,6 +4835,16 @@ function createVolume({ api, hosts }) {
       floorByHand();
       return;
     }
+    // Esc снимает линейку (таск 237) — раньше окна метки и раньше захвата
+    // мыши: инструмент включён поверх всего, и первое, чего от Esc ждут, — это
+    // убрать его. Захват при этом браузер отпускает сам, у него Esc не отнять.
+    if (event.key === "Escape" && measuring()) {
+      event.preventDefault();
+      event.stopPropagation();
+      measureDropAll();
+      setState({ measuring: false });
+      return;
+    }
     // Esc закрывает окно метки (правка 2026-10-27): «Сделай что бы по Esc
     // закрывалось окно о метке, которое открывается по нажатию Q». Делает то
     // же, что крестик окна, — снимает выделение. Под захватом мышь браузер
@@ -5018,6 +5125,8 @@ function createVolume({ api, hosts }) {
       ghost: ghosting(),
       // Дом идёт (таск 09 сценариев): E и щелчок управляют устройствами.
       home: homeOn(),
+      // Линейка включена (таск 237): щелчок ставит концы отрезка.
+      measuring: measuring(),
     });
     // Подсказка в полном экране не уходит, а **складывается в свой знак**
     // (таск 166, G246). Она единственная из спрятанного говорит про руки:
@@ -5235,6 +5344,11 @@ function createVolume({ api, hosts }) {
         // Выделили метку в списке или на плане — рамка и карточка поднимаются
         // здесь: выделение одно на оба вида. То же и с показом связей.
         if ("selectedMarkIds" in changed || "linksShown" in changed) syncSelection();
+        // Линейку включили или убрали (таск 237): меняются подсказка и кадр.
+        if ("measuring" in changed) {
+          syncHint();
+          redraw();
+        }
         // Окно браузера сузили или развернули — колонка пришла листом или
         // вернулась на место, и параметрам надо переехать (таск 231, G351).
         // Сцена от этого не меняется, поэтому отбор ниже нас не позовёт.
