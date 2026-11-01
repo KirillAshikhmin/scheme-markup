@@ -68852,7 +68852,8 @@ offsetX: boxWidth / 2 - ((extent.minX + extent.maxX) / 2) * zoom,
 offsetY: boxHeight / 2 - ((extent.minY + extent.maxY) / 2) * zoom,
 };
 }
-function workshopHint(tool, way) {
+function workshopHint(tool, way, measuring = false) {
+if (measuring) return strings.measure.hintDrawing + " " + strings.workshop.hintView;
 return workshopHintSubject(tool, way) + " " + strings.workshop.hintView;
 }
 function workshopHintSubject(tool, way) {
@@ -69377,6 +69378,40 @@ free,
 gridMm: gridMm(),
 gridSnap: gridSnap(),
 });
+}
+function measuring() {
+return getState().measuring === true;
+}
+function measureKey() {
+return measureKeyOf(getState());
+}
+function measureSnapMm(pointMm, free) {
+const ends = measureEnds("drawing", measureKey());
+const points = ends && ends.live && ends.from ? [ends.from] : [];
+return workshopSnapMm(points, pointMm, view, { free, gridMm: gridMm(), gridSnap: gridSnap() }).point;
+}
+function measureClick(event) {
+const key = measureKey();
+if (!key) return;
+measureAdd("drawing", key, measureSnapMm(mmOf(event), event.altKey));
+redraw();
+}
+function measureHover(event) {
+const key = measureKey();
+if (!key) return;
+const at = onField(event) ? measureSnapMm(mmOf(event), event.altKey) : null;
+if (measureAim("drawing", key, at)) redraw();
+}
+function paintMeasure() {
+const ends = measureEnds("drawing", measureKey());
+if (!ends) return;
+drawMeasure(
+ctx,
+screenOf(ends.from),
+ends.to ? screenOf(ends.to) : null,
+measureDrawingLines(ends.from, ends.to),
+{ color: MEASURE_COLOR, live: ends.live },
+);
 }
 function mode() {
 return workshopModeOf(tool);
@@ -70065,7 +70100,7 @@ pan = { x: event.clientX, y: event.clientY };
 syncCursor();
 return;
 }
-if (tool === "edit" && !anchorPick && !splitPick) {
+if (tool === "edit" && !anchorPick && !splitPick && !measuring()) {
 const pick = workshopPick(project(), schemeId, mmOf(event), view, selected, hiddenObjects());
 if (pick) {
 grab(pick, event);
@@ -70098,6 +70133,10 @@ drag.toMm = workshopRoundMm(screenToPlan({ x: pick.handle.x, y: pick.handle.y },
 }
 }
 function tap(event) {
+if (measuring()) {
+measureClick(event);
+return;
+}
 if (anchorPick) {
 placeAnchor(event);
 return;
@@ -70221,6 +70260,10 @@ if (drag) {
 if (!drag.moved && !workshopHandMoved(drag.start, { x: event.clientX, y: event.clientY })) return;
 drag.moved = true;
 dragTo(event);
+return;
+}
+if (measuring()) {
+if (event.pointerType !== "touch") measureHover(event);
 return;
 }
 if (splitPick) {
@@ -70463,6 +70506,13 @@ event.stopPropagation();
 return;
 }
 if (event.key === "Escape") {
+if (measuring()) {
+event.preventDefault();
+event.stopPropagation();
+measureDropAll();
+setState({ measuring: false });
+return;
+}
 const step = workshopEscStep({
 anchorPick: Boolean(anchorPick),
 splitPick: Boolean(splitPick),
@@ -70613,6 +70663,7 @@ paintSplit();
 paintObjectHandles();
 paintDraft();
 paintGuides(box);
+if (measuring()) paintMeasure();
 }
 function paintGuides(box) {
 if (!layerOn("guidesShown")) return;
@@ -70963,7 +71014,7 @@ syncDetails(current, wall);
 syncHeightButton(current);
 syncElevation(current, wall);
 syncList(current);
-hintPlate.update(workshopHint(tool, workshopObjectWay));
+hintPlate.update(workshopHint(tool, workshopObjectWay, measuring()));
 summaryPlate.update(workshopSummaryLines(current, schemeId, spot), {
 alert: spot.kind === "noScale",
 });
@@ -71302,6 +71353,7 @@ if (
 "gridShown" in changed ||
 "gridSnap" in changed ||
 "guidesShown" in changed ||
+"measuring" in changed ||
 "project" in changed
 ) {
 sync();

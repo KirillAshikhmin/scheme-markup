@@ -177,6 +177,15 @@ import {
   canvasUndoStep,
   canvasCommit,
 } from "../canvas.js";
+import {
+  MEASURE_COLOR,
+  measureAdd,
+  measureAim,
+  measureDrawingLines,
+  measureDropAll,
+  measureEnds,
+  measureKeyOf,
+} from "../measure.js";
 import { GESTURE_CLOSE_MIN, gestureDraftClick, gestureDraftEnd } from "../gestures.js";
 import { createPlanNav } from "../planNav.js";
 import {
@@ -207,6 +216,7 @@ import {
   drawDraftAngle,
   drawDraftGuides,
   drawFont,
+  drawMeasure,
   drawPathHandles,
   hitPathHandle,
   pathEditHandles,
@@ -1792,7 +1802,11 @@ export function workshopFitView(extent, viewport, max = WORKSHOP_ZOOM_MAX) {
  * Привычные слова занятий при этом не переписаны ни в одном: про колесо и
  * Shift там сказано своим языком с самого начала (правило таска 182).
  */
-export function workshopHint(tool, way) {
+export function workshopHint(tool, way, measuring = false) {
+  // Линейка (таск 237) — поверх занятий: рука занята отрезком, и про стены с
+  // проёмами рассказывать нечего. Ход по полю при этом тот же, и строка о нём
+  // остаётся: вид возят из любого занятия.
+  if (measuring) return strings.measure.hintDrawing + " " + strings.workshop.hintView;
   return workshopHintSubject(tool, way) + " " + strings.workshop.hintView;
 }
 
@@ -2699,6 +2713,59 @@ function createWorkshop({ api, hosts }) {
       gridMm: gridMm(),
       gridSnap: gridSnap(),
     });
+  }
+
+  // ——— линейка (таск 237, G356) ———
+  //
+  // Отметка общая на три поля (`state.measuring`), и спрашивается она здесь, в
+  // одном месте: клик, ход руки, Esc и кадр читают один ответ.
+  //
+  // **Притяжка та же, что при рисовании** — `snapOf` без единой своей мерки:
+  // узел сетки, когда сетка включена, иначе направляющие и ровный угол, Alt
+  // снимает. Заказчик просил инструмент, а не второй способ целиться.
+
+  function measuring() {
+    return getState().measuring === true;
+  }
+
+  function measureKey() {
+    return measureKeyOf(getState());
+  }
+
+  /** Куда сядет конец отрезка: цепочка магнита — уже поставленный конец. */
+  function measureSnapMm(pointMm, free) {
+    const ends = measureEnds("drawing", measureKey());
+    const points = ends && ends.live && ends.from ? [ends.from] : [];
+    return workshopSnapMm(points, pointMm, view, { free, gridMm: gridMm(), gridSnap: gridSnap() }).point;
+  }
+
+  /** Клик линейкой: первый конец, второй конец, третий — новый отрезок. */
+  function measureClick(event) {
+    const key = measureKey();
+    if (!key) return;
+    measureAdd("drawing", key, measureSnapMm(mmOf(event), event.altKey));
+    redraw();
+  }
+
+  /** Второй конец идёт за рукой: число живое, пока тянут. */
+  function measureHover(event) {
+    const key = measureKey();
+    if (!key) return;
+    const at = onField(event) ? measureSnapMm(mmOf(event), event.altKey) : null;
+    if (measureAim("drawing", key, at)) redraw();
+  }
+
+  /** Отрезок мерки поверх кадра: целые миллиметры чертежа. */
+  function paintMeasure() {
+    const ends = measureEnds("drawing", measureKey());
+    if (!ends) return;
+    drawMeasure(
+      ctx,
+      screenOf(ends.from),
+      ends.to ? screenOf(ends.to) : null,
+      measureDrawingLines(ends.from, ends.to),
+      { color: MEASURE_COLOR, live: ends.live },
+    );
   }
 
   // ——— режимы и занятия ———
@@ -3765,7 +3832,10 @@ function createWorkshop({ api, hosts }) {
     // ожидание старше занятия, и нажатие обязано дойти до клика, а не увести
     // стену. Найдено живым прогоном: точку ставили по лестнице, а лестница
     // выделялась и ехала за рукой — щелчок до `tap` не доходил вовсе.
-    if (tool === "edit" && !anchorPick && !splitPick) {
+    // Пока мерят, под руку не берётся ничего — по той же причине, по которой
+    // ничего не берётся в ожидании точки привязки: нажатие обязано дойти до
+    // клика, а не увести стену из-под линейки (таск 237).
+    if (tool === "edit" && !anchorPick && !splitPick && !measuring()) {
       const pick = workshopPick(project(), schemeId, mmOf(event), view, selected, hiddenObjects());
       if (pick) {
         grab(pick, event);
@@ -3820,6 +3890,12 @@ function createWorkshop({ api, hosts }) {
    * и притяжка всё равно ставит вершину в узел или на ровный угол.
    */
   function tap(event) {
+    // Линейка забирает щелчок себе раньше всех ожиданий и занятий (таск 237):
+    // пока она включена, рука показывает концы отрезка и ничего не чертит.
+    if (measuring()) {
+      measureClick(event);
+      return;
+    }
     // Ждут точку привязки — щелчок принадлежит ей, а не занятию (таск 208).
     // Проверка стоит первой нарочно: иначе клик успел бы поставить вершину.
     if (anchorPick) {
@@ -4001,6 +4077,13 @@ function createWorkshop({ api, hosts }) {
       if (!drag.moved && !workshopHandMoved(drag.start, { x: event.clientX, y: event.clientY })) return;
       drag.moved = true;
       dragTo(event);
+      return;
+    }
+    // Второй конец мерки идёт за рукой (таск 237): число живое, пока тянут.
+    // Пальцем этого хода нет — палец на поле означает панораму, а мерку он
+    // ставит тапом.
+    if (measuring()) {
+      if (event.pointerType !== "touch") measureHover(event);
       return;
     }
     // Призрак точки привязки идёт за рукой — как призрак вещи (таск 208).
@@ -4343,6 +4426,15 @@ function createWorkshop({ api, hosts }) {
       return;
     }
     if (event.key === "Escape") {
+      // Линейка снимается первой (таск 237): она включена поверх занятий, и
+      // своего черновика под ней не бывает — её клик до цепочки не доходит.
+      if (measuring()) {
+        event.preventDefault();
+        event.stopPropagation();
+        measureDropAll();
+        setState({ measuring: false });
+        return;
+      }
       // Лесенка целиком — в `workshopEscStep`, здесь только исполнение.
       // Слушатель висит в фазе перехвата: иначе окно закрылось бы раньше, чем
       // черновик успел отмениться.
@@ -4592,6 +4684,9 @@ function createWorkshop({ api, hosts }) {
     paintObjectHandles();
     paintDraft();
     paintGuides(box);
+    // Отрезок линейки — поверх и шкалы: это мерка, а не часть чертежа, и в
+    // лист ГОСТ с выгрузками она не уходит (их рисует `drawDrawing`).
+    if (measuring()) paintMeasure();
   }
 
   /**
@@ -5163,7 +5258,7 @@ function createWorkshop({ api, hosts }) {
     syncHeightButton(current);
     syncElevation(current, wall);
     syncList(current);
-    hintPlate.update(workshopHint(tool, workshopObjectWay));
+    hintPlate.update(workshopHint(tool, workshopObjectWay, measuring()));
     // Сводка — строками, как в объёме: каждая отвечает на свой вопрос, и
     // читать её сверху вниз легче, чем одну длинную строку.
     summaryPlate.update(workshopSummaryLines(current, schemeId, spot), {
@@ -5717,6 +5812,8 @@ function createWorkshop({ api, hosts }) {
       // Шкала и направляющие — тоже из «Интерфейса» и тоже про это поле
       // (таск 193): без этой строки отметка меняла бы только себя.
       "guidesShown" in changed ||
+      // Линейку включили или убрали (таск 237): меняются и подсказка, и кадр.
+      "measuring" in changed ||
       // Шаг сетки принадлежит объекту, но правят его там же, и перерисовать
       // поле на его смену обязан тот же обработчик.
       "project" in changed
