@@ -22,7 +22,7 @@ import {
   VOLUME_STEP_MM,
 } from "./measures.js";
 import { volumeIsFloor } from "./faces.js";
-import { volumeBasis, volumeFocal } from "./camera.js";
+import { volumeRayAt } from "./camera.js";
 import {
   VOLUME_ROOM_PROBE_MM,
   VOLUME_SUN_PROBE_MM,
@@ -763,17 +763,12 @@ export function volumeStanceStep(stance, seconds, options = {}) {
  * Считается **плоскостью пола, а не гранями сцены**: указывают на место, а не
  * на поверхность, и нажатый кусок стены должен значить «туда, к этой стене», а
  * не «на её гребень». Куда человек встанет на самом деле, решает `volumeMoveTo`.
+ *
+ * Сам луч считает `volumeRayAt` (таск 237): та же арифметика понадобилась
+ * линейке, и хозяин у неё теперь один — камера.
  */
 export function volumeFloorAt(camera, box, x, y) {
-  const basis = volumeBasis(camera);
-  const focal = volumeFocal(box);
-  const right = (x - box.width / 2) / focal;
-  const up = (box.height / 2 - y) / focal;
-  const direction = {
-    x: basis.fwd.x + basis.right.x * right + basis.up.x * up,
-    y: basis.fwd.y + basis.right.y * right + basis.up.y * up,
-    z: basis.fwd.z + basis.right.z * right + basis.up.z * up,
-  };
+  const direction = volumeRayAt(camera, box, x, y).dir;
   if (!(direction.z < -1e-6) || !(camera.at.z > 0)) return null;
   const away = -camera.at.z / direction.z;
   return { x: camera.at.x + direction.x * away, y: camera.at.y + direction.y * away };

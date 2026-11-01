@@ -1,9 +1,13 @@
-// «Объём»: что под пальцем — метка, канал, дверь и проём по точке экрана.
+// «Объём»: что под пальцем — метка, канал, дверь, проём и поверхность по точке
+// экрана.
 //
 // Часть «Объёма», вынесенная из `src/volume.js` (2026-10-25) переносом без
 // переименований: снаружи модуль читают через дверь `volume.js`, а соседи по
 // `src/volume/` — напрямую. Зависимости идут только вниз по слоям (порядок —
 // в шапке `volume.js`), циклов нет. Решения и доводы — в шапках разделов ниже.
+import { volumeRayAt } from "./camera.js";
+import { volumeIsCeiling, volumeIsFloor, volumeIsWall } from "./faces.js";
+import { VOLUME_DOOR_RGB, VOLUME_FRAME_RGB, VOLUME_GLASS_RGB, VOLUME_NEAR_MM } from "./measures.js";
 
 /**
  * Какую дверь показывают (G207): ищется по полотну и ручке, сверху вниз — тем
@@ -258,4 +262,178 @@ function volumePolygonCentre(xy) {
   }
   const count = xy.length / 2;
   return { x: sumX / count, y: sumY / count };
+}
+
+// ——— поверхность под прицелом: линейка (таск 237, G356, G358) ——————————————
+//
+// Заказчик: «В объёме начало и конец отрезка измеряемого может ставиться только
+// на стены\пол\потолок, а не просто в случайную точку в объёме». И, вторым
+// ответом (G358): «Да, поверхности дверей, проёмов и окон тоже надо отмечать».
+//
+// **Обратного хода «точка кадра → точка на грани в миллиметрах» в сборке не
+// было.** Кадр отвечал только хозяином (`volumeSightAt` — чья метка), а
+// многоугольник кадра трёхмерной геометрии не несёт вовсе: у него `xy`,
+// глубина, ярус и краска (`volumeFacePolygons`). Путей было два, и выбран
+// первый:
+//
+//   **луч сквозь грани сцены на событие** — кадр не платит ничего. Мерят редко:
+//     два клика на измерение и ход руки между ними. Проход по `scene.faces`
+//     стоит отсечения плоскостью (скалярное произведение и деление), а
+//     попадание в многоугольник считается только у граней, которые ближе уже
+//     найденной, — на объекте в 13 тысяч граней это доли миллисекунды;
+//
+//   донести геометрию до многоугольника кадра было бы ближе к готовому порядку
+//     отрисовки, но платил бы **каждый кадр**: три числа на вершину у шести
+//     сотен многоугольников, и всё это ради двух кликов за сеанс. Бюджет кадра
+//     (§6.4 карты) такого не выдерживает, и правило «новый эффект в кадре
+//     меряют прежде, чем принять» здесь отвечает отказом.
+//
+// **Поверхность опознаётся гранью, а не цветом стены**: `volumeIsWall` /
+// `volumeIsFloor` / `volumeIsCeiling` — крашеная стена несёт ответ полем
+// `paint`, и сравнение `rgb` на ней провалилось бы. Полотно двери, створка и
+// бруски рамы краски человека не знают вовсе, и у них ответ как раз цветом
+// сборки: `VOLUME_DOOR_RGB` и `VOLUME_FRAME_RGB` больше нигде не встречаются
+// (их ставит только `walls.js`), а проём узнаётся ещё и по хозяину (`doorId`,
+// `doorway`) — звенья гармошки и ворота приходят ими.
+//
+// **Откос, подоконник и перемычка проёма приходят стеной, и это не поблажка**:
+// срез толщи стены красится её же краской, то есть стеной и является. Отличать
+// его отдельным условием было бы дороже и неверно по существу.
+//
+// **Мерим до стекла, а не сквозь него** (решение таска; заказчик оставил выбор
+// исполнителю). Взгляд сквозь прозрачную бесхозную грань проходит
+// (`volumeSeeThrough`) — там это правильно: за стеклом двери выделяют то, что
+// видно. Линейке это правило не годится: человек целится в стеклопакет, и
+// точка ушла бы на дом через улицу — туда, куда он не показывал. Стекло — это
+// поверхность, которой касаются рулеткой, и мерить до него честнее.
+//
+// **А сквозь тюль и прозрачную мебель луч идёт дальше.** Их заказчик не
+// называл (G358 — «двери, проёмы, окна»), и останавливаться на них значило бы
+// отказывать в точке там, где поверхность за ними прекрасно видна: сквозь
+// шкаф видно стену, и мерить хотят до стены. Разводятся они со стеклом по
+// существу, а не по прозрачности: стекло — это `glass` у стеклянной стены и
+// `VOLUME_GLASS_RGB` у остеклённого полотна, всё прочее прозрачное — ткань и
+// вещи каталога.
+
+/** Стекло ли это: стеклянная стена или остеклённое полотно двери и окна. */
+function volumeSurfaceGlass(face) {
+  return Boolean(face.glass) || face.rgb === VOLUME_GLASS_RGB;
+}
+
+/**
+ * Поверхность под точкой кадра: `{point, kind}` или `null`, если луч ни во что
+ * не упёрся (небо, взгляд мимо дома).
+ *
+ * `point` — миллиметры чертежа с третьей осью от пола; `kind` — что это
+ * (`volumeSurfaceKind`). Решение «ставить точку или нет» принимает вызывающий:
+ * здесь только ответ на вопрос «что там», а слова у отказа свои
+ * (`strings.measure.volumeMiss*`).
+ */
+export function volumeSurfaceAt(scene, camera, box, x, y) {
+  if (!scene || scene.empty || !Array.isArray(scene.faces) || !camera || !box) return null;
+  const ray = volumeRayAt(camera, box, x, y);
+  let found = null;
+  let near = Infinity;
+  for (const face of scene.faces) {
+    // Линия не поверхность; прозрачное пропускается, кроме стекла.
+    if (face.line) continue;
+    if (face.clear && !volumeSurfaceGlass(face)) continue;
+    const away = volumeFaceRayAway(face, ray, near);
+    if (away === null) continue;
+    near = away;
+    found = face;
+  }
+  if (!found) return null;
+  return {
+    point: {
+      x: ray.at.x + ray.dir.x * near,
+      y: ray.at.y + ray.dir.y * near,
+      z: ray.at.z + ray.dir.z * near,
+    },
+    kind: volumeSurfaceKind(found),
+  };
+}
+
+/** Годится ли эта поверхность под конец отрезка. Одна дверь к правилу G358. */
+export function volumeSurfaceHolds(kind) {
+  return Boolean(kind) && kind !== "other";
+}
+
+/**
+ * Чем грань работает: `wall`, `floor`, `ceiling`, `door` (полотно, створка,
+ * звено, ворота), `frame` (бруски рамы окна и остеклённой двери), `glass` — или
+ * `other` у всего прочего: вещи каталога, тела меток, земля вокруг плиты.
+ *
+ * Порядок проверок — порядок надёжности ответа. Стекло спрашивается первым: его
+ * грань у стеклянной стены **была** стеной и краску потеряла (`volumeGlassFace`
+ * сбрасывает `paint`), и отвечать на неё «стена» значило бы соврать о том, до
+ * чего мерили. Хозяин проёма — последним: он есть и у откосов, а те уже
+ * ответили стеной, и это ближе к делу.
+ */
+export function volumeSurfaceKind(face) {
+  if (!face) return "other";
+  if (volumeSurfaceGlass(face)) return "glass";
+  if (volumeIsWall(face)) return "wall";
+  if (volumeIsFloor(face)) return "floor";
+  if (volumeIsCeiling(face)) return "ceiling";
+  if (face.rgb === VOLUME_DOOR_RGB) return "door";
+  if (face.rgb === VOLUME_FRAME_RGB) return "frame";
+  if (face.doorId || face.doorway) return "door";
+  return "other";
+}
+
+/**
+ * Насколько далеко по лучу лежит грань — или `null`: луч идёт вдоль её
+ * плоскости, упирается за спиной, дальше уже найденной (`limit`) или мимо самого
+ * многоугольника.
+ *
+ * Порядок проверок — порядок цены: плоскость стоит одно деление, попадание в
+ * многоугольник — обход всех его вершин, и до него доходят только грани, которые
+ * и правда ближе.
+ */
+function volumeFaceRayAway(face, ray, limit) {
+  const points = face.p;
+  if (!points || points.length < 3) return null;
+  const n = face.n;
+  if (!n) return null;
+  const denom = n.x * ray.dir.x + n.y * ray.dir.y + n.z * ray.dir.z;
+  if (Math.abs(denom) < 1e-9) return null;
+  const first = points[0];
+  const away =
+    ((first.x - ray.at.x) * n.x + (first.y - ray.at.y) * n.y + (first.z - ray.at.z) * n.z) / denom;
+  if (!(away > VOLUME_NEAR_MM) || !(away < limit)) return null;
+  const at = {
+    x: ray.at.x + ray.dir.x * away,
+    y: ray.at.y + ray.dir.y * away,
+    z: ray.at.z + ray.dir.z * away,
+  };
+  return volumeFaceHolds(points, n, at) ? away : null;
+}
+
+/**
+ * Лежит ли точка плоскости внутри многоугольника. Многоугольник роняется на ту
+ * из трёх плоскостей, где он не выродился: ось с самой большой нормалью
+ * выбрасывается — стену по оси `x` нельзя разбирать в плановых осях, она там
+ * отрезок.
+ */
+function volumeFaceHolds(points, n, at) {
+  const ax = Math.abs(n.x);
+  const ay = Math.abs(n.y);
+  const az = Math.abs(n.z);
+  const drop = az >= ax && az >= ay ? "z" : ay >= ax ? "y" : "x";
+  const flat =
+    drop === "z"
+      ? (point) => ({ u: point.x, v: point.y })
+      : drop === "y"
+        ? (point) => ({ u: point.x, v: point.z })
+        : (point) => ({ u: point.y, v: point.z });
+  const spot = flat(at);
+  let inside = false;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i, i += 1) {
+    const a = flat(points[i]);
+    const b = flat(points[j]);
+    const crosses = a.v > spot.v !== b.v > spot.v;
+    if (crosses && spot.u < ((b.u - a.u) * (spot.v - a.v)) / (b.v - a.v) + a.u) inside = !inside;
+  }
+  return inside;
 }

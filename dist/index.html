@@ -6364,6 +6364,13 @@ display: none;
              разбор, поэтому кнопка есть и в режиме просмотра. -->
         <div id="header-links" class="mount"></div>
         <div id="header-actions" class="mount"></div>
+        <!-- Линейка (таск 237, G356): «добавь в верхнюю панель рядом с кнопокй
+             печати инструмент Линейка, что бы измерять расстояния». Стоит
+             сразу за значком принтера — так и просил заказчик. Своя точка
+             монтирования, а не кнопка внутри выгрузок: за принтером меню,
+             которое открывают и закрывают, а линейка включает занятие на поле —
+             в одной панели они однажды закрылись бы вместе. -->
+        <div id="header-measure" class="mount"></div>
         <!-- «Интерфейс проекта» окном (таск 175, G272): на узком экране раздел
              левой колонки в лист не приходит вовсе, и до размера меток,
              подписей, слоёв и масштаба с телефона было не добраться. Кнопка
@@ -6850,7 +6857,7 @@ font: "Шрифт",
 fontDraft: "Чертёжный ГОСТ",
 fontSystem: "Системный",
 fontHint: "Только на экране: на печать и в выгрузку всегда идёт чертёжный",
-guides: "Линейка и направляющие",
+guides: "Шкала и направляющие",
 guidesHint:
 "Полоса с делениями по краям поля и линии, которые с неё тянут. Работает на плане и в чертеже: на плане деления в пикселях подложки, в чертеже — в миллиметрах. Направляющие ставят на плане, в чертеже они видны там, где у него есть масштаб и привязка.",
 layers: "Слои",
@@ -7734,6 +7741,24 @@ cancelled: "Калибровка отменена",
 meters: "{value} м",
 lengthLabel: "Длина по плану",
 markLength: "Длина по плану: {value}",
+},
+measure: {
+name: "Линейка",
+title: "Линейка: измерить расстояние",
+titleOn: "Убрать линейку",
+mm: "{value} мм",
+hintPlan:
+"Линейка: клик — начало отрезка, второй клик — конец, расстояние в метрах по масштабу плана. Третий клик начинает новый отрезок. Направление липнет к ровным углам и направляющим, Alt — свободно. Esc — убрать линейку.",
+hintDrawing:
+"Линейка: клик — начало отрезка, второй клик — конец, расстояние в миллиметрах чертежа. Третий клик начинает новый отрезок. Притяжка та же, что при рисовании: узел сетки, направляющие, ровный угол; Alt — свободно. Esc — убрать линейку.",
+hintVolume:
+"Линейка: клик — начало отрезка, второй клик — конец. Концы ложатся на стену, пол, потолок, дверь, окно и откосы проёма — в воздух, в небо и в мебель точка не встанет. Третий клик начинает новый отрезок. Esc — убрать линейку.",
+volumeParts: "по полу {floor}, по высоте {rise}",
+volumeMissNone: "Мимо дома: конец отрезка ложится на стену, пол, потолок, дверь или окно",
+volumeMissOther: "Здесь мебель, а не поверхность: конец отрезка ложится на стену, пол, потолок, дверь или окно",
+noMeters: "Масштаб плана не задан",
+scaleAskTitle: "Линейке нужен масштаб",
+scaleLater: "Мерить без метров",
 },
 workshop: {
 open: "Чертёж",
@@ -25353,6 +25378,94 @@ ctx.arc(at.x, at.y, radius, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * part);
 ctx.stroke();
 ctx.restore();
 }
+const MEASURE_LABEL_GAP_PX = 16;
+const MEASURE_TICK_PX = 7;
+const MEASURE_END_PX = 3.5;
+const MEASURE_FONT_PX = 13;
+const MEASURE_LINE_PX = 15;
+const MEASURE_PLATE_PAD = 5;
+function drawMeasure(ctx, from, to, lines = [], options = {}) {
+if (!ctx || !from) return;
+const color = options.color || "#d6336c";
+ctx.save();
+ctx.lineCap = "round";
+if (to) {
+ctx.lineWidth = 4;
+ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
+ctx.beginPath();
+ctx.moveTo(from.x, from.y);
+ctx.lineTo(to.x, to.y);
+ctx.stroke();
+ctx.lineWidth = 2;
+ctx.strokeStyle = color;
+if (options.live) ctx.setLineDash([7, 5]);
+ctx.beginPath();
+ctx.moveTo(from.x, from.y);
+ctx.lineTo(to.x, to.y);
+ctx.stroke();
+ctx.setLineDash([]);
+}
+const span = to ? Math.hypot(to.x - from.x, to.y - from.y) : 0;
+const unit = span > 0.001 ? { x: (to.x - from.x) / span, y: (to.y - from.y) / span } : { x: 1, y: 0 };
+const across = { x: -unit.y, y: unit.x };
+for (const end of to ? [from, to] : [from]) {
+if (span > 0.001) {
+ctx.lineWidth = 3;
+ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
+ctx.beginPath();
+ctx.moveTo(end.x - across.x * MEASURE_TICK_PX, end.y - across.y * MEASURE_TICK_PX);
+ctx.lineTo(end.x + across.x * MEASURE_TICK_PX, end.y + across.y * MEASURE_TICK_PX);
+ctx.stroke();
+ctx.lineWidth = 1.6;
+ctx.strokeStyle = color;
+ctx.beginPath();
+ctx.moveTo(end.x - across.x * MEASURE_TICK_PX, end.y - across.y * MEASURE_TICK_PX);
+ctx.lineTo(end.x + across.x * MEASURE_TICK_PX, end.y + across.y * MEASURE_TICK_PX);
+ctx.stroke();
+}
+ctx.beginPath();
+ctx.arc(end.x, end.y, MEASURE_END_PX, 0, Math.PI * 2);
+ctx.fillStyle = color;
+ctx.fill();
+ctx.lineWidth = 1.5;
+ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+ctx.stroke();
+}
+const rows = (Array.isArray(lines) ? lines : []).filter((line) => typeof line === "string" && line !== "");
+if (rows.length === 0 || !to) {
+ctx.restore();
+return;
+}
+const middle = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+const side = across.y > 0 ? -1 : 1;
+const at = {
+x: middle.x + across.x * MEASURE_LABEL_GAP_PX * side,
+y: middle.y + across.y * MEASURE_LABEL_GAP_PX * side,
+};
+ctx.font = drawFont(MEASURE_FONT_PX, 600);
+ctx.textBaseline = "middle";
+ctx.textAlign = "center";
+let width = 0;
+for (const line of rows) width = Math.max(width, ctx.measureText(line).width);
+const height = rows.length * MEASURE_LINE_PX;
+const rect = {
+x: at.x - width / 2 - MEASURE_PLATE_PAD,
+y: at.y - height / 2 - MEASURE_PLATE_PAD,
+width: width + MEASURE_PLATE_PAD * 2,
+height: height + MEASURE_PLATE_PAD * 2,
+};
+platePath(ctx, rect, 5);
+ctx.fillStyle = "rgba(255, 255, 255, 0.94)";
+ctx.fill();
+ctx.lineWidth = 1.2;
+ctx.strokeStyle = color;
+ctx.stroke();
+ctx.fillStyle = color;
+for (const [index, line] of rows.entries()) {
+ctx.fillText(line, at.x, at.y - height / 2 + MEASURE_LINE_PX * (index + 0.5));
+}
+ctx.restore();
+}
 function drawPathHandles(ctx, handles, color, hovered) {
 const tint = color || "#0969da";
 const list = handles || [];
@@ -33848,6 +33961,27 @@ return (side / 2) / Math.tan(((VOLUME_FOV_DEG / 2) * Math.PI) / 180);
 function volumeHorizon(camera, box) {
 return box.height / 2 + volumeFocal(box) * Math.tan(camera.pitch || 0);
 }
+function volumeRayAt(camera, box, x, y) {
+const basis = volumeBasis(camera);
+const focal = volumeFocal(box);
+const right = (x - box.width / 2) / focal;
+const up = (box.height / 2 - y) / focal;
+return {
+at: { x: camera.at.x, y: camera.at.y, z: camera.at.z },
+dir: {
+x: basis.fwd.x + basis.right.x * right + basis.up.x * up,
+y: basis.fwd.y + basis.right.y * right + basis.up.y * up,
+z: basis.fwd.z + basis.right.z * right + basis.up.z * up,
+},
+};
+}
+function volumeScreenAt(point, camera, box) {
+const basis = volumeBasis(camera);
+const spot = volumeToCamera(point, camera.at, basis);
+if (!(spot.z >= VOLUME_NEAR_MM)) return null;
+const scale = volumeFocal(box) / spot.z;
+return { x: box.width / 2 + spot.x * scale, y: box.height / 2 - spot.y * scale };
+}
 function volumeToCamera(point, eye, basis) {
 const dx = point.x - eye.x;
 const dy = point.y - eye.y;
@@ -38286,15 +38420,7 @@ if (landed) speedMm = 0;
 return { crouchMm, liftMm, speedMm };
 }
 function volumeFloorAt(camera, box, x, y) {
-const basis = volumeBasis(camera);
-const focal = volumeFocal(box);
-const right = (x - box.width / 2) / focal;
-const up = (box.height / 2 - y) / focal;
-const direction = {
-x: basis.fwd.x + basis.right.x * right + basis.up.x * up,
-y: basis.fwd.y + basis.right.y * right + basis.up.y * up,
-z: basis.fwd.z + basis.right.z * right + basis.up.z * up,
-};
+const direction = volumeRayAt(camera, box, x, y).dir;
 if (!(direction.z < -1e-6) || !(camera.at.z > 0)) return null;
 const away = -camera.at.z / direction.z;
 return { x: camera.at.x + direction.x * away, y: camera.at.y + direction.y * away };
@@ -40607,6 +40733,85 @@ sumY += xy[index + 1];
 const count = xy.length / 2;
 return { x: sumX / count, y: sumY / count };
 }
+function volumeSurfaceGlass(face) {
+return Boolean(face.glass) || face.rgb === VOLUME_GLASS_RGB;
+}
+function volumeSurfaceAt(scene, camera, box, x, y) {
+if (!scene || scene.empty || !Array.isArray(scene.faces) || !camera || !box) return null;
+const ray = volumeRayAt(camera, box, x, y);
+let found = null;
+let near = Infinity;
+for (const face of scene.faces) {
+if (face.line) continue;
+if (face.clear && !volumeSurfaceGlass(face)) continue;
+const away = volumeFaceRayAway(face, ray, near);
+if (away === null) continue;
+near = away;
+found = face;
+}
+if (!found) return null;
+return {
+point: {
+x: ray.at.x + ray.dir.x * near,
+y: ray.at.y + ray.dir.y * near,
+z: ray.at.z + ray.dir.z * near,
+},
+kind: volumeSurfaceKind(found),
+};
+}
+function volumeSurfaceHolds(kind) {
+return Boolean(kind) && kind !== "other";
+}
+function volumeSurfaceKind(face) {
+if (!face) return "other";
+if (volumeSurfaceGlass(face)) return "glass";
+if (volumeIsWall(face)) return "wall";
+if (volumeIsFloor(face)) return "floor";
+if (volumeIsCeiling(face)) return "ceiling";
+if (face.rgb === VOLUME_DOOR_RGB) return "door";
+if (face.rgb === VOLUME_FRAME_RGB) return "frame";
+if (face.doorId || face.doorway) return "door";
+return "other";
+}
+function volumeFaceRayAway(face, ray, limit) {
+const points = face.p;
+if (!points || points.length < 3) return null;
+const n = face.n;
+if (!n) return null;
+const denom = n.x * ray.dir.x + n.y * ray.dir.y + n.z * ray.dir.z;
+if (Math.abs(denom) < 1e-9) return null;
+const first = points[0];
+const away =
+((first.x - ray.at.x) * n.x + (first.y - ray.at.y) * n.y + (first.z - ray.at.z) * n.z) / denom;
+if (!(away > VOLUME_NEAR_MM) || !(away < limit)) return null;
+const at = {
+x: ray.at.x + ray.dir.x * away,
+y: ray.at.y + ray.dir.y * away,
+z: ray.at.z + ray.dir.z * away,
+};
+return volumeFaceHolds(points, n, at) ? away : null;
+}
+function volumeFaceHolds(points, n, at) {
+const ax = Math.abs(n.x);
+const ay = Math.abs(n.y);
+const az = Math.abs(n.z);
+const drop = az >= ax && az >= ay ? "z" : ay >= ax ? "y" : "x";
+const flat =
+drop === "z"
+? (point) => ({ u: point.x, v: point.y })
+: drop === "y"
+? (point) => ({ u: point.x, v: point.z })
+: (point) => ({ u: point.y, v: point.z });
+const spot = flat(at);
+let inside = false;
+for (let i = 0, j = points.length - 1; i < points.length; j = i, i += 1) {
+const a = flat(points[i]);
+const b = flat(points[j]);
+const crosses = a.v > spot.v !== b.v > spot.v;
+if (crosses && spot.u < ((b.u - a.u) * (spot.v - a.v)) / (b.v - a.v) + a.u) inside = !inside;
+}
+return inside;
+}
 
 // src/volume/backdrop.js
 const VOLUME_SKY_NEAR = 0.08;
@@ -42646,6 +42851,7 @@ planPick: ["M4 5h16v14H4z", "M12 5v5", "M12 13v6", "M12 12h8"],
 fullscreen: ["M4 9.5V4h5.5", "M20 9.5V4h-5.5", "M4 14.5V20h5.5", "M20 14.5V20h-5.5"],
 fullscreenExit: ["M9.5 4v5.5H4", "M14.5 4v5.5H20", "M9.5 20v-5.5H4", "M14.5 20v-5.5H20"],
 printer: ["M7.5 9.5V4.5h9v5", "M4.5 9.5h15v7h-3", "M7.5 16.5h-3v-7", "M7.5 13.5h9v6h-9z"],
+measure: ["M4.5 12h15", "M8 9L4.5 12L8 15", "M16 9L19.5 12L16 15", "M4.5 7v10", "M19.5 7v10"],
 sliders: ["M4 9h16", "M4 15h16", "M10.8 9a1.8 1.8 0 1 1-3.6 0 1.8 1.8 0 0 1 3.6 0", "M16.8 15a1.8 1.8 0 1 1-3.6 0 1.8 1.8 0 0 1 3.6 0"],
 crouch: ["M12 4.5v9", "M8.5 10 12 13.5l3.5-3.5", "M5 19.5h14"],
 jump: ["M12 13.5v-9", "M8.5 8 12 4.5l3.5 3.5", "M5 19.5h14"],
@@ -43183,6 +43389,7 @@ headerSearch: "header-search",
 headerHistory: "header-history",
 headerWarnings: "header-warnings",
 headerLinks: "header-links",
+headerMeasure: "header-measure",
 headerSizes: "header-sizes",
 projectActions: "project-actions",
 dialogs: "dialog-host",
@@ -43201,6 +43408,7 @@ screen: SCREEN_DEFAULT,
 simRunning: false,
 tablet: false,
 scenarioId: null,
+measuring: false,
 project: null,
 schemeId: null,
 selectedMarkIds: [],
@@ -52739,6 +52947,94 @@ releasePlanImage(decoded);
 }
 }
 
+// src/measure.js
+const MEASURE_FIELDS = ["drawing", "scheme", "volume"];
+const MEASURE_COLOR = "#d6336c";
+const measureHeld = new Map();
+function measureKeyOf(state) {
+const projectId = state && state.project ? state.project.id : null;
+const schemeId = state && state.schemeId ? state.schemeId : null;
+if (!projectId || !schemeId) return null;
+return projectId + "|" + schemeId;
+}
+function measureSlot(field, key) {
+if (!key) return null;
+const held = measureHeld.get(field);
+if (!held || held.key !== key) return null;
+return held;
+}
+function measureAdd(field, key, point) {
+if (!key || !point) return null;
+const held = measureSlot(field, key);
+const next = held && held.a && !held.b ? { key, a: held.a, b: point, aim: null } : { key, a: point, b: null, aim: null };
+measureHeld.set(field, next);
+return next;
+}
+function measureAim(field, key, point) {
+const held = measureSlot(field, key);
+if (!held || !held.a || held.b) return false;
+const was = held.aim;
+if (point && was && was.x === point.x && was.y === point.y && (was.z || 0) === (point.z || 0)) return false;
+if (!point && !was) return false;
+held.aim = point || null;
+return true;
+}
+function measureDrop(field) {
+if (!measureHeld.has(field)) return false;
+measureHeld.delete(field);
+return true;
+}
+function measureDropAll() {
+if (measureHeld.size === 0) return false;
+measureHeld.clear();
+return true;
+}
+function measureEnds(field, key) {
+const held = measureSlot(field, key);
+if (!held || !held.a) return null;
+if (held.b) return { from: held.a, to: held.b, live: false };
+return { from: held.a, to: held.aim || null, live: true };
+}
+function measureStarted(field, key) {
+const held = measureSlot(field, key);
+return Boolean(held && held.a && !held.b);
+}
+function measureSpan(a, b) {
+if (!a || !b) return 0;
+const dx = Number(b.x) - Number(a.x);
+const dy = Number(b.y) - Number(a.y);
+const dz = (Number(b.z) || 0) - (Number(a.z) || 0);
+return Math.sqrt(dx * dx + dy * dy + dz * dz);
+}
+function measureParts(a, b) {
+if (!a || !b) return { straight: 0, floor: 0, rise: 0 };
+const dx = Number(b.x) - Number(a.x);
+const dy = Number(b.y) - Number(a.y);
+const dz = (Number(b.z) || 0) - (Number(a.z) || 0);
+return { straight: Math.sqrt(dx * dx + dy * dy + dz * dz), floor: Math.hypot(dx, dy), rise: Math.abs(dz) };
+}
+function measureMmText(value) {
+return text("measure.mm", { value: Math.round(Number(value) || 0) });
+}
+function measureDrawingLines(fromMm, toMm) {
+if (!fromMm || !toMm) return [];
+return [measureMmText(measureSpan(fromMm, toMm))];
+}
+function measurePlanLines(project, schemeId, from, to) {
+if (!from || !to) return [];
+const meters = planLengthMeters(project, schemeId, [from, to]);
+if (meters === null) return [strings.measure.noMeters];
+return [text("scale.meters", { value: formatMeters(meters) })];
+}
+function measureVolumeLines(from, to) {
+if (!from || !to) return [];
+const parts = measureParts(from, to);
+return [
+measureMmText(parts.straight),
+text("measure.volumeParts", { floor: measureMmText(parts.floor), rise: measureMmText(parts.rise) }),
+];
+}
+
 // src/panels/colorPicker.js
 const COLOR_FIELD_SIZE = { width: 232, height: 168 };
 const COLOR_HUE_HEIGHT = 18;
@@ -59770,6 +60066,70 @@ render();
 .catch(() => {});
 }
 registerPanel(PANEL_IDS.canvasCard, mountMarkCard);
+
+// src/panels/measureButton.js
+function measureButtonStep(state) {
+if (!state) return "on";
+if (state.measuring) return "off";
+if (state.screen === "scheme" && state.schemeId && !planHasScale(state.project, state.schemeId)) return "scale";
+return "on";
+}
+function measureButtonShown(state) {
+if (!state || !state.project) return false;
+return MEASURE_FIELDS.includes(state.screen || "");
+}
+function mountMeasureButton(host, api) {
+const { getState, setState, subscribe } = api;
+const button = uiIconButton("measure", {
+class: "ui-btn measure__toggle",
+label: strings.measure.name,
+title: strings.measure.title,
+on: { click: () => press() },
+});
+button.setAttribute("aria-pressed", "false");
+host.replaceChildren(button);
+async function press() {
+const state = getState();
+const step = measureButtonStep(state);
+if (step === "off") {
+measureDropAll();
+setState({ measuring: false });
+return;
+}
+if (step === "scale") {
+const go = await uiConfirm({
+title: strings.measure.scaleAskTitle,
+message: strings.scale.dialogNone + " " + strings.scale.dialogHint,
+confirmLabel: strings.scale.ask,
+cancelLabel: strings.measure.scaleLater,
+confirmClass: "ui-btn ui-btn--accent",
+});
+if (go) {
+measureDropAll();
+setState({ measuring: false });
+canvasStartScale(state.schemeId);
+return;
+}
+}
+const patch = { measuring: true };
+const mode = getState().mode;
+if (mode && mode !== "select" && mode !== "add") patch.mode = "select";
+setState(patch);
+}
+function refresh(state) {
+host.hidden = !measureButtonShown(state);
+const on = state.measuring === true;
+button.classList.toggle("is-on", on);
+button.setAttribute("aria-pressed", on ? "true" : "false");
+button.setAttribute("aria-label", on ? strings.measure.titleOn : strings.measure.name);
+button.title = on ? strings.measure.titleOn : strings.measure.title;
+}
+subscribe((state, changed) => {
+if ("project" in changed || "screen" in changed || "measuring" in changed || "schemeId" in changed) refresh(state);
+});
+refresh(getState());
+}
+registerPanel(PANEL_IDS.headerMeasure, mountMeasureButton);
 
 // src/panels/miniPlan.js
 const MINI_PLAN_MARK_PX = 7;

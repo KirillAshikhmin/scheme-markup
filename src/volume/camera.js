@@ -42,6 +42,49 @@ export function volumeHorizon(camera, box) {
   return box.height / 2 + volumeFocal(box) * Math.tan(camera.pitch || 0);
 }
 
+/**
+ * Луч сквозь точку кадра: `{at, dir}` в мировых миллиметрах (таск 237).
+ *
+ * **Обратный ход кадра, и хозяин у него один.** Кадр считает точку экрана как
+ * `halfWidth + camX · focal / camZ` (`volumeFacePolygons`); здесь то же деление
+ * раскручивается обратно: доли экрана переводятся в оси камеры, и из них
+ * собирается направление. Длина `dir` произвольна — важно только направление.
+ *
+ * Эта арифметика жила внутри `volumeFloorAt` (перенос по полу кликом, G212), и
+ * теперь она нужна дважды: линейка целится тем же лучом, только упирается не в
+ * плоскость пола, а в грани сцены (`volumeSurfaceAt`). Второго экземпляра быть
+ * не должно — разойдись они на знак, перенос и мерка показывали бы разные места
+ * под одной и той же точкой экрана.
+ */
+export function volumeRayAt(camera, box, x, y) {
+  const basis = volumeBasis(camera);
+  const focal = volumeFocal(box);
+  const right = (x - box.width / 2) / focal;
+  const up = (box.height / 2 - y) / focal;
+  return {
+    at: { x: camera.at.x, y: camera.at.y, z: camera.at.z },
+    dir: {
+      x: basis.fwd.x + basis.right.x * right + basis.up.x * up,
+      y: basis.fwd.y + basis.right.y * right + basis.up.y * up,
+      z: basis.fwd.z + basis.right.z * right + basis.up.z * up,
+    },
+  };
+}
+
+/**
+ * Куда точка мира попадает на кадре: `{x, y}` или `null` — ближе ближней
+ * плоскости, то есть позади головы. Прямой ход того же деления, что
+ * раскручивает `volumeRayAt`; нужен подписи мерки, которая встаёт у середины
+ * отрезка, а не у его концов.
+ */
+export function volumeScreenAt(point, camera, box) {
+  const basis = volumeBasis(camera);
+  const spot = volumeToCamera(point, camera.at, basis);
+  if (!(spot.z >= VOLUME_NEAR_MM)) return null;
+  const scale = volumeFocal(box) / spot.z;
+  return { x: box.width / 2 + spot.x * scale, y: box.height / 2 - spot.y * scale };
+}
+
 export function volumeToCamera(point, eye, basis) {
   const dx = point.x - eye.x;
   const dy = point.y - eye.y;

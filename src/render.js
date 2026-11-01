@@ -4267,6 +4267,130 @@ export function drawPressRing(ctx, at, progress, color) {
   ctx.restore();
 }
 
+// ——— линейка измерения (таск 237, G356) ——————————————————————————————————
+//
+// Не путать со шкалой по краям поля (`drawRuler` выше): та с таска 237 так и
+// называется — «Шкала и направляющие», — а слово «Линейка» отдано инструменту,
+// который меряет расстояния (G357).
+//
+// Отрезок мерки — **одно рисование на три поля**: «Чертёж», «Схема» и «Объём»
+// дают сюда готовые экранные точки и готовые строки, а как это выглядит,
+// решается здесь. Второго такого знака в сборке быть не должно: разойдись они
+// — мерка в объёме стала бы отличаться от мерки на плане, и человек решил бы,
+// что это разные инструменты.
+//
+// Рисуется **поверх** кадра и мимо `drawScheme`: мерка не часть объекта, и в
+// PNG, в печать и в лист «Схема» она не попадает — ровно как направляющие и
+// кольцо ожидания рядом.
+
+/** Насколько подпись отходит от линии: ближе садится на неё, дальше отрывается. */
+const MEASURE_LABEL_GAP_PX = 16;
+/** Половина поперечной засечки на конце — знак размерной линии чертежа. */
+const MEASURE_TICK_PX = 7;
+/** Кружок на конце: по нему видно точку, в которую мерка и встала. */
+const MEASURE_END_PX = 3.5;
+const MEASURE_FONT_PX = 13;
+const MEASURE_LINE_PX = 15;
+const MEASURE_PLATE_PAD = 5;
+
+/**
+ * Отрезок линейки: линия с засечками на концах и подпись рядом.
+ *
+ * `from` и `to` — экранные точки; `to` может быть `null` (поставлен только
+ * первый конец) — тогда рисуется одна точка, и это честно: мерить ещё нечего.
+ * `lines` — строки подписи сверху вниз, их считают поля по своим единицам.
+ * `options.live` — второй конец идёт за рукой: линия пунктиром, чтобы готовую
+ * мерку нельзя было спутать с недоведённой.
+ */
+export function drawMeasure(ctx, from, to, lines = [], options = {}) {
+  if (!ctx || !from) return;
+  const color = options.color || "#d6336c";
+  ctx.save();
+  ctx.lineCap = "round";
+  // Белая подложка под линией: мерка ложится и на тёмный пол объёма, и на
+  // серую стену, и на подложку плана — без неё линия местами пропадает.
+  if (to) {
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(to.x, to.y);
+    ctx.stroke();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = color;
+    if (options.live) ctx.setLineDash([7, 5]);
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(to.x, to.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  const span = to ? Math.hypot(to.x - from.x, to.y - from.y) : 0;
+  const unit = span > 0.001 ? { x: (to.x - from.x) / span, y: (to.y - from.y) / span } : { x: 1, y: 0 };
+  const across = { x: -unit.y, y: unit.x };
+  for (const end of to ? [from, to] : [from]) {
+    if (span > 0.001) {
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
+      ctx.beginPath();
+      ctx.moveTo(end.x - across.x * MEASURE_TICK_PX, end.y - across.y * MEASURE_TICK_PX);
+      ctx.lineTo(end.x + across.x * MEASURE_TICK_PX, end.y + across.y * MEASURE_TICK_PX);
+      ctx.stroke();
+      ctx.lineWidth = 1.6;
+      ctx.strokeStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(end.x - across.x * MEASURE_TICK_PX, end.y - across.y * MEASURE_TICK_PX);
+      ctx.lineTo(end.x + across.x * MEASURE_TICK_PX, end.y + across.y * MEASURE_TICK_PX);
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.arc(end.x, end.y, MEASURE_END_PX, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+    ctx.stroke();
+  }
+  const rows = (Array.isArray(lines) ? lines : []).filter((line) => typeof line === "string" && line !== "");
+  if (rows.length === 0 || !to) {
+    ctx.restore();
+    return;
+  }
+  // Подпись уходит в сторону от линии, а не садится на неё: под числом может
+  // лежать стена, и читать его поверх линии мерки было бы труднее всего.
+  const middle = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+  // Сторона выбирается так, чтобы подпись шла **вверх** от линии: вниз она
+  // легла бы под курсор, которым тянут второй конец.
+  const side = across.y > 0 ? -1 : 1;
+  const at = {
+    x: middle.x + across.x * MEASURE_LABEL_GAP_PX * side,
+    y: middle.y + across.y * MEASURE_LABEL_GAP_PX * side,
+  };
+  ctx.font = drawFont(MEASURE_FONT_PX, 600);
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "center";
+  let width = 0;
+  for (const line of rows) width = Math.max(width, ctx.measureText(line).width);
+  const height = rows.length * MEASURE_LINE_PX;
+  const rect = {
+    x: at.x - width / 2 - MEASURE_PLATE_PAD,
+    y: at.y - height / 2 - MEASURE_PLATE_PAD,
+    width: width + MEASURE_PLATE_PAD * 2,
+    height: height + MEASURE_PLATE_PAD * 2,
+  };
+  platePath(ctx, rect, 5);
+  ctx.fillStyle = "rgba(255, 255, 255, 0.94)";
+  ctx.fill();
+  ctx.lineWidth = 1.2;
+  ctx.strokeStyle = color;
+  ctx.stroke();
+  ctx.fillStyle = color;
+  for (const [index, line] of rows.entries()) {
+    ctx.fillText(line, at.x, at.y - height / 2 + MEASURE_LINE_PX * (index + 0.5));
+  }
+  ctx.restore();
+}
+
 /**
  * Рисование ручек пути.
  *

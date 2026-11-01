@@ -145,6 +145,8 @@ import {
   volumeClipNear,
   volumeFocal,
   volumeHorizon,
+  volumeRayAt,
+  volumeScreenAt,
 } from "./volume/camera.js";
 import {
   VOLUME_FLOOR_LAP,
@@ -398,6 +400,9 @@ import {
   volumeDoorwayAt,
   volumePickAt,
   volumeSightAt,
+  volumeSurfaceAt,
+  volumeSurfaceHolds,
+  volumeSurfaceKind,
 } from "./volume/pick.js";
 import {
   VOLUME_BACKDROP_CLEAR_MM,
@@ -725,6 +730,7 @@ export {
   volumePrismSolid,
   volumePush,
   volumeRainMask,
+  volumeRayAt,
   volumeRiverGreens,
   volumeRoomAt,
   volumeRoomKey,
@@ -735,6 +741,7 @@ export {
   volumeRooms,
   volumeScene,
   volumeSchemeOriginMm,
+  volumeScreenAt,
   volumeSeamGrow,
   volumeSelectLines,
   volumeShade,
@@ -778,6 +785,9 @@ export {
   volumeSunOpenings,
   volumeSunSpotFaces,
   volumeSunSpotRgb,
+  volumeSurfaceAt,
+  volumeSurfaceHolds,
+  volumeSurfaceKind,
   volumeTintCss,
   volumeTintRgb,
   volumeTubeFaces,
