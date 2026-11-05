@@ -2077,6 +2077,21 @@ color: var(--panel-text);
 .sizes__input.is-bad {
 border-color: var(--danger);
 }
+.sizes__input::placeholder {
+color: var(--panel-muted);
+font-style: italic;
+opacity: 1;
+}
+.sizes__inherited {
+display: flex;
+flex-direction: column;
+gap: 2px;
+color: var(--panel-muted);
+font-size: 12px;
+}
+.sizes__inherited:empty {
+display: none;
+}
 .picker--objects {
 width: min(calc(96vw - 40px), calc(var(--picker-columns, 1) * 290px));
 min-width: min(calc(96vw - 40px), 300px);
@@ -8327,7 +8342,7 @@ unit: "мм",
 open: "Размеры и высота",
 onMark: "Длина, ширина, высота и высота над полом — в отдельном окне",
 title: "Размеры метки {label}",
-hint: "Вещь на стене: длина вдоль стены, высота вверх, ширина поперёк — от стены в комнату; высота над полом — не размер вещи, а место, куда её вешают. Все поля необязательные: пустое — «не задано». Ноль — значение: у метки в полу высота над полом равна нулю, у встроенной вещи ширина равна нулю. Ширина — единственное поле с минусом: утопленное (щит в нише) уходит за плоскость стены.",
+hint: "Вещь на стене: длина вдоль стены, высота вверх, ширина поперёк — от стены в комнату; высота над полом — не размер вещи, а место, куда её вешают. Все поля необязательные: пустое — «не задано», и тогда в нём бледным стоит число, которое метка берёт у группы или у типа — по нему и рисуют развёртка с объёмом. Ноль — значение: у метки в полу высота над полом равна нулю, у встроенной вещи ширина равна нулю. Ширина — единственное поле с минусом: утопленное (щит в нише) уходит за плоскость стены.",
 length: "Длина, {unit}",
 width: "Высота, {unit}",
 depth: "Ширина, {unit}",
@@ -8338,12 +8353,20 @@ depthShort: "Ш",
 heightAboveFloorShort: "от пола",
 summary: "{values} {unit}",
 save: "Сохранить размеры",
+fromType: "из типа",
+fromGroup: "из группы",
+fromBoth: "из типа и группы",
+inheritedValue: "({value})",
+summaryFrom: "{summary} · {from}",
+inherited: "Унаследовано {from}: {values}",
+inheritedTitle:
+"В скобках — размеры, которые метка берёт у типа или у группы: своих у неё нет, а развёртка и объём рисуют по этим числам. Своё число перебивает унаследованное, стёртое поле возвращает наследование.",
 flat: {
 width: "Ширина, {unit}",
 depth: "Высота, {unit}",
 widthShort: "Ш",
 depthShort: "В",
-hint: "Вещь лежит лицом вниз — под потолком (высота над полом не задана) или на полу (высота над полом ровно ноль): высота идёт вниз от потолка или вверх от пола, а длина с шириной ложатся в план. Все поля необязательные: пустое — «не задано». Ноль — значение: у встроенного в потолок светильника высота равна нулю. Минус у высоты поле примет — это то же число, что у вещи на стене, — но здесь он ничего не меняет: утопленное бывает только у стены.",
+hint: "Вещь лежит лицом вниз — под потолком (высота над полом не задана) или на полу (высота над полом ровно ноль): высота идёт вниз от потолка или вверх от пола, а длина с шириной ложатся в план. Все поля необязательные: пустое — «не задано», и тогда в нём бледным стоит число, которое метка берёт у группы или у типа — по нему и рисует объём. Ноль — значение: у встроенного в потолок светильника высота равна нулю. Минус у высоты поле примет — это то же число, что у вещи на стене, — но здесь он ничего не меняет: утопленное бывает только у стены.",
 typeHint: "Эти размеры метка берёт, пока не задала свои: по ним объём рисует вещь в масштабе комнаты. У этого типа высота над полом пустая или нулевая — значит его метки лежат лицом вниз, под потолком или на полу: высота свисает вниз, а длина с шириной ложатся в план. Впишите высоту над полом — и имена станут стенными: высота вверх, ширина поперёк стены. Пустое поле — умолчания нет. Поправили здесь — поехали все метки этого типа, у которых своего размера нет.",
 },
 },
@@ -57574,15 +57597,40 @@ return ["length", "width", "depth", "heightAboveFloor"];
 function markSizesNumber(value) {
 return String(value).replace(".", ",");
 }
+function markSizesOriginOf(source, field) {
+const from = source ? source[field + "From"] : null;
+return from === "group" || from === "type" ? from : null;
+}
+function markSizesFromWord(origins) {
+if (origins.has("group")) return origins.has("type") ? strings.markSizes.fromBoth : strings.markSizes.fromGroup;
+return strings.markSizes.fromType;
+}
 function markSizesSummary(mark, seat = MARK_AXIS_UPRIGHT) {
 const values = markDimensions(mark);
 const parts = [];
+const origins = new Set();
 for (const field of markSizesOrder(seat)) {
 if (values[field] === null) continue;
-parts.push(text(markSizesKey(field, seat, "Short")) + " " + markSizesNumber(values[field]));
+const origin = markSizesOriginOf(mark, field);
+const number = markSizesNumber(values[field]);
+if (origin) origins.add(origin);
+parts.push(
+text(markSizesKey(field, seat, "Short")) +
+" " +
+(origin ? text("markSizes.inheritedValue", { value: number }) : number),
+);
 }
 if (parts.length === 0) return "";
-return text("markSizes.summary", { values: parts.join(" · "), unit: strings.markSizes.unit });
+const summary = text("markSizes.summary", { values: parts.join(" · "), unit: strings.markSizes.unit });
+if (origins.size === 0) return summary;
+return text("markSizes.summaryFrom", { summary, from: markSizesFromWord(origins) });
+}
+function markSizesInherited(project, mark) {
+if (!mark) return null;
+const bare = { ...mark };
+for (const field of MARK_DIMENSION_FIELDS) bare[field] = null;
+const sizes = markSizes(project, bare);
+return MARK_DIMENSION_FIELDS.some((field) => sizes[field] !== null) ? sizes : null;
 }
 function markSizesParse(raw) {
 const values = {};
@@ -57614,7 +57662,7 @@ title: text("markSizes.title", { label: labelOf(project, markId) }),
 hints: { [MARK_AXIS_UPRIGHT]: strings.markSizes.hint, [MARK_AXIS_FLAT]: strings.markSizes.flat.hint },
 current: markDimensions(mark),
 onWall: markOnWall(project, mark),
-inherited: markSizes(project, mark).heightAboveFloor,
+inherited: markSizesInherited(project, mark),
 });
 }
 function openSizesPicker({ title, hints, current, onWall, inherited }) {
@@ -57622,7 +57670,8 @@ return new Promise((resolve) => {
 const inputs = new Map();
 const labels = new Map();
 const error = uiBadLine();
-let seat = axisSeatOf(current.heightAboveFloor === null ? inherited : current.heightAboveFloor, onWall);
+const inheritedOf = (field) => (inherited ? inherited[field] : null);
+let seat = axisSeatOf(current.heightAboveFloor === null ? inheritedOf("heightAboveFloor") : current.heightAboveFloor, onWall);
 const hintNode = uiEl("p", { class: "modal__hint", text: hints[seat] });
 const seatNow = (raw) => {
 let own = null;
@@ -57631,14 +57680,16 @@ own = markDimensionValue(raw, "heightAboveFloor");
 } catch (ignored) {
 return seat;
 }
-return axisSeatOf(own === null ? inherited : own, onWall);
+return axisSeatOf(own === null ? inheritedOf("heightAboveFloor") : own, onWall);
 };
 const cell = (field, cellClass) => {
 const label = markSizesLabel(field, seat);
+const fallback = inheritedOf(field);
 const input = uiEl("input", {
 class: "ui-input sizes__input",
 type: "number",
 value: current[field] === null ? "" : String(current[field]),
+placeholder: fallback === null ? "" : markSizesNumber(fallback),
 title: label,
 attrs: {
 min: String(MARK_DIMENSION_SIGNED.includes(field) ? -MARK_DIMENSION_MAX : 0),
@@ -57668,9 +57719,32 @@ const rows = [
 uiEl("div", { class: "sizes__trio" }, trio.map((field) => cell(field, "sizes__cell"))),
 floorCell,
 ];
+const inheritedNode = uiEl("div", { class: "sizes__inherited" });
+const paintInherited = () => {
+inheritedNode.replaceChildren();
+if (!inherited) return;
+for (const origin of ["type", "group"]) {
+const values = {};
+let any = false;
+for (const field of MARK_DIMENSION_FIELDS) {
+const empty = String(inputs.get(field).value).trim() === "";
+const mine = empty && inherited[field + "From"] === origin && inherited[field] !== null;
+values[field] = mine ? inherited[field] : null;
+if (mine) any = true;
+}
+if (!any) continue;
+const line = text("markSizes.inherited", {
+from: origin === "group" ? strings.markSizes.fromGroup : strings.markSizes.fromType,
+values: markSizesSummary(values, seat),
+});
+inheritedNode.append(uiEl("span", { text: line }));
+}
+};
 inputs.get("heightAboveFloor").addEventListener("input", (event) => {
 applySeat(seatNow(event.target.value));
 });
+for (const input of inputs.values()) input.addEventListener("input", () => paintInherited());
+paintInherited();
 let modal;
 const done = (value) => {
 modal.close();
@@ -57689,7 +57763,7 @@ done(parsed.values);
 };
 modal = uiModal({
 title,
-body: uiEl("div", { class: "sizes" }, [hintNode, ...rows, error]),
+body: uiEl("div", { class: "sizes" }, [hintNode, ...rows, inheritedNode, error]),
 actions: [
 uiButton(strings.dialog.cancel, { on: { click: () => done(null) } }),
 uiButton(strings.markSizes.save, { class: "ui-btn ui-btn--accent", on: { click: () => save() } }),
@@ -59444,6 +59518,7 @@ fields: null,
 };
 if (!head.open) return head;
 const controllers = options.controllers instanceof Map ? options.controllers : new Map();
+const sizes = markSizes(project, mark);
 head.fields = {
 number: mark.number,
 equipment: placementsAt(project, mark.id).length,
@@ -59451,7 +59526,9 @@ roomId: mark.roomId || null,
 roomManual: markRoomManual(mark),
 location: mark.location || "",
 original: mark.original || "",
-sizes: markSizesSummary(mark, markAxisSeat(project, mark)),
+sizes: markSizesSummary(sizes, markAxisSeat(project, mark)),
+sizesOwn: markHasDimensions(mark),
+sizesInherited: MARK_DIMENSION_FIELDS.some((field) => sizes[field + "From"] === "type" || sizes[field + "From"] === "group"),
 device: deviceMarkField(project, mark.id),
 curtain: markIsCurtain(project, mark.id) ? markCurtainSide(project, mark.id) : null,
 lengthText: marksLengthText(project, mark),
@@ -59956,8 +60033,10 @@ on: { click: () => editControls(mark.id) },
 : null;
 const sizesButton = view.fields
 ? uiButton(view.fields.sizes || strings.markSizes.open, {
-class: "ui-btn ui-btn--wide mark-row__sizes" + (view.fields.sizes ? " is-set" : ""),
-title: strings.markSizes.onMark,
+class: "ui-btn ui-btn--wide mark-row__sizes" + (view.fields.sizesOwn ? " is-set" : ""),
+title: view.fields.sizesInherited
+? strings.markSizes.onMark + " · " + strings.markSizes.inheritedTitle
+: strings.markSizes.onMark,
 on: { click: () => editSizes(mark.id) },
 })
 : null;
