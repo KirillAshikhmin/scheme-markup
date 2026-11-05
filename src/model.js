@@ -2586,6 +2586,127 @@ function clampFraction(value) {
   return Math.min(1, Math.max(0, value));
 }
 
+// ——— собрать блок из уже стоящих меток и разобрать его (таск 244) ————————
+//
+// Слова заказчика (G366): «А ещё у метки кнопку - добавить в блок. При наатии
+// предлагает кликнуть на метку в другом блоке. Если метка уже была в блоке, то
+// эти блоки мёржатся в один, позиция меток остаётся. Если же нажали на метку
+// без блока, то они обе создают блок». И следом (G367): «Убрать из блока -
+// тоже сделай».
+//
+// До этого блок росла только ручка «+» (`addToGroup`): она **ставит новую**
+// метку рядом с данной. Две уже стоящие метки свести было нечем — ровно то, о
+// чём заказчик: рамку размечают по месту, а потом оказывается, что выключатель
+// у двери и диммер рядом с ним — один подрозетник.
+//
+// **Ни одна точка не двигается.** Это главное требование и оно же — причина,
+// по которой здесь нет ничего, кроме правки `groupId` и списка `markIds`: шаг
+// блока (`BLOCK_STEP_PX`) к сведению готовых меток отношения не имеет, они уже
+// стоят там, где их поставил инженер.
+//
+// **Порядок массива `project.marks` не трогается** — ни здесь, ни в разборе. На
+// нём держатся трое (доводы — у `mark.z`): смыкание номеров, перечень «чем
+// управляет» и выбор ведущей метки устройства (`deviceFollowers` берёт первую
+// по массиву). Перестановка молча передала бы аксессуар другой метке.
+//
+// Что при этом пересчитывается само и потому не хранится: подпись блока
+// (`blockLabelParts` по `blockMembers`), порядок внутри него, раскладка рамки в
+// «Объёме». Ярусы (`mark.z`) остаются своими у каждой метки: свести их в один
+// слой — это «порядок меток», отдельная команда, и делать её заодно значило бы
+// двинуть на экране то, чего человек не просил.
+
+/**
+ * Свести две метки в один блок: `{project, group}`.
+ *
+ * Отказы — именованными ошибками модели, и каждая называет причину, а не
+ * «нельзя»: человек щёлкает по плану, и молчаливый отказ выглядел бы сбоем.
+ * Комментарию отвечает свой код, а не общий `blockOnlyForPoints`: про плашку
+ * надо сказать плашкой, иначе человек ищет в ней «точку», которой у неё нет.
+ *
+ * Хозяин — блок **второй** метки (той, по которой щёлкнули): команда зовётся
+ * «добавить в блок», и добавляют в тот, который показали. Это не формальность —
+ * у блока есть смещение подписи, и живёт оно у первой метки списка
+ * (`render.labelOffsetOf`, `labelLeaderHolder`): у хозяина подпись остаётся
+ * там, куда её оттащили рукой, а у приходящего блока она всё равно пропала бы
+ * — подпись у блока одна. Отданное смещение не стирается: лежит в своей метке
+ * и вернётся, если её однажды вынуть.
+ *
+ * Своей группы нет ни у той, ни у другой — заводится новая, и первой в ней
+ * стоит та же вторая метка.
+ */
+export function joinToBlock(project, markId, otherId) {
+  const mark = requireMark(project, markId);
+  const other = requireMark(project, otherId);
+  if (mark.id === other.id) throw modelError("blockJoinSelf");
+  // Комментарий — надпись на плане, а не изделие: в подрозетнике ему не место.
+  if (markIsComment(mark) || markIsComment(other)) throw modelError("commentNoBlock");
+  if (mark.kind !== "point" || other.kind !== "point") throw modelError("blockOnlyForPoints");
+  // Блок — соседство на одном листе: группа меток двух схем уже считается
+  // поломкой (`validate: groupAcrossSchemes`), и заводить её руками нельзя.
+  if (mark.schemeId !== other.schemeId) throw modelError("blockJoinScheme");
+  if (mark.groupId && mark.groupId === other.groupId) throw modelError("blockJoinSame");
+  const theirs = findGroup(project, other.groupId);
+  const ours = findGroup(project, mark.groupId);
+  const host = theirs || ours;
+  if (!host) {
+    const group = { id: newId(), schemeId: other.schemeId, markIds: [other.id, mark.id], labelOffset: null };
+    const joined = new Set(group.markIds);
+    const marks = project.marks.map((item) => (joined.has(item.id) ? { ...item, groupId: group.id } : item));
+    return { project: withProject(project, { marks, groups: [...project.groups, group] }), group };
+  }
+  // Кого приводят: всю группу приходящей стороны или её одну метку. Блока нет
+  // у второй метки — приходит она сама, и хозяином остаётся блок первой. Дыр в
+  // списке не остаётся: хозяин мог уже держать кого-то из приходящих.
+  const guest = theirs ? ours : null;
+  const brought = theirs ? (guest ? guest.markIds : [mark.id]) : [other.id];
+  const coming = brought.filter((id) => !host.markIds.includes(id));
+  const markIds = [...host.markIds, ...coming];
+  const groups = project.groups
+    .filter((item) => !guest || item.id !== guest.id)
+    .map((item) => (item.id === host.id ? { ...item, markIds } : item));
+  const joined = new Set(coming);
+  const marks = project.marks.map((item) => (joined.has(item.id) ? { ...item, groupId: host.id } : item));
+  return {
+    project: withProject(project, { marks, groups }),
+    group: groups.find((item) => item.id === host.id),
+  };
+}
+
+/**
+ * Вынуть метку из блока: `{project, dissolved}`, где `dissolved` — блок
+ * распался целиком (в нём осталась одна метка).
+ *
+ * Метка остаётся на своём месте: из неё уходит только `groupId`. Правило
+ * «группа меньше двух меток недопустима» здесь не новое — так же разбирает
+ * группу `deleteMark`, и то же говорит `validate: smallGroup`; разница одна —
+ * метки при этом никуда не девается.
+ *
+ * Блок-одна-метка (одна метка со многими точками, режим «Одна метка на блок»)
+ * сюда не ходит вовсе: вынимать из неё нечего — она сама себе блок, и «убрать»
+ * означало бы для неё **удалить точку**, то есть потерять место установки, а не
+ * освободить метку. Два разных дела под одним именем — ловушка; точка убирается
+ * своим жестом, а не этой командой.
+ */
+export function leaveBlock(project, markId) {
+  const mark = requireMark(project, markId);
+  const group = findGroup(project, mark.groupId);
+  // Поля нет, или оно показывает в пустоту: блока у метки нет — значит и
+  // выходить ей некуда. Висячий `groupId` при этом чистится: он и сам поломка.
+  if (!group) {
+    if (!mark.groupId) throw modelError("blockLeaveAlone");
+    const marks = project.marks.map((item) => (item.id === markId ? { ...item, groupId: null } : item));
+    return { project: withProject(project, { marks }), dissolved: false };
+  }
+  const rest = group.markIds.filter((id) => id !== markId);
+  const dissolved = rest.filter((id) => findMark(project, id)).length < 2;
+  const groups = dissolved
+    ? project.groups.filter((item) => item.id !== group.id)
+    : project.groups.map((item) => (item.id === group.id ? { ...item, markIds: rest } : item));
+  const freed = new Set(dissolved ? group.markIds : [markId]);
+  const marks = project.marks.map((item) => (freed.has(item.id) ? { ...item, groupId: null } : item));
+  return { project: withProject(project, { marks, groups }), dissolved };
+}
+
 // ——— размеры метки ———————————————————————————————————————————————————
 //
 // Длина, ширина, высота и высота над полом — четыре необязательных числа.
