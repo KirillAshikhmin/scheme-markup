@@ -49,9 +49,12 @@ import {
   addToGroup,
   applyMarkWalls,
   applyRoomOutlines,
+  blockLabel,
   blockMembers,
   blockStepPx,
   deleteMark,
+  joinToBlock,
+  leaveBlock,
   deleteOutline,
   findScheme,
   findType,
@@ -259,6 +262,25 @@ export const CANVAS_MODE_SCALE = "scale";
 // этот режим не нужна.
 export const CANVAS_MODE_ROOM_TRACE = "roomTrace";
 
+// ——— вторая метка блока: имя режима (таск 244) ————————————————————————
+//
+// Шестой режим холста, самый короткий из всех: рука показывает **одну** метку,
+// с которой собрать блок, и режим сам возвращается в «Выделение».
+//
+// Механизм взят готовый — тот же, что у калибровки и у помещения по чертежу
+// (`CANVAS_MODE_SCALE`, `CANVAS_MODE_ROOM_TRACE`): режим состояния, подсказка
+// над планом, плашка о входе, крестик вместо курсора, Esc на выход. Третьего
+// способа «подожди, пока ткнут» в сборке заводить нельзя, а окно со списком
+// меток (`openMarkPicker`) здесь не годится по существу: заказчик просит
+// «кликнуть на метку», и выбирают её **глазами на плане** — в списке соседство
+// меток, из которого и состоит блок, не видно вовсе.
+//
+// Отличие от тех двух одно: выделение **не снимается**. Первая метка блока —
+// это и есть выделенная, её карточка держит кнопку, и терять её нельзя. Ручки
+// выделенного при этом гаснут (`canvasHandlesShown`), иначе «+» под рукой
+// отобрал бы клик у второй метки.
+export const CANVAS_MODE_BLOCK_JOIN = "blockJoin";
+
 /**
  * Режимы, у которых **нет своей кнопки** в ряду «Режим», — и потому о входе в
  * них говорит плашка (таск 133).
@@ -277,6 +299,7 @@ export const CANVAS_MODE_NOTES = {
   room: strings.canvas.modeRoomSaid,
   roomTrace: strings.canvas.modeRoomTraceSaid,
   scale: strings.scale.started,
+  blockJoin: strings.canvas.modeBlockJoinSaid,
 };
 
 /**
@@ -387,6 +410,49 @@ export function canvasStartRoomTrace(roomId) {
 }
 
 /**
+ * Ждать щелчка по второй метке блока — **единственная дверь в режим** (таск
+ * 244), как `canvasStartScale` у калибровки.
+ *
+ * Выделение, в отличие от тех двух дверей, остаётся: показанная метка — первая
+ * метка будущего блока, и команда берёт её оттуда же, откуда её видит человек,
+ * — из выделения. Второго места, где лежала бы «та, с которой начали», в
+ * состоянии не появляется: разойдись оно с выделением, карточка держала бы
+ * кнопку одной метки, а блок собрался бы с другой.
+ */
+export function canvasStartBlockJoin(markId) {
+  // Вторую метку показывают **на плане** — значит план и показываем (таск 153):
+  // карточка метки стоит и над «Объёмом», и кнопку в ней однажды попросят туда.
+  setScreen(SCREEN_DEFAULT);
+  canvasApi.setState({
+    selectedMarkIds: [markId],
+    selectedOutlineId: null,
+    editPathId: null,
+    mode: CANVAS_MODE_BLOCK_JOIN,
+  });
+}
+
+/**
+ * Ждёт ли холст прямо сейчас вторую метку блока, и та ли это метка, с которой
+ * начали. Спрашивает карточка — чтобы показать нажатой ту самую кнопку.
+ */
+export function canvasBlockJoining(state, markId) {
+  if (!state || state.mode !== CANVAS_MODE_BLOCK_JOIN) return false;
+  return !markId || (state.selectedMarkIds || [])[0] === markId;
+}
+
+/**
+ * Передумали ждать вторую метку. Одна дверь на три дороги — Esc, повторное
+ * нажатие на зажёгшуюся кнопку и выделение, которое из-под режима увели:
+ * выход обязан быть один, иначе одна из дорог однажды оставит режим висеть.
+ *
+ * Выделение не трогается: метка, с которой начинали, остаётся выделенной, и
+ * кнопка в её карточке — под рукой.
+ */
+export function canvasStopBlockJoin() {
+  canvasApi.setState({ mode: "select" });
+}
+
+/**
  * Отказ автоопределения словами. Чистая функция от объекта и ответа
  * `roomTraceAt`: шесть причин, и каждая называет, что делать дальше.
  *
@@ -434,6 +500,11 @@ function canvasHandlesShown(state) {
   // не правит и работает в просмотре, где ручек нет и так.
   if (state && state.measuring) return false;
   if (!canvasEditAllowed(state)) return false;
+  // Ожидание второй метки блока — то же самое, и здесь это особенно важно:
+  // метка, с которой начали, **остаётся выделенной**, её ручка «+» висит ровно
+  // на шаге блока, то есть накрывает соседа — как раз ту метку, по которой
+  // человек и целится.
+  if (state.mode === CANVAS_MODE_BLOCK_JOIN) return false;
   return state.mode !== CANVAS_MODE_SCALE && state.mode !== CANVAS_MODE_ROOM_TRACE;
 }
 
@@ -507,6 +578,13 @@ export function canvasHintText(state) {
   // Калибровка — поверх всего остального: рука в этот момент занята отрезком,
   // и про метки с помещениями рассказывать нечего.
   if (state.mode === CANVAS_MODE_SCALE) return strings.scale.hint;
+  // Ожидание второй метки блока — тоже поверх всего: рука целится в метку, и
+  // про постановку новых рассказывать сейчас нечего. Подсказка называет первую
+  // метку — иначе, вернувшись к плану через минуту, человек не узнает, с какой
+  // он начал.
+  if (state.mode === CANVAS_MODE_BLOCK_JOIN) {
+    return text("canvas.hintBlockJoin", { label: labelOf(state.project, state.selectedMarkIds[0]) });
+  }
   if (state.mode === CANVAS_MODE_ROOM_TRACE) {
     return text("canvas.hintRoomTrace", { name: room ? room.name : "" });
   }
@@ -2530,6 +2608,79 @@ function canvasRoomTraceClick(plan) {
   }
 }
 
+// ——— блок из двух готовых меток (таск 244) ———————————————————————————
+//
+// Два шага истории и ни одного сдвига: собрать блок и разобрать его. Записывает
+// обе команды модель (`joinToBlock`, `leaveBlock`), холст только показывает
+// промахи словами и возвращает режим в «Выделение».
+
+/**
+ * Щелчок в ожидании второй метки блока.
+ *
+ * Промах мимо меток режима не снимает: человек целится в знак размером с
+ * ноготь, и выкидывать его из команды за один недолёт значило бы заставить
+ * нажимать кнопку снова. Выходят отсюда Esc или удавшимся щелчком.
+ *
+ * Попадание считается тем же `hitTest`, что и выделение: клик достаётся той
+ * метке, которую видно сверху (`marksInDrawOrder`), и второго правила
+ * попадания в сборке нет.
+ */
+function canvasBlockJoinClick(point, slack) {
+  const state = canvasState();
+  const scheme = canvasScheme(state);
+  const markId = state.selectedMarkIds[0];
+  if (!scheme || !markId) return;
+  const hit = hitTest(state.project, scheme, point, canvasViewOf(state), state.filter, slack);
+  if (!hit) {
+    canvasApi.notify(strings.canvas.blockJoinMiss);
+    return;
+  }
+  // Отказ модели — не сбой, а ответ: его слова называют причину (та же метка,
+  // комментарий, линия, чужая схема, один и тот же блок), и режим после него
+  // остаётся — следующий щелчок попадёт куда надо.
+  try {
+    const result = joinToBlock(state.project, markId, hit.markId);
+    canvasCommit(state.project, result.project, strings.history.blockJoin, {
+      selection: [markId],
+      patch: { mode: "select" },
+    });
+    // Что получилось — вслух: подпись нового блока и сколько в нём меток. По
+    // ней сразу видно, тот ли блок собрался, а чисел на плане не прочитать —
+    // подпись блока свёрнута в диапазон.
+    canvasApi.notify(
+      text("canvas.blockJoined", {
+        label: blockLabel(result.project, result.group.markIds),
+        count: result.group.markIds.length,
+      }),
+      "success",
+    );
+  } catch (error) {
+    canvasFail(error);
+  }
+}
+
+/**
+ * Вынуть выделенную метку из блока. Своего режима тут нет вовсе: показывать
+ * нечего — метка уже выделена, и команда исполняется нажатием.
+ *
+ * Про распавшийся блок говорится словом: соседняя метка тоже вышла из блока, а
+ * на плане это видно только по подписи, которая перестала быть перечислением.
+ */
+export function canvasBlockLeave(markId) {
+  const state = canvasState();
+  try {
+    const result = leaveBlock(state.project, markId);
+    canvasCommit(state.project, result.project, strings.history.blockLeave, { selection: [markId] });
+    canvasApi.notify(
+      result.dissolved
+        ? text("canvas.blockDissolved", { label: labelOf(state.project, markId) })
+        : text("canvas.blockLeft", { label: labelOf(state.project, markId) }),
+    );
+  } catch (error) {
+    canvasFail(error);
+  }
+}
+
 function canvasDraftClick(plan, screen, free) {
   const state = canvasState();
   if (!canvasDraft) {
@@ -3177,6 +3328,9 @@ export function canvasTapKind(state, pick = {}) {
   // Определение по чертежу забирает тап так же и ровно затем же: рука
   // показывает точку внутри комнаты, и ручка метки под пальцем отобрала бы её.
   if (state && state.mode === CANVAS_MODE_ROOM_TRACE) return "roomTrace";
+  // Вторая метка блока — тем же порядком: тап достаётся ей, а не ручке «+»
+  // выделенной метки, которая как раз над соседом по блоку и висит.
+  if (state && state.mode === CANVAS_MODE_BLOCK_JOIN) return "blockJoin";
   if (pick.labelTurn) return "labelTurn";
   if (pick.labelLeader) return "labelLeader";
   // Ручка вершины — для переноса, а не для тапа: тапом по ней мышь тоже ничего
@@ -3206,6 +3360,10 @@ export function canvasGrabKind(state, pick = {}) {
   if (state && state.measuring) return null;
   if (!canvasEditAllowed(state)) return null;
   if (state.mode === CANVAS_MODE_SCALE || state.mode === CANVAS_MODE_ROOM_TRACE) return null;
+  // Пока ждут вторую метку блока, долгое нажатие не берёт ничего: метку сейчас
+  // показывают, а не возят, — и уехавшая под пальцем метка была бы ровно тем
+  // сдвигом, которого в этой команде быть не должно.
+  if (state.mode === CANVAS_MODE_BLOCK_JOIN) return null;
   if (state.mode === "room" || canvasAddKind(state) === "line") return null;
   if (pick.pathHandle) return pick.pathHandle.kind === "vertex" ? "pathVertex" : "pathAdd";
   if (pick.markId) return pick.part === "label" ? "label" : "mark";
@@ -3503,6 +3661,7 @@ function canvasTouchUp(state, drag, point, cancelled) {
   else if (kind === "measurePoint") canvasMeasureClick(plan, point, false);
   else if (kind === "scalePoint") canvasScaleClick(plan, point, false);
   else if (kind === "roomTrace") canvasRoomTraceClick(plan);
+  else if (kind === "blockJoin") canvasBlockJoinClick(point, canvasHitSlack(true));
   else if (kind === "vertex") {
     if (state.mode === "room") canvasOutlineClick(plan, point, false);
     else canvasLineClick(plan, point, false);
@@ -3678,6 +3837,14 @@ function canvasPointerDown(event) {
   // причине. Жест начинается панорамой: план обязан листаться и здесь.
   if (editable && state.mode === CANVAS_MODE_ROOM_TRACE) {
     canvasDrag = { kind: "roomTrace", start: point, view: { ...state.view }, moved: false };
+    return;
+  }
+
+  // Показ второй метки блока — тем же порядком и по той же причине: ручки
+  // выделенной метки сейчас не при деле, а «+» среди них целится как раз в
+  // соседа. Жест начинается панорамой: план обязан листаться и здесь.
+  if (editable && state.mode === CANVAS_MODE_BLOCK_JOIN) {
+    canvasDrag = { kind: "blockJoin", start: point, view: { ...state.view }, moved: false };
     return;
   }
 
@@ -4346,6 +4513,12 @@ function canvasPointerUp(event) {
     canvasRoomTraceClick(plan);
     return;
   }
+  // Метка ловится экранной точкой, а не долей плана: `hitTest` меряет попадание
+  // глазом — знаком и подписью на экране, а не координатой под ними.
+  if (drag.kind === "blockJoin") {
+    canvasBlockJoinClick(point, canvasHitSlack(false));
+    return;
+  }
   if (drag.kind === "line") {
     canvasLineClick(plan, point, event.altKey);
     return;
@@ -4400,7 +4573,11 @@ function canvasDoubleAt(at, slack = 0) {
   // отрезка, и ни замыкать, ни возвращать подпись на место сейчас нечего.
   // В определении по чертежу его нет по той же причине: там всё решает один
   // клик, и второй не должен приниматься за правку только что найденного.
+  // В ожидании второй метки блока двойного жеста нет по той же причине, что в
+  // определении по чертежу: всё решает один щелчок, и второй не должен
+  // приниматься за правку только что собранного блока.
   if (state.mode === CANVAS_MODE_SCALE || state.mode === CANVAS_MODE_ROOM_TRACE) return false;
+  if (state.mode === CANVAS_MODE_BLOCK_JOIN) return false;
   const scheme = canvasScheme(state);
   const view = canvasViewOf(state);
   // Двойной клик по линейке ставит направляющую в точке клика — это второй
@@ -4634,6 +4811,14 @@ function canvasKeyDown(event) {
       canvasApi.setState({ measuring: false });
       return;
     }
+    // Ожидание второй метки блока снимается вторым — и **раньше выделения**:
+    // метка, с которой начали, выделена, и общее правило сняло бы сперва её, а
+    // режим оставило. Esc в этой команде значит «передумал»: выделение и
+    // карточка с кнопкой остаются на месте.
+    if (state.mode === CANVAS_MODE_BLOCK_JOIN) {
+      canvasStopBlockJoin();
+      return;
+    }
     if (canvasCancelDraft()) return;
     // Первый Esc заканчивает правку линии: выделение при этом остаётся — за ним
     // стоят панель свойств и кнопки, и сносить его заодно нельзя.
@@ -4848,6 +5033,18 @@ function mountCanvas(host, api) {
     // рисует рука. Черновик подтягивается к новому положению дел здесь, в
     // одном месте, а не на каждой кнопке, которая что-то из этого правит.
     if ("mode" in changed || "activeTypeId" in changed || "project" in changed) canvasSyncDraft(state);
+    // Ожидание второй метки блока живёт, пока **выделена ровно одна метка этой
+    // схемы** (таск 244): первая метка блока берётся из выделения, и без неё
+    // режим ждал бы щелчка, которому некуда прийти. Условие висит здесь, на
+    // состоянии, а не на дверях: выделение сносят Delete, отмена, смена схемы и
+    // запуск дома — каждая дорога чинила бы это по-своему.
+    if (
+      state.mode === CANVAS_MODE_BLOCK_JOIN &&
+      ("selectedMarkIds" in changed || "schemeId" in changed || "project" in changed || "simRunning" in changed)
+    ) {
+      const held = state.selectedMarkIds.length === 1 ? findMark(state.project, state.selectedMarkIds[0]) : null;
+      if (!held || held.schemeId !== state.schemeId || !canvasEditAllowed(state)) canvasStopBlockJoin();
+    }
     if ("mode" in changed) {
       canvasSyncCursor();
       // Новое занятие — молчание начинается заново (таск 217, D66): про

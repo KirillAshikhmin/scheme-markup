@@ -24,6 +24,7 @@ import {
   MARK_ORDER_DOWN,
   MARK_ORDER_FRONT,
   MARK_ORDER_UP,
+  findGroup,
   findMark,
   findRoom,
   findScheme,
@@ -35,11 +36,15 @@ import {
   styleOf,
 } from "../model.js";
 import {
+  canvasBlockJoining,
+  canvasBlockLeave,
   canvasEditAllowed,
   canvasEditCommentText,
   canvasMarkOrder,
   canvasMarkOrderCan,
   canvasOnScreen,
+  canvasStartBlockJoin,
+  canvasStopBlockJoin,
 } from "../canvas.js";
 import { planToScreen, typeIconPlan, typeSignIcon } from "../render.js";
 import { getSetting, setSetting } from "../store.js";
@@ -225,8 +230,13 @@ export function markCardShift(markY, cardTop, gap = MARK_CARD_GAP) {
  * `order` — ряд команд порядка меток (таск 238). Его передаёт только план: на
  * плане метки и накладываются друг на друга, а в объёме порядок плана не
  * значит ничего — там грани складывает дерево разбиения.
+ *
+ * `block` — ряд команд блока (таск 244). Его тоже передаёт только план, и по
+ * той же мерке: «Добавить в блок» ждёт щелчка **по метке на плане**, и половина
+ * ряда в объёме была бы мёртвой. Разводить пару по двум местам хуже, чем
+ * показать её в одном.
  */
-export function markCardParts(model, { headButton = null, extra = null, order = null } = {}) {
+export function markCardParts(model, { headButton = null, extra = null, order = null, block = null } = {}) {
   const head = uiEl("div", { class: "mark-card__head" }, [
     // Знак — общей лестницей (таск 228, находка 15): у линейной метки в
     // карточке стояла точка, хотя в справочнике у её типа штрих.
@@ -249,6 +259,7 @@ export function markCardParts(model, { headButton = null, extra = null, order = 
   }
   if (extra) body.append(extra);
   if (order) body.append(order);
+  if (block) body.append(block);
   return [head, body];
 }
 
@@ -307,6 +318,72 @@ export function markCardOrderRow(state, markId) {
     uiIconButton("up", options(MARK_ORDER_UP, words.up, words.upHint)),
     uiIconButton("down", options(MARK_ORDER_DOWN, words.down, words.downHint)),
     uiIconButton("toBack", options(MARK_ORDER_BACK, words.back, words.backHint)),
+  ]);
+}
+
+/**
+ * Ряд «Блок»: собрать блок из двух готовых меток и вынуть метку из блока
+ * (таск 244, G366 и G367).
+ *
+ * **Место — здесь, под «Порядком»**, и причина та же, по которой там стоит
+ * порядок: блок — это соседство **на плане**, человек видит его глазами и
+ * решает сразу, а карточка стоит у выделенной метки, на том же поле, во всех
+ * раскладках правки. В списке меток строки стоят по справочнику и номеру, и
+ * «добавить в блок» означало бы там «к кому-то, кого на экране не видно».
+ *
+ * **Ожидание щелчка — готовый механизм холста** (`canvasStartBlockJoin`, режим
+ * `CANVAS_MODE_BLOCK_JOIN`), тот же, которым показывают точку внутри комнаты и
+ * концы отрезка калибровки: подсказка над планом, плашка о входе, крестик
+ * вместо курсора, Esc на выход. Третьего способа «подожди, пока ткнут» в
+ * сборке нет и заводить его нельзя. Зажёгшаяся кнопка — второй след ожидания:
+ * подсказку над планом сворачивают, а кнопка остаётся под рукой.
+ *
+ * `null` — ряда нет вовсе: в просмотре и при запущенном доме правок не бывает
+ * (`canvasEditAllowed`), а у линии и у комментария блока не бывает никогда
+ * (`blockOnlyForPoints`, `commentNoBlock`) — гаснущий ряд обещал бы им
+ * несуществующее.
+ *
+ * Кнопка, которой нечего делать, гаснет и говорит в подсказке почему — как
+ * «выше» у метки, которая и так наверху. Гаснет здесь «Убрать»: у одиночной
+ * метки — потому что она не в блоке, у метки со многими точками — потому что
+ * она **сама себе блок** и вынимать из неё нечего (убрать точку — другое дело
+ * и другой жест).
+ */
+export function markCardBlockRow(state, markId) {
+  if (!state || !state.project || !canvasEditAllowed(state) || !canvasOnScreen(state)) return null;
+  const mark = findMark(state.project, markId);
+  if (!mark || mark.kind !== "point") return null;
+  const words = strings.markCard.blockRow;
+  const group = mark.groupId ? findGroup(state.project, mark.groupId) : null;
+  // Сколько в блоке живых меток: в блоке из двух выход одной распускает его
+  // целиком, и подсказка обязана сказать это **до** нажатия.
+  const members = group ? group.markIds.filter((id) => findMark(state.project, id)).length : 0;
+  const waiting = canvasBlockJoining(state, markId);
+  const leaveHint = group
+    ? members <= 2
+      ? words.leaveLast
+      : words.leaveHint
+    : mark.points.length > 1
+      ? words.leaveSingle
+      : words.leaveAlone;
+  return uiEl("div", { class: "mark-card__row mark-card__row--act" }, [
+    uiEl("span", { class: "mark-card__name", text: words.label }),
+    uiIconButton("blockJoin", {
+      class: "ui-btn mark-card__order" + (waiting ? " is-active" : ""),
+      label: words.join,
+      title: words.join + " — " + (waiting ? words.joinWaiting : words.joinHint),
+      attrs: { "aria-pressed": waiting ? "true" : "false" },
+      // Повторное нажатие зажёгшейся кнопки — отмена: кнопка показывает
+      // ожидание, значит она же его и снимает. Esc уходит той же дверью.
+      on: { click: () => (waiting ? canvasStopBlockJoin() : canvasStartBlockJoin(markId)) },
+    }),
+    uiIconButton("blockLeave", {
+      class: "ui-btn mark-card__order",
+      label: words.leave,
+      title: words.leave + " — " + leaveHint,
+      attrs: group ? {} : { disabled: "disabled" },
+      on: { click: () => canvasBlockLeave(markId) },
+    }),
   ]);
 }
 
@@ -454,6 +531,7 @@ function mountMarkCard(host, api) {
         headButton,
         extra: deviceView ? deviceView.node : commentRow,
         order: markCardOrderRow(state, model.id),
+        block: markCardBlockRow(state, model.id),
       }),
     );
     // План подвигается в просмотре и в запущенном доме (`markCardLifts`): там
@@ -489,6 +567,10 @@ function mountMarkCard(host, api) {
       "layout" in changed ||
       "schemeId" in changed ||
       "screen" in changed ||
+      // Режим — из-за ряда «Блок» (таск 244): пока холст ждёт вторую метку,
+      // кнопка «Добавить в блок» горит, и загореться ей негде, кроме этой
+      // перерисовки.
+      "mode" in changed ||
       "simRunning" in changed
     ) {
       render();
