@@ -47,7 +47,14 @@ import {
   objectModelByKey,
   objectModelFaceCount,
 } from "../src/objectModels/registry.js";
-import { volumeMarkFaces, volumeMarkPlacement, volumeMarkView, volumeModelRgb, volumeScene } from "../src/volume.js";
+import {
+  VOLUME_BLOCK_STEP_MM,
+  volumeMarkFaces,
+  volumeMarkPlacement,
+  volumeMarkView,
+  volumeModelRgb,
+  volumeScene,
+} from "../src/volume.js";
 
 /** Изображения розеток: у типа с таким изображением модель — евро-розетка. */
 const SOCKET_VIEWS = ["socket", "socket380"];
@@ -309,9 +316,13 @@ test("блок из трёх розеток — три евро-розетки �
     assertEuroSocket(place, "розетка блока");
     centres.push(place.frame.at.x * place.frame.u.x + place.frame.at.y * place.frame.u.y);
   }
-  // Три отдельных тела вдоль стены, а не одно растянутое.
+  // Три отдельных тела вдоль стены, а не одно растянутое. Расстояние между
+  // ними — межцентровое рамки (таск 239, G360): до него стенд ставил привязки
+  // через 90 мм, и тест сторожил только «не слиплись».
   centres.sort((a, b) => a - b);
-  assert.ok(centres[1] - centres[0] > 80 && centres[2] - centres[1] > 80, "розетки блока налезли друг на друга");
+  for (const gap of [centres[1] - centres[0], centres[2] - centres[1]]) {
+    assert.ok(Math.abs(gap - VOLUME_BLOCK_STEP_MM) < 1e-6, "розетки блока стоят не через 71 мм, а через " + gap);
+  }
 });
 
 test("розетка больше не похожа на выключатель: у выключателя ни круга, ни гнёзд", () => {

@@ -251,6 +251,7 @@ import {
   volumeSunSpotRgb,
 } from "./volume/sun.js";
 import {
+  VOLUME_BLOCK_STEP_MM,
   VOLUME_LINK_COLOR,
   VOLUME_MARK_CEILING,
   VOLUME_MARK_LIFT_MM,
@@ -261,6 +262,7 @@ import {
   VOLUME_MARK_ROOM,
   VOLUME_SELECT_COLOR,
   VOLUME_TIE_COLOR,
+  volumeBlockSeats,
   volumeChannelLines,
   volumeChannelLinks,
   volumeConeFaces,
@@ -461,6 +463,7 @@ export {
   VOLUME_BACKDROP_DEFAULT,
   VOLUME_BACKDROP_KINDS,
   VOLUME_BACKDROP_NEAR_MM,
+  VOLUME_BLOCK_STEP_MM,
   VOLUME_BODY_MM,
   VOLUME_CEILING_RGB,
   VOLUME_CITY,
@@ -615,6 +618,7 @@ export {
   volumeBackdropPush,
   volumeBasis,
   volumeBodyAt,
+  volumeBlockSeats,
   volumeCanStand,
   volumeCeilingUnderVoid,
   volumeChannelAt,

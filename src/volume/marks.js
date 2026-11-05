@@ -8,6 +8,8 @@
 import { MARK_BOX_FRAME_DEPTH_MM, markBoxMm } from "../markBox.js";
 import {
   MARK_CURTAIN_SIDES,
+  blockMembers,
+  findGroup,
   findType,
   findWall,
   hexToRgb,
@@ -306,14 +308,199 @@ function volumeLineFrames(repeat, path, acrossMm, bottomMm, topMm) {
   });
 }
 
+// ——— рамка блока (таск 239, требование G360) ———————————————————————————————
+//
+// Слова заказчика: «Выключатели и розетки в 1 группе (в 1 блоке) располагать в
+// объёме рядом друг с другом, в одном блоке, как и в жизни блоки
+// розеток\выключаетелей, с межцентровым расстоянием 71 мм. Если только не
+// указано иное. Например можно задать высоту, когда розетка снизу, на высоте 10
+// см, на той же вертикали выключатель на высотк 90 см, а выше на высоте 150 см
+// расположен термостат — тут высота от пола у каждого указывается.»
+//
+// **Почему место считается заново.** Шаг блока на плане меряется знаком —
+// `BLOCK_STEP_RATIO` = 2,22 радиуса (G182, «знаки касаются краями»), — и это
+// решение остаётся: план схема, и блок на нём обязан читаться при любой
+// величине знака. Но в миллиметрах такой шаг выходит какой угодно: он зависит
+// от величины знака и масштаба подложки, и в объёме блок стоял вразнобой.
+// Поэтому объём берёт у плана **порядок и середину**, а расстояние считает
+// сам. План от этого не двигается ни на долю (G68): он и объём расходятся
+// здесь нарочно, и сказано об этом вслух.
+//
+// Правило целиком:
+//
+//   1. **Блок — это посты рамки, а не метки.** Пост даёт каждая точка метки:
+//      блок бывает группой меток (`group.markIds`) и одной меткой со многими
+//      точками (`blockModeOf` → `single`), а в жизни это одно и то же — рамка
+//      на N постов. Поэтому метка со многими точками встаёт в объёме **телом на
+//      точку**, а не одним телом посередине блока, как до этого таска.
+//   2. **Ряд — одна высота.** Посты с одинаковой высотой над полом идут в ряд
+//      через 71 мм (подрозетник 68 мм, центры в 71). Разные высоты — разные
+//      ряды, и ряд из одного поста встаёт ровно на оси блока: пример заказчика
+//      (розетка 100 · выключатель 900 · термостат 1500) выходит столбиком на
+//      одной вертикали сам, без отдельной ветки. Высота берётся готовой у
+//      `markSizes` — своя, group'овая (G203) или справочная, — и равенство
+//      проверяется точным числом: высоты приходят из справочника и из полей, а
+//      не из счёта, и допуска им не нужно.
+//   3. **Отсчёт — от середины блока.** Ряд в 71 мм бывает у́же нарисованного
+//      на плане и шире его; отсчитай его от первого поста — и блок уехал бы со
+//      стены. Середина — та же, что у `volumePathMiddle`: половина между
+//      крайними постами, а не их среднее, чтобы стопка совпавших точек её не
+//      перекашивала. Середина одна на все ряды блока — иначе «та же вертикаль»
+//      разошлась бы у ряда из одного и ряда из трёх.
+//   4. **Порядок в ряду — порядок на плане**, вдоль оси стены. Модельный
+//      `blockMembers` здесь не годится: он упорядочен справочником, и блок,
+//      нарисованный «Р1 В1», встал бы в объёме «В1 Р1» вопреки плану, который
+//      инженер держит перед глазами. Геометрия молчит только у совпавших постов
+//      (стопка, G181) — тогда, и только тогда, порядок берётся у модели
+//      (`blockMembers`, потом номер точки).
+//   5. **Угол и сторона стены — разные блоки.** Посты делятся по стене и по
+//      той её стороне, на которой лежат: подрозетник за угол не загибается, и
+//      блок, нарисованный через угол, — это две рамки, каждая на своей стене со
+//      своей серединой. Наклонной стене ничего не нужно вовсе: ряд меряется
+//      отступом вдоль оси стены, а оси всё равно, под каким она углом.
+//   6. **Пост без высоты в ряд не идёт.** Без высоты вещь висит под потолком
+//      (`volumeMarkPlacement`, правило 3), а у ряда высота — его определение.
+//      Такая метка остаётся там, где стояла, и тело у неё по-прежнему одно.
+//   7. **Привязка метки старше плана.** Отступ поста вдоль стены считается от
+//      `markWall(mark).atMm` — его правят руками (`wallManual`), и перебивать
+//      записанное число проекцией точки нельзя. План разводит только точки
+//      **внутри одной метки**: привязка у метки одна на все её точки, и другого
+//      способа узнать, где какой пост, у объёма нет.
+
+/**
+ * Межцентровое расстояние постов в блоке: подрозетник — 68 мм, центры — 71.
+ *
+ * Мера объёма, а не плана: шаг знака на плане живёт своей мерой
+ * (`BLOCK_STEP_RATIO` в `model.js`, G182) и от этого числа не зависит.
+ */
+export const VOLUME_BLOCK_STEP_MM = 71;
+
+/** Ось блока без стены: направление между двумя самыми далёкими постами. */
+function volumeBlockAxis(points) {
+  let best = null;
+  for (let i = 0; i < points.length; i += 1) {
+    for (let j = i + 1; j < points.length; j += 1) {
+      const dx = points[j].x - points[i].x;
+      const dy = points[j].y - points[i].y;
+      const length = Math.hypot(dx, dy);
+      if (!(length > 0) || (best && length <= best.length)) continue;
+      best = { length, u: { x: dx / length, y: dy / length } };
+    }
+  }
+  return best ? best.u : { x: 1, y: 0 };
+}
+
+/** Половина между крайними: та же середина, что у `volumePathMiddle`. */
+function volumeBlockMiddle(values) {
+  return (Math.min(...values) + Math.max(...values)) / 2;
+}
+
+/**
+ * Посты блоков: `Map<markId, [место, …]>` — по месту на точку метки, в порядке
+ * точек. Метки вне блока в ответе нет вовсе: её место считается как считалось.
+ *
+ * Место стенного поста — `{alongMm}` (отступ вдоль оси стены), место поста без
+ * стены — `{x, y}` в миллиметрах чертежа. Чистая: ни холста, ни строк.
+ */
+export function volumeBlockSeats(project, marks) {
+  const seats = new Map();
+  if (!project) return seats;
+  // Посты, разложенные по блокам: ключ — блок, стена и её сторона (правило 5).
+  const blocks = new Map();
+  for (const mark of marks || []) {
+    if (!mark || mark.kind !== "point" || markIsComment(mark)) continue;
+    const points = mark.points || [];
+    const group = findGroup(project, mark.groupId);
+    // Не блок: одиночная метка без группы. Группа из одной метки тоже ничего не
+    // двигает — ряд из одного поста стоит там, где стоял (см. ниже).
+    if (!group && points.length < 2) continue;
+    const heightMm = markSizes(project, mark).heightAboveFloor;
+    if (heightMm === null) continue;
+    const binding = markWall(mark);
+    const wall = binding ? findWall(project, binding.wallId) : null;
+    const vectors = wall ? wallVectors(wall) : null;
+    const side = wall && vectors ? markWallSideOn(project, mark, wall.id) : null;
+    const path = volumeMarkPathMm(project, mark);
+    const blockKey = group ? group.id : mark.id;
+    const rank = group
+      ? blockMembers(project, group.markIds).findIndex((member) => member.id === mark.id)
+      : 0;
+    for (let index = 0; index < points.length; index += 1) {
+      const at = path[index] || null;
+      const slot = { markId: mark.id, index, rank, heightMm };
+      if (wall && vectors && side) {
+        // Сдвиг точки по плану относительно первой точки этой же метки —
+        // единственное, за чем объём идёт к плану (правило 7).
+        const own = at && path[0] ? (at.x - path[0].x) * vectors.u.x + (at.y - path[0].y) * vectors.u.y : 0;
+        slot.alongMm = binding.atMm + own;
+        slot.wall = true;
+      } else {
+        if (!at) continue;
+        slot.at = at;
+        slot.wall = false;
+      }
+      const key = blockKey + "\u0000" + (slot.wall ? wall.id + "\u0000" + side : "");
+      const list = blocks.get(key);
+      if (list) list.push(slot);
+      else blocks.set(key, [slot]);
+    }
+  }
+  for (const list of blocks.values()) {
+    // Один пост — двигать нечего: ни ряда, ни середины, отличной от него
+    // самого. Своя привязка метки остаётся при ней.
+    if (list.length < 2) continue;
+    const onWall = list[0].wall;
+    const u = onWall ? null : volumeBlockAxis(list.map((slot) => slot.at));
+    const along = (slot) => (onWall ? slot.alongMm : slot.at.x * u.x + slot.at.y * u.y);
+    const anchor = volumeBlockMiddle(list.map(along));
+    const middle = onWall
+      ? null
+      : {
+          x: volumeBlockMiddle(list.map((slot) => slot.at.x)),
+          y: volumeBlockMiddle(list.map((slot) => slot.at.y)),
+        };
+    const rows = new Map();
+    for (const slot of list) {
+      const row = rows.get(slot.heightMm);
+      if (row) row.push(slot);
+      else rows.set(slot.heightMm, [slot]);
+    }
+    for (const row of rows.values()) {
+      row.sort((a, b) => {
+        if (along(a) !== along(b)) return along(a) - along(b);
+        if (a.rank !== b.rank) return a.rank - b.rank;
+        return a.index - b.index;
+      });
+      const half = (row.length - 1) / 2;
+      for (let place = 0; place < row.length; place += 1) {
+        const slot = row[place];
+        const shift = (place - half) * VOLUME_BLOCK_STEP_MM;
+        // Середина ряда — середина **блока** (правило 3): у ряда из одного поста
+        // сдвиг нулевой, и он садится ровно на ось блока.
+        const seat = onWall
+          ? { alongMm: anchor + shift }
+          : { x: middle.x + u.x * shift, y: middle.y + u.y * shift };
+        let own = seats.get(slot.markId);
+        if (!own) seats.set(slot.markId, (own = []));
+        own[slot.index] = seat;
+      }
+    }
+  }
+  return seats;
+}
+
 /**
  * Где стоит одна метка — или почему не стоит нигде.
  *
  * `null` — того, чего в объёме нет вовсе (плашка комментария); `{markId, skip}`
  * — неразмещённая; полное описание места — размещённая. Чистая: ни холста, ни
  * строк, — правило места обязано проверяться без браузера.
+ *
+ * `seat` — пост рамки блока (таск 239, `volumeBlockSeats`): готовый отступ
+ * вдоль стены или готовая точка в плане. Без него всё считается как считалось —
+ * по привязке метки и по середине её точек.
  */
-export function volumeMarkPlacement(project, mark, where = []) {
+export function volumeMarkPlacement(project, mark, where = [], seat = null) {
   if (!mark || markIsComment(mark)) return null;
   const path = volumeMarkPathMm(project, mark);
   if (path.length === 0) return { markId: mark.id, skip: VOLUME_MARK_NO_POINT };
@@ -405,7 +592,10 @@ export function volumeMarkPlacement(project, mark, where = []) {
     const fromMm = Math.min(binding.atMm, to);
     const toMm = Math.max(binding.atMm, to);
     const alongMm = line ? Math.max(VOLUME_MARK_MIN_MM, toMm - fromMm) : lengthMm;
-    const middle = (fromMm + toMm) / 2;
+    // Пост рамки блока старше привязки (таск 239): отступ ему посчитан по всему
+    // блоку, а не по одной метке. Линия постом не бывает — блок собирается
+    // только из точек (`addToGroup`).
+    const middle = seat && typeof seat.alongMm === "number" && !line ? seat.alongMm : (fromMm + toMm) / 2;
     // Выступ идёт наружу от грани стены; утопленное (щит, выступ −30) уходит
     // внутрь, но лицом остаётся в плоскости стены — иначе его не было бы видно.
     const outer = recessed ? faceMm : faceMm + depthMm;
@@ -476,7 +666,9 @@ export function volumeMarkPlacement(project, mark, where = []) {
   }
 
   // ——— в воздухе на своей высоте и под потолком ———
-  const middle = volumePathMiddle(path);
+  // Пост рамки блока (таск 239) — готовая точка в плане; без него, как и было,
+  // середина точек метки. Линия ряда не знает: её рисует весь её путь.
+  const middle = seat && seat.x !== undefined && !line ? { x: seat.x, y: seat.y } : volumePathMiddle(path);
   const room = heightMm === null ? volumeRoomAt(where, middle) : null;
   if (heightMm === null && !room) return { markId: mark.id, skip: VOLUME_MARK_NO_PLACE };
   // Вверх у вещи без стены идёт **выступ**: она лежит лицом к полу или к
@@ -573,22 +765,39 @@ export function volumeMarkPlacement(project, mark, where = []) {
  * Запасной габарит — не потеря, а догадка: вещь в сцене есть, но её размер
  * сборка выдумала. Поэтому `spare` отдельным списком, а не причиной в
  * `unplaced`: это разные новости, и смешивать их нельзя.
+ *
+ * **Размещений у метки бывает больше одного** (таск 239): метка со многими
+ * точками — это рамка на N постов, и в объёме у неё N тел. Хозяин у всех один и
+ * тот же `markId`, поэтому выделение, щелчок, связи и свет читаются как
+ * прежде — они спрашивают метку, а не тело (`volumeMarkPlace` отдаёт первое).
+ * В `spare` метка при этом попадает **один раз**: догадка о размере у неё одна.
  */
 export function volumeMarks(project, schemeId, { marks, rooms, walls } = {}) {
   const list = marks || (project ? project.marks.filter((mark) => mark.schemeId === schemeId) : []);
   const placed = [];
   const unplaced = [];
   const spare = [];
+  const spared = new Set();
   const where = { rooms: rooms || [], walls: walls || [] };
+  const seats = volumeBlockSeats(project, list);
   for (const mark of list) {
-    const place = volumeMarkPlacement(project, mark, where);
-    if (!place) continue;
-    if (place.skip) {
-      unplaced.push({ markId: mark.id, label: labelOf(project, mark.id), reason: place.skip });
-      continue;
+    const own = seats.get(mark.id) || null;
+    // Тело на пост — только у метки, посты которой и правда посчитаны: без них
+    // (потолочная метка, метка без моста к миллиметрам) тело одно, как было.
+    const bodies = own && (mark.points || []).length > 1 ? mark.points.length : 1;
+    for (let index = 0; index < bodies; index += 1) {
+      const place = volumeMarkPlacement(project, mark, where, own ? own[index] || null : null);
+      if (!place) break;
+      if (place.skip) {
+        unplaced.push({ markId: mark.id, label: labelOf(project, mark.id), reason: place.skip });
+        break;
+      }
+      placed.push(place);
+      if (place.spare && !spared.has(place.markId)) {
+        spared.add(place.markId);
+        spare.push({ markId: place.markId, label: place.label });
+      }
     }
-    placed.push(place);
-    if (place.spare) spare.push({ markId: place.markId, label: place.label });
   }
   return { placed, unplaced, spare };
 }

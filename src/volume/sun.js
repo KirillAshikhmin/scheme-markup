@@ -156,12 +156,19 @@ export function volumeSheerPlace(place) {
  * Условие то же, что было внутри счёта: тюлевое тело модели (`volumeSheerPlace`)
  * **и** привязка к стене с габаритом — без стены и ширины связать её с проёмом
  * нечем.
+ *
+ * **Метка здесь одна, сколько бы тел у неё ни было** (таск 239): у метки со
+ * многими точками в объёме N тел, а открывают её одну — строка «открыто N из M»
+ * считает шторы, а не полотнища.
  */
 export function volumeSheerPlaces(places) {
   const out = [];
+  const seen = new Set();
   for (const place of places || []) {
     if (!place || place.mode !== VOLUME_MARK_WALL || !place.wallId || !place.frame) continue;
     if (!volumeSheerPlace(place)) continue;
+    if (seen.has(place.markId)) continue;
+    seen.add(place.markId);
     out.push(place);
   }
   return out;
