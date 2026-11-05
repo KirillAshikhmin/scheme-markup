@@ -1,20 +1,24 @@
-// Рамка блока в «Объёме» (таск 239, требование G360).
+// Рамка блока в «Объёме» (таск 239, требование G360; раскладка — таск 241,
+// требование G361).
 //
 // Слова заказчика: «Выключатели и розетки в 1 группе (в 1 блоке) располагать в
 // объёме рядом друг с другом, в одном блоке, как и в жизни блоки
 // розеток\выключаетелей, с межцентровым расстоянием 71 мм. Если только не
 // указано иное. Например можно задать высоту, когда розетка снизу, на высоте 10
 // см, на той же вертикали выключатель на высотк 90 см, а выше на высоте 150 см
-// расположен термостат — тут высота от пола у каждого указывается.»
+// расположен термостат — тут высота от пола у каждого указывается.» И о
+// готовой работе: «да, так и надо, столбиком. Хотя тут зависит от того как они
+// на схеме расположены или по горизонтали или по вертикали».
 //
 // Проверяется **место тела в сцене**, а не толкование полей: отступ вдоль стены
 // снимается с габарита модели (`place.frame.at`), высота — с его низа. Так тест
 // не повторяет код размещения, а меряет то, что увидит глаз.
 //
-// Чего тест держать обязан: шаг 71 мм, середину блока точкой отсчёта, столбик
-// по высотам, решётку в смешанном блоке, порядок по плану (а не по справочнику),
-// две рамки на углу, наклонную стену, нетронутое потолочное место и G68 —
-// объект от показа не меняется ни байтом.
+// Чего тест держать обязан: шаг 71 мм, середину блока точкой отсчёта, ряд вдоль
+// стены и столбик поперёк неё — с теми же высотами, решётку в смешанном блоке,
+// равные высоты поперёк, букву Г, стопку, порядок по плану (а не по
+// справочнику), две рамки на углу, наклонную стену, нетронутое потолочное место
+// и G68 — объект от показа не меняется ни байтом.
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -97,6 +101,11 @@ function putOnWall(scene, project, code, atMm, { wall = 0, y = -1300 } = {}) {
  * Блок из меток: первая ставится, остальные добавляются к ней как соседние
  * точки — тем же путём, каким их ставит холст (`addToGroup`). Привязка каждой
  * ставится по её отступу, как это делает автоматика таска 127.
+ *
+ * `options.side` (и `part.side`) — сторона ручки «+», которой блок нарисован:
+ * `"right"` ведёт точки **вдоль** северной стены, `"down"` — **поперёк** неё, в
+ * глубину комнаты. С таска 241 от этого зависит раскладка (правило 2), поэтому
+ * сторона у стенда называется вслух.
  */
 function blockOnWall(scene, project, parts, options = {}) {
   const first = putOnWall(scene, project, parts[0].code, parts[0].atMm, options);
@@ -104,7 +113,7 @@ function blockOnWall(scene, project, parts, options = {}) {
   const ids = [first.markId];
   for (const part of parts.slice(1)) {
     const typeId = typeByCode(next, part.code).id;
-    const grown = addToGroup(next, ids[ids.length - 1], "right", { typeId });
+    const grown = addToGroup(next, ids[ids.length - 1], part.side || options.side || "right", { typeId });
     next = setMarkWall(grown.project, grown.mark.id, {
       wallId: scene.walls[options.wall || 0],
       atMm: part.atMm,
@@ -179,15 +188,24 @@ test("ряд из двух стоит симметрично середине: �
   assert.deepEqual(along, [1150 - 35.5, 1150 + 35.5], "ряд из двух не симметричен середине блока");
 });
 
-// ——— столбик по высотам (пример заказчика) ————————————————————————————————
+// ——— столбик поперёк стены (пример заказчика) —————————————————————————————
+//
+// Блок, нарисованный **в глубину комнаты**: с таска 241 столбик решает
+// направление точек, а высоты — только вертикаль. Тот же пример, нарисованный
+// вдоль стены, идёт рядом (тест ниже).
 
-test("разные высоты ставят блок на одну вертикаль: 100 · 900 · 1500", () => {
+test("поперёк стены блок встаёт на одну вертикаль: 100 · 900 · 1500", () => {
   const scene = roomScene();
-  const block = blockOnWall(scene, scene.project, [
-    { code: "Р", atMm: 1900, heightMm: 100 },
-    { code: "В", atMm: 1990, heightMm: 900 },
-    { code: "Д", atMm: 2080, heightMm: 1500 },
-  ]);
+  const block = blockOnWall(
+    scene,
+    scene.project,
+    [
+      { code: "Р", atMm: 1900, heightMm: 100 },
+      { code: "В", atMm: 1990, heightMm: 900 },
+      { code: "Д", atMm: 2080, heightMm: 1500 },
+    ],
+    { side: "down" },
+  );
   const bodies = block.ids.map((id) => bodyOf(scene, block.project, id, "пост блока"));
   for (const body of bodies) {
     assert.equal(body.alongMm, 1990, "пост ушёл с оси блока: " + body.alongMm);
@@ -199,13 +217,18 @@ test("разные высоты ставят блок на одну вертик
   );
 });
 
-test("смешанный блок — решётка: ряд из совпавших высот, одиночка на оси", () => {
+test("смешанный блок поперёк — решётка: ряд из совпавших высот, одиночка на оси", () => {
   const scene = roomScene();
-  const block = blockOnWall(scene, scene.project, [
-    { code: "Р", atMm: 1900, heightMm: 300 },
-    { code: "Р", atMm: 1990, heightMm: 300 },
-    { code: "В", atMm: 2080, heightMm: 900 },
-  ]);
+  const block = blockOnWall(
+    scene,
+    scene.project,
+    [
+      { code: "Р", atMm: 1900, heightMm: 300 },
+      { code: "Р", atMm: 1990, heightMm: 300 },
+      { code: "В", atMm: 2080, heightMm: 900 },
+    ],
+    { side: "down" },
+  );
   const bodies = block.ids.map((id) => bodyOf(scene, block.project, id, "пост блока"));
   // Ось блока — половина между 1900 и 2080.
   const axis = 1990;
@@ -219,6 +242,165 @@ test("смешанный блок — решётка: ряд из совпавш
     [300, 300, 900],
     "высоты в решётке разошлись с заданными",
   );
+});
+
+// ——— направление решает раскладку (таск 241, требование G361) ————————————————
+//
+// Те же высоты, что в двух тестах выше, но блок нарисован **вдоль** стены —
+// и встаёт рядом, а не столбиком. Это главная проверка таска: до него
+// раскладку решали одни высоты, и оба рисунка выходили одинаковыми.
+
+test("вдоль стены разные высоты идут рядом: один ряд через 71 мм, лесенкой", () => {
+  const scene = roomScene();
+  const block = blockOnWall(scene, scene.project, [
+    { code: "Р", atMm: 1900, heightMm: 300 },
+    { code: "Р", atMm: 1990, heightMm: 300 },
+    { code: "В", atMm: 2080, heightMm: 900 },
+  ]);
+  const bodies = block.ids.map((id) => bodyOf(scene, block.project, id, "пост блока"));
+  const axis = 1990;
+  assert.deepEqual(
+    bodies.map((body) => body.alongMm),
+    [axis - VOLUME_BLOCK_STEP_MM, axis, axis + VOLUME_BLOCK_STEP_MM],
+    "ряд вдоль стены собрался не по одному посту на точку",
+  );
+  // Вертикаль у каждого своя: ряд не равняет высоты и не сводит их в одну.
+  assert.deepEqual(
+    bodies.map((body) => body.heightMm),
+    [300, 300, 900],
+    "высоты в ряду разошлись с заданными",
+  );
+});
+
+test("равные высоты поперёк стены расходятся вдоль неё: в одном месте двух вещей не бывает", () => {
+  const scene = roomScene();
+  // Настоящий случай объекта заказчика: две розетки на 300, нарисованные одна
+  // за другой в глубину комнаты. Столбик им запрещён физикой — тела совпали бы
+  // полностью, — поэтому они обращаются в обычный ряд.
+  const block = blockOnWall(
+    scene,
+    scene.project,
+    [
+      { code: "Р", atMm: 1000, heightMm: 300 },
+      { code: "Р", atMm: 1300, heightMm: 300 },
+    ],
+    { side: "down" },
+  );
+  const bodies = block.ids.map((id) => bodyOf(scene, block.project, id, "розетка"));
+  assert.deepEqual(
+    bodies.map((body) => body.alongMm),
+    [1150 - 35.5, 1150 + 35.5],
+    "совпавшие высоты поперёк стены не разошлись вдоль неё",
+  );
+});
+
+test("блок буквой Г решается целиком — по длинной стороне габарита", () => {
+  const scene = roomScene();
+  // Три поста вдоль стены и четвёртый, уведённый в глубину: габарит длиннее
+  // вдоль, значит вся рамка — ряд. Рамка одна и по углу не загибается.
+  const bent = blockOnWall(scene, scene.project, [
+    { code: "Р", atMm: 1900, heightMm: 300 },
+    { code: "Р", atMm: 1990, heightMm: 300 },
+    { code: "Р", atMm: 2080, heightMm: 300 },
+    { code: "В", atMm: 2170, heightMm: 900, side: "down" },
+  ]);
+  const along = bent.ids.map((id) => bodyOf(scene, bent.project, id, "пост Г").alongMm);
+  const axis = 2035;
+  assert.deepEqual(
+    along,
+    [axis - 106.5, axis - 35.5, axis + 35.5, axis + 106.5],
+    "блок буквой Г с длинной стороной вдоль стены встал не рядом",
+  );
+  // И наоборот: длинная сторона в глубину — вертикаль, разбитая высотами.
+  const deep = blockOnWall(scene, scene.project, [
+    { code: "Р", atMm: 1900, heightMm: 300 },
+    { code: "Р", atMm: 1990, heightMm: 900, side: "down" },
+    { code: "В", atMm: 2080, heightMm: 1500, side: "down" },
+    { code: "В", atMm: 2170, heightMm: 2000, side: "down" },
+  ]);
+  for (const body of deep.ids.map((id) => bodyOf(scene, deep.project, id, "пост Г"))) {
+    assert.equal(body.alongMm, 2035, "блок буквой Г с длинной стороной в глубину ушёл с оси");
+  }
+});
+
+test("совпавшие посты о направлении молчат: решают высоты", () => {
+  const scene = roomScene();
+  // Стопка (G181): все точки блока в одном месте плана — направления нет
+  // вовсе, и картинка остаётся той, что была до таска 241. Сюда же приходит
+  // «развели только чтобы знаки не слиплись»: порог в миллиметрах не выдуман, а
+  // мерятся два разброса между собой.
+  const block = blockOnWall(scene, scene.project, [
+    { code: "Р", atMm: 1900, heightMm: 100 },
+    { code: "В", atMm: 1990, heightMm: 900 },
+    { code: "Д", atMm: 2080, heightMm: 1500 },
+  ]);
+  let project = block.project;
+  const at = planMmToFraction(project, scene.schemeId, { x: -100, y: -1300 });
+  for (const id of block.ids) project = updateMark(project, id, { points: [at] }).project;
+  for (const id of block.ids) {
+    const body = bodyOf(scene, project, id, "пост стопки");
+    assert.equal(body.alongMm, 1990, "стопка разъехалась вдоль стены: " + body.alongMm);
+  }
+});
+
+test("наклонная стена: направление меряется её осью, а не осями плана", () => {
+  const scene = roomScene();
+  const added = addWall(scene.project, {
+    schemeId: scene.schemeId,
+    aMm: { x: -1000, y: 1000 },
+    bMm: { x: 1000, y: -1000 },
+    thicknessMm: 100,
+  });
+  let project = added.project;
+  const u = { x: Math.SQRT1_2, y: -Math.SQRT1_2 };
+  // Нормаль стены — та же, что в модели: влево от хода `a → b`.
+  const n = { x: u.y, y: -u.x };
+  /**
+   * Пара постов на наклонной: розетка на 300 и выключатель на 900, второй
+   * сдвинут на 300 мм в осях **стены**, а не плана. Блок собирается ручкой «+»,
+   * как на холсте, и точка соседа потом ставится куда нужно — холст то же
+   * делает перетаскиванием.
+   */
+  const pair = (shift) => {
+    // −500 по нормали — внутрь комнаты: ровно на оси сторона стены не
+    // определена (`markWallSideOn` отдаёт `null`), и метка на стену бы не встала.
+    const base = { x: -1000 + 1000 * u.x - 500 * n.x, y: 1000 + 1000 * u.y - 500 * n.y };
+    const typeId = typeByCode(project, "Р").id;
+    const first = addMark(project, {
+      schemeId: scene.schemeId,
+      typeId,
+      kind: "point",
+      points: [planMmToFraction(project, scene.schemeId, base)],
+    });
+    let next = setMarkWall(first.project, first.mark.id, { wallId: added.wall.id, atMm: 1000 }).project;
+    // Высота у розетки своя, а не справочная: иначе её перебьёт высота группы
+    // (G203, «в группе высота распространяется на всех»), и столбика из двух
+    // высот не вышло бы вовсе.
+    next = updateMark(next, first.mark.id, { heightAboveFloor: 300 }).project;
+    const grown = addToGroup(next, first.mark.id, "right", { typeId: typeByCode(next, "В").id });
+    next = updateMark(grown.project, grown.mark.id, {
+      points: [planMmToFraction(next, scene.schemeId, { x: base.x + shift.x, y: base.y + shift.y })],
+      heightAboveFloor: 900,
+    }).project;
+    next = setMarkWall(next, grown.mark.id, { wallId: added.wall.id, atMm: 1090 }).project;
+    return { project: next, ids: [first.mark.id, grown.mark.id] };
+  };
+  // Вдоль стены (сдвиг по её оси): высоты 300 и 900 не мешают ряду.
+  const sideways = pair({ x: u.x * 300, y: u.y * 300 });
+  const row = sideways.ids.map((id) => bodyOf(scene, sideways.project, id, "пост наклонной"));
+  const gap = Math.hypot(
+    row[1].place.frame.at.x - row[0].place.frame.at.x,
+    row[1].place.frame.at.y - row[0].place.frame.at.y,
+  );
+  assert.ok(Math.abs(gap - VOLUME_BLOCK_STEP_MM) < 1e-6, "вдоль наклонной стены ряд вышел " + gap + " вместо 71");
+  // Поперёк стены (сдвиг по её нормали): столбик, оба поста на одной вертикали.
+  const deep = pair({ x: -n.x * 300, y: -n.y * 300 });
+  const stack = deep.ids.map((id) => bodyOf(scene, deep.project, id, "пост наклонной"));
+  const apart = Math.hypot(
+    stack[1].place.frame.at.x - stack[0].place.frame.at.x,
+    stack[1].place.frame.at.y - stack[0].place.frame.at.y,
+  );
+  assert.ok(apart < 1e-6, "поперёк наклонной стены посты разъехались на " + apart + " мм");
 });
 
 // ——— порядок в ряду ————————————————————————————————————————————————————————
@@ -315,6 +497,11 @@ test("наклонная стена: шаг 71 мм меряется вдоль 
   });
   let project = added.project;
   const typeId = typeByCode(project, "Р").id;
+  // Шаг ручки «+» идёт по оси плана, а стена — под 45°: вдоль и поперёк выходит
+  // ровно поровну, и о направлении такой рисунок не говорит ничего (правило 2,
+  // таск 241). Высота у обеих розеток одна, и ряд — единственная раскладка,
+  // какая им остаётся: на одной вертикали два тела совпали бы.
+  //
   // Стена идёт под 45°; отступ 1000 от её начала — это точка (−293, 293). Точки
   // отодвинуты от оси на полметра: ровно на оси сторона стены не определена
   // (`markWallSideOn` отдаёт `null`), и метка на стену бы не встала.

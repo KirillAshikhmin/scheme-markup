@@ -37177,6 +37177,15 @@ return best ? best.u : { x: 1, y: 0 };
 function volumeBlockMiddle(values) {
 return (Math.min(...values) + Math.max(...values)) / 2;
 }
+function volumeBlockSpread(plan, axis) {
+const values = plan.map((at) => at.x * axis.x + at.y * axis.y);
+return Math.max(...values) - Math.min(...values);
+}
+function volumeBlockAlongWall(list, u, n) {
+const plan = list.map((slot) => slot.plan).filter(Boolean);
+if (plan.length < 2) return false;
+return volumeBlockSpread(plan, u) > volumeBlockSpread(plan, n);
+}
 function volumeBlockSeats(project, marks) {
 const seats = new Map();
 if (!project) return seats;
@@ -37206,11 +37215,13 @@ const blockKey = group ? group.id : mark.id;
 const rank = group ? rankIn(group, mark.id) : 0;
 for (let index = 0; index < points.length; index += 1) {
 const at = path[index] || null;
-const slot = { markId: mark.id, index, rank, heightMm };
+const slot = { markId: mark.id, index, rank, heightMm, plan: at };
 if (wall && vectors && side) {
 const own = at && path[0] ? (at.x - path[0].x) * vectors.u.x + (at.y - path[0].y) * vectors.u.y : 0;
 slot.alongMm = binding.atMm + own;
 slot.wall = true;
+slot.u = vectors.u;
+slot.n = vectors.n;
 } else {
 if (!at) continue;
 slot.at = at;
@@ -37225,7 +37236,8 @@ else blocks.set(key, [slot]);
 for (const list of blocks.values()) {
 if (list.length < 2) continue;
 const onWall = list[0].wall;
-const u = onWall ? null : volumeBlockAxis(list.map((slot) => slot.at));
+const u = onWall ? list[0].u : volumeBlockAxis(list.map((slot) => slot.at));
+const n = onWall ? list[0].n : { x: u.y, y: -u.x };
 const along = (slot) => (onWall ? slot.alongMm : slot.at.x * u.x + slot.at.y * u.y);
 const anchor = volumeBlockMiddle(list.map(along));
 const middle = onWall
@@ -37235,10 +37247,13 @@ x: volumeBlockMiddle(list.map((slot) => slot.at.x)),
 y: volumeBlockMiddle(list.map((slot) => slot.at.y)),
 };
 const rows = new Map();
+if (volumeBlockAlongWall(list, u, n)) rows.set(null, list.slice());
+else {
 for (const slot of list) {
 const row = rows.get(slot.heightMm);
 if (row) row.push(slot);
 else rows.set(slot.heightMm, [slot]);
+}
 }
 for (const row of rows.values()) {
 row.sort((a, b) => {
