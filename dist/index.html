@@ -6671,6 +6671,17 @@ keyHint: "Клавиша «{key}»",
 keys: { front: "Shift+]", up: "]", down: "[", back: "Shift+[" },
 block: "Метка из блока переставляется вместе со всем блоком",
 },
+blockRow: {
+label: "Блок",
+join: "Добавить в блок",
+joinHint: "Щёлкнуть по второй метке на плане: она в блоке — блоки сольются, без блока — соберётся новый. Позиции меток не меняются",
+joinWaiting: "Ждём щелчка по второй метке на плане. Esc — отменить",
+leave: "Убрать из блока",
+leaveHint: "Вынуть метку из блока — она останется на своём месте",
+leaveAlone: "Убрать из блока — метка не в блоке",
+leaveSingle: "Убрать из блока — это блок из точек одной метки, вынимать из него нечего",
+leaveLast: "Вынуть метку из блока — блок из двух меток при этом распадётся",
+},
 },
 search: {
 placeholder: "Поиск по объекту",
@@ -6860,10 +6871,13 @@ selectModeHint: "Клик выбирает метку: её двигают, пр
 mode_room: "Обводка",
 mode_roomTrace: "По чертежу",
 mode_scale: "Калибровка",
+mode_blockJoin: "Сбор блока",
 modeNow_room: "Сейчас обводится контур помещения: клик — вершина, двойной клик — конец. «Выделение» или Esc — выйти.",
 modeNow_roomTrace:
 "Сейчас помещение определяется по чертежу: клик внутри комнаты найдёт контур по стенам. Определение разовое, связи со стенами у контура нет. «Выделение» или Esc — выйти.",
 modeNow_scale: "Сейчас калибровка масштаба: два клика по концам известного отрезка. «Выделение» или Esc — выйти.",
+modeNow_blockJoin:
+"Сейчас собирается блок: щёлкните по второй метке на плане. Она в блоке — блоки сольются, без блока — соберётся новый; позиции меток не меняются. «Выделение» или Esc — отменить.",
 selectModeLeave: "Выйти из текущего режима в выделение (то же делает Esc)",
 kindPointHint: "Тип точечный: клик по плану ставит точку",
 kindLineHint: "Тип линейный: клики рисуют ломаную, двойной клик заканчивает",
@@ -7035,6 +7049,13 @@ modeRoomSaid: "Обводка помещения: клик — вершина п
 hintRoomTrace:
 "Помещение «{name}» по чертежу: клик внутри комнаты — контур найдётся сам по стенам. Часть комнаты, занятую соседним помещением, он не захватит, а дверной проём для него — глухая стена. Определение разовое: поправите стену, и контур сам не поедет. Esc — выйти.",
 modeRoomTraceSaid: "Помещение по чертежу: клик внутри комнаты найдёт контур по стенам. Esc — выйти.",
+hintBlockJoin:
+"Собираем блок с меткой «{label}»: щёлкните по второй метке на плане. Метка уже в блоке — блоки сольются в один; без блока — соберётся новый. Ни одна метка при этом не сдвинется. Esc — отменить.",
+modeBlockJoinSaid: "Сбор блока: щёлкните по второй метке на плане. Esc — отменить.",
+blockJoinMiss: "Здесь нет метки — щёлкните по знаку или по подписи той, с которой собрать блок",
+blockJoined: "Блок собран: {label} — меток в нём {count}. Ctrl+Z отменит",
+blockLeft: "Метка {label} вышла из блока и осталась на своём месте. Ctrl+Z отменит",
+blockDissolved: "Метка {label} вышла, и блок распался: в нём осталась одна метка. Ctrl+Z отменит",
 outlineTooShort: "Контур помещения — не меньше трёх вершин",
 needRoom: "Сначала выберите помещение, которое обводим",
 deleteOutlineTitle: "Удалить контур помещения?",
@@ -7068,6 +7089,8 @@ history: {
 addMark: "постановка метки",
 pasteMark: "вставка метки",
 addBlock: "точка блока",
+blockJoin: "сбор блока",
+blockLeave: "выход из блока",
 addLine: "линия",
 move: "перемещение метки",
 moveBlock: "перенос блока",
@@ -7238,6 +7261,11 @@ codeRequired: "Нужен код типа — от одной до {max} бук�
 codeTooLong: "Код типа — не больше {max} букв",
 codeLetters: "Код типа — только буквы, без цифр и знаков",
 blockOnlyForPoints: "Блок собирается только из точек, линию в блок не поставить",
+blockJoinSelf: "Это та же метка: блок собирают из двух, а не из одной",
+commentNoBlock: "Комментарий в блок не ходит — это надпись на плане, а не изделие",
+blockJoinScheme: "Блок стоит на одной схеме: метки разных схем в один блок не собираются",
+blockJoinSame: "Эти метки уже в одном блоке",
+blockLeaveAlone: "Метка не в блоке — выходить ей некуда",
 codeTaken: "Код {code} уже занят",
 nameRequired: "Нужно название",
 typeHasMarks: "Тип {code} используют метки ({count}) — сперва смените им тип",
@@ -14622,6 +14650,54 @@ return { project: withProject(project, { marks, groups, counters }), mark: creat
 }
 function clampFraction(value) {
 return Math.min(1, Math.max(0, value));
+}
+function joinToBlock(project, markId, otherId) {
+const mark = requireMark(project, markId);
+const other = requireMark(project, otherId);
+if (mark.id === other.id) throw modelError("blockJoinSelf");
+if (markIsComment(mark) || markIsComment(other)) throw modelError("commentNoBlock");
+if (mark.kind !== "point" || other.kind !== "point") throw modelError("blockOnlyForPoints");
+if (mark.schemeId !== other.schemeId) throw modelError("blockJoinScheme");
+if (mark.groupId && mark.groupId === other.groupId) throw modelError("blockJoinSame");
+const theirs = findGroup(project, other.groupId);
+const ours = findGroup(project, mark.groupId);
+const host = theirs || ours;
+if (!host) {
+const group = { id: newId(), schemeId: other.schemeId, markIds: [other.id, mark.id], labelOffset: null };
+const joined = new Set(group.markIds);
+const marks = project.marks.map((item) => (joined.has(item.id) ? { ...item, groupId: group.id } : item));
+return { project: withProject(project, { marks, groups: [...project.groups, group] }), group };
+}
+const guest = theirs ? ours : null;
+const brought = theirs ? (guest ? guest.markIds : [mark.id]) : [other.id];
+const coming = brought.filter((id) => !host.markIds.includes(id));
+const markIds = [...host.markIds, ...coming];
+const groups = project.groups
+.filter((item) => !guest || item.id !== guest.id)
+.map((item) => (item.id === host.id ? { ...item, markIds } : item));
+const joined = new Set(coming);
+const marks = project.marks.map((item) => (joined.has(item.id) ? { ...item, groupId: host.id } : item));
+return {
+project: withProject(project, { marks, groups }),
+group: groups.find((item) => item.id === host.id),
+};
+}
+function leaveBlock(project, markId) {
+const mark = requireMark(project, markId);
+const group = findGroup(project, mark.groupId);
+if (!group) {
+if (!mark.groupId) throw modelError("blockLeaveAlone");
+const marks = project.marks.map((item) => (item.id === markId ? { ...item, groupId: null } : item));
+return { project: withProject(project, { marks }), dissolved: false };
+}
+const rest = group.markIds.filter((id) => id !== markId);
+const dissolved = rest.filter((id) => findMark(project, id)).length < 2;
+const groups = dissolved
+? project.groups.filter((item) => item.id !== group.id)
+: project.groups.map((item) => (item.id === group.id ? { ...item, markIds: rest } : item));
+const freed = new Set(dissolved ? group.markIds : [markId]);
+const marks = project.marks.map((item) => (freed.has(item.id) ? { ...item, groupId: null } : item));
+return { project: withProject(project, { marks, groups }), dissolved };
 }
 const MARK_DIMENSION_UNIT = "mm";
 const MARK_DIMENSION_MAX = 100000;
@@ -43091,6 +43167,8 @@ up: ["M12 19V6", "M6.5 11.5 12 6l5.5 5.5"],
 down: ["M12 5v13", "M6.5 12.5 12 18l5.5-5.5"],
 toFront: ["M4.5 4.5h15", "M12 20V9", "M6.5 14.5 12 9l5.5 5.5"],
 toBack: ["M4.5 19.5h15", "M12 4v11", "M6.5 9.5 12 15l5.5-5.5"],
+blockJoin: ["M14.5 4.5h5v15h-5", "M4 12h7", "M8 8.5 11.5 12 8 15.5"],
+blockLeave: ["M14.5 4.5h5v15h-5", "M11 12H4", "M7.5 8.5 4 12 7.5 15.5"],
 swap: ["M4.5 9h13", "M14.5 5.5 18 9l-3.5 3.5", "M19.5 15h-13", "M9.5 11.5 6 15l3.5 3.5"],
 rotateLeft: ["M5.5 12a6.5 6.5 0 1 1 3 5.5", "M9 8.5H5.5V5"],
 rotateRight: ["M18.5 12a6.5 6.5 0 1 0-3 5.5", "M15 8.5h3.5V5"],
@@ -50150,10 +50228,12 @@ return false;
 }
 const CANVAS_MODE_SCALE = "scale";
 const CANVAS_MODE_ROOM_TRACE = "roomTrace";
+const CANVAS_MODE_BLOCK_JOIN = "blockJoin";
 const CANVAS_MODE_NOTES = {
 room: strings.canvas.modeRoomSaid,
 roomTrace: strings.canvas.modeRoomTraceSaid,
 scale: strings.scale.started,
+blockJoin: strings.canvas.modeBlockJoinSaid,
 };
 async function canvasCommitScale(before, after, schemeId, options = {}) {
 const factor = drawingScaleFactor(before, after, schemeId);
@@ -50207,6 +50287,22 @@ editPathId: null,
 mode: CANVAS_MODE_ROOM_TRACE,
 });
 }
+function canvasStartBlockJoin(markId) {
+setScreen(SCREEN_DEFAULT);
+canvasApi.setState({
+selectedMarkIds: [markId],
+selectedOutlineId: null,
+editPathId: null,
+mode: CANVAS_MODE_BLOCK_JOIN,
+});
+}
+function canvasBlockJoining(state, markId) {
+if (!state || state.mode !== CANVAS_MODE_BLOCK_JOIN) return false;
+return !markId || (state.selectedMarkIds || [])[0] === markId;
+}
+function canvasStopBlockJoin() {
+canvasApi.setState({ mode: "select" });
+}
 const CANVAS_ROOM_TRACE_SAID = {
 noWalls: strings.roomTrace.noWalls,
 noBridge: strings.roomTrace.noBridge,
@@ -50235,6 +50331,7 @@ const CANVAS_SCALE_COLOR = "#0969da";
 function canvasHandlesShown(state) {
 if (state && state.measuring) return false;
 if (!canvasEditAllowed(state)) return false;
+if (state.mode === CANVAS_MODE_BLOCK_JOIN) return false;
 return state.mode !== CANVAS_MODE_SCALE && state.mode !== CANVAS_MODE_ROOM_TRACE;
 }
 function canvasMeasuring(state) {
@@ -50265,6 +50362,9 @@ if (findOutline(state.project, state.editPathId)) return strings.canvas.hintOutl
 const type = state.project && state.activeTypeId ? findType(state.project, state.activeTypeId) : null;
 const room = state.project && state.activeRoomId ? findRoom(state.project, state.activeRoomId) : null;
 if (state.mode === CANVAS_MODE_SCALE) return strings.scale.hint;
+if (state.mode === CANVAS_MODE_BLOCK_JOIN) {
+return text("canvas.hintBlockJoin", { label: labelOf(state.project, state.selectedMarkIds[0]) });
+}
 if (state.mode === CANVAS_MODE_ROOM_TRACE) {
 return text("canvas.hintRoomTrace", { name: room ? room.name : "" });
 }
@@ -51388,6 +51488,47 @@ count: found.points.length,
 canvasFail(error);
 }
 }
+function canvasBlockJoinClick(point, slack) {
+const state = canvasState();
+const scheme = canvasScheme(state);
+const markId = state.selectedMarkIds[0];
+if (!scheme || !markId) return;
+const hit = hitTest(state.project, scheme, point, canvasViewOf(state), state.filter, slack);
+if (!hit) {
+canvasApi.notify(strings.canvas.blockJoinMiss);
+return;
+}
+try {
+const result = joinToBlock(state.project, markId, hit.markId);
+canvasCommit(state.project, result.project, strings.history.blockJoin, {
+selection: [markId],
+patch: { mode: "select" },
+});
+canvasApi.notify(
+text("canvas.blockJoined", {
+label: blockLabel(result.project, result.group.markIds),
+count: result.group.markIds.length,
+}),
+"success",
+);
+} catch (error) {
+canvasFail(error);
+}
+}
+function canvasBlockLeave(markId) {
+const state = canvasState();
+try {
+const result = leaveBlock(state.project, markId);
+canvasCommit(state.project, result.project, strings.history.blockLeave, { selection: [markId] });
+canvasApi.notify(
+result.dissolved
+? text("canvas.blockDissolved", { label: labelOf(state.project, markId) })
+: text("canvas.blockLeft", { label: labelOf(state.project, markId) }),
+);
+} catch (error) {
+canvasFail(error);
+}
+}
 function canvasDraftClick(plan, screen, free) {
 const state = canvasState();
 if (!canvasDraft) {
@@ -51843,6 +51984,7 @@ if (state && state.measuring) return "measurePoint";
 if (!canvasEditAllowed(state)) return "select";
 if (state && state.mode === CANVAS_MODE_SCALE) return "scalePoint";
 if (state && state.mode === CANVAS_MODE_ROOM_TRACE) return "roomTrace";
+if (state && state.mode === CANVAS_MODE_BLOCK_JOIN) return "blockJoin";
 if (pick.labelTurn) return "labelTurn";
 if (pick.labelLeader) return "labelLeader";
 if (pick.pathHandle) return pick.pathHandle.kind === "vertex" ? "none" : "pathAdd";
@@ -51856,6 +51998,7 @@ function canvasGrabKind(state, pick = {}) {
 if (state && state.measuring) return null;
 if (!canvasEditAllowed(state)) return null;
 if (state.mode === CANVAS_MODE_SCALE || state.mode === CANVAS_MODE_ROOM_TRACE) return null;
+if (state.mode === CANVAS_MODE_BLOCK_JOIN) return null;
 if (state.mode === "room" || canvasAddKind(state) === "line") return null;
 if (pick.pathHandle) return pick.pathHandle.kind === "vertex" ? "pathVertex" : "pathAdd";
 if (pick.markId) return pick.part === "label" ? "label" : "mark";
@@ -52028,6 +52171,7 @@ screenToPlan({ x: handle.x, y: handle.y }, scheme, view),
 else if (kind === "measurePoint") canvasMeasureClick(plan, point, false);
 else if (kind === "scalePoint") canvasScaleClick(plan, point, false);
 else if (kind === "roomTrace") canvasRoomTraceClick(plan);
+else if (kind === "blockJoin") canvasBlockJoinClick(point, canvasHitSlack(true));
 else if (kind === "vertex") {
 if (state.mode === "room") canvasOutlineClick(plan, point, false);
 else canvasLineClick(plan, point, false);
@@ -52143,6 +52287,10 @@ return;
 }
 if (editable && state.mode === CANVAS_MODE_ROOM_TRACE) {
 canvasDrag = { kind: "roomTrace", start: point, view: { ...state.view }, moved: false };
+return;
+}
+if (editable && state.mode === CANVAS_MODE_BLOCK_JOIN) {
+canvasDrag = { kind: "blockJoin", start: point, view: { ...state.view }, moved: false };
 return;
 }
 const editedPath = editable ? canvasEditedPath(state, scheme) : null;
@@ -52555,6 +52703,10 @@ if (drag.kind === "roomTrace") {
 canvasRoomTraceClick(plan);
 return;
 }
+if (drag.kind === "blockJoin") {
+canvasBlockJoinClick(point, canvasHitSlack(false));
+return;
+}
 if (drag.kind === "line") {
 canvasLineClick(plan, point, event.altKey);
 return;
@@ -52578,6 +52730,7 @@ function canvasDoubleAt(at, slack = 0) {
 const state = canvasState();
 if (!canvasEditAllowed(state)) return false;
 if (state.mode === CANVAS_MODE_SCALE || state.mode === CANVAS_MODE_ROOM_TRACE) return false;
+if (state.mode === CANVAS_MODE_BLOCK_JOIN) return false;
 const scheme = canvasScheme(state);
 const view = canvasViewOf(state);
 if (canvasGuidesShown(state)) {
@@ -52722,6 +52875,10 @@ if (event.key === "Escape") {
 if (canvasMeasuring(state)) {
 measureDropAll();
 canvasApi.setState({ measuring: false });
+return;
+}
+if (state.mode === CANVAS_MODE_BLOCK_JOIN) {
+canvasStopBlockJoin();
 return;
 }
 if (canvasCancelDraft()) return;
@@ -52871,6 +53028,13 @@ canvasPreview = null;
 if (state.selectedWallId) canvasApi.setState({ selectedWallId: null });
 }
 if ("mode" in changed || "activeTypeId" in changed || "project" in changed) canvasSyncDraft(state);
+if (
+state.mode === CANVAS_MODE_BLOCK_JOIN &&
+("selectedMarkIds" in changed || "schemeId" in changed || "project" in changed || "simRunning" in changed)
+) {
+const held = state.selectedMarkIds.length === 1 ? findMark(state.project, state.selectedMarkIds[0]) : null;
+if (!held || held.schemeId !== state.schemeId || !canvasEditAllowed(state)) canvasStopBlockJoin();
+}
 if ("mode" in changed) {
 canvasSyncCursor();
 canvasSilentSaid = false;
@@ -60258,7 +60422,7 @@ if (!Number.isFinite(markY) || !Number.isFinite(cardTop)) return 0;
 const limit = cardTop - gap;
 return markY > limit ? Math.round(markY - limit) : 0;
 }
-function markCardParts(model, { headButton = null, extra = null, order = null } = {}) {
+function markCardParts(model, { headButton = null, extra = null, order = null, block = null } = {}) {
 const head = uiEl("div", { class: "mark-card__head" }, [
 uiSignCell(typeSignIcon(model.sign, UI_SIGN.size, UI_SIGN.length)),
 uiEl("span", { class: "mark-card__label", text: model.label }),
@@ -60279,6 +60443,7 @@ uiEl("span", { class: "mark-card__value", text: row.value }),
 }
 if (extra) body.append(extra);
 if (order) body.append(order);
+if (block) body.append(block);
 return [head, body];
 }
 function markCardOrderRow(state, markId) {
@@ -60300,6 +60465,39 @@ uiIconButton("toFront", options(MARK_ORDER_FRONT, words.front, words.frontHint))
 uiIconButton("up", options(MARK_ORDER_UP, words.up, words.upHint)),
 uiIconButton("down", options(MARK_ORDER_DOWN, words.down, words.downHint)),
 uiIconButton("toBack", options(MARK_ORDER_BACK, words.back, words.backHint)),
+]);
+}
+function markCardBlockRow(state, markId) {
+if (!state || !state.project || !canvasEditAllowed(state) || !canvasOnScreen(state)) return null;
+const mark = findMark(state.project, markId);
+if (!mark || mark.kind !== "point") return null;
+const words = strings.markCard.blockRow;
+const group = mark.groupId ? findGroup(state.project, mark.groupId) : null;
+const members = group ? group.markIds.filter((id) => findMark(state.project, id)).length : 0;
+const waiting = canvasBlockJoining(state, markId);
+const leaveHint = group
+? members <= 2
+? words.leaveLast
+: words.leaveHint
+: mark.points.length > 1
+? words.leaveSingle
+: words.leaveAlone;
+return uiEl("div", { class: "mark-card__row mark-card__row--act" }, [
+uiEl("span", { class: "mark-card__name", text: words.label }),
+uiIconButton("blockJoin", {
+class: "ui-btn mark-card__order" + (waiting ? " is-active" : ""),
+label: words.join,
+title: words.join + " — " + (waiting ? words.joinWaiting : words.joinHint),
+attrs: { "aria-pressed": waiting ? "true" : "false" },
+on: { click: () => (waiting ? canvasStopBlockJoin() : canvasStartBlockJoin(markId)) },
+}),
+uiIconButton("blockLeave", {
+class: "ui-btn mark-card__order",
+label: words.leave,
+title: words.leave + " — " + leaveHint,
+attrs: group ? {} : { disabled: "disabled" },
+on: { click: () => canvasBlockLeave(markId) },
+}),
 ]);
 }
 function mountMarkCard(host, api) {
@@ -60412,6 +60610,7 @@ card.replaceChildren(
 headButton,
 extra: deviceView ? deviceView.node : commentRow,
 order: markCardOrderRow(state, model.id),
+block: markCardBlockRow(state, model.id),
 }),
 );
 if (markCardLifts(state) && shownFor !== model.id) {
@@ -60438,6 +60637,7 @@ if (
 "layout" in changed ||
 "schemeId" in changed ||
 "screen" in changed ||
+"mode" in changed ||
 "simRunning" in changed
 ) {
 render();
