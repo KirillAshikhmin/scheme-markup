@@ -3219,6 +3219,162 @@ export function deleteMark(project, markId) {
   };
 }
 
+// ——— ярус метки на плане (таск 238) ——————————————————————————————————
+//
+// Слова заказчика: «Порядок меток на экране (на передний план, на задний план,
+// ниже, выше)». Наложение меток — дело обычное: блок розеток под выключателем,
+// плашка комментария поверх знаков, метка на метке в тесном углу. До этого
+// таска порядок на экране был порядком массива `project.marks` — порядком
+// постановки, — и управлять им человек не мог ничем.
+//
+// **Порядок хранится своим полем `mark.z`, а не перестановкой массива**, и это
+// решение, а не вкус. Место в массиве уже занято — его читают как «порядок
+// постановки» трое, и у каждого от этого зависит не картинка, а данные:
+//
+//   — `marksInRoomOrder` → `compactNumbers` («Сомкнуть номера»): внутри
+//     помещения номера раздаются в порядке постановки. Подними метку наверх
+//     ради вида — и та же кнопка выдала бы другие номера;
+//   — `marksInOrder` → `markControls`, `markControlsByChannel`,
+//     `markControlledBy`, `setMarkControls`: перечень «чем управляет» хранится
+//     и показывается в порядке объекта, «а не в порядке кликов». Перестановка
+//     массива переписала бы этот перечень в файле;
+//   — `deviceFollowers`: у меток с одним обозначением ведущая — **первая по
+//     массиву**. Перестановка молча передала бы аксессуар, адрес (`aid`) и
+//     свою запись `mark.device` другой метке — в имитации это другой дом.
+//
+// Ярус от них не зависит вовсе, миграции не требует и в старый объект не
+// дописывается: поля нет — значит ярус 0.
+//
+// **Ноль — это верх.** Умолчание выбрано так, чтобы «без яруса» значило «как
+// рисовалось до таска 238» для обоих случаев сразу: у объекта, которому
+// порядок не правили, все ярусы равны и порядок остаётся порядком массива; а
+// новая, скопированная и вставленная метка попадает **наверх**, как и прежде,
+// — и после того, как порядок на схеме уже правили руками. Поэтому правка
+// раздаёт схеме ярусы от нуля вниз (`0, -1, -2, …`), а не от нуля вверх.
+export const MARK_ORDER_FRONT = "front";
+export const MARK_ORDER_BACK = "back";
+export const MARK_ORDER_UP = "up";
+export const MARK_ORDER_DOWN = "down";
+
+/** Четыре команды порядка — в том порядке, в каком они стоят в интерфейсе. */
+export const MARK_ORDER_MOVES = [MARK_ORDER_FRONT, MARK_ORDER_UP, MARK_ORDER_DOWN, MARK_ORDER_BACK];
+
+/**
+ * Ярус метки на плане: 0 — верх, отрицательное — ниже. Чтение терпимое: поля
+ * нет, оно пустое или пришло из чужого файла строкой — ярус 0.
+ */
+export function markZ(mark) {
+  return mark && Number.isFinite(mark.z) ? mark.z : 0;
+}
+
+/**
+ * Метки в порядке рисования — снизу вверх. Одно правило на всех: по нему
+ * рисует `drawScheme`, по нему же ищет попадание `hitTest`, и то же самое
+ * уходит в PNG, в лист ГОСТ, в печать и в архив всех схем. Разойдись они —
+ * клик достался бы не той метке, которую видно сверху.
+ *
+ * Сортировка **устойчивая** (это требование языка с ES2019): при равных
+ * ярусах порядок остаётся порядком массива, поэтому объект, которому порядок
+ * не правили, рисуется ровно как рисовался.
+ */
+export function marksInDrawOrder(marks) {
+  return (Array.isArray(marks) ? [...marks] : []).sort((first, second) => markZ(first) - markZ(second));
+}
+
+/**
+ * Куда встанет выделенное: новый порядок меток схемы или `null`, если команда
+ * ничего не меняет (метка и так наверху, одна на схеме, неизвестная команда).
+ *
+ * `options.among` — идентификаторы меток, которые человек **видит** (холст
+ * передаёт видимые под фильтром). На шаг «выше»/«ниже» он влияет: шагать надо
+ * через ту метку, которую видно, иначе нажатие не меняло бы на экране ничего.
+ * «На передний план» и «на задний план» фильтр не слушают нарочно: они про
+ * весь лист, и метка, поднятая наверх, обязана остаться наверху и после того,
+ * как фильтр сняли.
+ */
+function markOrderPlan(project, markIds, move, options = {}) {
+  const picked = [];
+  for (const id of Array.isArray(markIds) ? markIds : []) {
+    const mark = findMark(project, id);
+    if (mark) picked.push(mark);
+  }
+  if (picked.length === 0) throw modelError("markNotFound");
+  // Ярус — порядок на одном листе: метки чужих схем в переносе не участвуют.
+  // Выделение холста всегда с одной схемы, и блок тоже; разошлись — значит
+  // зовёт не холст, и чужой лист трогать нечего.
+  const schemeId = picked[0].schemeId;
+  const ids = new Set(picked.filter((mark) => mark.schemeId === schemeId).map((mark) => mark.id));
+  const list = marksInDrawOrder(project.marks.filter((mark) => mark.schemeId === schemeId));
+  const rest = list.filter((mark) => !ids.has(mark.id));
+  if (rest.length === 0) return null;
+  const among = Array.isArray(options.among) ? new Set(options.among) : null;
+  const seen = (mark) => !among || among.has(mark.id);
+  const at = new Map(rest.map((mark, index) => [mark.id, index]));
+  let slot = null;
+  if (move === MARK_ORDER_FRONT) slot = rest.length;
+  else if (move === MARK_ORDER_BACK) slot = 0;
+  else if (move === MARK_ORDER_UP || move === MARK_ORDER_DOWN) {
+    const up = move === MARK_ORDER_UP;
+    // Край выделенного, от которого шагаем: наверх — от верхней метки группы,
+    // вниз — от нижней. Группа едет целиком и смыкается: так же, как блок
+    // едет целиком на перетаскивании (G189).
+    let edge = -1;
+    for (let index = 0; index < list.length; index += 1) {
+      if (!ids.has(list[index].id)) continue;
+      if (up || edge < 0) edge = index;
+    }
+    let step = -1;
+    for (let index = edge + (up ? 1 : -1); index >= 0 && index < list.length; index += up ? 1 : -1) {
+      if (ids.has(list[index].id) || !seen(list[index])) continue;
+      step = index;
+      break;
+    }
+    if (step < 0) return null;
+    slot = at.get(list[step].id) + (up ? 1 : 0);
+  }
+  if (slot === null) return null;
+  const moving = list.filter((mark) => ids.has(mark.id));
+  const arranged = [...rest.slice(0, slot), ...moving, ...rest.slice(slot)];
+  return arranged.every((mark, index) => mark === list[index]) ? null : arranged;
+}
+
+/** Сделает ли команда что-нибудь: кнопка, которая ничего не меняет, гаснет. */
+export function markOrderCan(project, markIds, move, options = {}) {
+  try {
+    return markOrderPlan(project, markIds, move, options) !== null;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Переставить выделенные метки по ярусам: `{project, moved}`. `moved: false`
+ * — команда ничего не меняет, и шага истории быть не должно.
+ *
+ * Ярусы раздаются **всей схеме** сразу (`0` верхней и вниз по единице):
+ * плотный ряд без дыр не оставляет вопроса «а что между −1 и 0», и
+ * относительный порядок тех, кого не двигали, при этом сохраняется. Ярус 0
+ * поле не получает вовсе — у верхней метки оно удаляется: так объект, которому
+ * порядок правили один раз, не копит `z: 0` на каждой метке.
+ */
+export function moveMarkOrder(project, markIds, move, options = {}) {
+  const arranged = markOrderPlan(project, markIds, move, options);
+  if (!arranged) return { project, moved: false };
+  const top = arranged.length - 1;
+  const wanted = new Map(arranged.map((mark, index) => [mark.id, index - top]));
+  const marks = project.marks.map((mark) => {
+    if (!wanted.has(mark.id)) return mark;
+    const value = wanted.get(mark.id);
+    if (markZ(mark) === value && (value !== 0 || !("z" in mark))) return mark;
+    if (value === 0) {
+      const { z: dropped, ...without } = mark;
+      return without;
+    }
+    return { ...mark, z: value };
+  });
+  return { project: withProject(project, { marks }), moved: true };
+}
+
 // ——— копия метки —————————————————————————————————————————————————————
 //
 // Заказчик: «копируем тип и вставляем туда, где курсор». Тип — это минимум;

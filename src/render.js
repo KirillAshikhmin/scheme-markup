@@ -35,6 +35,7 @@ import {
   markIsComment,
   markLabelLeader,
   markPointer,
+  marksInDrawOrder,
   listedTypes,
   openingArchGeometry,
   openingFaceGrid,
@@ -2631,9 +2632,25 @@ function markVisible(project, mark, filter) {
   return queryHit(haystack, query);
 }
 
+/**
+ * Метки схемы, прошедшие фильтр, **в порядке рисования** — снизу вверх
+ * (таск 238). Порядок спрашивается у модели (`marksInDrawOrder`): он
+ * свойство объекта, а не кадра.
+ *
+ * Эта дверь одна на всех, и порядок поэтому один на всех: `drawScheme`,
+ * `hitTest`, стопки, раскладка подписей, PNG, лист ГОСТ, печать, архив всех
+ * схем и мини-план читают метки отсюда. Заведи вторую — и верхняя на экране
+ * метка отдала бы клик соседке или ушла бы на лист под ней.
+ *
+ * Список меток сбоку и листы таблиц сортируют этот ответ заново (по
+ * справочнику и номеру) — им порядок на экране не нужен, и таск 238 их не
+ * трогает.
+ */
 export function visibleMarks(project, scheme, filter) {
   if (!project || !scheme) return [];
-  return project.marks.filter((mark) => mark.schemeId === scheme.id && markVisible(project, mark, filter));
+  return marksInDrawOrder(
+    project.marks.filter((mark) => mark.schemeId === scheme.id && markVisible(project, mark, filter)),
+  );
 }
 
 // ——— стопка совпавших меток ———————————————————————————————————————————

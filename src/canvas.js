@@ -72,8 +72,10 @@ import {
   linkedMarkIds,
   markCommentText,
   markIsComment,
+  markOrderCan,
   markPointer,
   markSnapshot,
+  moveMarkOrder,
   pasteMark,
   setMarkPointer,
   moveMarkPoint,
@@ -1816,6 +1818,59 @@ function canvasToggleLabelLeader(markId) {
   try {
     const after = updateMark(state.project, holder, { labelLeader: !shown }).project;
     canvasCommit(state.project, after, strings.history.labelLeader, { selection: [markId] });
+  } catch (error) {
+    canvasFail(error);
+  }
+}
+
+// ——— порядок меток на экране (таск 238, G359) ————————————————————————
+//
+// Слова заказчика: «Порядок меток на экране (на передний план, на задний план,
+// ниже, выше)». Четыре команды живут **в карточке выделенной метки** — там же,
+// где человек её и выбрал, и во всех раскладках правки (`panels/markCard.js`).
+//
+// Порядок — свойство объекта (`mark.z`, правило в `model.moveMarkOrder`),
+// поэтому правка идёт через `canvasCommit`: отменяется по Ctrl+Z, уезжает в
+// файл и виден на экране, в PNG, на листе ГОСТ и в печати.
+//
+// Кого переставляем: метку из блока — **вместе со всем блоком**, как её и
+// везут по плану (G189). Своего правила порядок не заводит: «взял розетку —
+// везёшь блок» человек уже выучил на перетаскивании, и рамка из розеток,
+// уехавшая под выключатель половиной, была бы не порядком, а поломкой.
+// Порядка **внутри** блока нет нарочно: розетки в одной рамке стоят рядом, а
+// не друг на друге, а совпавшие знаки на плане разводит стопка (G181) — у неё
+// своё правило, высота над полом.
+function canvasOrderIds(state, markId) {
+  const mark = state.project ? findMark(state.project, markId) : null;
+  if (!mark) return [];
+  return canvasMoveIds(state.project, markId, mark.groupId || null, false);
+}
+
+// Что человек видит: шаг «выше»/«ниже» шагает через видимую метку, иначе под
+// фильтром нажатие не меняло бы на экране ничего. Края («на передний план»,
+// «на задний план») фильтр не слушают — почему, написано у `markOrderPlan`.
+function canvasOrderAmong(state, scheme) {
+  return { among: visibleMarks(state.project, scheme, state.filter).map((mark) => mark.id) };
+}
+
+/** Сделает ли команда порядка что-нибудь: по этому гаснут кнопки карточки. */
+export function canvasMarkOrderCan(state, markId, move) {
+  const scheme = state ? canvasScheme(state) : null;
+  if (!state || !state.project || !scheme || !canvasEditAllowed(state)) return false;
+  return markOrderCan(state.project, canvasOrderIds(state, markId), move, canvasOrderAmong(state, scheme));
+}
+
+export function canvasMarkOrder(markId, move) {
+  const state = canvasState();
+  const scheme = state ? canvasScheme(state) : null;
+  if (!state || !state.project || !scheme) return;
+  try {
+    const result = moveMarkOrder(state.project, canvasOrderIds(state, markId), move, canvasOrderAmong(state, scheme));
+    // Шага истории у команды, которая ничего не меняет, быть не должно:
+    // Ctrl+Z после третьего нажатия «выше» у верхней метки отменил бы чужую
+    // правку.
+    if (!result.moved) return;
+    canvasCommit(state.project, result.project, strings.history.markOrder, { selection: [markId] });
   } catch (error) {
     canvasFail(error);
   }
