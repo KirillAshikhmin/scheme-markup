@@ -501,8 +501,10 @@ function volumeBlockAlongWall(list, u, n) {
  */
 function volumeBlockFrameRows(tier, split) {
   if (!split || tier.length < 2) return [tier];
+  // Пост без точки плана (путь короче списка точек) о рядах не говорит ничего:
+  // такая рамка остаётся однорядной.
+  if (!tier.every((slot) => typeof slot.deepMm === "number")) return [tier];
   const sorted = tier.slice().sort((a, b) => a.deepMm - b.deepMm);
-  if (!sorted.every((slot) => typeof slot.deepMm === "number")) return [tier];
   const rows = [[sorted[0]]];
   for (let index = 1; index < sorted.length; index += 1) {
     const gap = sorted[index].deepMm - sorted[index - 1].deepMm;
