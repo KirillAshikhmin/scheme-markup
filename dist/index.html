@@ -6667,6 +6667,8 @@ down: "Ниже",
 downHint: "Опустить метку на один знак ниже — под ту, что лежит под ней",
 back: "На задний план",
 backHint: "Убрать метку под все остальные на этой схеме",
+keyHint: "Клавиша «{key}»",
+keys: { front: "Shift+]", up: "]", down: "[", back: "Shift+[" },
 block: "Метка из блока переставляется вместе со всем блоком",
 },
 },
@@ -51006,6 +51008,12 @@ canvasCommit(state.project, result.project, strings.history.markOrder, { selecti
 canvasFail(error);
 }
 }
+function canvasOrderKey(event) {
+if (!event || event.altKey || event.ctrlKey || event.metaKey) return null;
+if (event.code === "BracketRight") return event.shiftKey ? MARK_ORDER_FRONT : MARK_ORDER_UP;
+if (event.code === "BracketLeft") return event.shiftKey ? MARK_ORDER_BACK : MARK_ORDER_DOWN;
+return null;
+}
 async function canvasEditCommentText(markId) {
 const before = canvasState();
 const mark = before.project ? findMark(before.project, markId) : null;
@@ -52680,6 +52688,15 @@ if (inField) return;
 if (event.code === "KeyQ" && !event.altKey) {
 event.preventDefault();
 canvasPickType();
+return;
+}
+const orderMove = state.selectedMarkIds.length === 1 ? canvasOrderKey(event) : null;
+if (orderMove) {
+if (event.repeat) return;
+if (canvasMarkOrderCan(state, state.selectedMarkIds[0], orderMove)) {
+event.preventDefault();
+canvasMarkOrder(state.selectedMarkIds[0], orderMove);
+}
 return;
 }
 if (canvasHasPlan()) {
@@ -60273,7 +60290,7 @@ const tail = mark.groupId ? ". " + words.block : "";
 const options = (move, label, hint) => ({
 class: "ui-btn mark-card__order",
 label,
-title: label + " — " + hint + tail,
+title: label + " — " + hint + tail + ". " + text("markCard.order.keyHint", { key: words.keys[move] }),
 attrs: canvasMarkOrderCan(state, markId, move) ? {} : { disabled: "disabled" },
 on: { click: () => canvasMarkOrder(markId, move) },
 });

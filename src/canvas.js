@@ -39,6 +39,10 @@ import {
   DEFAULT_MARK_SIZE,
   DEFAULT_VIEW,
   MARK_KIND_COMMENT,
+  MARK_ORDER_BACK,
+  MARK_ORDER_DOWN,
+  MARK_ORDER_FRONT,
+  MARK_ORDER_UP,
   OUTLINE_MIN_POINTS,
   addMark,
   addOutline,
@@ -1874,6 +1878,38 @@ export function canvasMarkOrder(markId, move) {
   } catch (error) {
     canvasFail(error);
   }
+}
+
+/**
+ * Клавиша порядка (таск 240, G362): какую из четырёх команд просят — или
+ * `null`, если клавиша не наша. Чистая функция ради теста: раскладку клавиш
+ * без браузера больше проверить нечем.
+ *
+ * **`]` и `[` — шаг выше и ниже, с Shift — на передний и задний план.** Пара
+ * скобок у порядка слоёв стоит во всех редакторах, откуда человек сюда
+ * приходит (Photoshop, Illustrator, Figma, PowerPoint), и читается как пара:
+ * правая скобка — к себе, левая — от себя, Shift — до упора.
+ *
+ * **Ctrl/Cmd у скобок не взят нарочно, хотя в тех редакторах он есть.** В
+ * браузере на Mac эти сочетания уже заняты, и заняты по-разному: Cmd+[ и
+ * Cmd+] — «назад» и «вперёд» по истории страницы (их ещё можно отобрать
+ * `preventDefault`), а Cmd+Shift+[ и Cmd+Shift+] — переключение вкладок, и
+ * его отобрать нельзя вовсе. Половина раскладки работала бы, половина уводила
+ * бы на соседнюю вкладку посреди разметки. Голые скобки не заняты ничем — ни
+ * в браузере, ни в сборке, — и стоят в одном ряду с остальными клавишами
+ * плана: `Q` — пипетка, пробел — панорама, стрелки — ход, «+»/«−» — масштаб.
+ *
+ * **Физический код, а не знак** (`BracketRight`/`BracketLeft`): на русской
+ * раскладке на этих кнопках «ъ» и «х», и сравнение с `event.key === "]"`
+ * промолчало бы ровно у тех, кто размечает планы по-русски (D17). Скобки —
+ * то исключение из «знаки препинания раскладки не имеют», которое и делает
+ * разбор по коду обязательным.
+ */
+export function canvasOrderKey(event) {
+  if (!event || event.altKey || event.ctrlKey || event.metaKey) return null;
+  if (event.code === "BracketRight") return event.shiftKey ? MARK_ORDER_FRONT : MARK_ORDER_UP;
+  if (event.code === "BracketLeft") return event.shiftKey ? MARK_ORDER_BACK : MARK_ORDER_DOWN;
+  return null;
 }
 
 /**
@@ -4533,6 +4569,26 @@ function canvasKeyDown(event) {
   if (event.code === "KeyQ" && !event.altKey) {
     event.preventDefault();
     canvasPickType();
+    return;
+  }
+  // Порядок наложенных меток (таск 240): те же четыре команды, что в ряду
+  // «Порядок» у карточки выделенной метки, и ровно с теми же правилами —
+  // одна выделенная метка, разрешённая правка и живая команда
+  // (`canvasMarkOrderCan`). Своего условия клавиша не заводит: разойдись она
+  // с кнопкой, человек получил бы два ответа на один вопрос.
+  const orderMove = state.selectedMarkIds.length === 1 ? canvasOrderKey(event) : null;
+  if (orderMove) {
+    // **Автоповтор системы здесь не шаг** (`event.repeat`, находка 10 разбора
+    // механик): придержал скобку — и в истории десяток шагов «порядок меток»,
+    // сквозь которые человек идёт Ctrl+Z по одному. То же условие у поворота
+    // вещи в чертеже.
+    if (event.repeat) return;
+    // Клавиша молчит там, где кнопка гаснет: метке наверху «выше» не делает
+    // ни правки, ни шага истории.
+    if (canvasMarkOrderCan(state, state.selectedMarkIds[0], orderMove)) {
+      event.preventDefault();
+      canvasMarkOrder(state.selectedMarkIds[0], orderMove);
+    }
     return;
   }
   // Ход и масштаб — до всего остального. Поля и диалоги отсечены выше, больше

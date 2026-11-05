@@ -45,6 +45,7 @@ import {
   setMarkNumber,
   updateMark,
 } from "../src/model.js";
+import { canvasOrderKey } from "../src/canvas.js";
 import { strings } from "../src/strings.js";
 import { packProject, unpackProject } from "../src/projectFile.js";
 import { drawScheme, hitTest, markStackPoints, markStacks, visibleMarks } from "../src/render.js";
@@ -456,4 +457,59 @@ test("ряд команд порядка стоит в карточке метк
   // получает: порядок плана в объёме не значит ничего.
   assert.ok(!/order:\s*markCardOrderRow/.test(VOLUME_SRC), "ряд порядка уехал в карточку объёма");
   assert.ok(CARD_SRC.includes("order: markCardOrderRow(state, model.id)"), "карточка плана не показывает ряд порядка");
+});
+
+// ——— клавиши порядка (таск 240, G362) ————————————————————————————————
+//
+// Слова заказчика: «Горячие клавиши добавь». Четыре команды те же, дверь та
+// же (`canvasMarkOrder`), новое здесь — раскладка и условия, при которых
+// клавиша молчит. Раскладка: `]` и `[` — шаг выше и ниже, с Shift — на
+// передний и задний план; доводы — у `canvasOrderKey`.
+test("скобки просят шаг, скобки с Shift — передний и задний план", () => {
+  const key = (code, shiftKey = false) => canvasOrderKey({ code, shiftKey });
+  assert.equal(key("BracketRight"), MARK_ORDER_UP);
+  assert.equal(key("BracketLeft"), MARK_ORDER_DOWN);
+  assert.equal(key("BracketRight", true), MARK_ORDER_FRONT);
+  assert.equal(key("BracketLeft", true), MARK_ORDER_BACK);
+  // Все четыре команды разобраны, и ни одна не осталась без клавиши.
+  const asked = MARK_ORDER_MOVES.map((move) => move);
+  const given = ["BracketRight", "BracketLeft"].flatMap((code) => [key(code, true), key(code)]);
+  assert.deepEqual(given.sort(), asked.sort(), "какая-то команда порядка осталась без клавиши");
+});
+
+test("клавиша порядка ловится по физической кнопке, а не по знаку раскладки", () => {
+  // На русской раскладке на этих кнопках «ъ» и «х»: сравнение по `event.key`
+  // промолчало бы ровно у тех, кто размечает планы по-русски (D17).
+  assert.equal(canvasOrderKey({ code: "BracketRight", key: "ъ" }), MARK_ORDER_UP);
+  assert.equal(canvasOrderKey({ code: "BracketLeft", key: "х" }), MARK_ORDER_DOWN);
+  // И наоборот: знак «]» на чужой кнопке командой не считается.
+  assert.equal(canvasOrderKey({ code: "Digit9", key: "]" }), null);
+});
+
+test("с Ctrl, Cmd и Alt скобка — не наша клавиша", () => {
+  // Ctrl/Cmd у скобок не взят нарочно: на Mac Cmd+[ и Cmd+] — история
+  // страницы, а Cmd+Shift+[ и Cmd+Shift+] — переключение вкладок, которое
+  // отобрать нельзя вовсе.
+  for (const modifier of ["ctrlKey", "metaKey", "altKey"]) {
+    assert.equal(canvasOrderKey({ code: "BracketRight", [modifier]: true }), null, modifier + " у скобки не отсечён");
+    assert.equal(canvasOrderKey({ code: "BracketLeft", [modifier]: true }), null, modifier + " у скобки не отсечён");
+  }
+  assert.equal(canvasOrderKey({ code: "KeyQ" }), null, "чужая клавиша просит порядок");
+  assert.equal(canvasOrderKey(null), null);
+});
+
+test("клавиша порядка работает там же, где кнопка, и шага вслепую не кладёт", () => {
+  const down = CANVAS_SRC.slice(CANVAS_SRC.indexOf("function canvasKeyDown"), CANVAS_SRC.indexOf("function canvasKeyUp"));
+  const at = down.indexOf("canvasOrderKey(event)");
+  assert.ok(at > 0, "клавиши порядка пропали из обработчика плана");
+  // Диалог, набор текста и своя клавиатура поля отсечены раньше (правило
+  // таска 213), и клавиша плана работает только на своём экране.
+  for (const guard of ["uiDialogDepth() > 0", "uiTypingTarget(event.target)", "if (inField) return;", "canvasOnScreen(state)"]) {
+    assert.ok(down.indexOf(guard) >= 0 && down.indexOf(guard) < at, "клавиша порядка стоит раньше отсечения: " + guard);
+  }
+  const branch = down.slice(at, at + 900);
+  assert.ok(down.slice(0, at).includes("selectedMarkIds.length === 1"), "клавиша берёт не одну выделенную метку");
+  assert.ok(branch.includes("if (event.repeat) return;"), "автоповтор набивает историю шагами порядка");
+  assert.ok(branch.includes("canvasMarkOrderCan(state,"), "клавиша не спрашивает того же, что гасит кнопку");
+  assert.ok(branch.includes("canvasMarkOrder(state.selectedMarkIds[0], orderMove)"), "клавиша правит порядок не той дверью");
 });
