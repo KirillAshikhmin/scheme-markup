@@ -37186,6 +37186,18 @@ const plan = list.map((slot) => slot.plan).filter(Boolean);
 if (plan.length < 2) return false;
 return volumeBlockSpread(plan, u) > volumeBlockSpread(plan, n);
 }
+function volumeBlockFrameRows(tier, split) {
+if (!split || tier.length < 2) return [tier];
+if (!tier.every((slot) => typeof slot.deepMm === "number")) return [tier];
+const sorted = tier.slice().sort((a, b) => a.deepMm - b.deepMm);
+const rows = [[sorted[0]]];
+for (let index = 1; index < sorted.length; index += 1) {
+const gap = sorted[index].deepMm - sorted[index - 1].deepMm;
+if (gap > VOLUME_BLOCK_STEP_MM / 2) rows.push([sorted[index]]);
+else rows[rows.length - 1].push(sorted[index]);
+}
+return rows.length === tier.length ? [tier] : rows;
+}
 function volumeBlockSeats(project, marks) {
 const seats = new Map();
 if (!project) return seats;
@@ -37222,6 +37234,7 @@ slot.alongMm = binding.atMm + own;
 slot.wall = true;
 slot.u = vectors.u;
 slot.n = vectors.n;
+if (at) slot.deepMm = (at.x * vectors.n.x + at.y * vectors.n.y) * (side === "left" ? 1 : -1);
 } else {
 if (!at) continue;
 slot.at = at;
@@ -37246,16 +37259,25 @@ const middle = onWall
 x: volumeBlockMiddle(list.map((slot) => slot.at.x)),
 y: volumeBlockMiddle(list.map((slot) => slot.at.y)),
 };
-const rows = new Map();
-if (volumeBlockAlongWall(list, u, n)) rows.set(null, list.slice());
-else {
+const tiers = new Map();
 for (const slot of list) {
-const row = rows.get(slot.heightMm);
-if (row) row.push(slot);
-else rows.set(slot.heightMm, [slot]);
+const tier = tiers.get(slot.heightMm);
+if (tier) tier.push(slot);
+else tiers.set(slot.heightMm, [slot]);
+}
+const rows = [];
+if (tiers.size === list.length && volumeBlockAlongWall(list, u, n)) {
+rows.push({ posts: list.slice(), aboveMm: 0 });
+} else {
+for (const [heightMm, tier] of tiers) {
+const split = volumeBlockFrameRows(tier, onWall && heightMm !== 0);
+const bottom = (split.length - 1) / 2;
+for (let index = 0; index < split.length; index += 1) {
+rows.push({ posts: split[index], aboveMm: (index - bottom) * VOLUME_BLOCK_STEP_MM });
 }
 }
-for (const row of rows.values()) {
+}
+for (const { posts: row, aboveMm } of rows) {
 row.sort((a, b) => {
 if (along(a) !== along(b)) return along(a) - along(b);
 if (a.rank !== b.rank) return a.rank - b.rank;
@@ -37268,6 +37290,7 @@ const shift = (place - half) * VOLUME_BLOCK_STEP_MM;
 const seat = onWall
 ? { alongMm: anchor + shift }
 : { x: middle.x + u.x * shift, y: middle.y + u.y * shift };
+if (aboveMm) seat.heightMm = slot.heightMm + aboveMm;
 let own = seats.get(slot.markId);
 if (!own) seats.set(slot.markId, (own = []));
 own[slot.index] = seat;
@@ -37312,7 +37335,7 @@ curtainSide: MARK_CURTAIN_SIDES.includes(mark.curtainSide) ? mark.curtainSide : 
 spare: box.guessed,
 model: view ? objectModelChannels(objectModelByKey(view.name), typeChannels(project, mark.typeId)) : null,
 };
-const heightMm = sizes.heightAboveFloor;
+const heightMm = seat && typeof seat.heightMm === "number" ? seat.heightMm : sizes.heightAboveFloor;
 const binding = markWall(mark);
 const wall = binding ? findWall(project, binding.wallId) : null;
 const vectors = wall ? wallVectors(wall) : null;
