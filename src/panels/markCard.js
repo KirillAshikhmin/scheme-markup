@@ -43,7 +43,7 @@ import {
 } from "../canvas.js";
 import { planToScreen, typeIconPlan, typeSignIcon } from "../render.js";
 import { getSetting, setSetting } from "../store.js";
-import { strings } from "../strings.js";
+import { strings, text } from "../strings.js";
 import { UI_SIGN, UI_SIGN_SMALL, uiButton, uiEl, uiIcon, uiIconButton, uiSignCell } from "./ui.js";
 import { deviceCardPart, deviceCardView, deviceLogicEntry, deviceLogicSection } from "./deviceCard.js";
 import { marksControllerIndex, marksLinkedText, marksLinkedTitle, marksRowModel } from "./marks.js";
@@ -261,9 +261,15 @@ export function markCardParts(model, { headButton = null, extra = null, order = 
  * карточка стоит у выделенной метки, на том же поле, во всех раскладках правки
  * — и на планшете под пальцем, и на компьютере под курсором. В списке меток
  * строки стоят по справочнику и номеру, а не в порядке экрана, и команда
- * «выше» там указывала бы не туда, куда смотрит глаз. Горячих клавиш ряду не
- * придумано нарочно: правило сборки — ключ, о котором негде прочитать, всё
- * равно что его нет (таск 213), а подсказка плана уже в три строки.
+ * «выше» там указывала бы не туда, куда смотрит глаз.
+ *
+ * **Клавиши у ряда появились в таске 240** (слова заказчика: «Горячие клавиши
+ * добавь») — `]` и `[`, с Shift на передний и задний план; разбор и доводы о
+ * раскладке — у `canvasOrderKey`. Правило сборки «ключ, о котором негде
+ * прочитать, всё равно что его нет» (таск 213) закрыто здесь же, в подсказке
+ * каждой кнопки: подсказка плана уже в три строки, а кнопка видна ровно
+ * тогда, когда клавиша и работает, — метка выделена, правка разрешена. Так же
+ * названы Ctrl+Z у отмены и Ctrl+S у сохранения.
  *
  * `null` — ряда нет вовсе: в просмотре и при запущенном доме правок не бывает
  * (`canvasEditAllowed`), и гаснущий ряд кнопок обещал бы несуществующее.
@@ -283,10 +289,14 @@ export function markCardOrderRow(state, markId) {
   // Имя значка стоит в самом вызове строкой, а не приезжает доводом: набор
   // значков сверяется с кодом сканированием исходников (`test/panelIcons`), и
   // спрятанное за помощником имя было бы для него мёртвым рисунком.
+  // Клавиша — последним словом подсказки, как «Клавиша «/»» у поиска: сперва
+  // что делает кнопка, потом чем её позвать с клавиатуры. Имя клавиши берётся
+  // по ключу команды, тому же, что у модели, — второго списка команд здесь не
+  // появляется.
   const options = (move, label, hint) => ({
     class: "ui-btn mark-card__order",
     label,
-    title: label + " — " + hint + tail,
+    title: label + " — " + hint + tail + ". " + text("markCard.order.keyHint", { key: words.keys[move] }),
     attrs: canvasMarkOrderCan(state, markId, move) ? {} : { disabled: "disabled" },
     on: { click: () => canvasMarkOrder(markId, move) },
   });

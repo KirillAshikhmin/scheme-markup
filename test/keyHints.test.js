@@ -18,7 +18,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-import { strings } from "../src/strings.js";
+import { MARK_ORDER_MOVES } from "../src/model.js";
+import { strings, text } from "../src/strings.js";
 
 const srcDir = join(dirname(fileURLToPath(import.meta.url)), "..", "src");
 const read = (name) => readFileSync(join(srcDir, name), "utf8");
@@ -190,4 +191,39 @@ test("пока открыт диалог, клавиатура не принад
     assert.ok(line, name + ": сторож перестал спрашивать про свой экран");
     assert.match(line, /uiDialogDepth\(\) === 0/, name + ": диалог перестал забирать клавиатуру");
   }
+});
+
+// ——— клавиши порядка меток названы у своих кнопок (таск 240, G362) ————
+//
+// Таск 238 клавиш не завёл именно по правилу этого файла: ключ, о котором
+// негде прочитать, всё равно что его нет. Клавиши появились в таске 240, и
+// место, где о них читают, — подсказка самой кнопки порядка: подсказка плана
+// уже в три строки, а кнопка видна ровно тогда, когда клавиша и работает.
+test("у каждой команды порядка названа своя клавиша — в подсказке её кнопки", () => {
+  const words = strings.markCard.order;
+  const named = [];
+  for (const move of MARK_ORDER_MOVES) {
+    const key = words.keys[move];
+    assert.equal(typeof key, "string", "команда порядка без клавиши: " + move);
+    assert.ok(key.length > 0, "у команды " + move + " пустое имя клавиши");
+    named.push(key);
+  }
+  // Клавиши не повторяются: одна кнопка — одно сочетание.
+  assert.equal(new Set(named).size, named.length, "две команды порядка на одном сочетании: " + named.join(", "));
+  // Слово, которым клавиша называется, — шаблон с подстановкой, а не четыре
+  // копии: разойдись они, одна кнопка объясняла бы клавишу иначе.
+  assert.match(words.keyHint, /\{key\}/, "в словаре пропал шаблон имени клавиши");
+  assert.equal(text("markCard.order.keyHint", { key: "]" }), words.keyHint.replace("{key}", "]"));
+});
+
+test("подсказка кнопки порядка доезжает до кнопки, а не лежит в словаре мёртвой", () => {
+  const card = read(join("panels", "markCard.js"));
+  const body = card.slice(card.indexOf("export function markCardOrderRow"));
+  assert.ok(
+    body.includes('text("markCard.order.keyHint", { key: words.keys[move] })'),
+    "клавиша перестала попадать в подсказку кнопки порядка",
+  );
+  // Имя клавиши берётся по ключу команды модели — второго списка команд в
+  // карточке не появляется.
+  assert.ok(body.includes("title: label + \" — \" + hint + tail"), "подсказка кнопки порядка собирается иначе");
 });
