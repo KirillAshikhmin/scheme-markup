@@ -6657,6 +6657,18 @@ pointerOff: "Без указателя",
 pointerHint: "Указатель включается кнопкой у самой плашки на плане",
 pointerHintOn:
 "Плашку и точку возят по отдельности: тяните плашку — поедет текст, тяните точку на конце указателя — поедет остриё. Выключается кнопкой у плашки",
+order: {
+label: "Порядок",
+front: "На передний план",
+frontHint: "Поднять метку поверх всех на этой схеме",
+up: "Выше",
+upHint: "Поднять метку на один знак выше — над той, что сейчас её накрывает",
+down: "Ниже",
+downHint: "Опустить метку на один знак ниже — под ту, что лежит под ней",
+back: "На задний план",
+backHint: "Убрать метку под все остальные на этой схеме",
+block: "Метка из блока переставляется вместе со всем блоком",
+},
 },
 search: {
 placeholder: "Поиск по объекту",
@@ -7084,6 +7096,7 @@ markField: "правка полей метки",
 markNumber: "правка номера метки",
 markFreeNumber: "свободный номер метки",
 markSizes: "размеры метки",
+markOrder: "порядок меток",
 replaceImage: "замена плана",
 turnImage: "поворот плана",
 wallChain: "цепочка стен",
@@ -14864,6 +14877,80 @@ return {
 project: withProject(project, { marks: linked, groups, placements, ...dropLogicBindings(project, gone) }),
 deleted: mark,
 };
+}
+const MARK_ORDER_FRONT = "front";
+const MARK_ORDER_BACK = "back";
+const MARK_ORDER_UP = "up";
+const MARK_ORDER_DOWN = "down";
+const MARK_ORDER_MOVES = [MARK_ORDER_FRONT, MARK_ORDER_UP, MARK_ORDER_DOWN, MARK_ORDER_BACK];
+function markZ(mark) {
+return mark && Number.isFinite(mark.z) ? mark.z : 0;
+}
+function marksInDrawOrder(marks) {
+return (Array.isArray(marks) ? [...marks] : []).sort((first, second) => markZ(first) - markZ(second));
+}
+function markOrderPlan(project, markIds, move, options = {}) {
+const picked = [];
+for (const id of Array.isArray(markIds) ? markIds : []) {
+const mark = findMark(project, id);
+if (mark) picked.push(mark);
+}
+if (picked.length === 0) throw modelError("markNotFound");
+const schemeId = picked[0].schemeId;
+const ids = new Set(picked.filter((mark) => mark.schemeId === schemeId).map((mark) => mark.id));
+const list = marksInDrawOrder(project.marks.filter((mark) => mark.schemeId === schemeId));
+const rest = list.filter((mark) => !ids.has(mark.id));
+if (rest.length === 0) return null;
+const among = Array.isArray(options.among) ? new Set(options.among) : null;
+const seen = (mark) => !among || among.has(mark.id);
+const at = new Map(rest.map((mark, index) => [mark.id, index]));
+let slot = null;
+if (move === MARK_ORDER_FRONT) slot = rest.length;
+else if (move === MARK_ORDER_BACK) slot = 0;
+else if (move === MARK_ORDER_UP || move === MARK_ORDER_DOWN) {
+const up = move === MARK_ORDER_UP;
+let edge = -1;
+for (let index = 0; index < list.length; index += 1) {
+if (!ids.has(list[index].id)) continue;
+if (up || edge < 0) edge = index;
+}
+let step = -1;
+for (let index = edge + (up ? 1 : -1); index >= 0 && index < list.length; index += up ? 1 : -1) {
+if (ids.has(list[index].id) || !seen(list[index])) continue;
+step = index;
+break;
+}
+if (step < 0) return null;
+slot = at.get(list[step].id) + (up ? 1 : 0);
+}
+if (slot === null) return null;
+const moving = list.filter((mark) => ids.has(mark.id));
+const arranged = [...rest.slice(0, slot), ...moving, ...rest.slice(slot)];
+return arranged.every((mark, index) => mark === list[index]) ? null : arranged;
+}
+function markOrderCan(project, markIds, move, options = {}) {
+try {
+return markOrderPlan(project, markIds, move, options) !== null;
+} catch {
+return false;
+}
+}
+function moveMarkOrder(project, markIds, move, options = {}) {
+const arranged = markOrderPlan(project, markIds, move, options);
+if (!arranged) return { project, moved: false };
+const top = arranged.length - 1;
+const wanted = new Map(arranged.map((mark, index) => [mark.id, index - top]));
+const marks = project.marks.map((mark) => {
+if (!wanted.has(mark.id)) return mark;
+const value = wanted.get(mark.id);
+if (markZ(mark) === value && (value !== 0 || !("z" in mark))) return mark;
+if (value === 0) {
+const { z: dropped, ...without } = mark;
+return without;
+}
+return { ...mark, z: value };
+});
+return { project: withProject(project, { marks }), moved: true };
 }
 const MARK_COPY_FIELDS = ["location", "original", ...MARK_DIMENSION_FIELDS];
 function markSnapshot(project, markId) {
@@ -24441,7 +24528,9 @@ return queryHit(haystack, query);
 }
 function visibleMarks(project, scheme, filter) {
 if (!project || !scheme) return [];
-return project.marks.filter((mark) => mark.schemeId === scheme.id && markVisible(project, mark, filter));
+return marksInDrawOrder(
+project.marks.filter((mark) => mark.schemeId === scheme.id && markVisible(project, mark, filter)),
+);
 }
 const MARK_STACK_REACH_RATIO = 1;
 const MARK_STACK_STEP_RATIO = 3;
@@ -42960,6 +43049,8 @@ close: ["M7 7 17 17", "M17 7 7 17"],
 minus: ["M5 12h14"],
 up: ["M12 19V6", "M6.5 11.5 12 6l5.5 5.5"],
 down: ["M12 5v13", "M6.5 12.5 12 18l5.5-5.5"],
+toFront: ["M4.5 4.5h15", "M12 20V9", "M6.5 14.5 12 9l5.5 5.5"],
+toBack: ["M4.5 19.5h15", "M12 4v11", "M6.5 9.5 12 15l5.5-5.5"],
 swap: ["M4.5 9h13", "M14.5 5.5 18 9l-3.5 3.5", "M19.5 15h-13", "M9.5 11.5 6 15l3.5 3.5"],
 rotateLeft: ["M5.5 12a6.5 6.5 0 1 1 3 5.5", "M9 8.5H5.5V5"],
 rotateRight: ["M18.5 12a6.5 6.5 0 1 0-3 5.5", "M15 8.5h3.5V5"],
@@ -50848,6 +50939,31 @@ labelBox(state.project, scheme, target, canvasViewOf(state), state.filter),
 try {
 const after = updateMark(state.project, holder, { labelLeader: !shown }).project;
 canvasCommit(state.project, after, strings.history.labelLeader, { selection: [markId] });
+} catch (error) {
+canvasFail(error);
+}
+}
+function canvasOrderIds(state, markId) {
+const mark = state.project ? findMark(state.project, markId) : null;
+if (!mark) return [];
+return canvasMoveIds(state.project, markId, mark.groupId || null, false);
+}
+function canvasOrderAmong(state, scheme) {
+return { among: visibleMarks(state.project, scheme, state.filter).map((mark) => mark.id) };
+}
+function canvasMarkOrderCan(state, markId, move) {
+const scheme = state ? canvasScheme(state) : null;
+if (!state || !state.project || !scheme || !canvasEditAllowed(state)) return false;
+return markOrderCan(state.project, canvasOrderIds(state, markId), move, canvasOrderAmong(state, scheme));
+}
+function canvasMarkOrder(markId, move) {
+const state = canvasState();
+const scheme = state ? canvasScheme(state) : null;
+if (!state || !state.project || !scheme) return;
+try {
+const result = moveMarkOrder(state.project, canvasOrderIds(state, markId), move, canvasOrderAmong(state, scheme));
+if (!result.moved) return;
+canvasCommit(state.project, result.project, strings.history.markOrder, { selection: [markId] });
 } catch (error) {
 canvasFail(error);
 }
@@ -60087,7 +60203,7 @@ if (!Number.isFinite(markY) || !Number.isFinite(cardTop)) return 0;
 const limit = cardTop - gap;
 return markY > limit ? Math.round(markY - limit) : 0;
 }
-function markCardParts(model, { headButton = null, extra = null } = {}) {
+function markCardParts(model, { headButton = null, extra = null, order = null } = {}) {
 const head = uiEl("div", { class: "mark-card__head" }, [
 uiSignCell(typeSignIcon(model.sign, UI_SIGN.size, UI_SIGN.length)),
 uiEl("span", { class: "mark-card__label", text: model.label }),
@@ -60107,7 +60223,29 @@ uiEl("span", { class: "mark-card__value", text: row.value }),
 );
 }
 if (extra) body.append(extra);
+if (order) body.append(order);
 return [head, body];
+}
+function markCardOrderRow(state, markId) {
+if (!state || !state.project || !canvasEditAllowed(state) || !canvasOnScreen(state)) return null;
+const words = strings.markCard.order;
+const mark = findMark(state.project, markId);
+if (!mark) return null;
+const tail = mark.groupId ? ". " + words.block : "";
+const options = (move, label, hint) => ({
+class: "ui-btn mark-card__order",
+label,
+title: label + " — " + hint + tail,
+attrs: canvasMarkOrderCan(state, markId, move) ? {} : { disabled: "disabled" },
+on: { click: () => canvasMarkOrder(markId, move) },
+});
+return uiEl("div", { class: "mark-card__row mark-card__row--act" }, [
+uiEl("span", { class: "mark-card__name", text: words.label }),
+uiIconButton("toFront", options(MARK_ORDER_FRONT, words.front, words.frontHint)),
+uiIconButton("up", options(MARK_ORDER_UP, words.up, words.upHint)),
+uiIconButton("down", options(MARK_ORDER_DOWN, words.down, words.downHint)),
+uiIconButton("toBack", options(MARK_ORDER_BACK, words.back, words.backHint)),
+]);
 }
 function mountMarkCard(host, api) {
 const { getState, setState, subscribe } = api;
@@ -60214,7 +60352,13 @@ render();
 });
 }
 card.classList.toggle("mark-card--sim", part === "remote" || logicOpen);
-card.replaceChildren(...markCardParts(model, { headButton, extra: deviceView ? deviceView.node : commentRow }));
+card.replaceChildren(
+...markCardParts(model, {
+headButton,
+extra: deviceView ? deviceView.node : commentRow,
+order: markCardOrderRow(state, model.id),
+}),
+);
 if (markCardLifts(state) && shownFor !== model.id) {
 shownFor = model.id;
 liftMark(state, model.id);

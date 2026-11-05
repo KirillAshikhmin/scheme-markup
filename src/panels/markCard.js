@@ -20,6 +20,10 @@
 import { PANEL_IDS, layoutAllows, registerPanel } from "../app.js";
 import {
   MARK_KINDS,
+  MARK_ORDER_BACK,
+  MARK_ORDER_DOWN,
+  MARK_ORDER_FRONT,
+  MARK_ORDER_UP,
   findMark,
   findRoom,
   findScheme,
@@ -30,7 +34,13 @@ import {
   markPointer,
   styleOf,
 } from "../model.js";
-import { canvasEditCommentText, canvasOnScreen } from "../canvas.js";
+import {
+  canvasEditAllowed,
+  canvasEditCommentText,
+  canvasMarkOrder,
+  canvasMarkOrderCan,
+  canvasOnScreen,
+} from "../canvas.js";
 import { planToScreen, typeIconPlan, typeSignIcon } from "../render.js";
 import { getSetting, setSetting } from "../store.js";
 import { strings } from "../strings.js";
@@ -211,8 +221,12 @@ export function markCardShift(markY, cardTop, gap = MARK_CARD_GAP) {
  *
  * Кнопку головы и хвост полей задаёт хозяин: на плане это сворачивание или
  * крестик и строка правки комментария, в объёме — крестик, снимающий выделение.
+ *
+ * `order` — ряд команд порядка меток (таск 238). Его передаёт только план: на
+ * плане метки и накладываются друг на друга, а в объёме порядок плана не
+ * значит ничего — там грани складывает дерево разбиения.
  */
-export function markCardParts(model, { headButton = null, extra = null } = {}) {
+export function markCardParts(model, { headButton = null, extra = null, order = null } = {}) {
   const head = uiEl("div", { class: "mark-card__head" }, [
     // Знак — общей лестницей (таск 228, находка 15): у линейной метки в
     // карточке стояла точка, хотя в справочнике у её типа штрих.
@@ -234,7 +248,55 @@ export function markCardParts(model, { headButton = null, extra = null } = {}) {
     );
   }
   if (extra) body.append(extra);
+  if (order) body.append(order);
   return [head, body];
+}
+
+/**
+ * Ряд команд порядка меток на экране (таск 238, G359): «на передний план»,
+ * «выше», «ниже», «на задний план» — слова заказчика.
+ *
+ * **Место выбрано здесь, а не в списке меток и не на клавишах**, и вот почему:
+ * наложение — вопрос про план, человек видит его глазами и решает сразу, а
+ * карточка стоит у выделенной метки, на том же поле, во всех раскладках правки
+ * — и на планшете под пальцем, и на компьютере под курсором. В списке меток
+ * строки стоят по справочнику и номеру, а не в порядке экрана, и команда
+ * «выше» там указывала бы не туда, куда смотрит глаз. Горячих клавиш ряду не
+ * придумано нарочно: правило сборки — ключ, о котором негде прочитать, всё
+ * равно что его нет (таск 213), а подсказка плана уже в три строки.
+ *
+ * `null` — ряда нет вовсе: в просмотре и при запущенном доме правок не бывает
+ * (`canvasEditAllowed`), и гаснущий ряд кнопок обещал бы несуществующее.
+ *
+ * Кнопка, которой некуда двигать, гаснет (`canvasMarkOrderCan`) — как «выше» у
+ * первой схемы в списке схем: так видно, что метка и так наверху, а не что
+ * нажатие потерялось.
+ */
+export function markCardOrderRow(state, markId) {
+  if (!state || !state.project || !canvasEditAllowed(state) || !canvasOnScreen(state)) return null;
+  const words = strings.markCard.order;
+  const mark = findMark(state.project, markId);
+  if (!mark) return null;
+  // Слова про блок — в подсказке каждой кнопки: поедет вся рамка розеток, а не
+  // взятая розетка (G189), и узнать об этом человеку больше негде.
+  const tail = mark.groupId ? ". " + words.block : "";
+  // Имя значка стоит в самом вызове строкой, а не приезжает доводом: набор
+  // значков сверяется с кодом сканированием исходников (`test/panelIcons`), и
+  // спрятанное за помощником имя было бы для него мёртвым рисунком.
+  const options = (move, label, hint) => ({
+    class: "ui-btn mark-card__order",
+    label,
+    title: label + " — " + hint + tail,
+    attrs: canvasMarkOrderCan(state, markId, move) ? {} : { disabled: "disabled" },
+    on: { click: () => canvasMarkOrder(markId, move) },
+  });
+  return uiEl("div", { class: "mark-card__row mark-card__row--act" }, [
+    uiEl("span", { class: "mark-card__name", text: words.label }),
+    uiIconButton("toFront", options(MARK_ORDER_FRONT, words.front, words.frontHint)),
+    uiIconButton("up", options(MARK_ORDER_UP, words.up, words.upHint)),
+    uiIconButton("down", options(MARK_ORDER_DOWN, words.down, words.downHint)),
+    uiIconButton("toBack", options(MARK_ORDER_BACK, words.back, words.backHint)),
+  ]);
 }
 
 function mountMarkCard(host, api) {
@@ -376,7 +438,13 @@ function mountMarkCard(host, api) {
     // Пульт и раскрытая «Логика» ловят щелчки и растут, как карточка
     // запущенного дома; свёрнутая строка — нет: карточка остаётся сквозной.
     card.classList.toggle("mark-card--sim", part === "remote" || logicOpen);
-    card.replaceChildren(...markCardParts(model, { headButton, extra: deviceView ? deviceView.node : commentRow }));
+    card.replaceChildren(
+      ...markCardParts(model, {
+        headButton,
+        extra: deviceView ? deviceView.node : commentRow,
+        order: markCardOrderRow(state, model.id),
+      }),
+    );
     // План подвигается в просмотре и в запущенном доме (`markCardLifts`): там
     // карточка высокая и метка действительно уходит под неё. На компьютере
     // без дома выделение случается на каждый клик по метке, и сдвиг плана
