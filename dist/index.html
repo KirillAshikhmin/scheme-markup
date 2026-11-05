@@ -35747,9 +35747,12 @@ return Boolean(place.model && volumeSheerParts(place.model.parts));
 }
 function volumeSheerPlaces(places) {
 const out = [];
+const seen = new Set();
 for (const place of places || []) {
 if (!place || place.mode !== VOLUME_MARK_WALL || !place.wallId || !place.frame) continue;
 if (!volumeSheerPlace(place)) continue;
+if (seen.has(place.markId)) continue;
+seen.add(place.markId);
 out.push(place);
 }
 return out;
@@ -37066,7 +37069,101 @@ heightMm: repeat.toFloor
 };
 });
 }
-function volumeMarkPlacement(project, mark, where = []) {
+const VOLUME_BLOCK_STEP_MM = 71;
+function volumeBlockAxis(points) {
+let best = null;
+for (let i = 0; i < points.length; i += 1) {
+for (let j = i + 1; j < points.length; j += 1) {
+const dx = points[j].x - points[i].x;
+const dy = points[j].y - points[i].y;
+const length = Math.hypot(dx, dy);
+if (!(length > 0) || (best && length <= best.length)) continue;
+best = { length, u: { x: dx / length, y: dy / length } };
+}
+}
+return best ? best.u : { x: 1, y: 0 };
+}
+function volumeBlockMiddle(values) {
+return (Math.min(...values) + Math.max(...values)) / 2;
+}
+function volumeBlockSeats(project, marks) {
+const seats = new Map();
+if (!project) return seats;
+const blocks = new Map();
+for (const mark of marks || []) {
+if (!mark || mark.kind !== "point" || markIsComment(mark)) continue;
+const points = mark.points || [];
+const group = findGroup(project, mark.groupId);
+if (!group && points.length < 2) continue;
+const heightMm = markSizes(project, mark).heightAboveFloor;
+if (heightMm === null) continue;
+const binding = markWall(mark);
+const wall = binding ? findWall(project, binding.wallId) : null;
+const vectors = wall ? wallVectors(wall) : null;
+const side = wall && vectors ? markWallSideOn(project, mark, wall.id) : null;
+const path = volumeMarkPathMm(project, mark);
+const blockKey = group ? group.id : mark.id;
+const rank = group
+? blockMembers(project, group.markIds).findIndex((member) => member.id === mark.id)
+: 0;
+for (let index = 0; index < points.length; index += 1) {
+const at = path[index] || null;
+const slot = { markId: mark.id, index, rank, heightMm };
+if (wall && vectors && side) {
+const own = at && path[0] ? (at.x - path[0].x) * vectors.u.x + (at.y - path[0].y) * vectors.u.y : 0;
+slot.alongMm = binding.atMm + own;
+slot.wall = true;
+} else {
+if (!at) continue;
+slot.at = at;
+slot.wall = false;
+}
+const key = blockKey + "\u0000" + (slot.wall ? wall.id + "\u0000" + side : "");
+const list = blocks.get(key);
+if (list) list.push(slot);
+else blocks.set(key, [slot]);
+}
+}
+for (const list of blocks.values()) {
+if (list.length < 2) continue;
+const onWall = list[0].wall;
+const u = onWall ? null : volumeBlockAxis(list.map((slot) => slot.at));
+const along = (slot) => (onWall ? slot.alongMm : slot.at.x * u.x + slot.at.y * u.y);
+const anchor = volumeBlockMiddle(list.map(along));
+const middle = onWall
+? null
+: {
+x: volumeBlockMiddle(list.map((slot) => slot.at.x)),
+y: volumeBlockMiddle(list.map((slot) => slot.at.y)),
+};
+const rows = new Map();
+for (const slot of list) {
+const row = rows.get(slot.heightMm);
+if (row) row.push(slot);
+else rows.set(slot.heightMm, [slot]);
+}
+for (const row of rows.values()) {
+row.sort((a, b) => {
+if (along(a) !== along(b)) return along(a) - along(b);
+if (a.rank !== b.rank) return a.rank - b.rank;
+return a.index - b.index;
+});
+const half = (row.length - 1) / 2;
+for (let place = 0; place < row.length; place += 1) {
+const slot = row[place];
+const shift = (place - half) * VOLUME_BLOCK_STEP_MM;
+const seat = onWall
+? { alongMm: anchor + shift }
+: { x: middle.x + u.x * shift, y: middle.y + u.y * shift };
+let own = seats.get(slot.markId);
+if (!own) seats.set(slot.markId, (own = []));
+own[slot.index] = seat;
+}
+}
+}
+return seats;
+}
+function volumeMarkPlacement(project, mark, where = [], seat = null) {
 if (!mark || markIsComment(mark)) return null;
 const path = volumeMarkPathMm(project, mark);
 if (path.length === 0) return { markId: mark.id, skip: VOLUME_MARK_NO_POINT };
@@ -37115,7 +37212,7 @@ const to = binding.toMm === null ? binding.atMm : binding.toMm;
 const fromMm = Math.min(binding.atMm, to);
 const toMm = Math.max(binding.atMm, to);
 const alongMm = line ? Math.max(VOLUME_MARK_MIN_MM, toMm - fromMm) : lengthMm;
-const middle = (fromMm + toMm) / 2;
+const middle = seat && typeof seat.alongMm === "number" && !line ? seat.alongMm : (fromMm + toMm) / 2;
 const outer = recessed ? faceMm : faceMm + depthMm;
 const inner = recessed ? faceMm - depthMm : faceMm;
 const bottomMm = volumeMarkOnFloor(heightMm) ? 0 : heightMm - widthMm / 2;
@@ -37166,7 +37263,7 @@ heightMm: widthMm,
 },
 };
 }
-const middle = volumePathMiddle(path);
+const middle = seat && seat.x !== undefined && !line ? { x: seat.x, y: seat.y } : volumePathMiddle(path);
 const room = heightMm === null ? volumeRoomAt(where, middle) : null;
 if (heightMm === null && !room) return { markId: mark.id, skip: VOLUME_MARK_NO_PLACE };
 const onFloor = volumeMarkOnFloor(heightMm);
@@ -37218,16 +37315,25 @@ const list = marks || (project ? project.marks.filter((mark) => mark.schemeId ==
 const placed = [];
 const unplaced = [];
 const spare = [];
+const spared = new Set();
 const where = { rooms: rooms || [], walls: walls || [] };
+const seats = volumeBlockSeats(project, list);
 for (const mark of list) {
-const place = volumeMarkPlacement(project, mark, where);
-if (!place) continue;
+const own = seats.get(mark.id) || null;
+const bodies = own && (mark.points || []).length > 1 ? mark.points.length : 1;
+for (let index = 0; index < bodies; index += 1) {
+const place = volumeMarkPlacement(project, mark, where, own ? own[index] || null : null);
+if (!place) break;
 if (place.skip) {
 unplaced.push({ markId: mark.id, label: labelOf(project, mark.id), reason: place.skip });
-continue;
+break;
 }
 placed.push(place);
-if (place.spare) spare.push({ markId: place.markId, label: place.label });
+if (place.spare && !spared.has(place.markId)) {
+spared.add(place.markId);
+spare.push({ markId: place.markId, label: place.label });
+}
+}
 }
 return { placed, unplaced, spare };
 }
