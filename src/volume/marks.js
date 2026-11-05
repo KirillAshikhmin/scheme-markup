@@ -407,6 +407,18 @@ export function volumeBlockSeats(project, marks) {
   if (!project) return seats;
   // Посты, разложенные по блокам: ключ — блок, стена и её сторона (правило 5).
   const blocks = new Map();
+  // Модельный порядок меток блока — раз на группу: им различаются только
+  // совпавшие посты (правило 4), но спрашивать его у каждой метки заново
+  // значило бы перебирать справочник по разу на метку.
+  const ranks = new Map();
+  const rankIn = (group, markId) => {
+    let own = ranks.get(group.id);
+    if (!own) {
+      own = new Map(blockMembers(project, group.markIds).map((member, index) => [member.id, index]));
+      ranks.set(group.id, own);
+    }
+    return own.has(markId) ? own.get(markId) : 0;
+  };
   for (const mark of marks || []) {
     if (!mark || mark.kind !== "point" || markIsComment(mark)) continue;
     const points = mark.points || [];
@@ -422,9 +434,7 @@ export function volumeBlockSeats(project, marks) {
     const side = wall && vectors ? markWallSideOn(project, mark, wall.id) : null;
     const path = volumeMarkPathMm(project, mark);
     const blockKey = group ? group.id : mark.id;
-    const rank = group
-      ? blockMembers(project, group.markIds).findIndex((member) => member.id === mark.id)
-      : 0;
+    const rank = group ? rankIn(group, mark.id) : 0;
     for (let index = 0; index < points.length; index += 1) {
       const at = path[index] || null;
       const slot = { markId: mark.id, index, rank, heightMm };
@@ -779,7 +789,14 @@ export function volumeMarks(project, schemeId, { marks, rooms, walls } = {}) {
   const spare = [];
   const spared = new Set();
   const where = { rooms: rooms || [], walls: walls || [] };
-  const seats = volumeBlockSeats(project, list);
+  // Посты считаются по **всем** меткам схемы, а не по видимым: рамка — вещь на
+  // стене, и спрятанная фильтром розетка не должна двигать соседний
+  // выключатель. Подпись блока устроена иначе (`blockLabel` берёт видимые) — и
+  // по своей причине: она обещает то, что на листе, а не то, что на стене.
+  const seats = volumeBlockSeats(
+    project,
+    project ? project.marks.filter((mark) => mark.schemeId === schemeId) : list,
+  );
   for (const mark of list) {
     const own = seats.get(mark.id) || null;
     // Тело на пост — только у метки, посты которой и правда посчитаны: без них

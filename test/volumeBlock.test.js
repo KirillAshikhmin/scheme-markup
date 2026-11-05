@@ -366,6 +366,26 @@ test("потолочное место в ряд не идёт: метка без
   assert.equal(bodies[0].place.mode, "ceiling", "потолочная метка перестала быть потолочной");
 });
 
+test("фильтр блок не двигает: спрятанная розетка не уносит соседку", () => {
+  const scene = roomScene();
+  const block = blockOnWall(scene, scene.project, [
+    { code: "Р", atMm: 1900 },
+    { code: "Р", atMm: 2000 },
+    { code: "Р", atMm: 2100 },
+  ]);
+  const all = block.ids.map((id) => bodyOf(scene, block.project, id, "розетка").alongMm);
+  // Та же сцена, но на плане видны только две метки из трёх — так окно отдаёт
+  // в объём отфильтрованный список. Рамка на стене от этого не едет.
+  const shown = block.project.marks.filter((mark) => mark.id !== block.ids[2]);
+  const built = volumeScene(block.project, scene.schemeId, { marks: shown });
+  const wall = block.project.walls.find((item) => item.id === scene.walls[0]);
+  for (let index = 0; index < 2; index += 1) {
+    const place = built.marks.find((item) => item.markId === block.ids[index]);
+    assert.ok(place, "видимая розетка пропала из сцены");
+    assert.equal(alongWall(wall, place.frame.at), all[index], "видимая розетка поехала из-за спрятанной соседки");
+  }
+});
+
 // ——— G68 ———————————————————————————————————————————————————————————————————
 
 test("G68: показ блока в объёме не меняет объект ни на байт", () => {

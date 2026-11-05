@@ -152,7 +152,7 @@ marks → floors → walk → scene → lamps → signs → frame → pick → b
 | `sky.js` | час суток, светила, погода | `volumeMood`, `volumeSkyColors`, `volumeBodyAt`, `volumeMoonShape` |
 | `walls.js` | стены, углы, проёмы | `volumeWallFaces`, `volumeWallMiters`, `volumeWallSolids`, `volumeDoorOpen` |
 | `sun.js` | солнце и луна в комнате, шторы и тюль | `volumeSunSpotFaces`, `volumeMoonSpotFaces`, `volumeSunOpenings`, `volumeCurtain*` |
-| `marks.js` | тела меток, модели, выделение и связи | `volumeMarks`, `volumeMarkFaces`, `volumeModelFaces` (тела из `objectModels/*`) |
+| `marks.js` | тела меток, модели, рамка блока, выделение и связи | `volumeMarks`, `volumeMarkFaces`, `volumeBlockSeats`, `volumeModelFaces` (тела из `objectModels/*`) |
 | `floors.js` | пол, потолок, вещи, лестница, двусвет | `volumeFloorFaces`, `volumeObjectFaces`, `volumeStairs`, `volumeCeilingUnderVoid` |
 | `walk.js` | где встать, ходьба, стойка, падение | `volumeCanStand`, `volumeMoveTo`, `volumeFallTo`, `volumeStanceStep`, `volumeStairLanding` |
 | `scene.js` | сборка сцены | `volumeScene`, `volumeStackScene` |
@@ -183,6 +183,7 @@ marks → floors → walk → scene → lamps → signs → frame → pick → b
 - **Двусвет — одно помещение для света** (правка 2026-10-27): в стопке дыра этажа выше (помещение без пола) получает ключ помещения под ней (`volumeStackRoomAlias`), а низ и торец перекрытия этажа выше — помещения этажа ниже под ними; свой ключ грань хранит в `roomOwn`, связь пересчитывается на каждой сборке, в том числе у кусков дерева порядка. У стены над дырой полоса пола без напуска и без торца со стороны дыры. Падение в дыру — только когда «Объём» на экране (`fallFloor`).
 - **Лестница собирается по габариту** (`objectModels/stairs.js`): плоские ступени по подъёму 175 мм, на пятую часть уже хода; Г-, П-образная и спиральная отражаются (`schemeObject.mirror`). Предел модели в пять тел к ним не относится — лестниц на объекте одна-две. Окно «на какой этаж» — с 400 мм и только из помещения лестницы (`volumeStairNear` со сценой).
 - **Двери и створки окон — одно множество открытого** (`openDoors` в `panels/volume.js`, `openDoorIds` сцены): окна, кроме витража в пол (`openingVents`), открываются створкой — первой секцией лица, у балконного над поясом (`openingVentCell`, `volumeWindowSash`). «Все двери» (`R`) окон не трогает. Дом узнаёт о створке тем же `simDoor`: климат проветривает комнату площадью створки, датчик открытия в проёме окна ходит с ним (`markDoorOf`).
+- **Блок стоит рамкой, а план от этого не двигается** (таск 239, G360): места постов считает `volumeBlockSeats` **раз на сборку сцены**, межцентровое — `VOLUME_BLOCK_STEP_MM` = 71. Ряд — одна высота, разные высоты дают ряды на одной вертикали, отсчёт от середины блока, порядок в ряду — порядок на плане вдоль стены, стена со стороной режет блок на рамки (угол). Шаг знака на плане (`BLOCK_STEP_RATIO`, G182) не трогается: план — схема, и расхождение с объёмом здесь нарочное. Отсюда же второе: **у метки в объёме бывает больше одного тела** — метка со многими точками (`blockMode: "single"`) даёт тело на точку, `markId` у всех один, и `volumeMarkPlace` по-прежнему отдаёт первое.
 
 ### 6.4 Бюджет кадра
 

@@ -37090,6 +37090,15 @@ function volumeBlockSeats(project, marks) {
 const seats = new Map();
 if (!project) return seats;
 const blocks = new Map();
+const ranks = new Map();
+const rankIn = (group, markId) => {
+let own = ranks.get(group.id);
+if (!own) {
+own = new Map(blockMembers(project, group.markIds).map((member, index) => [member.id, index]));
+ranks.set(group.id, own);
+}
+return own.has(markId) ? own.get(markId) : 0;
+};
 for (const mark of marks || []) {
 if (!mark || mark.kind !== "point" || markIsComment(mark)) continue;
 const points = mark.points || [];
@@ -37103,9 +37112,7 @@ const vectors = wall ? wallVectors(wall) : null;
 const side = wall && vectors ? markWallSideOn(project, mark, wall.id) : null;
 const path = volumeMarkPathMm(project, mark);
 const blockKey = group ? group.id : mark.id;
-const rank = group
-? blockMembers(project, group.markIds).findIndex((member) => member.id === mark.id)
-: 0;
+const rank = group ? rankIn(group, mark.id) : 0;
 for (let index = 0; index < points.length; index += 1) {
 const at = path[index] || null;
 const slot = { markId: mark.id, index, rank, heightMm };
@@ -37317,7 +37324,10 @@ const unplaced = [];
 const spare = [];
 const spared = new Set();
 const where = { rooms: rooms || [], walls: walls || [] };
-const seats = volumeBlockSeats(project, list);
+const seats = volumeBlockSeats(
+project,
+project ? project.marks.filter((mark) => mark.schemeId === schemeId) : list,
+);
 for (const mark of list) {
 const own = seats.get(mark.id) || null;
 const bodies = own && (mark.points || []).length > 1 ? mark.points.length : 1;
