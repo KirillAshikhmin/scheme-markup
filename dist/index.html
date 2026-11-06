@@ -37307,6 +37307,32 @@ else rows[rows.length - 1].push(sorted[index]);
 }
 return rows.length === tier.length ? [tier] : rows.reverse();
 }
+function volumeBlockColumns(rows, along) {
+const rowOf = new Map();
+const all = [];
+for (let index = 0; index < rows.length; index += 1) {
+for (const slot of rows[index]) {
+rowOf.set(slot, index);
+all.push(slot);
+}
+}
+all.sort((a, b) => along(a) - along(b) || a.rank - b.rank || a.index - b.index);
+let column = 0;
+let here = new Set([rowOf.get(all[0])]);
+all[0].column = 0;
+for (let index = 1; index < all.length; index += 1) {
+const slot = all[index];
+const row = rowOf.get(slot);
+const gap = along(slot) - along(all[index - 1]);
+if (gap > VOLUME_BLOCK_STEP_MM / 2 || here.has(row)) {
+column += 1;
+here = new Set();
+}
+here.add(row);
+slot.column = column;
+}
+return column + 1;
+}
 function volumeBlockSeats(project, marks) {
 const seats = new Map();
 if (!project) return seats;
@@ -37383,31 +37409,37 @@ if (tier) tier.push(slot);
 else tiers.set(slot.heightMm, [slot]);
 }
 const rows = [];
+const frame = (split, lift) => {
+const columns = volumeBlockColumns(split, along);
+for (let index = 0; index < split.length; index += 1) {
+rows.push({
+posts: split[index],
+aboveMm: lift(index),
+columns,
+tightAlong: columns > 1,
+tightUp: split.length > 1,
+});
+}
+};
 if (tiers.size === list.length && volumeBlockAlongWall(list, u, n)) {
-rows.push({ posts: list.slice(), aboveMm: 0 });
+frame([list.slice()], () => 0);
 } else {
 for (const [heightMm, tier] of tiers) {
 const split = volumeBlockFrameRows(tier, onWall && heightMm !== 0);
 const bottom = (split.length - 1) / 2;
-for (let index = 0; index < split.length; index += 1) {
-rows.push({ posts: split[index], aboveMm: (index - bottom) * VOLUME_BLOCK_STEP_MM });
+frame(split, (index) => (index - bottom) * VOLUME_BLOCK_STEP_MM);
 }
 }
-}
-for (const { posts: row, aboveMm } of rows) {
-row.sort((a, b) => {
-if (along(a) !== along(b)) return along(a) - along(b);
-if (a.rank !== b.rank) return a.rank - b.rank;
-return a.index - b.index;
-});
-const half = (row.length - 1) / 2;
-for (let place = 0; place < row.length; place += 1) {
-const slot = row[place];
-const shift = (place - half) * VOLUME_BLOCK_STEP_MM;
+for (const { posts: row, aboveMm, columns, tightAlong, tightUp } of rows) {
+const half = (columns - 1) / 2;
+for (const slot of row) {
+const shift = (slot.column - half) * VOLUME_BLOCK_STEP_MM;
 const seat = onWall
 ? { alongMm: anchor + shift }
 : { x: middle.x + u.x * shift, y: middle.y + u.y * shift };
 if (aboveMm || slot.borrowed) seat.heightMm = slot.heightMm + aboveMm;
+if (onWall && tightAlong) seat.tightAlong = true;
+if (onWall && tightUp) seat.tightUp = true;
 let own = seats.get(slot.markId);
 if (!own) seats.set(slot.markId, (own = []));
 own[slot.index] = seat;
@@ -37423,8 +37455,9 @@ if (path.length === 0) return { markId: mark.id, skip: VOLUME_MARK_NO_POINT };
 const sizes = markSizes(project, mark);
 const markView = volumeMarkView(project, mark);
 const box = markBoxMm({ lengthMm: sizes.length, widthMm: sizes.width }, markView);
-const lengthMm = Math.max(VOLUME_MARK_MIN_MM, box.lengthMm);
-const widthMm = Math.max(VOLUME_MARK_MIN_MM, box.widthMm);
+const tight = (sideMm, near) => (near ? Math.min(sideMm, VOLUME_BLOCK_STEP_MM) : sideMm);
+const lengthMm = Math.max(VOLUME_MARK_MIN_MM, tight(box.lengthMm, seat && seat.tightAlong));
+const widthMm = Math.max(VOLUME_MARK_MIN_MM, tight(box.widthMm, seat && seat.tightUp));
 const nothingOwn = box.lengthFrom !== "own" && box.widthFrom !== "own";
 const depthOwn = nothingOwn && sizes.depth === null ? MARK_BOX_FRAME_DEPTH_MM : sizes.depth;
 const depthMm = Math.max(VOLUME_MARK_LIFT_MM, Math.abs(depthOwn || 0));
