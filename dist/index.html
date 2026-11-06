@@ -39525,14 +39525,19 @@ glow.set(markId, { level, rgb: tree ? VOLUME_STAR_RGB : color || VOLUME_GLOW_RGB
 const strength = level * fade * (tree ? VOLUME_TREE_LIGHT : 1);
 lamps.set(markId, strength);
 if (color) colors.set(markId, color);
-const key = item.roomId || volumeRoomKeyAt(scene, volumeMarkProbe(place));
-if (key) {
-const power = volumeLampPower(place) * strength;
+const total = volumeLampPower(place) * strength;
+const sources = volumeLampSources(place, scene, item.roomId);
+let whole = 0;
+for (const source of sources) whole += source.power;
+const rgb = color || VOLUME_LAMP_LIGHT_RGB;
+const warm = (key, power) => {
+if (!key) return;
 sums.set(key, (sums.get(key) || 0) + power);
 const mix = paints.get(key) || [0, 0, 0, 0, false];
-const rgb = color || VOLUME_LAMP_LIGHT_RGB;
 paints.set(key, [mix[0] + rgb[0] * power, mix[1] + rgb[1] * power, mix[2] + rgb[2] * power, mix[3] + power, mix[4] || Boolean(color)]);
-}
+};
+if (sources.length === 0 || !(whole > 0)) warm(item.roomId, total);
+else for (const source of sources) warm(source.room, (total * source.power) / whole);
 }
 if (glow.size === 0 && !sky) return null;
 const areas = volumeRoomAreas(scene);
@@ -39623,7 +39628,19 @@ power: (perMeter * length) / count / 1000,
 return out;
 }
 const VOLUME_LAMP_WALL_OUT_MM = 30;
-function volumeLampSources(place) {
+const volumeLampRoomMemo = new WeakMap();
+function volumeLampRooms(scene, place) {
+if (!scene || !place || !place.anchor) return null;
+const held = volumeLampRoomMemo.get(place);
+if (held) return held;
+const at = volumeMarkProbe(place);
+const shift = { x: at.x - place.anchor.x, y: at.y - place.anchor.y };
+const keyAt = (point) => volumeRoomKeyAt(scene, { x: point.x + shift.x, y: point.y + shift.y });
+const keys = place.kind === "line" ? volumeLampPieces(place).map((piece) => keyAt(piece.at)) : [keyAt(place.anchor)];
+volumeLampRoomMemo.set(place, keys);
+return keys;
+}
+function volumeLampSources(place, scene = null, roomId = null) {
 if (!place || !place.anchor) return [];
 const down = { x: 0, y: 0, z: -1 };
 const wall = place.mode === VOLUME_MARK_WALL && place.face && place.face.normal ? place.face.normal : null;
@@ -39632,19 +39649,22 @@ const lift = (point) =>
 wall
 ? { x: point.x + wall.x * VOLUME_LAMP_WALL_OUT_MM, y: point.y + wall.y * VOLUME_LAMP_WALL_OUT_MM, z: point.z }
 : point;
+const rooms = volumeLampRooms(scene, place);
 if (place.kind === "line") {
-return volumeLampPieces(place).map((piece) => ({
+return volumeLampPieces(place).map((piece, index) => ({
 at: lift(piece.at),
 power: piece.power,
 dir: out(piece.at.z),
 wall,
 beam: 1,
+room: (rooms && rooms[index]) || null,
 }));
 }
 const size = volumeLampFace(place);
 const most = Math.max(size.widthMm, size.heightMm);
 const beam = most <= 120 ? 0.6 : most >= 400 ? 1.15 : 1;
-return [{ at: lift(place.anchor), power: volumeLampPower(place), dir: out(place.anchor.z), wall, beam }];
+const room = roomId || (rooms && rooms[0]) || null;
+return [{ at: lift(place.anchor), power: volumeLampPower(place), dir: out(place.anchor.z), wall, beam, room }];
 }
 function volumeRoomShare(sum, areaMm2) {
 const area = Math.max(2e6, Number(areaMm2) > 0 ? Number(areaMm2) : VOLUME_LAMP_ROOM_MM2);
@@ -39856,12 +39876,11 @@ for (const markId of ids) {
 const place = volumeMarkPlace(scene, markId);
 if (!place) continue;
 const item = live.get(markId);
-const key = (item && item.roomId) || volumeRoomKeyAt(scene, volumeMarkProbe(place));
-if (!key) continue;
-for (const source of volumeLampSources(place)) {
-const blockers = volumeShadeBlockers(occluders, key, source.at);
+for (const source of volumeLampSources(place, scene, item && item.roomId)) {
+if (!source.room) continue;
+const blockers = volumeShadeBlockers(occluders, source.room, source.at);
 const shade = blockers.length > 0 ? { blockers, shades, planes: new Map() } : null;
-volumeSourcePools(decals, byRoom, ways, key, markId, source, shade);
+volumeSourcePools(decals, byRoom, ways, source.room, markId, source, shade);
 }
 }
 volumeShadeMix(decals, shades);
