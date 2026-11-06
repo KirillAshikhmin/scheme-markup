@@ -158,6 +158,11 @@ export function jobOf(command, project, keys) {
       minutes: minutesOf(keys.get("time")),
       date: typeof keys.get("date") === "string" ? keys.get("date") : "",
       backdrop: typeof keys.get("backdrop") === "string" ? keys.get("backdrop") : null,
+      // Какие лампы горят (`--lamps`): «all» — все, иначе перечень обозначений
+      // через запятую. Без ключа дом не запущен вовсе, и кадр тот же, что был.
+      lamps: keys.has("lamps") ? (typeof keys.get("lamps") === "string" ? keys.get("lamps") : "all") : null,
+      // Отметка «Физический свет» — та же, что в окне параметров объёма.
+      flatLight: keys.has("flat-light"),
       scheme: (findScheme(project, schemeId) || {}).name || "",
     };
   }
