@@ -34,6 +34,7 @@ import {
 import {
   VOLUME_DOOR_RGB,
   VOLUME_FLOOR_RGB,
+  VOLUME_LAMP_AREA_MM2,
   VOLUME_LAMP_BOUNCE,
   VOLUME_LAMP_RINGS,
   VOLUME_LAMP_SOFT_STEPS,
@@ -542,4 +543,114 @@ test("кадр ночью: кольца пятна идут сразу за св
   }
   const day = volumeFrame(scene, camera, frameBox, null, null, live);
   assert.equal(day.filter((polygon) => polygon.fill.startsWith("rgba(") && !polygon.pick).length, 0, "днём пятна лампы рисуются");
+});
+
+// ——— ломаная лампа через два помещения (таск 248) ————————————————————————
+//
+// Слова заказчика: «лента по периметру потолка размещена, физически в разных
+// помещениях. но освещение только в одном, где начало линии».
+//
+// Стенд тот же, и к нему добавлены три ленты: одна идёт из гостиной в коридор
+// сквозь перегородку, вторая лежит целиком в гостиной, третья уходит из
+// гостиной на улицу. Дверь закрыта нарочно: ни перелива, ни клина сквозь проём
+// нет — и свет коридора может прийти только от кусков ленты, которые в нём
+// лежат.
+
+function tapeStand() {
+  const box = lampStand();
+  let project = box.project;
+  const fr = (point) => planMmToFraction(project, box.schemeId, point);
+  const tape = project.markTypes.find((item) => item.code === "Л");
+  const put = (a, b) => {
+    const made = addMark(project, { schemeId: box.schemeId, typeId: tape.id, kind: "line", points: [fr(a), fr(b)] });
+    project = applyMarkWalls(made.project, box.schemeId).project;
+    return made.marks[0].id;
+  };
+  const across = put({ x: -1000, y: -500 }, { x: 1000, y: -500 });
+  const inside = put({ x: -3000, y: 500 }, { x: -1500, y: 500 });
+  const outdoor = put({ x: -2000, y: 0 }, { x: -2000, y: -3000 });
+  return { ...box, project, marks: { ...box.marks, across, inside, outdoor } };
+}
+
+let tapeMemo = null;
+const tapes = () => tapeMemo || (tapeMemo = tapeStand());
+
+/** Сила, из которой вышла такая светлота помещения: обратный `volumeRoomShare`. */
+const powerOf = (share, areaMm2) => (-Math.log(1 - share) * areaMm2) / VOLUME_LAMP_AREA_MM2 / VOLUME_LAMP_BOUNCE;
+const LIVING_MM2 = 3800 * 2800;
+const HALL_MM2 = 1800 * 2800;
+
+/** Сколько колец этой метки легло на куски помещения. */
+const ringsIn = (light, markId, room) =>
+  [...light.decals.entries()]
+    .filter(([host]) => host.room === room)
+    .flatMap(([, list]) => list)
+    .filter((ring) => ring.markId === markId).length;
+
+test("ломаная лампа светит каждое помещение, через которое проходит, — своей долей силы", () => {
+  const box = tapes();
+  const scene = sceneOf(box);
+  const place = volumeMarkPlace(scene, box.marks.across);
+  const light = volumeLiveLight(scene, liveOf(box, { across: 1 }), { physical: true });
+  const living = light.rooms.get(box.rooms.living);
+  const hall = light.rooms.get(box.rooms.hall);
+  assert.ok(living > 0, "помещение начала линии не светится");
+  assert.ok(hall > 0, "помещение, в которое уходит лента, осталось тёмным");
+  // Сила лампы цела: доли кусков складываются в неё, а не в неё с добавкой.
+  const sum = powerOf(living, LIVING_MM2) + powerOf(hall, HALL_MM2);
+  const whole = volumeLampPower(place);
+  assert.ok(Math.abs(sum - whole) < 1e-9, "сила ленты разошлась по помещениям: " + sum + " против " + whole);
+  // Каждому помещению досталось меньше, чем если бы вся лента лежала в нём.
+  assert.ok(living < volumeRoomShare(whole * VOLUME_LAMP_BOUNCE, LIVING_MM2));
+  assert.ok(hall < volumeRoomShare(whole * VOLUME_LAMP_BOUNCE, HALL_MM2));
+  // Пятна легли на куски обоих помещений, а не одного.
+  assert.ok(ringsIn(light, box.marks.across, box.rooms.living) > 0, "в помещении начала линии нет пятен ленты");
+  assert.ok(ringsIn(light, box.marks.across, box.rooms.hall) > 0, "в соседнем помещении нет пятен ленты");
+  // Помещение у источника — помещение его куска.
+  const where = volumeLampSources(place, scene).map((source) => source.room);
+  assert.equal(where.length, 2);
+  assert.deepEqual([...new Set(where)].sort(), [box.rooms.hall, box.rooms.living].sort());
+});
+
+test("лента в одном помещении светит его ровно как светила: сила не делится", () => {
+  const box = tapes();
+  const scene = sceneOf(box);
+  const place = volumeMarkPlace(scene, box.marks.inside);
+  const light = volumeLiveLight(scene, liveOf(box, { inside: 1 }), { physical: true });
+  const want = volumeRoomShare(volumeLampPower(place) * VOLUME_LAMP_BOUNCE, LIVING_MM2);
+  assert.equal(light.rooms.get(box.rooms.living), want, "лента своей комнаты стала светить иначе");
+  assert.equal(light.rooms.get(box.rooms.hall), undefined, "лента гостиной за закрытой дверью светит коридор");
+  for (const source of volumeLampSources(place, scene)) assert.equal(source.room, box.rooms.living);
+});
+
+test("кусок ленты вне всякого помещения светит улицу: его доля никуда не идёт", () => {
+  const box = tapes();
+  const scene = sceneOf(box);
+  const place = volumeMarkPlace(scene, box.marks.outdoor);
+  const sources = volumeLampSources(place, scene);
+  assert.equal(sources.length, 3, "лента в три метра дала не три источника");
+  assert.equal(sources.filter((source) => source.room === null).length, 1, "кусок на улице получил помещение");
+  const light = volumeLiveLight(scene, liveOf(box, { outdoor: 1 }), { physical: true });
+  // Гостиная светится — прежде такая лента могла погасить весь свет метки.
+  const living = light.rooms.get(box.rooms.living);
+  assert.ok(living > 0, "куски в комнате перестали её светить");
+  assert.equal(light.rooms.size, 1, "улица попала в карту света комнат");
+  // Доля уличного куска не досталась никому: комната светлее не стала.
+  const inside = powerOf(living, LIVING_MM2);
+  assert.ok(inside < volumeLampPower(place) - 1e-9, "уличный кусок всё же посветил комнату: " + inside);
+});
+
+test("точечная лампа считается как считалась: помещение метки старше пробы", () => {
+  const box = tapes();
+  const scene = sceneOf(box);
+  const place = volumeMarkPlace(scene, box.marks.lamp);
+  assert.equal(volumeLampSources(place, scene, box.rooms.hall)[0].room, box.rooms.hall, "roomId метки перестал быть старше пробы");
+  assert.equal(volumeLampSources(place, scene)[0].room, box.rooms.living, "точечная лампа без roomId не узнала своего контура");
+  // У ломаной наоборот: roomId метки на свет не влияет — помещение решают куски.
+  const tape = volumeMarkPlace(scene, box.marks.across);
+  const rooms = new Set(volumeLampSources(tape, scene, box.rooms.hall).map((source) => source.room));
+  assert.equal(rooms.size, 2, "roomId метки подменил ленте помещения кусков");
+  assert.ok(rooms.has(box.rooms.living) && rooms.has(box.rooms.hall));
+  // Без сцены помещения не бывает: спрашивать его не у чего.
+  assert.equal(volumeLampSources(place)[0].room, null);
 });

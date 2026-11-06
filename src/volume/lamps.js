@@ -62,8 +62,16 @@ import { volumeMarkPlace } from "./scene.js";
  * **Комната светлеет от суммы ламп** — слова заказчика: «чем больше света
  * включено, тем ярче в комнате». Сумма — сила лампы (`volumeLampPower`) на её
  * яркость, а светлота комнаты — `volumeRoomShare`: одна лампа в гостиной даёт
- * полутьму, три — свет, и светлее полного не бывает. Помещение лампы — её
- * помещение в объекте, а у метки без него — контур, в котором она висит.
+ * полутьму, три — свет, и светлее полного не бывает.
+ *
+ * **Помещение светлит источник, а не метка** (таск 248). У точечной лампы
+ * источник один, и помещение у неё прежнее: помещение метки в объекте, а у
+ * метки без него — контур, в котором она висит. У ломаной (лента, трек)
+ * источник стоит на каждом метре, и помещение спрашивает **каждый кусок**
+ * (`volumeLampSources`): лента по периметру потолка через два помещения
+ * светлит оба — каждое своей долей силы. Сила всей лампы при этом та же
+ * (`volumeLampPower`): доли кусков складываются в неё, и лента, лежащая в
+ * одном помещении, светлит его ровно как светлила.
  *
  * `options.physical` — **физический свет** (отметка «Физический свет», по
  * умолчанию взведена). Слова заказчика: «что бы светил и в проёмах и чуть
@@ -120,15 +128,28 @@ export function volumeLiveLight(scene, live, options = {}) {
     const strength = level * fade * (tree ? VOLUME_TREE_LIGHT : 1);
     lamps.set(markId, strength);
     if (color) colors.set(markId, color);
-    const key = item.roomId || volumeRoomKeyAt(scene, volumeMarkProbe(place));
-    if (key) {
-      const power = volumeLampPower(place) * strength;
+    // Сила лампы раздаётся её помещениям по источникам (таск 248): у точечной
+    // источник один, и всё достаётся его помещению, как было; у ломаной — доля
+    // каждого куска достаётся помещению **этого куска**. Делится именно
+    // `volumeLampPower`, а не сумма сил кусков: у совсем короткой ленты сила
+    // поднята до `VOLUME_LAMP_POWER_MIN`, и помещение не должно от этого
+    // потемнеть. Кусок вне всякого помещения (лента вышла за контур) светит
+    // улицу, которой объём света не даёт, — его доля никуда не идёт.
+    const total = volumeLampPower(place) * strength;
+    const sources = volumeLampSources(place, scene, item.roomId);
+    let whole = 0;
+    for (const source of sources) whole += source.power;
+    const rgb = color || VOLUME_LAMP_LIGHT_RGB;
+    const warm = (key, power) => {
+      if (!key) return;
       sums.set(key, (sums.get(key) || 0) + power);
       // Свет комнаты — смесь цветов её ламп по их силе.
       const mix = paints.get(key) || [0, 0, 0, 0, false];
-      const rgb = color || VOLUME_LAMP_LIGHT_RGB;
       paints.set(key, [mix[0] + rgb[0] * power, mix[1] + rgb[1] * power, mix[2] + rgb[2] * power, mix[3] + power, mix[4] || Boolean(color)]);
-    }
+    };
+    // Места у лампы нет вовсе (кадр без сцены) — помещение берётся у метки.
+    if (sources.length === 0 || !(whole > 0)) warm(item.roomId, total);
+    else for (const source of sources) warm(source.room, (total * source.power) / whole);
   }
   if (glow.size === 0 && !sky) return null;
   const areas = volumeRoomAreas(scene);
@@ -272,16 +293,56 @@ function volumeLampPieces(place) {
 /** Вынос точки света от стены у лампы на стене: свет выходит из лица, а не из стены. */
 const VOLUME_LAMP_WALL_OUT_MM = 30;
 
+const volumeLampRoomMemo = new WeakMap();
+
 /**
- * Откуда лампа светит: `[{at, power, dir, wall, beam}]` — точка, сила, куда
- * смотрит (`null` — во все стороны), нормаль своей стены у лампы на стене и
- * ширина пятна. Линия даёт точку на каждый метр.
+ * **Помещения лампы** — по ключу на источник в том же порядке
+ * (`volumeLampSources`): у точечной один, у ломаной — свой у каждого куска
+ * (таск 248). `null` в списке — кусок, под которым нет никакого помещения:
+ * лента вышла за контур дома.
+ *
+ * Сдвиг пробы берётся у общей двери `volumeMarkProbe`: у лампы на стене проба
+ * отступает от лица внутрь комнаты, иначе точка на кромке контура отвечала бы
+ * жребием. Куску нужен тот же отступ, только от его точки, — поэтому сдвиг
+ * считается разностью, а не повторением числа.
+ *
+ * Считается **раз на место метки**: проба на кусок дороже пробы на метку
+ * (лента в 8 м — восемь проб), а `volumeLiveLight` зовут на каждый кадр.
+ * Место живёт в сцене, сцена пересобирается на правку объекта — значит и
+ * память стареет вместе с геометрией.
+ */
+function volumeLampRooms(scene, place) {
+  if (!scene || !place || !place.anchor) return null;
+  const held = volumeLampRoomMemo.get(place);
+  if (held) return held;
+  const at = volumeMarkProbe(place);
+  const shift = { x: at.x - place.anchor.x, y: at.y - place.anchor.y };
+  const keyAt = (point) => volumeRoomKeyAt(scene, { x: point.x + shift.x, y: point.y + shift.y });
+  const keys = place.kind === "line" ? volumeLampPieces(place).map((piece) => keyAt(piece.at)) : [keyAt(place.anchor)];
+  volumeLampRoomMemo.set(place, keys);
+  return keys;
+}
+
+/**
+ * Откуда лампа светит: `[{at, power, dir, wall, beam, room}]` — точка, сила,
+ * куда смотрит (`null` — во все стороны), нормаль своей стены у лампы на
+ * стене, ширина пятна и помещение, которое этот источник светит. Линия даёт
+ * точку на каждый метр.
  *
  * Куда смотрит, решает посадка (`place.mode`): потолочная — вниз, на стене —
  * от стены, висящая в воздухе выше человека — вниз, ниже — во все стороны
  * (подсветка пола, ночник у кровати).
+ *
+ * **Помещение лампы заводится только здесь** (таск 248): и свет комнаты
+ * (`volumeLiveLight`), и пятна с тенями (`volumeLampDecalsBuild`) берут его у
+ * источника, а второго места, где лампа узнаёт своё помещение, в сборке нет.
+ * Сцена нужна ровно за этим — без неё помещение остаётся неизвестным.
+ * У ломаной помещение решает кусок, а `roomId` метки отвечает за саму метку
+ * (журнал, сценарии, «чем управляет»): лента по периметру светит два
+ * помещения, в каком бы из них ни стояла её метка. У точечной всё как было —
+ * `roomId` метки старше пробы, так решено сборкой сценариев.
  */
-export function volumeLampSources(place) {
+export function volumeLampSources(place, scene = null, roomId = null) {
   if (!place || !place.anchor) return [];
   const down = { x: 0, y: 0, z: -1 };
   const wall = place.mode === VOLUME_MARK_WALL && place.face && place.face.normal ? place.face.normal : null;
@@ -290,20 +351,23 @@ export function volumeLampSources(place) {
     wall
       ? { x: point.x + wall.x * VOLUME_LAMP_WALL_OUT_MM, y: point.y + wall.y * VOLUME_LAMP_WALL_OUT_MM, z: point.z }
       : point;
+  const rooms = volumeLampRooms(scene, place);
   if (place.kind === "line") {
-    return volumeLampPieces(place).map((piece) => ({
+    return volumeLampPieces(place).map((piece, index) => ({
       at: lift(piece.at),
       power: piece.power,
       dir: out(piece.at.z),
       wall,
       beam: 1,
+      room: (rooms && rooms[index]) || null,
     }));
   }
   const size = volumeLampFace(place);
   const most = Math.max(size.widthMm, size.heightMm);
   // Точечный и подсветка светят узко, люстра — широко.
   const beam = most <= 120 ? 0.6 : most >= 400 ? 1.15 : 1;
-  return [{ at: lift(place.anchor), power: volumeLampPower(place), dir: out(place.anchor.z), wall, beam }];
+  const room = roomId || (rooms && rooms[0]) || null;
+  return [{ at: lift(place.anchor), power: volumeLampPower(place), dir: out(place.anchor.z), wall, beam, room }];
 }
 
 /**
@@ -656,12 +720,15 @@ function volumeLampDecalsBuild(scene, ids, live) {
     const place = volumeMarkPlace(scene, markId);
     if (!place) continue;
     const item = live.get(markId);
-    const key = (item && item.roomId) || volumeRoomKeyAt(scene, volumeMarkProbe(place));
-    if (!key) continue;
-    for (const source of volumeLampSources(place)) {
-      const blockers = volumeShadeBlockers(occluders, key, source.at);
+    // Помещение у каждого источника своё (таск 248): пятно ложится на грани
+    // помещения **этого куска**, и загораживатели тени берутся там же. Кусок
+    // без помещения (лента вышла за контур) пятна не кладёт — грани улицы
+    // пятен не носят; прежде из-за такого куска гасла вся лента.
+    for (const source of volumeLampSources(place, scene, item && item.roomId)) {
+      if (!source.room) continue;
+      const blockers = volumeShadeBlockers(occluders, source.room, source.at);
       const shade = blockers.length > 0 ? { blockers, shades, planes: new Map() } : null;
-      volumeSourcePools(decals, byRoom, ways, key, markId, source, shade);
+      volumeSourcePools(decals, byRoom, ways, source.room, markId, source, shade);
     }
   }
   volumeShadeMix(decals, shades);
