@@ -69,7 +69,7 @@ import {
   volumeStep,
   volumeWallLintels,
 } from "../src/volume.js";
-import { volumeAimAt, volumeStanceKey } from "../src/panels/volume.js";
+import { volumeAimAt, volumeFieldDown, volumeStanceKey } from "../src/panels/volume.js";
 
 // ——— стенд ———————————————————————————————————————————————————————————————
 //
@@ -445,6 +445,28 @@ test("прицел идёт за курсором, а под захваченн�
   assert.equal(volumeAimAt(box, { locked: false, pointer: null, view: "around" }), null);
   // А курсор в обзоре целится: E действует на то, на что показывают.
   assert.deepEqual(volumeAimAt(box, { locked: false, pointer: { x: 7, y: 9 }, view: "around" }), { x: 7, y: 9 });
+});
+
+// ——— чьё нажатие: холста или кнопки поверх него (таск 249, G376) ——————————
+//
+// Дефект, из-за которого щелчок под захваченной мышью не делал ничего: страж
+// требовал, чтобы нажатие пришло **в холст**, а под захватом браузер адресует
+// события мыши захваченному узлу — стойке. Поворот головы не начинался, и до
+// разбора щелчка дело не доходило.
+
+test("под захватом нажатие принадлежит полю, даже если пришло мимо холста", () => {
+  // Свободная мышь: полем считается только холст — кнопки и вопрос лежат
+  // своими узлами поверх него.
+  assert.equal(volumeFieldDown({ onCanvas: true, locked: false, touch: false }), true);
+  assert.equal(volumeFieldDown({ onCanvas: false, locked: false, touch: false }), false);
+  // Захват: холст событий не получает вовсе, и попасть по кнопке нечем —
+  // курсора не видно, целится середина поля.
+  assert.equal(volumeFieldDown({ onCanvas: false, locked: true, touch: false }), true);
+  assert.equal(volumeFieldDown({ onCanvas: true, locked: true, touch: false }), true);
+  // Палец под послабление не идёт: захвата он не просит, узел под касанием у
+  // него настоящий, и кнопку пальцем жмут именно по кнопке.
+  assert.equal(volumeFieldDown({ onCanvas: false, locked: true, touch: true }), false);
+  assert.equal(volumeFieldDown({ onCanvas: true, locked: true, touch: true }), true);
 });
 
 

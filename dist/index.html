@@ -5283,8 +5283,8 @@ gap: 6px;
 position: absolute;
 left: 50%;
 top: 50%;
-width: 11px;
-height: 11px;
+width: 12px;
+height: 12px;
 margin: -6px 0 0 -6px;
 pointer-events: none;
 z-index: 3;
@@ -5299,21 +5299,22 @@ cursor: none;
 .volume__aim::after {
 content: "";
 position: absolute;
-filter: drop-shadow(0 0 1px rgba(13, 17, 23, 0.95));
+filter: drop-shadow(1px 0 0 rgba(13, 17, 23, 0.9)) drop-shadow(-1px 0 0 rgba(13, 17, 23, 0.9))
+drop-shadow(0 1px 0 rgba(13, 17, 23, 0.9)) drop-shadow(0 -1px 0 rgba(13, 17, 23, 0.9));
 }
 .volume__aim::before {
 left: 0;
 top: 5px;
-width: 11px;
-height: 1px;
-background: linear-gradient(to right, #fff 0 4px, transparent 4px 7px, #fff 7px 11px);
+width: 12px;
+height: 2px;
+background: linear-gradient(to right, #fff 0 4px, transparent 4px 8px, #fff 8px 12px);
 }
 .volume__aim::after {
 left: 5px;
 top: 0;
-width: 1px;
-height: 11px;
-background: linear-gradient(to bottom, #fff 0 4px, transparent 4px 7px, #fff 7px 11px);
+width: 2px;
+height: 12px;
+background: linear-gradient(to bottom, #fff 0 4px, transparent 4px 8px, #fff 8px 12px);
 }
 .volume__fps {
 position: absolute;
@@ -66249,6 +66250,10 @@ return { kind: "none", id: null };
 function volumeAltKey(event) {
 return event.key === "Alt" || event.code === "AltLeft" || event.code === "AltRight";
 }
+function volumeFieldDown({ onCanvas, locked, touch }) {
+if (onCanvas) return true;
+return Boolean(locked) && !touch;
+}
 function volumeDoorsAfterAll(doors, open) {
 const list = doors || [];
 const closed = list.filter((id) => !open.has(id));
@@ -68077,9 +68082,10 @@ aroundTurn(yaw, pitch);
 function onPointerDown(event) {
 if (event.ctrlKey) crouchStop();
 if (event.button !== 0) return;
-if (event.target !== node) return;
+const touch = event.pointerType === "touch";
+if (!volumeFieldDown({ onCanvas: event.target === node, locked, touch })) return;
 stage.focus({ preventScroll: true });
-if (event.pointerType === "touch") {
+if (touch) {
 setTouch(true);
 touchDown(event);
 return;
