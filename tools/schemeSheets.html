@@ -51,6 +51,27 @@
         return blob ? createImageBitmap(blob) : null;
       }
 
+      /**
+       * Состояние дома для кадра: названные светильники схемы горят в полную
+       * силу. Вид устройства спрашивается у модели (`markDeviceOf`), а не
+       * угадывается по коду типа.
+       */
+      function liveOf(project, schemeId, lamps) {
+        const all = String(lamps).toLowerCase() === "all";
+        const want = new Set(String(lamps).split(",").map((item) => item.trim().toLowerCase()).filter(Boolean));
+        const live = new Map();
+        for (const mark of project.marks || []) {
+          if (mark.schemeId !== schemeId) continue;
+          const device = model.markDeviceOf(project, mark.id);
+          if (!device || device.kind !== "light") continue;
+          const type = model.findType(project, mark.typeId);
+          const sign = String((type && type.code) || "") + String(mark.number || "");
+          if (!all && !want.has(sign.toLowerCase())) continue;
+          live.set(mark.id, { on: true, level: 1, kind: "light", roomId: mark.roomId || null, fade: 1 });
+        }
+        return live;
+      }
+
       /** Стороны стен схемы: все, одного помещения или одной стены по имени. */
       function sidesOf(project, schemeId, job) {
         const plan = model.elevationPlan(project, schemeId);
@@ -187,7 +208,11 @@
             volume.volumeDrawBackdrop(ctx, box, camera, mood, scene.landMm);
             const shadow = volume.volumeShadowFaces(scene.shadowBoxes, mood.shadow);
             const spots = volume.volumeSunSpotFaces(scene.sunSpots, mood.shadow);
-            const polygons = volume.volumeFrame(scene, camera, box, [...shadow, ...spots], mood.tint);
+            // Горящие лампы (`--lamps`): дом тут не запускается — светом
+            // занимается тот же `volumeLiveLight`, которому окно объёма отдаёт
+            // состояние дома. Снимок приёмки со светом иначе не повторить.
+            const light = job.lamps ? volume.volumeLiveLight(scene, liveOf(project, schemeId, job.lamps), { physical: job.flatLight !== true, tint: mood.tint }) : null;
+            const polygons = volume.volumeFrame(scene, camera, box, [...shadow, ...spots], mood.tint, light);
             volume.volumeDraw(ctx, polygons);
             volume.volumeDrawBackdropNear(ctx, box, camera, mood, scene.landMm);
             const png = await exporter.viewPng(canvas, exporter.EXPORT_SCREEN_DPI);
