@@ -28,6 +28,7 @@ import {
   addRoom,
   addScheme,
   addToGroup,
+  addType,
   addWall,
   createProject,
   planFractionToMm,
@@ -689,6 +690,122 @@ test("потолочное место в ряд не идёт: метка без
   const bodies = bodiesOf(scene, project, markId);
   assert.equal(bodies.length, 1, "потолочную метку разобрали на тела, хотя ряда у неё нет");
   assert.equal(bodies[0].place.mode, "ceiling", "потолочная метка перестала быть потолочной");
+});
+
+// ——— высота от соседей по блоку (таск 245, требование G369) ————————————————
+//
+// Слова заказчика: «Брать высоту соседей по блоку». «Высоты нет» значит в
+// сборке две разные вещи, и правило их различает (`sizesSaidNothing`): о
+// потолочной вещи сказан габарит и умолчано о посадке, а о вещи без заданной
+// высоты не сказано ничего. На объекте заказчика такой случай один —
+// «кабель-канал» в блоке розеток на 300: ни у него, ни у его типа не заполнено
+// ни одно поле.
+
+/**
+ * Тип, о котором не сказано ничего: «высота не задана», а не «её не бывает».
+ *
+ * Заводится руками и без фигуры — иначе размеры ему проставит миграция
+ * `fillTypeSizes` (по коду, потом по форме знака), и случай заказчика не
+ * воспроизведётся. Его «кабель-канал» и «не определено» уцелели ровно потому,
+ * что сборка не узнала ни код, ни знак.
+ */
+function bareType(project) {
+  const added = addType(project, {
+    code: "КК",
+    name: "Кабель канал",
+    categoryId: typeByCode(project, "ВП").categoryId,
+    shape: null,
+  });
+  assert.equal(added.type.sizes, undefined, "у заведённого руками типа не должно быть размеров");
+  return added.project;
+}
+
+test("пост без заданной высоты встаёт в рамку с соседями", () => {
+  const scene = roomScene();
+  // Настоящий случай заказчика: три поста в ряд, у третьего высоты нет вовсе.
+  // До таска он оставался под потолком и молча; теперь это третий пост рамки.
+  const project = bareType(scene.project);
+  // Высоты розеток — **из справочника**, а не свои: именно так они стоят у
+  // заказчика. Это важно, и вот почему: лестница `markSizes` делится по группе
+  // только **своей** высотой соседа (G203), значит от типа она не достаётся, и
+  // без этой правки третий пост остался бы без высоты.
+  const block = blockOnWall(scene, project, [
+    { code: "Р", atMm: 1900 },
+    { code: "Р", atMm: 1990 },
+    { code: "КК", atMm: 2080 },
+  ]);
+  const bodies = block.ids.map((id) => bodyOf(scene, block.project, id, "пост блока"));
+  const axis = 1990;
+  assert.deepEqual(
+    bodies.map((body) => body.alongMm),
+    [axis - VOLUME_BLOCK_STEP_MM, axis, axis + VOLUME_BLOCK_STEP_MM],
+    "пост без высоты не встал в ряд с соседями",
+  );
+  assert.deepEqual(
+    bodies.map((body) => body.heightMm),
+    [300, 300, 300],
+    "пост без высоты не взял высоту блока",
+  );
+  assert.equal(bodies[2].place.mode, "wall", "пост без высоты остался висеть под потолком");
+});
+
+test("высоты у соседей разные — пост берёт нижнюю", () => {
+  const scene = roomScene();
+  // Розетка 300 и выключатель 900: пост без высоты садится в нижнюю рамку — то
+  // же правило, по которому высотой группы делится `markSizes` (G203, а та — за
+  // развёрткой G191: «одну высоту указывать у группы по нижнему объекту»).
+  const project = bareType(scene.project);
+  const block = blockOnWall(scene, project, [
+    { code: "Р", atMm: 1900 },
+    { code: "В", atMm: 1990 },
+    { code: "КК", atMm: 2080 },
+  ]);
+  const bodies = block.ids.map((id) => bodyOf(scene, block.project, id, "пост блока"));
+  assert.deepEqual(
+    bodies.map((body) => body.heightMm),
+    [300, 900, 300],
+    "пост без высоты взял не нижнюю высоту блока",
+  );
+  const axis = 1990;
+  assert.deepEqual(
+    bodies.map((body) => body.alongMm),
+    [axis - 35.5, axis, axis + 35.5],
+    "рамка из двух и одиночка над ней собрались не по середине блока",
+  );
+});
+
+test("потолочной метке высоту соседей не дают: о габарите сказано", () => {
+  const scene = roomScene();
+  // Точечный светильник: габарит у типа есть (90 × 90), высоты нет — такая вещь
+  // потолочная, и на стену к розетке она не уезжает. Розетка от этого тоже не
+  // двигается: рамки из одного поста не бывает.
+  //
+  // Высота розетки — из справочника. Задай ей **свою** — и светильник возьмёт
+  // 300 у лестницы `markSizes` (G203) ещё до всякой рамки: это картинка,
+  // которая была до таска, и трогать её нельзя (G68).
+  const block = blockOnWall(scene, scene.project, [
+    { code: "Р", atMm: 1900 },
+    { code: "Т", atMm: 1990 },
+  ]);
+  const socket = bodyOf(scene, block.project, block.ids[0], "розетка");
+  const light = bodyOf(scene, block.project, block.ids[1], "светильник");
+  assert.equal(light.place.mode, "ceiling", "потолочный светильник уехал на стену к розетке");
+  assert.equal(socket.alongMm, 1900, "розетка поехала из-за потолочной соседки");
+});
+
+test("блоку делиться нечем: высоты нет ни у одного поста", () => {
+  const scene = roomScene();
+  // Настоящий случай заказчика: две метки «не определено» в одном блоке. Брать
+  // высоту не у кого, и обе остаются там, где стояли, — дотасковая картинка.
+  const project = bareType(scene.project);
+  const block = blockOnWall(scene, project, [
+    { code: "КК", atMm: 1900 },
+    { code: "КК", atMm: 1990 },
+  ]);
+  for (const id of block.ids) {
+    const body = bodyOf(scene, block.project, id, "пост без высоты");
+    assert.equal(body.place.mode, "ceiling", "пост блока без единой высоты уехал на стену");
+  }
 });
 
 test("фильтр блок не двигает: спрятанная розетка не уносит соседку", () => {
