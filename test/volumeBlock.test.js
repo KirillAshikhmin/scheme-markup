@@ -46,6 +46,7 @@ import {
   updateMark,
   updateType,
 } from "../src/model.js";
+import { markSpareLine } from "../src/markSpare.js";
 import { VOLUME_BLOCK_STEP_MM, volumeScene } from "../src/volume.js";
 
 // ——— стенд: комната 4 × 3 м, северная стена по оси X ————————————————————————
@@ -995,6 +996,174 @@ test("столбик из разных высот лица не теряет: к
     [80, 80, 150],
     "столбику урезали длину лица",
   );
+  // И по вертикали целое: до соседнего яруса 600 и 800 мм, резать нечем
+  // (домофон справочника — 150 × 200).
+  assert.deepEqual(
+    block.ids.map((id) => bodyOf(scene, block.project, id, "пост столбика").place.frame.heightMm),
+    [80, 80, 200],
+    "столбику урезали высоту лица",
+  );
+});
+
+// ——— теснота по вертикали (таск 247, требование G374) ————————————————————————
+//
+// Счёт по четырём объектам заказчика нашёл четыре пары тел **одного блока**,
+// заходящих друг на друга: человек собирал столбик руками и вписывал высоты
+// через 70 мм при лице 80 (Р16 · Р17 · Р18 на 2000 · 2070 · 2140 и две пары
+// 900 / 970). Рамок такой блок не образует (таск 241), и шаг лица ему таск 246
+// не резал. Мера у таска 247 одна с таском 246 и названа по-человечески: посту
+// достаётся столько, сколько есть **до соседнего яруса блока**, — в рамке это
+// ровно модуль, и её кадр не меняется ни пикселем.
+
+/** Низ и верх тела: по ним и видно, налезают ли соседи друг на друга. */
+const spanOf = (body) => [body.place.frame.bottomMm, body.place.frame.bottomMm + body.place.frame.heightMm];
+
+test("столбик с высотами через 70 мм: лицо режется до соседа, а не до модуля", () => {
+  const scene = roomScene();
+  // Настоящий случай заказчика «Резеденция ГЧ» (Р16 · Р17 · Р18): три розетки
+  // 80 × 80 на одной вертикали через 70 мм — по 10 мм внахлёст.
+  const block = blockOnWall(
+    scene,
+    scene.project,
+    [
+      { code: "Р", atMm: 1900, heightMm: 2000 },
+      { code: "Р", atMm: 1990, heightMm: 2070 },
+      { code: "Р", atMm: 2080, heightMm: 2140 },
+    ],
+    { side: "down" },
+  );
+  const bodies = block.ids.map((id) => bodyOf(scene, block.project, id, "пост столбика"));
+  // Лицо — до соседа (70), а не до модуля (71): модулем остался бы миллиметр
+  // нахлёста. Длина вдоль стены цела: колонка у столбика одна.
+  for (const body of bodies) assert.deepEqual(faceOf(body), [80, 70], "пост столбика налезает на соседа");
+  // Середина тела осталась записанной высотой: по ней целится рамка выделения и
+  // приходит стрелка связи, и уехать ей нельзя — поэтому мера симметрична, а не
+  // своя у каждой стороны. Это и есть ответ на «пост с двумя соседями».
+  assert.deepEqual(
+    bodies.map((body) => body.heightMm),
+    [2000, 2070, 2140],
+    "середина тела уехала с записанной высоты",
+  );
+  const spans = bodies.map(spanOf);
+  assert.deepEqual(spans, [[1965, 2035], [2035, 2105], [2105, 2175]], "тела столбика стоят не вплотную");
+});
+
+test("рамки блока на 900 и 970: лицо режется разницей их чисел", () => {
+  const scene = roomScene();
+  // Пара заказчика «Данково 60» (ВВ6 × В6) и «Резеденция ГЧ» (ВВ3 × ВВ4):
+  // высоты заданы через 70 мм, и рамка над рамкой стоит теснее своего лица.
+  // Высоты заданных чисел сборка не подгоняет под модуль — это слово человека
+  // (G68), — а режет лицо до того, что есть.
+  const block = blockOnWall(
+    scene,
+    scene.project,
+    [
+      { code: "В", atMm: 1900, heightMm: 900 },
+      { code: "В", atMm: 1990, heightMm: 970 },
+    ],
+    { side: "down" },
+  );
+  const bodies = block.ids.map((id) => bodyOf(scene, block.project, id, "пост рамки"));
+  for (const body of bodies) assert.deepEqual(faceOf(body), [80, 70], "рамки блока налезают друг на друга");
+  assert.deepEqual(bodies.map(spanOf), [[865, 935], [935, 1005]], "рамки блока стоят не вплотную");
+});
+
+test("рамка с рядами меряется своим модулем, а не далёкой соседкой", () => {
+  const scene = roomScene();
+  // Многорядная рамка на 900 и одиночная розетка на 300 в одном блоке: у рамки
+  // мера своя (ряды через 71), у розетки соседа ближе 529 мм нет — и её лицо
+  // остаётся записанным. Этим и держится обещание «кадр таска 246 не изменился»:
+  // мера общая на рамку, а не на блок.
+  const frame = frameOnWall(scene, scene.project, [
+    { atMm: 1990, deepMm: -1380 },
+    { atMm: 2080, deepMm: -1380 },
+    { atMm: 1900, deepMm: -1280 },
+    { atMm: 1990, deepMm: -1280 },
+    { atMm: 2080, deepMm: -1280 },
+    { atMm: 1990, deepMm: -1180, code: "Р", heightMm: 300 },
+  ]);
+  const posts = frame.ids.slice(0, 5).map((id) => bodyOf(scene, frame.project, id, "пост рамки"));
+  for (const body of posts) assert.deepEqual(faceOf(body), [71, 71], "пост многорядной рамки потерял модуль");
+  const socket = bodyOf(scene, frame.project, frame.ids[5], "розетка 300");
+  assert.deepEqual(faceOf(socket), [80, 80], "одиночной рамке блока урезали лицо из-за далёкой соседки");
+});
+
+// ——— пост без размеров — модуль (таск 247, требование G373) ——————————————————
+//
+// Слова заказчика о работе таска 246: «исправь хвосты». Первый — «Кабель-канал»
+// в блоке розеток: размеров у него нет ни одного, габарит лица берётся у
+// изображения объекта (400 × 500), и в рамке он стоял полуметровым столбом.
+// Честная догадка в рамке подрозетников — пост, а не силуэт вещи во всю стену.
+
+/**
+ * Тип, о котором не сказано ничего, но со знаком: ровно «Кабель-канал»
+ * заказчика (`shape: "square-bolt"`). Знак даёт изображение «appliance» с
+ * габаритом 400 × 500, а размеров у типа нет — и миграция `fillTypeSizes` этой
+ * формы не узнаёт, поэтому случай воспроизводится как на объекте.
+ */
+function boltType(project) {
+  const added = addType(project, {
+    code: "КК",
+    name: "Кабель канал",
+    categoryId: typeByCode(project, "ВП").categoryId,
+    shape: "square-bolt",
+  });
+  assert.equal(added.type.sizes, undefined, "у заведённого руками типа не должно быть размеров");
+  return added.project;
+}
+
+test("пост блока без размеров рисуется модулем, а не габаритом изображения", () => {
+  const scene = roomScene();
+  const project = boltType(scene.project);
+  const block = blockOnWall(scene, project, [
+    { code: "Р", atMm: 1900 },
+    { code: "Р", atMm: 1990 },
+    { code: "КК", atMm: 2080 },
+  ]);
+  const post = bodyOf(scene, block.project, block.ids[2], "пост без размеров");
+  assert.deepEqual(faceOf(post), [71, 71], "пост без размеров остался полуметровым столбом");
+  // Из блока он не выкинут (G369 таска 245): высоту взял у соседей и стоит в
+  // рамке третьей колонкой.
+  assert.equal(post.heightMm, 300, "пост без размеров потерял высоту соседей");
+  assert.equal(post.alongMm, 1990 + VOLUME_BLOCK_STEP_MM, "пост без размеров вышел из рамки");
+  // А соседи остались при своём: модуль — ответ о вещи, а не о рамке.
+  assert.deepEqual(
+    faceOf(bodyOf(scene, block.project, block.ids[0], "розетка")),
+    [71, 80],
+    "соседняя розетка потеряла лицо",
+  );
+});
+
+test("одинокая метка без размеров запасной габарит не теряет", () => {
+  const scene = roomScene();
+  // Про неё договорено отдельно (G226, G230) и менять это не надо: рамки у неё
+  // нет, подменять габарит нечем, и строка о догадке говорит о том же.
+  const project = boltType(scene.project);
+  const lone = putOnWall(scene, project, "КК", 1900);
+  const bare = updateMark(lone.project, lone.markId, { heightAboveFloor: 300 }).project;
+  const body = bodyOf(scene, bare, lone.markId, "одинокая вещь без размеров");
+  assert.deepEqual(faceOf(body), [400, 500], "одинокой метке подменили габарит модулем");
+});
+
+test("строка о запасном габарите называет модуль поста", () => {
+  const scene = roomScene();
+  const project = boltType(scene.project);
+  const block = blockOnWall(scene, project, [
+    { code: "Р", atMm: 1900 },
+    { code: "КК", atMm: 1990 },
+  ]);
+  const built = volumeScene(block.project, scene.schemeId, {});
+  assert.deepEqual(
+    built.spare.map((item) => item.label),
+    ["КК1"],
+    "о догаданном габарите сборка молчит",
+  );
+  assert.equal(built.spare[0].postMm, VOLUME_BLOCK_STEP_MM, "модуль поста не дошёл до строки");
+  const said = markSpareLine(built.spare, { why: true });
+  assert.ok(said.includes("КК1"), said);
+  assert.ok(said.includes(String(VOLUME_BLOCK_STEP_MM)), "строка не назвала модуль: " + said);
+  // Голова строки прежняя: факт «размер догадан» никуда не делся.
+  assert.ok(said.startsWith(markSpareLine(built.spare)), said);
 });
 
 // ——— G68 ———————————————————————————————————————————————————————————————————
