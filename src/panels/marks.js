@@ -32,9 +32,11 @@ import {
   markControlsByChannel,
   markCurtainSide,
   markDimensions,
+  markHasDimensions,
   markIsCurtain,
   markLengthMeters,
   markRoomManual,
+  markSizes,
   markWall,
   markWallAlong,
   markWallManual,
@@ -546,6 +548,9 @@ export function marksRowModel(project, row, options = {}) {
   };
   if (!head.open) return head;
   const controllers = options.controllers instanceof Map ? options.controllers : new Map();
+  // Размеры по лестнице наследования (таск 243): один спрос на строку, и число
+  // с тем, откуда оно, приходят вместе.
+  const sizes = markSizes(project, mark);
   head.fields = {
     number: mark.number,
     equipment: placementsAt(project, mark.id).length,
@@ -553,11 +558,25 @@ export function marksRowModel(project, row, options = {}) {
     roomManual: markRoomManual(mark),
     location: mark.location || "",
     original: mark.original || "",
-    // Размеры — одной строкой: «Д 600 · Ш 400 · В 900 мм» или пусто, если не
-    // задан ни один. По ней кнопка и говорит, заданы ли они, не открывая окна.
-    // Посадка решает, какое из двух полей зовётся высотой (таск 161): у
-    // потолочной люстры «В» стоит у того числа, которое свисает вниз.
-    sizes: markSizesSummary(mark, markAxisSeat(project, mark)),
+    // Размеры — одной строкой: «Д 600 · Ш 400 · В 900 мм». Посадка решает,
+    // какое из двух полей зовётся высотой (таск 161): у потолочной люстры «В»
+    // стоит у того числа, которое свисает вниз.
+    //
+    // **Считается по лестнице, а не по своим полям** (таск 243, G365): строка
+    // показывает то, по чему рисует объём, а унаследованное ставит в скобки —
+    // «Д (80) · Ш (10) · В (80) · от пола (900) мм · из типа». До этого здесь
+    // стояло `markSizesSummary(mark, …)`, и у метки без своих чисел строка
+    // была пуста, хотя справочник их знал. Пусто теперь значит одно: не знает
+    // никто — ни метка, ни блок, ни тип.
+    //
+    // `sizesOwn` — заданы ли размеры **у самой метки**; по нему кнопка берёт
+    // цвет, как «Аксессуар» берёт его по своей настройке. Правило одно: своё
+    // выделено, унаследованное читается. `sizesInherited` — есть ли в строке
+    // хоть одно число в скобках: по нему кнопка добавляет к подсказке, что
+    // скобки значат, и молчит об этом там, где скобок нет.
+    sizes: markSizesSummary(sizes, markAxisSeat(project, mark)),
+    sizesOwn: markHasDimensions(mark),
+    sizesInherited: MARK_DIMENSION_FIELDS.some((field) => sizes[field + "From"] === "type" || sizes[field + "From"] === "group"),
     // Аксессуар метки (таск 03 сценариев): сводка и пометка «своя настройка».
     // Считается из модели на каждый спрос — второй правды о метке здесь нет.
     device: deviceMarkField(project, mark.id),
@@ -1242,10 +1261,18 @@ function mountMarksPanel(host, api) {
     // Размеры метки: третья кнопка того же ряда. Заданные она показывает
     // собой — «Д 600 · Ш 400 · В 900 мм», — как соседние показывают связи и
     // число единиц оборудования.
+    //
+    // **Выделена она своим, а не унаследованным** (таск 243): в скобках стоит
+    // то, что метка берёт у типа или у группы, и красить такую кнопку в цвет
+    // заданного значило бы снова стереть разницу между «я вписал» и «взято из
+    // справочника». Поэтому `is-set` идёт за `sizesOwn` — ровно как у соседней
+    // кнопки аксессуара. Что значат скобки, говорит подсказка.
     const sizesButton = view.fields
       ? uiButton(view.fields.sizes || strings.markSizes.open, {
-          class: "ui-btn ui-btn--wide mark-row__sizes" + (view.fields.sizes ? " is-set" : ""),
-          title: strings.markSizes.onMark,
+          class: "ui-btn ui-btn--wide mark-row__sizes" + (view.fields.sizesOwn ? " is-set" : ""),
+          title: view.fields.sizesInherited
+            ? strings.markSizes.onMark + " · " + strings.markSizes.inheritedTitle
+            : strings.markSizes.onMark,
           on: { click: () => editSizes(mark.id) },
         })
       : null;
