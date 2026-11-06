@@ -7986,6 +7986,7 @@ spare: {
 line: "Нарисованы запасным габаритом: {count} — {list}",
 more: "и ещё {count}",
 why: "Недостающие размеры взяты у габарита изображения объекта, а без изображения — у рамки {side} × {side} мм. Задайте размеры у типа — вещь встанет своей.",
+post: "Пост блока, о котором не сказано ничего, нарисован модулем {side} × {side} мм: в рамке он занимает место подрозетника.",
 },
 elevation: {
 wall: "Стена {name} · {length} мм",
@@ -22733,7 +22734,10 @@ count: named.length,
 list: markNamedList(named, (item) => item.label, "spare.more"),
 });
 if (options.why !== true) return head;
-return head + ". " + text("spare.why", { side: MARK_BOX_FRAME_MM });
+const why = text("spare.why", { side: MARK_BOX_FRAME_MM });
+const post = named.find((item) => item && item.postMm);
+if (!post) return head + ". " + why;
+return head + ". " + why + " " + text("spare.post", { side: post.postMm });
 }
 function markSpareTitle(list) {
 const named = list || [];
@@ -37409,15 +37413,19 @@ if (tier) tier.push(slot);
 else tiers.set(slot.heightMm, [slot]);
 }
 const rows = [];
-const frame = (split, lift) => {
+let frames = 0;
+const frame = (split, lift, baseMm = null) => {
 const columns = volumeBlockColumns(split, along);
+const frameId = frames;
+frames += 1;
 for (let index = 0; index < split.length; index += 1) {
 rows.push({
 posts: split[index],
 aboveMm: lift(index),
 columns,
-tightAlong: columns > 1,
-tightUp: split.length > 1,
+frameId,
+levelMm: baseMm === null ? null : baseMm + lift(index),
+tightAlongMm: columns > 1 ? VOLUME_BLOCK_STEP_MM : null,
 });
 }
 };
@@ -37427,19 +37435,31 @@ frame([list.slice()], () => 0);
 for (const [heightMm, tier] of tiers) {
 const split = volumeBlockFrameRows(tier, onWall && heightMm !== 0);
 const bottom = (split.length - 1) / 2;
-frame(split, (index) => (index - bottom) * VOLUME_BLOCK_STEP_MM);
+frame(split, (index) => (index - bottom) * VOLUME_BLOCK_STEP_MM, heightMm);
 }
 }
-for (const { posts: row, aboveMm, columns, tightAlong, tightUp } of rows) {
+const levels = rows.map((row) => row.levelMm).filter((value) => value !== null);
+const tightUpOf = new Map();
+for (const row of rows) {
+if (row.levelMm === null) continue;
+for (const other of levels) {
+const gap = Math.abs(other - row.levelMm);
+if (!(gap > 0)) continue;
+const own = tightUpOf.get(row.frameId);
+if (own === undefined || gap < own) tightUpOf.set(row.frameId, gap);
+}
+}
+for (const { posts: row, aboveMm, columns, frameId, tightAlongMm } of rows) {
 const half = (columns - 1) / 2;
+const tightUpMm = tightUpOf.has(frameId) ? tightUpOf.get(frameId) : null;
 for (const slot of row) {
 const shift = (slot.column - half) * VOLUME_BLOCK_STEP_MM;
 const seat = onWall
 ? { alongMm: anchor + shift }
 : { x: middle.x + u.x * shift, y: middle.y + u.y * shift };
 if (aboveMm || slot.borrowed) seat.heightMm = slot.heightMm + aboveMm;
-if (onWall && tightAlong) seat.tightAlong = true;
-if (onWall && tightUp) seat.tightUp = true;
+if (onWall && tightAlongMm) seat.tightAlong = tightAlongMm;
+if (onWall && tightUpMm) seat.tightUp = tightUpMm;
 let own = seats.get(slot.markId);
 if (!own) seats.set(slot.markId, (own = []));
 own[slot.index] = seat;
@@ -37455,10 +37475,11 @@ if (path.length === 0) return { markId: mark.id, skip: VOLUME_MARK_NO_POINT };
 const sizes = markSizes(project, mark);
 const markView = volumeMarkView(project, mark);
 const box = markBoxMm({ lengthMm: sizes.length, widthMm: sizes.width }, markView);
-const tight = (sideMm, near) => (near ? Math.min(sideMm, VOLUME_BLOCK_STEP_MM) : sideMm);
-const lengthMm = Math.max(VOLUME_MARK_MIN_MM, tight(box.lengthMm, seat && seat.tightAlong));
-const widthMm = Math.max(VOLUME_MARK_MIN_MM, tight(box.widthMm, seat && seat.tightUp));
 const nothingOwn = box.lengthFrom !== "own" && box.widthFrom !== "own";
+const postMm = seat && typeof seat.alongMm === "number" && nothingOwn ? VOLUME_BLOCK_STEP_MM : null;
+const tight = (sideMm, nearMm) => (nearMm ? Math.min(sideMm, nearMm) : sideMm);
+const lengthMm = Math.max(VOLUME_MARK_MIN_MM, tight(postMm || box.lengthMm, seat && seat.tightAlong));
+const widthMm = Math.max(VOLUME_MARK_MIN_MM, tight(postMm || box.widthMm, seat && seat.tightUp));
 const depthOwn = nothingOwn && sizes.depth === null ? MARK_BOX_FRAME_DEPTH_MM : sizes.depth;
 const depthMm = Math.max(VOLUME_MARK_LIFT_MM, Math.abs(depthOwn || 0));
 const recessed = Number(sizes.depth) < 0;
@@ -37483,6 +37504,7 @@ kind: line ? "line" : "point",
 view,
 curtainSide: MARK_CURTAIN_SIDES.includes(mark.curtainSide) ? mark.curtainSide : null,
 spare: box.guessed,
+postMm,
 model: view ? objectModelChannels(objectModelByKey(view.name), typeChannels(project, mark.typeId)) : null,
 };
 const heightMm = seat && typeof seat.heightMm === "number" ? seat.heightMm : sizes.heightAboveFloor;
@@ -37620,7 +37642,9 @@ break;
 placed.push(place);
 if (place.spare && !spared.has(place.markId)) {
 spared.add(place.markId);
-spare.push({ markId: place.markId, label: place.label });
+const said = { markId: place.markId, label: place.label };
+if (place.postMm) said.postMm = place.postMm;
+spare.push(said);
 }
 }
 }
