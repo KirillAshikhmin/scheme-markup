@@ -14869,10 +14869,12 @@ return Boolean(markWallSideOn(project, mark, wall.id));
 function markAxisSeat(project, mark) {
 return axisSeatOf(markSizes(project, mark).heightAboveFloor, markOnWall(project, mark));
 }
+function sizesSaidNothing(sizes) {
+return MARK_DIMENSION_FIELDS.every((field) => !sizes || sizes[field] === null);
+}
 function typeAxisSeat(type) {
 const sizes = typeSizes(type);
-const said = MARK_DIMENSION_FIELDS.some((field) => sizes[field] !== null);
-if (!said) return MARK_AXIS_UPRIGHT;
+if (sizesSaidNothing(sizes)) return MARK_AXIS_UPRIGHT;
 return axisSeatOf(sizes.heightAboveFloor, false);
 }
 function setTypeSizes(project, typeId, patch) {
@@ -37273,6 +37275,14 @@ best = { length, u: { x: dx / length, y: dy / length } };
 }
 return best ? best.u : { x: 1, y: 0 };
 }
+function volumeBlockSharedHeight(list) {
+let best = null;
+for (const slot of list) {
+if (slot.heightMm === null) continue;
+if (best === null || slot.heightMm < best) best = slot.heightMm;
+}
+return best;
+}
 function volumeBlockMiddle(values) {
 return (Math.min(...values) + Math.max(...values)) / 2;
 }
@@ -37295,7 +37305,7 @@ const gap = sorted[index].deepMm - sorted[index - 1].deepMm;
 if (gap > VOLUME_BLOCK_STEP_MM / 2) rows.push([sorted[index]]);
 else rows[rows.length - 1].push(sorted[index]);
 }
-return rows.length === tier.length ? [tier] : rows;
+return rows.length === tier.length ? [tier] : rows.reverse();
 }
 function volumeBlockSeats(project, marks) {
 const seats = new Map();
@@ -37315,8 +37325,9 @@ if (!mark || mark.kind !== "point" || markIsComment(mark)) continue;
 const points = mark.points || [];
 const group = findGroup(project, mark.groupId);
 if (!group && points.length < 2) continue;
-const heightMm = markSizes(project, mark).heightAboveFloor;
-if (heightMm === null) continue;
+const sizes = markSizes(project, mark);
+const heightMm = sizes.heightAboveFloor;
+if (heightMm === null && !sizesSaidNothing(sizes)) continue;
 const binding = markWall(mark);
 const wall = binding ? findWall(project, binding.wallId) : null;
 const vectors = wall ? wallVectors(wall) : null;
@@ -37346,7 +37357,14 @@ else blocks.set(key, [slot]);
 }
 }
 for (const list of blocks.values()) {
+const sharedMm = volumeBlockSharedHeight(list);
+if (sharedMm === null) continue;
 if (list.length < 2) continue;
+for (const slot of list) {
+if (slot.heightMm !== null) continue;
+slot.heightMm = sharedMm;
+slot.borrowed = true;
+}
 const onWall = list[0].wall;
 const u = onWall ? list[0].u : volumeBlockAxis(list.map((slot) => slot.at));
 const n = onWall ? list[0].n : { x: u.y, y: -u.x };
@@ -37389,7 +37407,7 @@ const shift = (place - half) * VOLUME_BLOCK_STEP_MM;
 const seat = onWall
 ? { alongMm: anchor + shift }
 : { x: middle.x + u.x * shift, y: middle.y + u.y * shift };
-if (aboveMm) seat.heightMm = slot.heightMm + aboveMm;
+if (aboveMm || slot.borrowed) seat.heightMm = slot.heightMm + aboveMm;
 let own = seats.get(slot.markId);
 if (!own) seats.set(slot.markId, (own = []));
 own[slot.index] = seat;
