@@ -35,6 +35,7 @@ import {
 } from "./faces.js";
 import {
   VOLUME_MARK_WALL,
+  VOLUME_ROOM_PROBE_MM,
   volumeBox3,
   volumeMix,
   volumePointInside,
@@ -155,7 +156,7 @@ export function volumeLiveLight(scene, live, options = {}) {
   const areas = volumeRoomAreas(scene);
   const rooms = new Map();
   for (const [key, sum] of sums) rooms.set(key, volumeRoomShare(sum * (physical ? VOLUME_LAMP_BOUNCE : 1), areas.get(key)));
-  if (physical) volumeLampSpill(scene, rooms);
+  volumeLampSpill(scene, rooms, physical);
   // Цвет света комнаты — только у комнат, где горит цветная лампа: у
   // остальных свет тот же тёплый белый, и карта о них молчит.
   let roomRgb = null;
@@ -216,10 +217,13 @@ export const VOLUME_LAMP_AREA_MM2 = 20e6;
 const VOLUME_LAMP_ROOM_MM2 = 15e6;
 /** Доля света комнаты, которая при физическом свете остаётся отражённой. */
 export const VOLUME_LAMP_BOUNCE = 0.6;
-/** Доля отражённого света, которую открытый дверной проём отдаёт соседке. */
-export const VOLUME_LAMP_SPILL = 0.3;
-/** Площадь проёма, при которой соседке отдаётся вся эта доля, — дверь 900 × 2100. */
-const VOLUME_LAMP_SPILL_MM2 = 1.9e6;
+/**
+ * Площадь открытой границы, за которой стена свет уже не держит вовсе (таск
+ * 250): граница шире этого сводит светлоту двух помещений в одну, и перепада
+ * на ней не остаётся. Число выбрано по двери 900 × 2100: у неё доля выходит
+ * прежние 0,3 (`VOLUME_LAMP_SPILL` до правки), и картинка у дверей та же.
+ */
+const VOLUME_LAMP_OPEN_MM2 = 6.3e6;
 
 /**
  * **Сила лампы** по её размеру: подсветка картины в сорок миллиметров слабее
@@ -398,18 +402,33 @@ function volumeRoomAreas(scene) {
 }
 
 /**
- * Проёмы своего этажа между двумя помещениями — для света ламп. Берутся у
- * солнца (`scene.sunSpots`): те же проёмы с теми же сторонами, шторами и
- * дверями, второго обхода стен нет. Помещение стороны узнаётся по контуру
- * (`pointsMm` — тот же массив, что у `scene.rooms`), и потому проёмы чужих
- * этажей стопки сюда не попадают: их контуры — другие массивы.
+ * **Открытые границы своего этажа между двумя помещениями** — один список на
+ * весь свет: сквозь них лампа кладёт клин соседке, небо светит её окнами, а
+ * отражённый свет перетекает (`volumeLampSpill`). Второго места, где сборка
+ * решает «тут свет проходит», нет.
+ *
+ * Границы двух видов, и оба — не выдумка этой двери:
+ *
+ *   — **проём в стене** — берётся у солнца (`scene.sunSpots`): те же проёмы с
+ *     теми же сторонами, шторами и дверями, второго обхода стен нет. Сюда же
+ *     попадает стеклянная стена — для света она проём во всю стену
+ *     (`volumeLightOpenings`). Помещение стороны узнаётся по контуру
+ *     (`pointsMm` — тот же массив, что у `scene.rooms`), и потому проёмы чужих
+ *     этажей стопки сюда не попадают: их контуры — другие массивы;
+ *   — **граница без стены** (таск 250, `volumeRoomBorders`) — два помещения
+ *     плана лежат встык, и стены между ними нет вовсе. Проёмом она не
+ *     записана, потому что проёма и нет: нечему держать свет.
+ *
+ * Дыра двусвета в этом списке не нужна: в стопке она уже носит ключ помещения
+ * под собой (`volumeStackRoomAlias`), то есть для света это одно помещение.
  */
 function volumeLampOpenings(scene) {
+  if (!scene) return [];
   const held = volumeOpeningMemo.get(scene);
   if (held) return held;
   const byPoints = new Map();
   for (const room of (scene && scene.rooms) || []) byPoints.set(room.pointsMm, volumeRoomKey(room));
-  const out = [];
+  const out = volumeRoomBorders(scene);
   for (const spot of (scene && scene.sunSpots) || []) {
     const left = spot.left ? byPoints.get(spot.left.pointsMm) : undefined;
     const right = spot.right ? byPoints.get(spot.right.pointsMm) : undefined;
@@ -441,21 +460,173 @@ function volumeLampOpenings(scene) {
 
 const volumeOpeningMemo = new WeakMap();
 
-/** Отражённый свет через открытые проёмы — один шаг, «чуть»: доля соседки. */
-function volumeLampSpill(scene, rooms) {
+/** Короче этого кромка границей не считается: это примыкание угла, а не проход. */
+const VOLUME_BORDER_MIN_MM = 300;
+/** Насколько кромки двух контуров могут разойтись и всё ещё быть одной линией. */
+const VOLUME_BORDER_GAP_MM = 20;
+
+const volumeBorderMemo = new WeakMap();
+
+/**
+ * **Граница без стены** (таск 250): две кромки контуров разных помещений лежат
+ * на одной прямой внахлёст, и стены на этом месте нет. Ответ — те же записи,
+ * что у проёма (`volumeLampOpenings`), только толщины у границы нет: «косяк»
+ * у неё один, и бока клина режет он.
+ *
+ * Зачем это есть. Квартира-студия и гостиная с кухней размечаются **одним
+ * помещением на зону**, и между зонами ничего не стоит. Свету это граница
+ * только на бумаге: пол и потолок идут сквозь неё не прерываясь, и перепад
+ * светлоты на ней — та самая ступенька, которой «в жизни не бывает».
+ *
+ * Стену спрашивают у `scene.walls` — у тех же полос, которыми стоит дом. Стена
+ * с проёмом границей не становится: её проёмы уже перечислены солнцем, и
+ * закрытая дверь в ней свет держит, как держала.
+ *
+ * Считается раз на сцену: контуры и стены живут в ней, а пересобирается она на
+ * правку объекта.
+ */
+function volumeRoomBorders(scene) {
+  if (!scene) return [];
+  const held = volumeBorderMemo.get(scene);
+  if (held) return held;
+  const out = [];
+  const rooms = scene.rooms || [];
+  const floors = volumeRoomFloors(scene);
+  const edges = [];
+  for (const room of rooms) {
+    const key = volumeRoomKey(room);
+    const base = key === null ? undefined : floors.get(key);
+    if (!key || base === undefined) continue;
+    const points = room.pointsMm || [];
+    for (let index = 0; index < points.length; index += 1) {
+      const a = points[index];
+      const b = points[(index + 1) % points.length];
+      const length = Math.hypot(b.x - a.x, b.y - a.y);
+      if (!(length > VOLUME_BORDER_MIN_MM)) continue;
+      edges.push({ key, base, top: base + (Number(room.heightMm) || 0), a, u: { x: (b.x - a.x) / length, y: (b.y - a.y) / length }, length });
+    }
+  }
+  for (let one = 0; one < edges.length; one += 1) {
+    for (let two = one + 1; two < edges.length; two += 1) {
+      const here = edges[one];
+      const there = edges[two];
+      // Разные помещения одного этажа: у этажей стопки свой пол, и кромки,
+      // совпавшие в плане, лежат на разной высоте.
+      if (here.key === there.key || Math.abs(here.base - there.base) > 1) continue;
+      // Одна прямая: направления сонаправлены или встречны, и поперечный
+      // разбег кромок меньше допуска.
+      if (Math.abs(here.u.x * there.u.y - here.u.y * there.u.x) > 1e-3) continue;
+      const dx = there.a.x - here.a.x;
+      const dy = there.a.y - here.a.y;
+      if (Math.abs(dy * here.u.x - dx * here.u.y) > VOLUME_BORDER_GAP_MM) continue;
+      const start = dx * here.u.x + dy * here.u.y;
+      const end = start + (there.u.x * here.u.x + there.u.y * here.u.y) * there.length;
+      const from = Math.max(0, Math.min(start, end));
+      const to = Math.min(here.length, Math.max(start, end));
+      if (!(to - from > VOLUME_BORDER_MIN_MM)) continue;
+      const middle = { x: here.a.x + here.u.x * (from + to) / 2, y: here.a.y + here.u.y * (from + to) / 2 };
+      if (volumeWallHere(scene, middle)) continue;
+      // Левая сторона — та, куда смотрит нормаль: у проёма это сторона стены,
+      // здесь — та же рука. Спрашивается общей дверью, а не выводится из
+      // порядка точек контура.
+      const n = { x: -here.u.y, y: here.u.x };
+      const aside = volumeRoomKeyAt(scene, { x: middle.x + n.x * VOLUME_ROOM_PROBE_MM, y: middle.y + n.y * VOLUME_ROOM_PROBE_MM });
+      const left = aside === there.key ? there.key : here.key;
+      const right = left === here.key ? there.key : here.key;
+      // Потолок у границы — нижний из двух: выше него соседку уже закрывает
+      // перепад перекрытий.
+      const top = Math.min(here.top, there.top);
+      const base = here.base;
+      if (!(top > base)) continue;
+      const corner = (along, z) => ({ x: here.a.x + here.u.x * along, y: here.a.y + here.u.y * along, z });
+      const face = [corner(from, base), corner(to, base), corner(to, top), corner(from, top)];
+      out.push({
+        left,
+        right,
+        // Толщины у границы нет — обе стороны «косяка» это она сама.
+        plus: face,
+        minus: face,
+        u: { x: here.u.x, y: here.u.y },
+        n,
+        areaMm2: (to - from) * (top - base),
+        shut: false,
+        // Косяков у границы нет, и смягчать их нечего (`volumeSourcePools`):
+        // клин сквозь неё — это пятно самой лампы, продолженное в соседку.
+        // Резким у него остаётся только край у стены, в которую граница
+        // упирается, — такую тень угол стены и правда кладёт.
+        jambs: false,
+      });
+    }
+  }
+  volumeBorderMemo.set(scene, out);
+  return out;
+}
+
+const volumeFloorMemo = new WeakMap();
+
+/** Отметка пола помещения — по его же граням пола: своего числа у помещения сцены нет. */
+function volumeRoomFloors(scene) {
+  if (!scene) return new Map();
+  const held = volumeFloorMemo.get(scene);
+  if (held) return held;
+  const out = new Map();
+  for (const face of scene.faces || []) {
+    if (!face.room || face.line || !volumeIsFloor(face)) continue;
+    const z = face.p[0].z;
+    const was = out.get(face.room);
+    if (was === undefined || z < was) out.set(face.room, z);
+  }
+  volumeFloorMemo.set(scene, out);
+  return out;
+}
+
+/** Стоит ли на этой точке плана стена — по тем же полосам, которыми стоит дом. */
+function volumeWallHere(scene, at) {
+  for (const wall of scene.walls || []) {
+    const dx = at.x - wall.a.x;
+    const dy = at.y - wall.a.y;
+    const along = dx * wall.u.x + dy * wall.u.y;
+    if (along < -wall.half || along > wall.len + wall.half) continue;
+    if (Math.abs(dx * wall.n.x + dy * wall.n.y) <= wall.half + VOLUME_BORDER_GAP_MM) return true;
+  }
+  return false;
+}
+
+/**
+ * **Отражённый свет через открытую границу** — один шаг: светлота соседки
+ * подтягивается к светлоте помещения на долю открытости границы.
+ *
+ * Доля — площадь границы против `VOLUME_LAMP_OPEN_MM2`: у двери 900 × 2100 это
+ * прежние 0,3 («чуть»), у границы без стены и у стеклянной стены — единица, и
+ * тогда у двух помещений светлота **одна**, то есть перепада на границе не
+ * остаётся вовсе (таск 250). Закрытая дверь сюда не попадает, и у неё перепад
+ * прежний.
+ *
+ * **Подтягивается, а не прибавляется.** Светлее соседки помещение от перелива
+ * не становится ни при какой доле: свет перетекает в темноту, а не копится на
+ * границе светлой полосой. Прежнее правило складывало доли и две одинаково
+ * светлые комнаты у открытой двери делало светлее каждой из них.
+ */
+function volumeLampSpill(scene, rooms, physical = true) {
   if (rooms.size === 0) return;
   const base = new Map(rooms);
   for (const way of volumeLampOpenings(scene)) {
     if (way.shut) continue;
-    const share = VOLUME_LAMP_SPILL * Math.min(1, way.areaMm2 / VOLUME_LAMP_SPILL_MM2);
+    // Без физического света свет комнаты заливает её целиком, и проём в стене
+    // его наружу не выпускает — так эта отметка и задумана. Границу без стены
+    // она не отменяет: держать свет там нечему, и два помещения одного
+    // пространства остаются одним (таск 250).
+    if (!physical && way.jambs !== false) continue;
+    const share = Math.min(1, way.areaMm2 / VOLUME_LAMP_OPEN_MM2);
     for (const [from, to] of [
       [way.left, way.right],
       [way.right, way.left],
     ]) {
-      const light = base.get(from);
-      if (!(light > 0)) continue;
-      const was = rooms.get(to) || 0;
-      rooms.set(to, 1 - (1 - was) * (1 - light * share));
+      const light = base.get(from) || 0;
+      const was = base.get(to) || 0;
+      if (!(light > was)) continue;
+      const now = was + (light - was) * share;
+      if (now > (rooms.get(to) || 0)) rooms.set(to, now);
     }
   }
 }
@@ -880,19 +1051,51 @@ function volumeSourcePools(decals, byRoom, ways, key, id, source, shade = null) 
     if (!into) continue;
     // Ближняя к источнику сторона проёма и дальняя: пучок срезают обе, как
     // срезают его косяки.
-    const near = way.left === key ? way.plus : way.minus;
-    const far = way.left === key ? way.minus : way.plus;
-    const share = 1 / VOLUME_LAMP_SOFT_STEPS;
-    for (let step = 0; step < VOLUME_LAMP_SOFT_STEPS; step += 1) {
+    const plus = way.jambs === false ? volumeOpenTop(way.plus, source.at.z) : way.plus;
+    const minus = way.plus === way.minus ? plus : way.jambs === false ? volumeOpenTop(way.minus, source.at.z) : way.minus;
+    const near = way.left === key ? plus : minus;
+    const far = way.left === key ? minus : plus;
+    // Точек столько, сколько есть что смягчать: у проёма в стене это полутень
+    // косяка, у границы без стены косяка нет вовсе (таск 250), и шесть точек
+    // вместо одной стоили бы вшестеро дороже ни за чем.
+    const steps = way.jambs === false ? 1 : VOLUME_LAMP_SOFT_STEPS;
+    const share = 1 / steps;
+    for (let step = 0; step < steps; step += 1) {
       // Точки — по диагонали: у каждой своя доля и вдоль проёма, и по высоте,
       // и мягкими выходят и бока клина (тень косяков), и его дальний край
       // (тень перемычки).
-      const shift = ((step + 0.5) / VOLUME_LAMP_SOFT_STEPS - 0.5) * 2 * VOLUME_LAMP_SOFT_MM;
+      const shift = ((step + 0.5) / steps - 0.5) * 2 * VOLUME_LAMP_SOFT_MM;
       const at = { x: source.at.x + way.u.x * shift, y: source.at.y + way.u.y * shift, z: source.at.z - shift / 2 };
       const point = { ...source, at };
       for (const host of byRoom.get(into) || []) volumeLampPool(decals, host, id, point, { near, far, n: way.n }, share);
     }
   }
+}
+
+/**
+ * Во сколько раз дальше самой границы ложится тень её «перемычки»
+ * (`volumeOpenTop`). Двадцать — это за пределами любой комнаты.
+ */
+const VOLUME_BORDER_REACH = 20;
+
+/**
+ * **Рамка границы без перемычки** (таск 250). Проём в стене режет пучок
+ * четырьмя кромками, и верхняя — перемычка — кладёт тень дальнего края
+ * (`volumeLampBeam`). У границы без стены перемычки нет: сверху там потолок
+ * комнаты, он тени не кладёт, а общая дверь проекции на точке вровень с лампой
+ * спотыкается (луч уходит мимо плоскости) и гасила бы клин целиком.
+ *
+ * Поэтому верх рамки срезается до высоты, с которой его тень ложится в
+ * `VOLUME_BORDER_REACH` раз дальше самой границы, — то есть дальше любой
+ * комнаты. Бока рамки от этого не двигаются: тень вертикальной кромки — прямая,
+ * и проходит она через те же точки.
+ */
+function volumeOpenTop(face, lampZ) {
+  let low = Infinity;
+  for (const point of face) low = Math.min(low, point.z);
+  if (!(lampZ > low)) return face;
+  const cap = lampZ - (lampZ - low) / VOLUME_BORDER_REACH;
+  return face.map((point) => (point.z > cap ? { x: point.x, y: point.y, z: cap } : point));
 }
 
 /**
@@ -982,7 +1185,9 @@ function volumeLampPool(decals, host, markId, source, way, share = 1, shade = nu
   }
   if (way) {
     const middle = volumeMiddleOf(host.p);
-    for (const edge of [way.near, way.far]) {
+    // У границы без стены (таск 250) толщины нет, и обе стороны «косяка» —
+    // одна и та же рамка: резать по ней дважды нечего.
+    for (const edge of way.near === way.far ? [way.near] : [way.near, way.far]) {
       // Сторона проёма режет пучок только тому, что лежит **за ней**: порог и
       // откос внутри толщины стены лампа видит сквозь ближнюю сторону, а
       // дальняя от них по ту же руку, что лампа. Без этого правила половина

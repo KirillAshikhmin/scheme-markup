@@ -39543,7 +39543,7 @@ if (glow.size === 0 && !sky) return null;
 const areas = volumeRoomAreas(scene);
 const rooms = new Map();
 for (const [key, sum] of sums) rooms.set(key, volumeRoomShare(sum * (physical ? VOLUME_LAMP_BOUNCE : 1), areas.get(key)));
-if (physical) volumeLampSpill(scene, rooms);
+volumeLampSpill(scene, rooms, physical);
 let roomRgb = null;
 for (const [key, mix] of paints) {
 if (!mix[4] || !(mix[3] > 0)) continue;
@@ -39574,8 +39574,7 @@ const VOLUME_LAMP_POWER_MAX = 1.6;
 const VOLUME_LAMP_AREA_MM2 = 20e6;
 const VOLUME_LAMP_ROOM_MM2 = 15e6;
 const VOLUME_LAMP_BOUNCE = 0.6;
-const VOLUME_LAMP_SPILL = 0.3;
-const VOLUME_LAMP_SPILL_MM2 = 1.9e6;
+const VOLUME_LAMP_OPEN_MM2 = 6.3e6;
 function volumeLampPower(place) {
 if (!place) return 0.8;
 if (place.kind === "line") {
@@ -39685,11 +39684,12 @@ volumeAreaMemo.set(scene, areas);
 return areas;
 }
 function volumeLampOpenings(scene) {
+if (!scene) return [];
 const held = volumeOpeningMemo.get(scene);
 if (held) return held;
 const byPoints = new Map();
 for (const room of (scene && scene.rooms) || []) byPoints.set(room.pointsMm, volumeRoomKey(room));
-const out = [];
+const out = volumeRoomBorders(scene);
 for (const spot of (scene && scene.sunSpots) || []) {
 const left = spot.left ? byPoints.get(spot.left.pointsMm) : undefined;
 const right = spot.right ? byPoints.get(spot.right.pointsMm) : undefined;
@@ -39716,20 +39716,112 @@ volumeOpeningMemo.set(scene, out);
 return out;
 }
 const volumeOpeningMemo = new WeakMap();
-function volumeLampSpill(scene, rooms) {
+const VOLUME_BORDER_MIN_MM = 300;
+const VOLUME_BORDER_GAP_MM = 20;
+const volumeBorderMemo = new WeakMap();
+function volumeRoomBorders(scene) {
+if (!scene) return [];
+const held = volumeBorderMemo.get(scene);
+if (held) return held;
+const out = [];
+const rooms = scene.rooms || [];
+const floors = volumeRoomFloors(scene);
+const edges = [];
+for (const room of rooms) {
+const key = volumeRoomKey(room);
+const base = key === null ? undefined : floors.get(key);
+if (!key || base === undefined) continue;
+const points = room.pointsMm || [];
+for (let index = 0; index < points.length; index += 1) {
+const a = points[index];
+const b = points[(index + 1) % points.length];
+const length = Math.hypot(b.x - a.x, b.y - a.y);
+if (!(length > VOLUME_BORDER_MIN_MM)) continue;
+edges.push({ key, base, top: base + (Number(room.heightMm) || 0), a, u: { x: (b.x - a.x) / length, y: (b.y - a.y) / length }, length });
+}
+}
+for (let one = 0; one < edges.length; one += 1) {
+for (let two = one + 1; two < edges.length; two += 1) {
+const here = edges[one];
+const there = edges[two];
+if (here.key === there.key || Math.abs(here.base - there.base) > 1) continue;
+if (Math.abs(here.u.x * there.u.y - here.u.y * there.u.x) > 1e-3) continue;
+const dx = there.a.x - here.a.x;
+const dy = there.a.y - here.a.y;
+if (Math.abs(dy * here.u.x - dx * here.u.y) > VOLUME_BORDER_GAP_MM) continue;
+const start = dx * here.u.x + dy * here.u.y;
+const end = start + (there.u.x * here.u.x + there.u.y * here.u.y) * there.length;
+const from = Math.max(0, Math.min(start, end));
+const to = Math.min(here.length, Math.max(start, end));
+if (!(to - from > VOLUME_BORDER_MIN_MM)) continue;
+const middle = { x: here.a.x + here.u.x * (from + to) / 2, y: here.a.y + here.u.y * (from + to) / 2 };
+if (volumeWallHere(scene, middle)) continue;
+const n = { x: -here.u.y, y: here.u.x };
+const aside = volumeRoomKeyAt(scene, { x: middle.x + n.x * VOLUME_ROOM_PROBE_MM, y: middle.y + n.y * VOLUME_ROOM_PROBE_MM });
+const left = aside === there.key ? there.key : here.key;
+const right = left === here.key ? there.key : here.key;
+const top = Math.min(here.top, there.top);
+const base = here.base;
+if (!(top > base)) continue;
+const corner = (along, z) => ({ x: here.a.x + here.u.x * along, y: here.a.y + here.u.y * along, z });
+const face = [corner(from, base), corner(to, base), corner(to, top), corner(from, top)];
+out.push({
+left,
+right,
+plus: face,
+minus: face,
+u: { x: here.u.x, y: here.u.y },
+n,
+areaMm2: (to - from) * (top - base),
+shut: false,
+jambs: false,
+});
+}
+}
+volumeBorderMemo.set(scene, out);
+return out;
+}
+const volumeFloorMemo = new WeakMap();
+function volumeRoomFloors(scene) {
+if (!scene) return new Map();
+const held = volumeFloorMemo.get(scene);
+if (held) return held;
+const out = new Map();
+for (const face of scene.faces || []) {
+if (!face.room || face.line || !volumeIsFloor(face)) continue;
+const z = face.p[0].z;
+const was = out.get(face.room);
+if (was === undefined || z < was) out.set(face.room, z);
+}
+volumeFloorMemo.set(scene, out);
+return out;
+}
+function volumeWallHere(scene, at) {
+for (const wall of scene.walls || []) {
+const dx = at.x - wall.a.x;
+const dy = at.y - wall.a.y;
+const along = dx * wall.u.x + dy * wall.u.y;
+if (along < -wall.half || along > wall.len + wall.half) continue;
+if (Math.abs(dx * wall.n.x + dy * wall.n.y) <= wall.half + VOLUME_BORDER_GAP_MM) return true;
+}
+return false;
+}
+function volumeLampSpill(scene, rooms, physical = true) {
 if (rooms.size === 0) return;
 const base = new Map(rooms);
 for (const way of volumeLampOpenings(scene)) {
 if (way.shut) continue;
-const share = VOLUME_LAMP_SPILL * Math.min(1, way.areaMm2 / VOLUME_LAMP_SPILL_MM2);
+if (!physical && way.jambs !== false) continue;
+const share = Math.min(1, way.areaMm2 / VOLUME_LAMP_OPEN_MM2);
 for (const [from, to] of [
 [way.left, way.right],
 [way.right, way.left],
 ]) {
-const light = base.get(from);
-if (!(light > 0)) continue;
-const was = rooms.get(to) || 0;
-rooms.set(to, 1 - (1 - was) * (1 - light * share));
+const light = base.get(from) || 0;
+const was = base.get(to) || 0;
+if (!(light > was)) continue;
+const now = was + (light - was) * share;
+if (now > (rooms.get(to) || 0)) rooms.set(to, now);
 }
 }
 }
@@ -39981,16 +40073,27 @@ for (const host of byRoom.get(key) || []) volumeLampPool(decals, host, id, sourc
 for (const way of ways) {
 const into = way.left === key ? way.right : way.right === key ? way.left : null;
 if (!into) continue;
-const near = way.left === key ? way.plus : way.minus;
-const far = way.left === key ? way.minus : way.plus;
-const share = 1 / VOLUME_LAMP_SOFT_STEPS;
-for (let step = 0; step < VOLUME_LAMP_SOFT_STEPS; step += 1) {
-const shift = ((step + 0.5) / VOLUME_LAMP_SOFT_STEPS - 0.5) * 2 * VOLUME_LAMP_SOFT_MM;
+const plus = way.jambs === false ? volumeOpenTop(way.plus, source.at.z) : way.plus;
+const minus = way.plus === way.minus ? plus : way.jambs === false ? volumeOpenTop(way.minus, source.at.z) : way.minus;
+const near = way.left === key ? plus : minus;
+const far = way.left === key ? minus : plus;
+const steps = way.jambs === false ? 1 : VOLUME_LAMP_SOFT_STEPS;
+const share = 1 / steps;
+for (let step = 0; step < steps; step += 1) {
+const shift = ((step + 0.5) / steps - 0.5) * 2 * VOLUME_LAMP_SOFT_MM;
 const at = { x: source.at.x + way.u.x * shift, y: source.at.y + way.u.y * shift, z: source.at.z - shift / 2 };
 const point = { ...source, at };
 for (const host of byRoom.get(into) || []) volumeLampPool(decals, host, id, point, { near, far, n: way.n }, share);
 }
 }
+}
+const VOLUME_BORDER_REACH = 20;
+function volumeOpenTop(face, lampZ) {
+let low = Infinity;
+for (const point of face) low = Math.min(low, point.z);
+if (!(lampZ > low)) return face;
+const cap = lampZ - (lampZ - low) / VOLUME_BORDER_REACH;
+return face.map((point) => (point.z > cap ? { x: point.x, y: point.y, z: cap } : point));
 }
 function volumeLampFacing(n, source, distanceMm) {
 if (source.wall && n.x * source.wall.x + n.y * source.wall.y > 0.9 && distanceMm < 300) return 1;
@@ -40048,7 +40151,7 @@ if (Math.hypot(gapX, gapY) > reach) return;
 }
 if (way) {
 const middle = volumeMiddleOf(host.p);
-for (const edge of [way.near, way.far]) {
+for (const edge of way.near === way.far ? [way.near] : [way.near, way.far]) {
 if (way.n) {
 const sideOf = (point) => (point.x - edge[0].x) * way.n.x + (point.y - edge[0].y) * way.n.y;
 const here = sideOf(middle);

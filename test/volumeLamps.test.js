@@ -77,7 +77,9 @@ function lampStand(options = {}) {
     { x: -4000, y: 1500 },
   ];
   outer.forEach((point, index) => wall(point, outer[(index + 1) % outer.length]));
-  const middle = wall({ x: 0, y: -1500 }, { x: 0, y: 1500 });
+  // Перегородки между комнатами может не быть вовсе (таск 250): тогда контуры
+  // лежат встык, и граница у них — только на плане.
+  const middle = options.noWall ? null : wall({ x: 0, y: -1500 }, { x: 0, y: 1500 });
   const rooms = {};
   const room = (key, name, from, to) => {
     const made = addRoom(project, name);
@@ -94,19 +96,21 @@ function lampStand(options = {}) {
       ].map(fr),
     }).project;
   };
-  room("living", "Гостиная", -3900, -100);
-  room("hall", "Коридор", 100, 1900);
-  const door = addOpening(project, {
-    wallId: middle,
-    kind: "door",
-    atMm: 1000,
-    widthMm: 900,
-    heightMm: 2100,
-    heightAboveFloorMm: 0,
-    hinge: "start",
-    swing: "left",
-  });
-  project = door.project;
+  room("living", "Гостиная", -3900, middle ? -100 : 0);
+  room("hall", "Коридор", middle ? 100 : 0, 1900);
+  const door = middle
+    ? addOpening(project, {
+        wallId: middle,
+        kind: "door",
+        atMm: 1000,
+        widthMm: 900,
+        heightMm: 2100,
+        heightAboveFloorMm: 0,
+        hinge: "start",
+        swing: "left",
+      })
+    : null;
+  if (door) project = door.project;
   const marks = {};
   const put = (key, code, at, heightAboveFloor = null) => {
     const type = project.markTypes.find((item) => item.code === code);
@@ -120,15 +124,16 @@ function lampStand(options = {}) {
   // Подсветка картины — на западной стене, над картиной.
   put("picture", "ПС", { x: -3900, y: 0 }, 1800);
   put("hallLamp", "С", { x: 1000, y: 0 });
-  const openDoorIds = options.doorOpen ? new Set([door.opening.id]) : new Set();
-  return { project, schemeId, rooms, marks, doorId: door.opening.id, openDoorIds };
+  const doorId = door ? door.opening.id : null;
+  const openDoorIds = options.doorOpen && doorId ? new Set([doorId]) : new Set();
+  return { project, schemeId, rooms, marks, doorId, openDoorIds };
 }
 
 let standMemo = null;
 const stand = () => standMemo || (standMemo = lampStand());
 
 const sceneOf = (box, open = false) =>
-  volumeScene(box.project, box.schemeId, { roofOff: true, openDoorIds: open ? new Set([box.doorId]) : new Set() });
+  volumeScene(box.project, box.schemeId, { roofOff: true, openDoorIds: open && box.doorId ? new Set([box.doorId]) : new Set() });
 
 /** Состояние дома: `{ключ: яркость 0…1}` — горит, остальные лампы выключены. */
 function liveOf(box, lit) {
@@ -653,4 +658,103 @@ test("точечная лампа считается как считалась: 
   assert.ok(rooms.has(box.rooms.living) && rooms.has(box.rooms.hall));
   // Без сцены помещения не бывает: спрашивать его не у чего.
   assert.equal(volumeLampSources(place)[0].room, null);
+});
+
+// ——— граница без стены (таск 250) ————————————————————————————————————————
+//
+// Слова заказчика по снимку таска 248: «давай поправим что бы не было таких
+// резких переходов между помещениями. в жизни так не бывает».
+//
+// Стенд тот же, гостиная и коридор, но перегородки между ними нет: контуры
+// лежат встык по x = 0. Так размечают студию и гостиную с кухней — зона на
+// помещение, и между зонами ничего не стоит.
+
+const borderStandMemo = [];
+const borderStand = () => borderStandMemo[0] || (borderStandMemo[0] = lampStand({ noWall: true }));
+
+test("граница без стены: светлота у двух помещений одна — перепада на ней не остаётся", () => {
+  const box = borderStand();
+  const scene = sceneOf(box);
+  const light = volumeLiveLight(scene, liveOf(box, { lamp: 1 }), { physical: true });
+  const living = light.rooms.get(box.rooms.living);
+  const hall = light.rooms.get(box.rooms.hall);
+  assert.ok(living > 0.2, "лампа не светит и свою комнату: " + living);
+  assert.ok(Math.abs(hall - living) < 1e-9, "перепад на границе без стены остался: " + living + " против " + hall);
+  // И это не «обе тёмные»: перелив поднял соседку до комнаты, а не комнату
+  // опустил. Светлота комнаты — ровно та, что даёт её собственная лампа.
+  const own = volumeRoomShare(volumeLampPower(volumeMarkPlace(scene, box.marks.lamp)) * VOLUME_LAMP_BOUNCE, 3900 * 2800);
+  assert.ok(Math.abs(living - own) < 1e-9, "у самой комнаты светлота изменилась: " + living + " против " + own);
+});
+
+/** Сколько света кладут на точку пола кольца одной лампы: `1 − П(1 − доля)`. */
+function floorCoverAt(light, markId, at) {
+  const inside = (poly) => {
+    let on = false;
+    for (let index = 0, back = poly.length - 1; index < poly.length; back = index, index += 1) {
+      const a = poly[index];
+      const b = poly[back];
+      if (a.y > at.y !== b.y > at.y && at.x < ((b.x - a.x) * (at.y - a.y)) / (b.y - a.y) + a.x) on = !on;
+    }
+    return on;
+  };
+  let keep = 1;
+  for (const [host, list] of light.decals) {
+    if (host.rgb !== VOLUME_FLOOR_RGB || !inside(host.p)) continue;
+    for (const ring of list) if (ring.markId === markId && inside(ring.p)) keep *= 1 - ring.alpha;
+  }
+  return 1 - keep;
+}
+
+test("граница без стены: пятно лампы переходит в соседку, а не обрывается по кромке контура", () => {
+  const box = borderStand();
+  const light = volumeLiveLight(sceneOf(box), liveOf(box, { lamp: 1 }), { physical: true });
+  const floorRings = (room) =>
+    [...light.decals.entries()]
+      .filter(([host]) => host.room === room && host.rgb === VOLUME_FLOOR_RGB)
+      .flatMap(([, list]) => list)
+      .filter((ring) => ring.markId === box.marks.lamp);
+  assert.ok(floorRings(box.rooms.living).length > 0, "лампа не светит пол своей комнаты");
+  assert.ok(floorRings(box.rooms.hall).length > 0, "сквозь границу без стены пятно не легло");
+  // Переходит, а не заливает ровно: у границы светло, вглубь соседки темнее.
+  const near = floorCoverAt(light, box.marks.lamp, { x: 200, y: 0 });
+  const far = floorCoverAt(light, box.marks.lamp, { x: 1800, y: 0 });
+  assert.ok(near > 0.05, "сразу за границей света нет: " + near);
+  assert.ok(far < near * 0.75, "свет в соседке не затухает: у границы " + near + ", в глубине " + far);
+});
+
+test("стена с закрытой дверью — не открытая граница: перепад остался", () => {
+  const box = stand();
+  const shut = volumeLiveLight(sceneOf(box, false), liveOf(box, { lamp: 1 }), { physical: true });
+  const open = volumeLiveLight(sceneOf(box, true), liveOf(box, { lamp: 1 }), { physical: true });
+  assert.equal(shut.rooms.get(box.rooms.hall) || 0, 0, "сквозь закрытую дверь свет перетёк");
+  const living = shut.rooms.get(box.rooms.living);
+  // Открытая дверь — «чуть»: доля площади проёма, а не равенство.
+  const through = open.rooms.get(box.rooms.hall);
+  assert.ok(through > 0, "сквозь открытую дверь свет не перетёк");
+  assert.ok(through < living * 0.45, "дверь 900 × 2100 пропустила как открытая граница: " + through + " при " + living);
+});
+
+test("перелив не делает соседку светлее помещения и не копится полосой на границе", () => {
+  const box = borderStand();
+  const scene = sceneOf(box);
+  // Обе комнаты светят одинаково — подтягивать нечего, светлота не меняется.
+  const both = volumeLiveLight(scene, liveOf(box, { lamp: 1, hallLamp: 1 }), { physical: true });
+  const alone = volumeLiveLight(scene, liveOf(box, { lamp: 1, hallLamp: 1 }), { physical: true });
+  for (const key of [box.rooms.living, box.rooms.hall]) {
+    assert.ok(both.rooms.get(key) <= Math.max(alone.rooms.get(box.rooms.living), alone.rooms.get(box.rooms.hall)) + 1e-9);
+  }
+  // Светлее своего источника соседка не становится ни при какой границе.
+  const one = volumeLiveLight(scene, liveOf(box, { lamp: 1 }), { physical: true });
+  assert.ok(one.rooms.get(box.rooms.hall) <= one.rooms.get(box.rooms.living) + 1e-9);
+});
+
+test("без физического света граница без стены всё равно одна комната, а дверь — нет", () => {
+  const border = borderStand();
+  const flat = volumeLiveLight(sceneOf(border), liveOf(border, { lamp: 1 }), { physical: false });
+  assert.ok(Math.abs(flat.rooms.get(border.rooms.hall) - flat.rooms.get(border.rooms.living)) < 1e-9, "без отметки граница без стены разорвала свет");
+  // А вот проём в стене без физического света свет не выпускает — так эта
+  // отметка и задумана: лампа заливает свою комнату целиком.
+  const walled = stand();
+  const door = volumeLiveLight(sceneOf(walled, true), liveOf(walled, { lamp: 1 }), { physical: false });
+  assert.equal(door.rooms.get(walled.rooms.hall) || 0, 0, "без физического света свет вышел в открытую дверь");
 });
