@@ -28151,7 +28151,7 @@ function libHashOf(value) {
 const hash = value && typeof value === "object" && typeof value.hash === "string" ? value.hash.trim().toLowerCase() : "";
 return SCENARIO_LIB_HASH_RE.test(hash) ? hash : "";
 }
-function libEntryOf(item) {
+function libEntryOf(item, current) {
 const hash = libHashOf(item);
 const file = item && typeof item.file === "string" ? item.file.trim() : "";
 if (!hash || !file) return null;
@@ -28162,6 +28162,7 @@ kind: item.kind === "global" ? "global" : "logic",
 hash,
 size: Number.isFinite(item.size) ? Number(item.size) : 0,
 file,
+current,
 });
 }
 function scenarioLibIndexRead(json) {
@@ -28174,9 +28175,11 @@ return new Map();
 }
 }
 const list = data && typeof data === "object" && Array.isArray(data.scripts) ? data.scripts : [];
+const said = data && typeof data === "object" && Array.isArray(data.current);
+const current = said ? new Set(data.current.filter((hash) => typeof hash === "string").map((hash) => hash.trim().toLowerCase())) : null;
 const out = new Map();
 for (const item of list) {
-const entry = item && typeof item === "object" ? libEntryOf(item) : null;
+const entry = item && typeof item === "object" ? libEntryOf(item, current === null ? null : current.has(libHashOf(item))) : null;
 if (entry) out.set(entry.hash, entry);
 }
 return out;
@@ -28211,15 +28214,25 @@ function scenarioLibNewer(ref, index) {
 const own = ref && typeof ref === "object" ? ref : null;
 const name = own && typeof own.name === "string" ? own.name : "";
 if (!name) return null;
-const rank = libVersionRank(own.version);
-if (rank < 0) return null;
+const hash = libHashOf(own);
 const map = index instanceof Map ? index : scenarioLibIndexRead(index);
+const rank = libVersionRank(own.version);
+const kin = [...map.values()].filter((entry) => entry.name === name && entry.hash !== hash);
 let best = null;
-for (const entry of map.values()) {
-if (entry.name !== name || libVersionRank(entry.version) <= rank) continue;
+if (rank >= 0) {
+for (const entry of kin) {
+if (libVersionRank(entry.version) <= rank) continue;
 if (!best || libVersionRank(entry.version) > libVersionRank(best.version)) best = entry;
 }
-return best;
+}
+if (best) return best;
+return (
+kin.find((entry) => {
+if (entry.current !== true) return false;
+const theirs = libVersionRank(entry.version);
+return rank < 0 || theirs < 0 || theirs >= rank;
+}) || null
+);
 }
 let libIndexMap = null;
 let libIndexText = "";
@@ -65698,7 +65711,7 @@ const newer = libIndex ? scenarioLibNewer(lib, libIndex) : null;
 if (!newer) return lines;
 const row = uiEl("li", { class: "scn-script__lib-newer" }, [
 uiEl("span", { text: strings.scenarioLib.newer }),
-uiEl("span", { class: "scn-script__lib-hint", text: text("scenarioLib.newerHint", { version: lib.version || "—", next: newer.version }) }),
+uiEl("span", { class: "scn-script__lib-hint", text: text("scenarioLib.newerHint", { version: lib.version || "—", next: newer.version || "—" }) }),
 ]);
 if (editable) {
 row.append(
