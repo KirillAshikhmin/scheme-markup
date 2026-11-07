@@ -17,7 +17,7 @@
 // выделенная метка уже показывает свою связную группу (`canvasFrameLinks`,
 // таски 79 и 84). Правило от раскладки не зависит, и в просмотре работает так
 // же — карточке остаётся только назвать связи словами.
-import { PANEL_IDS, appAllows, registerPanel } from "../app.js";
+import { PANEL_IDS, appAllows, appKind, registerPanel } from "../app.js";
 import {
   MARK_KINDS,
   MARK_ORDER_BACK,
@@ -112,11 +112,15 @@ export function markCardState(state, collapsed = false) {
  * Что показывает карточка. Чистая функция: поля решаются здесь, а не в разметке,
  * и проверяются без браузера.
  *
+ * `viewer` — карточку читает заказчик на странице просмотра (G19): рабочего
+ * комментария интегратора в ней нет, остальное — название, тип, помещение,
+ * чем управляет, размеры и высота — как всегда.
+ *
  * Пустые поля выпадают — на телефоне карточка из восьми строк «—» закрыла бы
  * пол-плана. Остаётся голова: обозначение, код и название типа; по ним метку
  * узнают, даже когда больше о ней ничего не записано.
  */
-export function markCardModel(project, markId) {
+export function markCardModel(project, markId, { viewer = false } = {}) {
   if (!project || !markId) return null;
   const mark = findMark(project, markId);
   if (!mark) return null;
@@ -157,7 +161,9 @@ export function markCardModel(project, markId) {
   }
   add(strings.marks.room, room ? room.name : "");
   add(strings.marks.location, fields.location);
-  add(strings.marks.comment, fields.original);
+  // Комментарий метки — рабочая запись интегратора; заказчику, смотрящему
+  // объект со страницы просмотра, он не показывается (G19).
+  if (!viewer) add(strings.marks.comment, fields.original);
   // Длина по плану — там же, где остальные поля, и из той же `marksRowModel`.
   // Пустая (нет масштаба или метка точечная) строка выпадает, как все пустые.
   add(strings.scale.lengthLabel, fields.lengthText);
@@ -425,7 +431,7 @@ function mountMarkCard(host, api) {
     const model =
       mode === MARK_CARD_NONE || !canvasOnScreen(state)
         ? null
-        : markCardModel(state.project, state.selectedMarkIds[0]);
+        : markCardModel(state.project, state.selectedMarkIds[0], { viewer: appKind() === "view" });
     card.hidden = !model;
     dropDevice();
     // В просмотре карточка показывает метку целиком и стоит колонкой; на

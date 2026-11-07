@@ -222,3 +222,17 @@ test("колонка прячется и возвращается по одно�
   assert.deepEqual(panelsAfterToggle(["left"], "верх", true), ["left"]);
   assert.deepEqual(PANEL_SIDES, ["left", "right"]);
 });
+
+test("карточка для страницы просмотра: рабочего комментария интегратора нет, размеры и помещение на месте (G19)", () => {
+  const made = scene();
+  let project = updateMark(made.project, made.lamp.id, { original: "Проверить кабель до монтажа", roomId: made.roomId }).project;
+  project = setMarkDimensions(project, made.lamp.id, { widthMm: 80, heightMm: 120 }).project;
+  const names = (card) => card.rows.map((row) => row.label);
+  const own = markCardModel(project, made.lamp.id);
+  assert.ok(names(own).includes(strings.marks.comment), "интегратор свой комментарий видит");
+  const viewer = markCardModel(project, made.lamp.id, { viewer: true });
+  assert.ok(!names(viewer).includes(strings.marks.comment));
+  assert.ok(!viewer.rows.some((row) => row.value.includes("Проверить кабель")));
+  assert.ok(names(viewer).includes(strings.marks.room));
+  assert.ok(names(viewer).includes(strings.markSizes.open), "размеры и высота остаются");
+});

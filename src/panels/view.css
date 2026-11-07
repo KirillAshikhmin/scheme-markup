@@ -1,0 +1,226 @@
+/* ——— страница просмотра объекта (таск 02 просмотра) ———————————————————
+   Слот объекта (`panels/viewStart.js`) и окно «Сценарии и журнал»
+   (`panels/viewScenarios.js`). Правила работают только на странице просмотра:
+   в «Разметке» этих узлов нет. Слой `#view-start` описан в `styles.css`. */
+
+/* Открывать файл и пустую подсказку здесь ведёт слот объекта: кнопка панели
+   файла спросила бы «новым объектом или вместо текущего», а страница держит
+   один объект и сама решает, молча заменять или спросить (G22). */
+#app[data-app="view"] #file-actions,
+#app[data-app="view"] #canvas-empty {
+  display: none;
+}
+
+/* ——— шапка: имя, дата, сценарии, меню ————————————————————————————— */
+.view-head {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  gap: 10px;
+  min-width: 0;
+  margin-left: 12px;
+}
+
+.view-head[hidden] {
+  display: none;
+}
+
+.view-head__name {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.view-head__date {
+  flex: none;
+  color: var(--panel-muted, #8b949e);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.view-head__scenarios {
+  flex: none;
+  margin-left: auto;
+}
+
+.view-menu {
+  position: relative;
+  flex: none;
+}
+
+.view-menu__list {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 220px;
+  padding: 4px;
+  border: 1px solid var(--panel-line);
+  border-radius: 8px;
+  background: var(--panel-bg);
+  box-shadow: 0 12px 32px rgba(1, 4, 9, 0.5);
+}
+
+.view-menu__list[hidden] {
+  display: none;
+}
+
+.view-menu__item {
+  justify-content: flex-start;
+  text-align: left;
+}
+
+/* ——— пустая страница и строки поверх поля ———————————————————————————— */
+.view-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  max-width: 360px;
+  padding: 20px 24px;
+  border: 1px solid var(--panel-line);
+  border-radius: 10px;
+  background: var(--panel-bg);
+  color: var(--panel-text);
+  text-align: center;
+}
+
+.view-empty__title {
+  margin: 0;
+  font-size: 18px;
+}
+
+.view-empty__text {
+  margin: 0;
+}
+
+.view-notes {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  width: min(560px, calc(100% - 24px));
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.view-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--panel-line);
+  border-radius: 8px;
+  background: var(--panel-bg);
+  color: var(--panel-text);
+  font-size: 13px;
+  pointer-events: auto;
+}
+
+.view-empty .view-note {
+  background: transparent;
+}
+
+/* Полоса дома живёт в той же верхней части «Схемы»: строки поля уходят ниже. */
+#app[data-screen="scheme"] .view-notes {
+  top: auto;
+  bottom: 8px;
+}
+
+/* ——— окно «Сценарии и журнал» ———————————————————————————————————————— */
+.view-scn {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.view-scn__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.view-scn__row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--panel-line);
+  border-radius: 8px;
+}
+
+.view-scn__name {
+  flex: 1 1 140px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+
+.view-scn__active {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: rgba(63, 185, 80, 0.2);
+  font-size: 12px;
+}
+
+.view-scn__active.is-off {
+  display: none;
+}
+
+.view-scn__fault {
+  flex: 1 1 100%;
+  color: #f85149;
+  font-size: 12px;
+}
+
+.view-scn__empty {
+  color: var(--panel-muted, #8b949e);
+}
+
+.view-scn__journal {
+  min-width: 0;
+}
+
+/* Журнал в окне — часть окна, а не угол поля: без привязки к углу. */
+.view-scn__journal.sim-journal {
+  position: static;
+  width: auto;
+  max-width: none;
+  border: 1px solid var(--canvas-line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.97);
+  color: var(--canvas-text);
+  font-size: 12px;
+}
+
+.view-scn__journal .sim-journal__list {
+  max-height: 40vh;
+  overflow: auto;
+}
+
+/* Телефон: шапка в одну строку — имя уступает, дата прячется в подсказку. */
+#app.is-mobile .view-head {
+  gap: 6px;
+  margin-left: 0;
+}
+
+#app.is-mobile .view-head__date {
+  display: none;
+}

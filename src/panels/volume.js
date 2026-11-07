@@ -31,7 +31,7 @@
 // потому, что «без него не понять, где стоишь», а «показать заказчику»
 // начинается с общего вида. Поэтому первый кадр — вся схема сверху, а человек
 // переходит к первому лицу, уже зная, куда попал.
-import { PANEL_IDS, appAllows, cancelFrame, registerPanel, scheduleFrame, screenMode } from "../app.js";
+import { PANEL_IDS, appAllows, appKind, cancelFrame, registerPanel, scheduleFrame, screenMode } from "../app.js";
 import { FULLSCREEN_EVENTS, canvasFrameLinks, canvasFullscreenBare, canvasFullscreenOn } from "../canvas.js";
 import { createFieldPlate, plateUnseen } from "./plate.js";
 import {
@@ -174,7 +174,6 @@ import {
   simStart,
   simClimate,
   simClimateSet,
-  simStop,
   simWatch,
 } from "../simulation.js";
 import { getSetting } from "../store.js";
@@ -1325,13 +1324,9 @@ function createVolume({ api, hosts }) {
   // ——— имитация умного дома (таск 09 сценариев) ———
   //
   // Всё здесь — сеанс поверхности: в объект не пишется ничего (G68). Дом один
-  // на страницу (`simulation.js`), «Объём» только запускает его по отметке,
-  // показывает и трогает руками.
+  // на страницу (`simulation.js`), «Объём» только запускает его по отметке
+  // (на странице просмотра — с открытия объекта), показывает и трогает руками.
   //
-  // `homeHere` — дом запустил «Объём»: он же и остановит его, уходя, — иначе
-  // «Схема» после прогулки оказалась бы в режиме имитации без единого нажатия
-  // «Запустить». Дом, запущенный в «Схеме», «Объём» не останавливает.
-  let homeHere = false;
   // Окно параметров ответило из хранилища, и известно, помнит ли себя дом:
   // снятая отметка не запускает дом даже на миг.
   let homeReady = false;
@@ -2929,7 +2924,7 @@ function createVolume({ api, hosts }) {
     // поля: выделение остаётся — рамкой на самой вещи и строкой в списке.
     if (cardForced && !(selected.length === 1 && selected[0] === cardForced)) cardForced = null;
     const shown = selected.length === 1 && (volumeParamsRead().hideCard !== true || cardForced === selected[0]);
-    const model = shown ? markCardModel(state.project, selected[0]) : null;
+    const model = shown ? markCardModel(state.project, selected[0], { viewer: appKind() === "view" }) : null;
     if (homeCard) homeCard.dispose();
     homeCard = null;
     card.hidden = !model;
@@ -3464,20 +3459,20 @@ function createVolume({ api, hosts }) {
   }
 
   /**
-   * Запустить или остановить дом по отметке и режиму (история 2.2): отметка
-   * стоит и «Объём» на экране — дом идёт; ушли из режима или сняли отметку —
-   * дом, запущенный здесь, останавливается.
+   * Запустить дом по отметке и режиму (история 2.2, долг G01). **Только
+   * запускает**: ушли из «Объёма» или сняли отметку — дом идёт дальше, часы,
+   * сценарии и свет не сбрасываются; гасит его одна кнопка полосы (в просмотре
+   * её нет вовсе). Правило запуска — чистая `volumeHomeStarts`.
    */
   function homeEnsure() {
     if (closed || !homeReady) return;
-    const want = volumeParamsRead().simulation === true && screenMode() === "volume";
-    if (want && !simRunning()) {
-      if (simStart()) homeHere = true;
-    } else if (!want && homeHere) {
-      homeHere = false;
-      homePresenceGone();
-      if (simRunning()) simStop();
-    }
+    const start = volumeHomeStarts({
+      simulation: volumeParamsRead().simulation === true,
+      screen: screenMode(),
+      kind: appKind(),
+      running: simRunning(),
+    });
+    if (start) simStart();
     homeSync();
   }
 
@@ -5266,14 +5261,12 @@ function createVolume({ api, hosts }) {
 
   function destroy() {
     if (closed) return;
-    // Дом, запущенный «Объёмом», уходит вместе с ним (таск 09 сценариев).
+    // Поле уходит, дом нет (G01): гасит его только кнопка полосы.
     homeRelease(true);
     if (homeCard) homeCard.dispose();
     homeCard = null;
     if (stopHome) stopHome();
     stopHome = null;
-    if (homeHere && simRunning()) simStop();
-    homeHere = false;
     closed = true;
     if (fpsTimer !== null) clearInterval(fpsTimer);
     if (settleTimer !== null) clearTimeout(settleTimer);
@@ -5389,8 +5382,8 @@ function createVolume({ api, hosts }) {
         if ("screen" in changed && state.screen !== "volume") {
           // Поле погасло — таймеру часа идти незачем.
           syncClock();
-          // Человек ушёл из «Объёма» — датчики его больше не видят, а дом,
-          // запущенный здесь, останавливается (таск 09 сценариев).
+          // Человек ушёл из «Объёма» — датчики его больше не видят; дом идёт
+          // дальше (G01): гасит его только кнопка полосы.
           homeRelease(true);
           homePresenceGone();
           homeEnsure();
@@ -5518,6 +5511,17 @@ function createVolume({ api, hosts }) {
     syncCard();
   });
   return { destroy };
+}
+
+/**
+ * Нужно ли запускать дом (долг G01): отметка «Умный дом» стоит, дом ещё не
+ * идёт, и либо на экране «Объём» («Разметка»), либо это страница просмотра, где
+ * дом идёт с открытия объекта в любом режиме. Гасить дом здесь нечем: правило
+ * знает только «запустить».
+ */
+export function volumeHomeStarts({ simulation, screen, kind, running }) {
+  if (simulation !== true || running === true) return false;
+  return kind === "view" || screen === "volume";
 }
 
 /** Доступен ли объёмный режим в этой раскладке. */

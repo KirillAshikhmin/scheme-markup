@@ -16,7 +16,7 @@
 // Клавиши (только в «Схеме», при запущенном доме, вне полей и диалогов):
 // `P` — пауза, `N` — «К следующему событию», `E` — нажать на выделенное
 // устройство. Правило — чистая `simBarKeyAction`.
-import { PANEL_IDS, registerPanel, screenMode } from "../app.js";
+import { PANEL_IDS, appKind, registerPanel, screenMode } from "../app.js";
 import {
   appClockDay,
   appClockJump,
@@ -99,6 +99,19 @@ export function simBarState(read) {
         : text("sim.bar.nextAt", { at: simBarClockText(nextAt).date + " " + simBarClockText(nextAt).time }),
     steps: SIM_BAR_STEPS.map((step) => ({ key: step.key, ms: step.ms })),
   };
+}
+
+/**
+ * Какие кнопки ряда запуска видны (R06.2): `{start, reset, command}`. На
+ * странице просмотра дом идёт, пока открыта страница, и заказчик не может ни
+ * остановить его, ни сбросить: «Запустить» остаётся лишь запасом на случай,
+ * когда дом не поднялся, а запущенному дому кнопки «Остановить» нет вовсе.
+ * В «Разметке» всё как было. Единственное место, где дом гасят, — кнопка
+ * `start` этой полосы.
+ */
+export function simBarControls({ kind, running }) {
+  const view = kind === "view";
+  return { start: view ? !running : true, reset: !view && running === true, command: running === true };
 }
 
 /**
@@ -202,7 +215,11 @@ export function openSimCommands(api) {
  */
 export function simBarMount(host, api) {
   host.classList.add("sim-bar");
-  const start = uiButton("", { class: "ui-btn sim-bar__start", on: { click: () => (simRunning() ? simStop() : simStart()) } });
+  // Гасит дом только эта кнопка; в просмотре запущенному дому её нет.
+  const start = uiButton("", {
+    class: "ui-btn sim-bar__start",
+    on: { click: () => (simRunning() ? (appKind() === "view" ? false : simStop()) : simStart()) },
+  });
   const status = uiEl("span", { class: "sim-bar__status" });
   const warn = uiEl("span", { class: "sim-bar__warn", text: strings.sim.bar.noWorker });
   const reset = uiButton(strings.sim.bar.reset, { class: "ui-btn sim-bar__reset", title: strings.sim.bar.resetHint, on: { click: () => simReset() } });
@@ -293,8 +310,10 @@ export function simBarMount(host, api) {
     status.textContent = running ? strings.sim.bar.running : strings.sim.bar.stopped;
     status.classList.toggle("is-running", running);
     warn.hidden = !(running && simInPage());
-    reset.hidden = !running;
-    command.hidden = !running;
+    const shown = simBarControls({ kind: appKind(), running });
+    start.hidden = !shown.start;
+    reset.hidden = !shown.reset;
+    command.hidden = !shown.command;
     clock.hidden = !running;
     host.classList.toggle("is-running", running);
     host.classList.toggle("is-expanded", expanded);
