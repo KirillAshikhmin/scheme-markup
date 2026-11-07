@@ -4708,6 +4708,189 @@ margin: 0;
 font-size: 11px;
 color: var(--panel-muted);
 }
+#app[data-app="view"] #file-actions,
+#app[data-app="view"] #canvas-empty {
+display: none;
+}
+.view-head {
+display: flex;
+align-items: center;
+flex: 1 1 auto;
+gap: 10px;
+min-width: 0;
+margin-left: 12px;
+}
+.view-head[hidden] {
+display: none;
+}
+.view-head__name {
+min-width: 0;
+overflow: hidden;
+font-weight: 600;
+text-overflow: ellipsis;
+white-space: nowrap;
+}
+.view-head__date {
+flex: none;
+color: var(--panel-muted, #8b949e);
+font-size: 12px;
+white-space: nowrap;
+}
+.view-head__scenarios {
+flex: none;
+margin-left: auto;
+}
+.view-menu {
+position: relative;
+flex: none;
+}
+.view-menu__list {
+position: absolute;
+top: calc(100% + 4px);
+right: 0;
+z-index: 30;
+display: flex;
+flex-direction: column;
+gap: 2px;
+min-width: 220px;
+padding: 4px;
+border: 1px solid var(--panel-line);
+border-radius: 8px;
+background: var(--panel-bg);
+box-shadow: 0 12px 32px rgba(1, 4, 9, 0.5);
+}
+.view-menu__list[hidden] {
+display: none;
+}
+.view-menu__item {
+justify-content: flex-start;
+text-align: left;
+}
+.view-empty {
+display: flex;
+flex-direction: column;
+align-items: center;
+gap: 12px;
+max-width: 360px;
+padding: 20px 24px;
+border: 1px solid var(--panel-line);
+border-radius: 10px;
+background: var(--panel-bg);
+color: var(--panel-text);
+text-align: center;
+}
+.view-empty__title {
+margin: 0;
+font-size: 18px;
+}
+.view-empty__text {
+margin: 0;
+}
+.view-notes {
+position: absolute;
+top: 8px;
+left: 50%;
+z-index: 1;
+display: flex;
+flex-direction: column;
+align-items: stretch;
+gap: 6px;
+width: min(560px, calc(100% - 24px));
+transform: translateX(-50%);
+pointer-events: none;
+}
+.view-note {
+display: flex;
+align-items: center;
+justify-content: space-between;
+gap: 10px;
+margin: 0;
+padding: 6px 10px;
+border: 1px solid var(--panel-line);
+border-radius: 8px;
+background: var(--panel-bg);
+color: var(--panel-text);
+font-size: 13px;
+pointer-events: auto;
+}
+.view-empty .view-note {
+background: transparent;
+}
+#app[data-screen="scheme"] .view-notes {
+top: auto;
+bottom: 8px;
+}
+.view-scn {
+display: flex;
+flex-direction: column;
+gap: 12px;
+min-width: 0;
+}
+.view-scn__list {
+display: flex;
+flex-direction: column;
+gap: 6px;
+margin: 0;
+padding: 0;
+list-style: none;
+}
+.view-scn__row {
+display: flex;
+align-items: center;
+flex-wrap: wrap;
+gap: 8px;
+padding: 6px 8px;
+border: 1px solid var(--panel-line);
+border-radius: 8px;
+}
+.view-scn__name {
+flex: 1 1 140px;
+min-width: 0;
+overflow-wrap: anywhere;
+font-weight: 600;
+}
+.view-scn__active {
+flex: none;
+padding: 1px 8px;
+border-radius: 10px;
+background: rgba(63, 185, 80, 0.2);
+font-size: 12px;
+}
+.view-scn__active.is-off {
+display: none;
+}
+.view-scn__fault {
+flex: 1 1 100%;
+color: #f85149;
+font-size: 12px;
+}
+.view-scn__empty {
+color: var(--panel-muted, #8b949e);
+}
+.view-scn__journal {
+min-width: 0;
+}
+.view-scn__journal.sim-journal {
+position: static;
+width: auto;
+max-width: none;
+border: 1px solid var(--canvas-line);
+border-radius: 8px;
+background: rgba(255, 255, 255, 0.97);
+color: var(--canvas-text);
+font-size: 12px;
+}
+.view-scn__journal .sim-journal__list {
+max-height: 40vh;
+overflow: auto;
+}
+#app.is-mobile .view-head {
+gap: 6px;
+margin-left: 0;
+}
+#app.is-mobile .view-head__date {
+display: none;
+}
 .volume__panel {
 display: flex;
 flex-direction: column;
@@ -6677,6 +6860,8 @@ noStore: "Браузер не даёт сохранить объект: он о�
 schemeBare: "У этой схемы нет ни подложки, ни чертежа — видны только метки",
 scenarios: "Сценарии и журнал",
 scenariosHint: "Сценарии объекта и журнал дома",
+scenariosEmpty: "В этом объекте нет сценариев",
+fileRefused: "{reason}. Попросите интегратора прислать файл заново",
 },
 panels: {
 schemes: "Схемы",
@@ -7282,6 +7467,7 @@ duplicateScenario: "дубль сценария",
 scenarioFromTemplate: "сценарий из заготовки",
 scenarioActive: "активность сценария",
 scenarioParams: "параметры сценария",
+scenarioLibUpdate: "обновление библиотечного сценария",
 scenarioBlockAdd: "добавление блока сценария",
 scenarioBlockRemove: "удаление блока сценария",
 scenarioBlockMove: "перестановка блоков сценария",
@@ -9220,6 +9406,7 @@ newerHint: "У объекта {version}, в библиотеке {next}",
 update: "Обновить",
 updated: "Сценарий «{name}» обновлён до версии {version}",
 version: "Версия {version}",
+stored: "Текст скрипта хранится в библиотеке, а не в объекте. Чтобы поправить его своей рукой, скачайте и загрузите своим сценарием.",
 },
 scenarios: {
 phrase: {
@@ -13502,7 +13689,8 @@ return value;
 
 // src/model.js
 const FORMAT_VERSION = 5;
-const FORMAT_VERSION_MAX = 6;
+const FORMAT_VERSION_SCENARIOS = 6;
+const FORMAT_VERSION_MAX = 7;
 const SHAPE_PALETTE = [
 "circle",
 "circle-cross",
@@ -19143,6 +19331,19 @@ return name || strings.sim.scenarioUntitled;
 function scenarioFlag(value, fallback) {
 return value === true || value === false ? value : fallback;
 }
+function scenarioLibPin(value) {
+if (!deviceObject(value)) return null;
+const hash = typeof value.hash === "string" ? value.hash.trim().toLowerCase() : "";
+if (!/^[0-9a-f]{64}$/.test(hash)) return null;
+return {
+name: typeof value.name === "string" ? value.name : "",
+version: typeof value.version === "string" ? value.version : "",
+hash,
+};
+}
+function scenarioLibOf(scenario) {
+return scenarioLibPin(scenario && typeof scenario === "object" ? scenario.lib : null);
+}
 function scenarioFields(source, current) {
 const has = (key) => Object.prototype.hasOwnProperty.call(source, key);
 const kind = current.kind;
@@ -19155,7 +19356,19 @@ if (has("description")) next.description = typeof source.description === "string
 if (kind === "block") {
 if (has("targets")) next.targets = Array.isArray(source.targets) ? clone(source.targets) : [];
 } else {
-if (has("source")) next.source = typeof source.source === "string" ? source.source : "";
+if (has("source")) {
+next.source = typeof source.source === "string" ? source.source : "";
+delete next.lib;
+}
+if (has("lib")) {
+const lib = scenarioLibPin(source.lib);
+if (lib) {
+next.lib = lib;
+delete next.source;
+} else {
+delete next.lib;
+}
+}
 if (has("origin")) next.origin = SCENARIO_ORIGINS.includes(source.origin) ? source.origin : SCENARIO_ORIGINS[0];
 if (has("fileName")) next.fileName = typeof source.fileName === "string" ? source.fileName : "";
 if (has("template")) {
@@ -19271,7 +19484,29 @@ if (!Array.isArray(project.logicBindings) || removed.size === 0) return {};
 return { logicBindings: project.logicBindings.filter((binding) => !removed.has(binding.markId)) };
 }
 function projectFormatVersion(project) {
-return scenariosList(project).length > 0 || logicBindingsList(project).length > 0 ? FORMAT_VERSION_MAX : FORMAT_VERSION;
+const list = scenariosList(project);
+if (list.some((item) => scenarioLibOf(item))) return FORMAT_VERSION_MAX;
+return list.length > 0 || logicBindingsList(project).length > 0 ? FORMAT_VERSION_SCENARIOS : FORMAT_VERSION;
+}
+function migrateScenarioLib(project, library) {
+const refOf = typeof library === "function" ? library : deviceObject(library) && typeof library.refOf === "function" ? library.refOf : null;
+if (!refOf || !project || !Array.isArray(project.scenarios)) return { project, changed: false };
+let changed = false;
+const scenarios = project.scenarios.map((scenario) => {
+if (!deviceObject(scenario) || scenario.kind === "block" || scenarioLibOf(scenario)) return scenario;
+const source = typeof scenario.source === "string" ? scenario.source : "";
+if (!source) return scenario;
+const lib = scenarioLibPin(refOf(source));
+if (!lib) return scenario;
+changed = true;
+const next = {};
+for (const key of Object.keys(scenario)) {
+if (key === "source") next.lib = lib;
+else next[key] = scenario[key];
+}
+return next;
+});
+return changed ? { project: { ...project, scenarios }, changed } : { project, changed: false };
 }
 function migrateScenarios(project) {
 if (!project) return { project, changed: false };
@@ -20770,7 +21005,7 @@ if (distance <= DEVICE_DOOR_REACH_MM && (!best || distance < best.distance)) bes
 }
 return best ? best.id : null;
 }
-function buildHomeSpec(project) {
+function buildHomeSpec(project, opts = null) {
 const accessories = homeAccessories(project);
 const followers = deviceFollowers(project);
 const lead = (markId) => followers.get(markId) || markId;
@@ -20794,11 +21029,12 @@ const openingId = markDoorOf(project, accessory.markId);
 if (openingId) doors.push({ markId: accessory.markId, openingId });
 }
 }
+const given = opts && typeof opts === "object" && Array.isArray(opts.scenarios) ? opts.scenarios : null;
 return {
 accessories,
 links,
 doors,
-scenarios: homeLeadMarks(structuredClone(scenariosInOrder(project)), followers),
+scenarios: homeLeadMarks(structuredClone(given || scenariosInOrder(project)), followers),
 logicBindings: homeLeadMarks(structuredClone(logicBindingsOf(project)), followers),
 };
 }
@@ -21444,7 +21680,7 @@ Array.isArray(value.schemes) &&
 Array.isArray(value.marks)
 );
 }
-function migrateProject(loaded) {
+function migrateProject(loaded, options = {}) {
 const version = Number(loaded.formatVersion);
 if (!Number.isFinite(version) || version < 1) throw fileError("foreignProject");
 if (version > FORMAT_VERSION_MAX) {
@@ -21459,7 +21695,10 @@ groups: Array.isArray(loaded.groups) ? loaded.groups : [],
 counters: loaded.counters && typeof loaded.counters === "object" ? loaded.counters : {},
 };
 const migrated = migrateDevices(
+migrateScenarioLib(
 migrateScenarios(fillTypeSizes(migrateCommentType(migrateTypeKinds(filled).project).project).project).project,
+options.library,
+).project,
 ).project;
 const current = projectFormatVersion(migrated);
 return migrated.formatVersion === current ? migrated : { ...migrated, formatVersion: current };
@@ -21609,9 +21848,11 @@ return prefix;
 async function unpackProject(blob, options = {}) {
 if (!blob) throw fileError("notAProject");
 const entries = await readZip(blob);
-return readProjectEntries(entries, typeof options.onProgress === "function" ? options.onProgress : null);
+return readProjectEntries(entries, typeof options.onProgress === "function" ? options.onProgress : null, {
+library: options.library,
+});
 }
-function readProjectEntries(entries, onProgress) {
+function readProjectEntries(entries, onProgress, options = {}) {
 const prefix = projectPrefix(entries);
 if (prefix === null) throw fileError("noProjectJson");
 let loaded;
@@ -21621,7 +21862,7 @@ loaded = JSON.parse(decodeText(entries.get(prefix + PROJECT_ENTRY)));
 throw fileError("brokenProjectJson");
 }
 if (!looksLikeProject(loaded)) throw fileError("foreignProject");
-const project = migrateProject(loaded);
+const project = migrateProject(loaded, { library: options.library });
 const imageNames = [...entries.keys()].filter(
 (name) => name.startsWith(prefix + SCHEMES_DIR) && name.length > (prefix + SCHEMES_DIR).length,
 );
@@ -21637,18 +21878,23 @@ if (onProgress) onProgress({ done: index + 1, total: imageNames.length, name });
 }
 let member = null;
 let projectKey = null;
+let writtenAt = null;
 const writer = entries.get(prefix + WRITER_ENTRY);
 if (writer) {
 try {
 const parsed = JSON.parse(decodeText(writer));
 if (parsed && typeof parsed.member === "string" && parsed.member) member = parsed.member;
 if (parsed && typeof parsed.projectKey === "string" && parsed.projectKey) projectKey = parsed.projectKey;
+if (parsed && typeof parsed.writtenAt === "string" && !Number.isNaN(Date.parse(parsed.writtenAt))) {
+writtenAt = parsed.writtenAt;
+}
 } catch {
 member = null;
 projectKey = null;
+writtenAt = null;
 }
 }
-return { project, images, member, projectKey };
+return { project, images, member, projectKey, writtenAt };
 }
 
 // src/merge.js
@@ -27970,6 +28216,300 @@ return registration;
 })
 .catch(() => null);
 return promise;
+}
+
+// src/scenarioLib.js
+const SCENARIO_LIB_DIR = "scenarios";
+const SCENARIO_LIB_INDEX = "index.json";
+const SCENARIO_LIB_VERSION = 1;
+const SCENARIO_LIB_SETTING = "scenarioLib";
+const SCENARIO_LIB_CACHE_MAX = 50;
+const SCENARIO_LIB_HASH_RE = /^[0-9a-f]{64}$/;
+const SCENARIO_LIB_BYTES = new TextEncoder();
+const SCENARIO_LIB_K = new Uint32Array([
+0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+]);
+function libRotr(value, by) {
+return ((value >>> by) | (value << (32 - by))) >>> 0;
+}
+function scenarioLibHash(source) {
+const bytes = SCENARIO_LIB_BYTES.encode(typeof source === "string" ? source : String(source ?? ""));
+const total = Math.ceil((bytes.length + 9) / 64) * 64;
+const block = new Uint8Array(total);
+block.set(bytes);
+block[bytes.length] = 0x80;
+const view = new DataView(block.buffer);
+const bits = bytes.length * 8;
+view.setUint32(total - 8, Math.floor(bits / 0x100000000));
+view.setUint32(total - 4, bits >>> 0);
+const h = new Uint32Array([0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]);
+const w = new Uint32Array(64);
+for (let at = 0; at < total; at += 64) {
+for (let i = 0; i < 16; i += 1) w[i] = view.getUint32(at + i * 4);
+for (let i = 16; i < 64; i += 1) {
+const a = w[i - 15];
+const b = w[i - 2];
+const s0 = (libRotr(a, 7) ^ libRotr(a, 18) ^ (a >>> 3)) >>> 0;
+const s1 = (libRotr(b, 17) ^ libRotr(b, 19) ^ (b >>> 10)) >>> 0;
+w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;
+}
+let a = h[0];
+let b = h[1];
+let c = h[2];
+let d = h[3];
+let e = h[4];
+let f = h[5];
+let g = h[6];
+let hh = h[7];
+for (let i = 0; i < 64; i += 1) {
+const s1 = (libRotr(e, 6) ^ libRotr(e, 11) ^ libRotr(e, 25)) >>> 0;
+const ch = ((e & f) ^ (~e & g)) >>> 0;
+const t1 = (hh + s1 + ch + SCENARIO_LIB_K[i] + w[i]) >>> 0;
+const s0 = (libRotr(a, 2) ^ libRotr(a, 13) ^ libRotr(a, 22)) >>> 0;
+const maj = ((a & b) ^ (a & c) ^ (b & c)) >>> 0;
+const t2 = (s0 + maj) >>> 0;
+hh = g;
+g = f;
+f = e;
+e = (d + t1) >>> 0;
+d = c;
+c = b;
+b = a;
+a = (t1 + t2) >>> 0;
+}
+h[0] = (h[0] + a) >>> 0;
+h[1] = (h[1] + b) >>> 0;
+h[2] = (h[2] + c) >>> 0;
+h[3] = (h[3] + d) >>> 0;
+h[4] = (h[4] + e) >>> 0;
+h[5] = (h[5] + f) >>> 0;
+h[6] = (h[6] + g) >>> 0;
+h[7] = (h[7] + hh) >>> 0;
+}
+let out = "";
+for (const part of h) out += part.toString(16).padStart(8, "0");
+return out;
+}
+function scenarioLibFileName(key, hash) {
+const own = String(key || "").trim() || "script";
+return own + "@" + String(hash || "").slice(0, 16) + ".js";
+}
+function libHashOf(value) {
+const hash = value && typeof value === "object" && typeof value.hash === "string" ? value.hash.trim().toLowerCase() : "";
+return SCENARIO_LIB_HASH_RE.test(hash) ? hash : "";
+}
+function libEntryOf(item) {
+const hash = libHashOf(item);
+const file = item && typeof item.file === "string" ? item.file.trim() : "";
+if (!hash || !file) return null;
+return Object.freeze({
+name: typeof item.name === "string" ? item.name : "",
+version: typeof item.version === "string" ? item.version : "",
+kind: item.kind === "global" ? "global" : "logic",
+hash,
+size: Number.isFinite(item.size) ? Number(item.size) : 0,
+file,
+});
+}
+function scenarioLibIndexRead(json) {
+let data = json;
+if (typeof json === "string") {
+try {
+data = JSON.parse(json);
+} catch {
+return new Map();
+}
+}
+const list = data && typeof data === "object" && Array.isArray(data.scripts) ? data.scripts : [];
+const out = new Map();
+for (const item of list) {
+const entry = item && typeof item === "object" ? libEntryOf(item) : null;
+if (entry) out.set(entry.hash, entry);
+}
+return out;
+}
+function scenarioLibRef(scenario) {
+const lib = scenario && typeof scenario === "object" ? scenario.lib : null;
+const hash = libHashOf(lib);
+if (!hash) return null;
+return {
+name: typeof lib.name === "string" ? lib.name : "",
+version: typeof lib.version === "string" ? lib.version : "",
+hash,
+};
+}
+function scenarioLibRefOf(source, index) {
+if (typeof source !== "string" || source === "") return null;
+const map = index instanceof Map ? index : scenarioLibIndexRead(index);
+const entry = map.get(scenarioLibHash(source));
+return entry ? { name: entry.name, version: entry.version, hash: entry.hash } : null;
+}
+function libVersionRank(version) {
+const parts = String(version || "")
+.trim()
+.split(".")
+.map((part) => Number.parseInt(part, 10));
+if (parts.length === 0 || !Number.isFinite(parts[0])) return -1;
+let rank = 0;
+for (let i = 0; i < 4; i += 1) rank = rank * 10000 + (Number.isFinite(parts[i]) ? Math.min(9999, Math.max(0, parts[i])) : 0);
+return rank;
+}
+function scenarioLibNewer(ref, index) {
+const own = ref && typeof ref === "object" ? ref : null;
+const name = own && typeof own.name === "string" ? own.name : "";
+if (!name) return null;
+const rank = libVersionRank(own.version);
+if (rank < 0) return null;
+const map = index instanceof Map ? index : scenarioLibIndexRead(index);
+let best = null;
+for (const entry of map.values()) {
+if (entry.name !== name || libVersionRank(entry.version) <= rank) continue;
+if (!best || libVersionRank(entry.version) > libVersionRank(best.version)) best = entry;
+}
+return best;
+}
+let libIndexMap = null;
+let libIndexText = "";
+let libIndexTried = false;
+const libScripts = new Map();
+let libWoke = false;
+function scenarioLibForget() {
+libIndexMap = null;
+libIndexText = "";
+libIndexTried = false;
+libScripts.clear();
+libWoke = false;
+}
+function libFetchDoor(opts) {
+const given = opts && typeof opts === "object" ? opts : {};
+if (typeof given.fetch === "function") return given.fetch;
+return typeof fetch === "function" ? (url) => fetch(url) : null;
+}
+function libStoreDoor(opts) {
+const given = opts && typeof opts === "object" ? opts : {};
+const own = given.store;
+if (own && typeof own.get === "function" && typeof own.set === "function") return own;
+return { get: getSetting, set: setSetting };
+}
+async function libGet(url, opts) {
+const door = libFetchDoor(opts);
+if (!door) return null;
+try {
+const response = await door(url);
+if (!response || response.ok === false) return null;
+const text = await response.text();
+return typeof text === "string" ? text : null;
+} catch {
+return null;
+}
+}
+async function libWake(opts) {
+if (libWoke) return;
+libWoke = true;
+const store = libStoreDoor(opts);
+let saved = null;
+try {
+saved = await store.get(SCENARIO_LIB_SETTING);
+} catch {
+saved = null;
+}
+if (!saved || typeof saved !== "object") return;
+if (typeof saved.index === "string" && saved.index && !libIndexText) libIndexText = saved.index;
+const scripts = saved.scripts && typeof saved.scripts === "object" ? saved.scripts : {};
+for (const [hash, source] of Object.entries(scripts)) {
+if (typeof source !== "string" || libScripts.has(hash)) continue;
+if (scenarioLibHash(source) === hash) libScripts.set(hash, source);
+}
+}
+async function libKeep(opts) {
+const store = libStoreDoor(opts);
+const scripts = {};
+for (const hash of [...libScripts.keys()].slice(-SCENARIO_LIB_CACHE_MAX)) scripts[hash] = libScripts.get(hash);
+try {
+await store.set(SCENARIO_LIB_SETTING, { index: libIndexText, scripts });
+} catch {
+}
+}
+async function scenarioLibIndex(opts) {
+if (libIndexMap) return libIndexMap;
+await libWake(opts);
+if (!libIndexTried) {
+libIndexTried = true;
+const text = await libGet(SCENARIO_LIB_DIR + "/" + SCENARIO_LIB_INDEX, opts);
+const map = text === null ? new Map() : scenarioLibIndexRead(text);
+if (map.size > 0) {
+libIndexMap = map;
+libIndexText = text;
+await libKeep(opts);
+return libIndexMap;
+}
+}
+if (libIndexText) {
+const saved = scenarioLibIndexRead(libIndexText);
+if (saved.size > 0) {
+libIndexMap = saved;
+return libIndexMap;
+}
+}
+return new Map();
+}
+async function libOne(ref, opts) {
+const hash = libHashOf(ref);
+if (!hash) return null;
+if (libScripts.has(hash)) return libScripts.get(hash);
+await libWake(opts);
+if (libScripts.has(hash)) return libScripts.get(hash);
+const index = await scenarioLibIndex(opts);
+const entry = index.get(hash);
+if (!entry) return null;
+const source = await libGet(SCENARIO_LIB_DIR + "/" + entry.file, opts);
+if (source === null) return null;
+if (scenarioLibHash(source) !== hash) return null;
+libScripts.set(hash, source);
+return source;
+}
+async function scenarioLibFetch(ref, opts) {
+const source = await libOne(ref, opts);
+if (source !== null) await libKeep(opts);
+return source;
+}
+async function scenarioLibResolve(project, opts) {
+const list = scenariosInOrder(project);
+const refs = new Map();
+for (const scenario of list) {
+const ref = scenarioLibRef(scenario);
+if (ref) refs.set(ref.hash, ref);
+}
+if (refs.size === 0) return { scenarios: list, missing: [] };
+await libWake(opts);
+let got = 0;
+for (const ref of refs.values()) {
+if (libScripts.has(ref.hash)) continue;
+if ((await libOne(ref, opts)) !== null) got += 1;
+}
+if (got > 0) await libKeep(opts);
+const missing = [];
+const scenarios = list.map((scenario) => {
+const ref = scenarioLibRef(scenario);
+if (!ref) return scenario;
+const source = libScripts.get(ref.hash);
+if (typeof source === "string") return { ...scenario, source };
+missing.push({
+id: String(scenario.id || ""),
+name: ref.name || (typeof scenario.name === "string" ? scenario.name : ""),
+version: ref.version,
+hash: ref.hash,
+});
+return { ...scenario, source: "", active: false, libMissing: true };
+});
+return { scenarios, missing };
 }
 
 // src/sim/workerSource.js
@@ -42690,9 +43230,9 @@ if (!project || typeof project !== "object") return null;
 if (typeof project.key === "string" && project.key) return project.key;
 return typeof project.id === "string" && project.id ? project.id : null;
 }
-function simHomeOf(project) {
+function simHomeOf(project, opts = null) {
 const { latDeg, lonDeg } = volumeSiteOf(project);
-const spec = buildHomeSpec(project);
+const spec = buildHomeSpec(project, opts);
 return {
 ...spec,
 site: latDeg === null || lonDeg === null ? null : { latDeg, lonDeg },
@@ -42802,6 +43342,7 @@ const makeBridge = typeof given.bridge === "function" ? given.bridge : createSim
 const settings = given.settings || { get: getSetting, set: setSetting };
 const clock = given.clock || { now: appClockNow, simMs: appClockSimMs, watch: appClockWatch, step: appClockStep, jump: appClockJump };
 const weather = given.weather || { read: appWeatherRead, watch: appWeatherWatch };
+const library = given.library || { resolve: scenarioLibResolve };
 const timers = given.timers || simulationTimers();
 let bridge = null;
 let clockOff = null;
@@ -42835,6 +43376,12 @@ const pendingSaves = new Map();
 let saveTimer = null;
 let lastSaveAt = -Infinity;
 let saveChain = Promise.resolve();
+const libSources = new Map();
+let libMissing = [];
+const libTold = new Set();
+let libAsked = null;
+let libSeq = 0;
+let libReady = null;
 let liveCache = null;
 let foreign = null;
 function ensureBridge() {
@@ -43047,6 +43594,59 @@ sentText = textNow;
 sentSpec = spec;
 post({ type: "load", spec });
 }
+function libBuild(next) {
+const list = scenariosInOrder(next);
+let any = false;
+const missing = [];
+const out = list.map((scenario) => {
+const ref = scenarioLibRef(scenario);
+if (!ref) return scenario;
+any = true;
+const source = libSources.get(ref.hash);
+if (typeof source === "string") return { ...scenario, source };
+missing.push({
+id: String(scenario.id || ""),
+name: ref.name || simScenarioName(scenario, scenario.id),
+version: ref.version,
+hash: ref.hash,
+});
+return { ...scenario, source: "", active: false, libMissing: true };
+});
+return any ? { scenarios: out, missing } : null;
+}
+function libraryAsk() {
+if (closed || libMissing.length === 0) return libReady;
+const want = libMissing.map((item) => item.hash).join("\u0000");
+if (want === libAsked) return libReady;
+libAsked = want;
+const seq = (libSeq += 1);
+const own = project;
+libReady = Promise.resolve()
+.then(() => library.resolve(own))
+.then((result) => libraryLanded(seq, result))
+.catch(() => libraryLanded(seq, null));
+return libReady;
+}
+function libraryLanded(seq, result) {
+if (closed || seq !== libSeq || !project) return libMissing;
+for (const scenario of simList(result && result.scenarios)) {
+const ref = scenarioLibRef(scenario);
+if (ref && typeof scenario.source === "string" && scenario.source) libSources.set(ref.hash, scenario.source);
+}
+const built = libBuild(project);
+libMissing = built ? built.missing : [];
+home = simHomeOf(project, built);
+const entries = [];
+for (const item of libMissing) {
+if (libTold.has(item.hash)) continue;
+libTold.add(item.hash);
+entries.push(entry("system", "scenarioLibMissing", { name: item.name }));
+}
+addLog(entries);
+if (bridge) resend();
+notify({ log: entries });
+return libMissing;
+}
 function entry(kind, code, vars, extra = {}) {
 const out = { at: clock.simMs(timers.now()), kind, chain: [], code, text: text("sim.journal." + code, vars), ...extra };
 if (vars) out.vars = vars;
@@ -43172,7 +43772,13 @@ scheduleSave();
 }
 const before = switching ? new Map() : accessories;
 project = next;
-home = simHomeOf(next);
+if (switching) {
+libTold.clear();
+libAsked = null;
+}
+const built = libBuild(next);
+libMissing = built ? built.missing : [];
+home = simHomeOf(next, built);
 accessories = new Map(home.accessories.map((accessory) => [accessory.markId, accessory]));
 if (switching) {
 key = nextKey;
@@ -43204,6 +43810,7 @@ if (lost) entries.push(entry("system", "editReset"));
 addLog(entries);
 if (switching) restoreSaved(key);
 notify({ log: entries });
+libraryAsk();
 return true;
 }
 function postStart() {
@@ -43390,6 +43997,8 @@ optionForms: (bindingId, scenarioId = null) => {
 ensureBridge();
 return optionForms(bindingId, scenarioId);
 },
+libraryMissing: () => libMissing.map((item) => ({ ...item })),
+libraryReady: () => Promise.resolve(libraryAsk()).then(() => libMissing.map((item) => ({ ...item }))),
 awake: () => bridge !== null,
 hung: () => ({ scenarios: [...hungScenarios.keys()], bindings: [...hungBindings.keys()] }),
 inPage: () => inPage,
@@ -43446,6 +44055,12 @@ return simSessionOf().journalClear();
 }
 function simSync(project) {
 return simSessionOf().sync(project);
+}
+function simLibraryMissing() {
+return simSessionOf().libraryMissing();
+}
+function simLibraryReady() {
+return simSessionOf().libraryReady();
 }
 function simNextAt() {
 return simSessionOf().nextAt();
@@ -56406,6 +57021,467 @@ modal.close();
 return { close };
 }
 
+// src/viewLink.js
+const VIEW_LINK_VERSION = 1;
+const VIEW_LINK_PARAM = "o";
+const VIEW_LINK_BROKEN = "viewLinkBroken";
+const VIEW_LINK_DROPPED = Object.freeze(["accepted", "equipmentTypes", "equipment", "placements"]);
+const VIEW_LINK_KEPT = Object.freeze(["categories", "markTypes", "schemes", "marks"]);
+const VIEW_LINK_DIGITS = 6;
+const VIEW_LINK_SCALE = 10 ** VIEW_LINK_DIGITS;
+const VIEW_LINK_ROUND_MAX = 1e9;
+const VIEW_LINK_TOKEN_MARK = "~";
+const VIEW_LINK_TOKEN_TRIES = 8;
+const VIEW_LINK_TOKEN_BASE = 36;
+const VIEW_LINK_B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+const VIEW_LINK_B64_NONE = 255;
+const VIEW_LINK_B64_BACK = (() => {
+const back = new Uint8Array(128).fill(VIEW_LINK_B64_NONE);
+for (let index = 0; index < VIEW_LINK_B64.length; index += 1) back[VIEW_LINK_B64.charCodeAt(index)] = index;
+return back;
+})();
+const VIEW_LINK_REGEX_AFTER = new Set([
+"return", "typeof", "instanceof", "in", "of", "new", "delete", "void", "throw", "case", "do", "else", "yield", "await",
+]);
+function viewLinkIsWord(ch) {
+if (ch === undefined) return false;
+const code = ch.charCodeAt(0);
+if (code >= 0x80) return true;
+if (code >= 48 && code <= 57) return true;
+if (code >= 65 && code <= 90) return true;
+if (code >= 97 && code <= 122) return true;
+return ch === "_" || ch === "$";
+}
+function viewLinkBreaksOf(body) {
+let breaks = "";
+for (let at = 0; at < body.length; at += 1) {
+const code = body.charCodeAt(at);
+if (code === 10 || code === 13 || code === 0x2028 || code === 0x2029) breaks += body[at];
+}
+return breaks;
+}
+function viewLinkFail(reason, extra = {}) {
+const error = new Error(
+reason === "version"
+? text("errors.futureVersion", { version: extra.version, current: VIEW_LINK_VERSION })
+: strings.view.linkBroken,
+);
+error.code = VIEW_LINK_BROKEN;
+error.reason = reason;
+Object.assign(error, extra);
+return error;
+}
+function viewLinkRound(value) {
+if (!Number.isFinite(value) || Number.isInteger(value)) return value;
+if (Math.abs(value) >= VIEW_LINK_ROUND_MAX) return value;
+const rounded = Math.round(value * VIEW_LINK_SCALE) / VIEW_LINK_SCALE;
+return rounded === 0 ? 0 : rounded;
+}
+function viewLinkClean(value) {
+if (Array.isArray(value)) return value.map(viewLinkClean);
+if (value && typeof value === "object") {
+const out = {};
+for (const [key, raw] of Object.entries(value)) {
+const cleaned = viewLinkClean(raw);
+if (cleaned === null || cleaned === undefined || cleaned === "") continue;
+if (Array.isArray(cleaned) && cleaned.length === 0) continue;
+if (cleaned && typeof cleaned === "object" && !Array.isArray(cleaned) && Object.keys(cleaned).length === 0) {
+continue;
+}
+out[key] = cleaned;
+}
+return out;
+}
+return typeof value === "number" ? viewLinkRound(value) : value;
+}
+function viewLinkNoComments(source) {
+const out = [];
+let i = 0;
+let last = "punct";
+let lastWord = "";
+const frames = [];
+let depth = 0;
+const template = () => {
+const from = i;
+while (i < source.length) {
+const ch = source[i];
+if (ch === "\\") {
+i += 2;
+continue;
+}
+if (ch === "`") {
+i += 1;
+out.push(source.slice(from, i));
+last = "value";
+return true;
+}
+if (ch === "$" && source[i + 1] === "{") {
+i += 2;
+out.push(source.slice(from, i));
+frames.push(depth);
+last = "punct";
+return true;
+}
+i += 1;
+}
+return false;
+};
+while (i < source.length) {
+const ch = source[i];
+const next = source[i + 1];
+if (ch === "/" && next === "/") {
+while (i < source.length && viewLinkBreaksOf(source[i]) === "") i += 1;
+continue;
+}
+if (ch === "/" && next === "*") {
+const end = source.indexOf("*/", i + 2);
+if (end < 0) return null;
+const body = source.slice(i, end + 2);
+i = end + 2;
+const breaks = viewLinkBreaksOf(body);
+out.push(breaks === "" ? " " : breaks);
+continue;
+}
+if (ch === '"' || ch === "'") {
+const from = i;
+i += 1;
+while (i < source.length && source[i] !== ch) i += source[i] === "\\" ? 2 : 1;
+i += 1;
+out.push(source.slice(from, i));
+last = "value";
+continue;
+}
+if (ch === "`") {
+out.push("`");
+i += 1;
+if (!template()) return null;
+continue;
+}
+if (ch === "/" && (last === "punct" || (last === "word" && VIEW_LINK_REGEX_AFTER.has(lastWord)))) {
+const from = i;
+let inClass = false;
+i += 1;
+while (i < source.length) {
+const c = source[i];
+if (c === "\\") {
+i += 2;
+continue;
+}
+if (c === "\n") return null;
+i += 1;
+if (c === "[") inClass = true;
+else if (c === "]") inClass = false;
+else if (c === "/" && !inClass) break;
+}
+while (i < source.length && viewLinkIsWord(source[i])) i += 1;
+out.push(source.slice(from, i));
+last = "value";
+continue;
+}
+if (viewLinkIsWord(ch)) {
+const from = i;
+while (i < source.length && viewLinkIsWord(source[i])) i += 1;
+const word = source.slice(from, i);
+out.push(word);
+last = /^[0-9]/.test(word) ? "value" : "word";
+lastWord = word;
+continue;
+}
+if (ch === "{") depth += 1;
+else if (ch === "}") {
+if (frames.length > 0 && frames[frames.length - 1] === depth) {
+frames.pop();
+out.push("}");
+i += 1;
+if (!template()) return null;
+continue;
+}
+depth -= 1;
+}
+out.push(ch);
+i += 1;
+if (ch !== " " && ch !== "\t" && ch !== "\n" && ch !== "\r") {
+last = ch === ")" || ch === "]" || ch === "}" ? "value" : "punct";
+}
+}
+return out.join("");
+}
+function viewLinkParses(source) {
+const make = globalThis.Function;
+if (typeof make !== "function") return false;
+try {
+new make(source);
+return true;
+} catch {
+return false;
+}
+}
+function viewLinkTrimSource(source) {
+if (typeof source !== "string" || source === "") return source;
+const short = viewLinkNoComments(source);
+if (short === null || short === source) return source;
+return viewLinkParses(short) ? short : source;
+}
+function viewLinkLibRef(source, index) {
+if (!index || typeof source !== "string" || source === "") return null;
+if (typeof index.refOf === "function") {
+const ref = index.refOf(source);
+return ref && typeof ref === "object" ? ref : null;
+}
+const entries = typeof index.values === "function" ? [...index.values()] : Array.isArray(index) ? index : [];
+for (const entry of entries) {
+if (entry && typeof entry === "object" && typeof entry.source === "string" && entry.source === source) {
+return { name: entry.name, version: entry.version, hash: entry.hash };
+}
+}
+return null;
+}
+function viewLinkScenarios(list, options) {
+const index = options.libraryIndex || null;
+const stripJs = options.stripJs !== false;
+let linked = 0;
+let inlined = 0;
+const scenarios = list.map((scenario) => {
+if (!scenario || typeof scenario !== "object") return scenario;
+const lib = scenario.lib && typeof scenario.lib === "object" ? scenario.lib : viewLinkLibRef(scenario.source, index);
+if (lib) {
+linked += 1;
+const { source: dropped, ...rest } = scenario;
+return { ...rest, lib };
+}
+if (typeof scenario.source !== "string" || scenario.source === "") return scenario;
+inlined += 1;
+return stripJs ? { ...scenario, source: viewLinkTrimSource(scenario.source) } : scenario;
+});
+return { scenarios, linked, inlined };
+}
+function viewLinkStrip(project, opts = {}) {
+return viewLinkStripped(project, opts).project;
+}
+function viewLinkStripped(project, opts = {}) {
+if (!project || typeof project !== "object") throw viewLinkFail("shape");
+const next = {};
+for (const [key, value] of Object.entries(project)) {
+if (VIEW_LINK_DROPPED.includes(key)) continue;
+next[key] = value;
+}
+if (Array.isArray(next.schemes)) {
+next.schemes = next.schemes.map((scheme) => {
+if (!scheme || typeof scheme !== "object" || scheme.imageId === undefined) return scheme;
+const { imageId: dropped, ...rest } = scheme;
+return rest;
+});
+}
+let linked = 0;
+let inlined = 0;
+if (Array.isArray(next.scenarios)) {
+const done = viewLinkScenarios(next.scenarios, opts);
+next.scenarios = done.scenarios;
+linked = done.linked;
+inlined = done.inlined;
+}
+const cleaned = viewLinkClean(next);
+for (const key of VIEW_LINK_KEPT) if (Array.isArray(next[key]) && !Array.isArray(cleaned[key])) cleaned[key] = [];
+return { project: cleaned, scenarios: { linked, inlined } };
+}
+function viewLinkWalkStrings(value, seen) {
+if (Array.isArray(value)) {
+for (const item of value) viewLinkWalkStrings(item, seen);
+return;
+}
+if (value && typeof value === "object") {
+for (const item of Object.values(value)) viewLinkWalkStrings(item, seen);
+return;
+}
+if (typeof value === "string") seen.push(value);
+}
+function viewLinkTokenMark(project) {
+const seen = [];
+viewLinkWalkStrings(project, seen);
+for (let length = 1; length <= VIEW_LINK_TOKEN_TRIES; length += 1) {
+const mark = VIEW_LINK_TOKEN_MARK.repeat(length);
+if (!seen.some((item) => item.startsWith(mark))) return mark;
+}
+throw viewLinkFail("shape");
+}
+function viewLinkWalkIds(value, order, known) {
+if (Array.isArray(value)) {
+for (const item of value) viewLinkWalkIds(item, order, known);
+return;
+}
+if (!value || typeof value !== "object") return;
+for (const [key, item] of Object.entries(value)) {
+if (key === "id" && typeof item === "string" && item !== "" && !known.has(item)) {
+known.set(item, order.length);
+order.push(item);
+}
+viewLinkWalkIds(item, order, known);
+}
+}
+function viewLinkMapStrings(value, swap) {
+if (Array.isArray(value)) return value.map((item) => viewLinkMapStrings(item, swap));
+if (value && typeof value === "object") {
+const out = {};
+for (const [key, item] of Object.entries(value)) out[key] = viewLinkMapStrings(item, swap);
+return out;
+}
+if (typeof value !== "string") return value;
+const swapped = swap(value);
+return swapped === undefined ? value : swapped;
+}
+function viewLinkAids(project) {
+const table = {};
+for (const [markId, aid] of deviceAids(project)) table[markId] = aid;
+return table;
+}
+function viewLinkAidList(project) {
+const marks = Array.isArray(project.marks) ? project.marks : [];
+if (marks.length === 0) return null;
+const hasScripts =
+(Array.isArray(project.scenarios) && project.scenarios.length > 0) ||
+(Array.isArray(project.logicBindings) && project.logicBindings.length > 0);
+if (!hasScripts) return null;
+const table = deviceAids(project);
+return marks.map((mark) => (mark && table.has(mark.id) ? table.get(mark.id) : 0));
+}
+function viewLinkEncode(bytes) {
+let out = "";
+for (let at = 0; at < bytes.length; at += 3) {
+const a = bytes[at];
+const b = bytes[at + 1];
+const c = bytes[at + 2];
+out += VIEW_LINK_B64[a >> 2];
+out += VIEW_LINK_B64[((a & 3) << 4) | (b === undefined ? 0 : b >> 4)];
+if (b === undefined) break;
+out += VIEW_LINK_B64[((b & 15) << 2) | (c === undefined ? 0 : c >> 6)];
+if (c === undefined) break;
+out += VIEW_LINK_B64[c & 63];
+}
+return out;
+}
+function viewLinkDecode(chars) {
+const length = chars.length;
+if (length % 4 === 1) throw viewLinkFail("payload");
+const bytes = new Uint8Array(Math.floor((length * 3) / 4));
+let out = 0;
+let bits = 0;
+let acc = 0;
+for (let at = 0; at < length; at += 1) {
+const code = chars.charCodeAt(at);
+const digit = code < 128 ? VIEW_LINK_B64_BACK[code] : VIEW_LINK_B64_NONE;
+if (digit === VIEW_LINK_B64_NONE) throw viewLinkFail("payload");
+acc = (acc << 6) | digit;
+bits += 6;
+if (bits >= 8) {
+bits -= 8;
+bytes[out] = (acc >> bits) & 0xff;
+out += 1;
+}
+}
+return bytes.subarray(0, out);
+}
+async function viewLinkPack(project, opts = {}) {
+const compress = opts.compress;
+if (typeof compress !== "function") throw viewLinkFail("codec");
+const stripped = viewLinkStripped(project, opts);
+const body = stripped.project;
+const mark = viewLinkTokenMark(body);
+const order = [];
+const known = new Map();
+viewLinkWalkIds(body, order, known);
+const short = viewLinkMapStrings(body, (value) =>
+known.has(value) ? mark + known.get(value).toString(VIEW_LINK_TOKEN_BASE) : undefined,
+);
+const madeAt = opts.madeAt instanceof Date ? opts.madeAt.toISOString() : opts.madeAt || new Date().toISOString();
+const aids = viewLinkAidList(body);
+const payload = {
+v: VIEW_LINK_VERSION,
+at: String(madeAt),
+mark,
+ids: order,
+...(aids ? { aids } : {}),
+p: short,
+};
+const json = new TextEncoder().encode(JSON.stringify(payload));
+const packed = await compress(json);
+const bytes = packed instanceof Uint8Array ? packed : new Uint8Array(packed);
+const result = VIEW_LINK_VERSION + "." + viewLinkEncode(bytes);
+return {
+text: result,
+bytes,
+stats: {
+json: json.length,
+packed: bytes.length,
+chars: result.length,
+scenarios: stripped.scenarios,
+},
+};
+}
+async function viewLinkRead(linkText, opts = {}) {
+const decompress = opts.decompress;
+if (typeof decompress !== "function") throw viewLinkFail("codec");
+if (typeof linkText !== "string" || linkText === "") throw viewLinkFail("payload");
+const dot = linkText.indexOf(".");
+if (dot <= 0) throw viewLinkFail("payload");
+const head = linkText.slice(0, dot);
+if (!/^[0-9]{1,4}$/.test(head)) throw viewLinkFail("payload");
+const version = Number(head);
+if (version !== VIEW_LINK_VERSION) throw viewLinkFail("version", { version });
+const body = linkText.slice(dot + 1);
+if (body === "") throw viewLinkFail("payload");
+const bytes = viewLinkDecode(body);
+let json = null;
+try {
+const plain = await decompress(bytes);
+json = new TextDecoder().decode(plain instanceof Uint8Array ? plain : new Uint8Array(plain));
+} catch {
+throw viewLinkFail("codec");
+}
+let payload = null;
+try {
+payload = JSON.parse(json);
+} catch {
+throw viewLinkFail("payload");
+}
+if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw viewLinkFail("shape");
+if (payload.v !== VIEW_LINK_VERSION) throw viewLinkFail("version", { version: payload.v });
+const short = payload.p;
+const mark = typeof payload.mark === "string" && payload.mark !== "" ? payload.mark : null;
+const ids = Array.isArray(payload.ids) ? payload.ids : null;
+if (!short || typeof short !== "object" || Array.isArray(short) || !mark || !ids) throw viewLinkFail("shape");
+const project = viewLinkMapStrings(short, (value) => {
+if (!value.startsWith(mark)) return undefined;
+const tail = value.slice(mark.length);
+if (!/^[0-9a-z]+$/.test(tail)) return undefined;
+const at = Number.parseInt(tail, VIEW_LINK_TOKEN_BASE);
+return Number.isInteger(at) && at >= 0 && at < ids.length && typeof ids[at] === "string" ? ids[at] : undefined;
+});
+if (
+typeof project.id !== "string" ||
+!Array.isArray(project.markTypes) ||
+!Array.isArray(project.schemes) ||
+!Array.isArray(project.marks)
+) {
+throw viewLinkFail("shape");
+}
+const warnings = [];
+if (Array.isArray(payload.aids)) {
+const table = deviceAids(project);
+project.marks.forEach((item, at) => {
+const was = payload.aids[at];
+if (!item || typeof was !== "number" || was === 0) return;
+const now = table.get(item.id);
+if (now !== was) warnings.push({ code: "addressMoved", markId: item.id, was, now: now === undefined ? 0 : now });
+});
+}
+return {
+project,
+madeAt: typeof payload.at === "string" ? payload.at : "",
+version,
+warnings,
+};
+}
+
 // src/panels/projectProps.js
 const STAMP_LABELS = {
 code: { label: "stampCode", hint: "stampCodeHint" },
@@ -57457,7 +58533,89 @@ label: strings.elevationSheet.button,
 hint: strings.elevationSheet.dialog,
 reason: walls === 0 ? strings.elevationSheet.noWalls : null,
 },
+{
+id: "link",
+label: strings.exportPanel.link,
+hint: strings.exportPanel.linkHint,
+reason: !project ? strings.exportPanel.linkNoProject : !brotliReachable() ? strings.exportPanel.linkNoCodec : null,
+},
 ];
+}
+const EXPORT_LINK_PAGE = "view.html";
+const EXPORT_LINK_MESSENGER_MAX = 4000;
+function exportLinkLong(chars) {
+return chars > EXPORT_LINK_MESSENGER_MAX;
+}
+async function exportLinkBuild(project, options = {}) {
+const index = options.index instanceof Map ? options.index : new Map();
+const packed = await viewLinkPack(project, {
+compress: options.compress,
+libraryIndex: { refOf: (source) => scenarioLibRefOf(source, index) },
+madeAt: options.madeAt,
+});
+return {
+url: String(options.base || EXPORT_LINK_PAGE) + "#" + VIEW_LINK_PARAM + "=" + packed.text,
+chars: packed.stats.chars,
+stats: packed.stats,
+};
+}
+function exportLinkBase() {
+return location.href.replace(/[#?].*$/, "").replace(/[^/]*$/, "") + EXPORT_LINK_PAGE;
+}
+function exportLinkDialog(api) {
+const project = api.getState().project;
+if (!project) return;
+const body = uiEl("div", { class: "export__link" }, [uiEl("p", { class: "modal__text", text: strings.exportPanel.linkBusy })]);
+const modal = uiModal({
+title: strings.exportPanel.linkDialog,
+body,
+actions: [uiButton(strings.dialog.close, { class: "ui-btn", on: { click: () => modal.close() } })],
+});
+(async () => {
+try {
+let index = new Map();
+try {
+index = await scenarioLibIndex();
+} catch (error) {
+}
+const built = await exportLinkBuild(project, { compress: brotliCompress, index, base: exportLinkBase() });
+const field = uiEl("textarea", { class: "export__linkText", attrs: { readonly: "readonly", rows: "4" } });
+field.value = built.url;
+const copy = uiButton(strings.exportPanel.linkCopy, {
+class: "ui-btn ui-btn--accent",
+on: {
+click: async () => {
+try {
+await navigator.clipboard.writeText(built.url);
+api.notify(strings.exportPanel.linkCopied, "success");
+} catch (error) {
+field.focus();
+field.select();
+api.notify(strings.exportPanel.linkCopyFailed, "error");
+}
+},
+},
+});
+const openTab = uiButton(strings.exportPanel.linkOpen, {
+class: "ui-btn",
+on: { click: () => window.open(built.url, "_blank", "noopener") },
+});
+const lines = [
+uiEl("p", { class: "modal__text", text: text("exportPanel.linkLength", { chars: built.chars }) }),
+uiEl("p", {
+class: "modal__text",
+text: text("exportPanel.linkScenarios", { linked: built.stats.scenarios.linked, inlined: built.stats.scenarios.inlined }),
+}),
+uiEl("p", { class: "modal__text", text: strings.exportPanel.linkSkipped }),
+];
+if (exportLinkLong(built.chars)) lines.push(uiEl("p", { class: "modal__text export__linkLong", text: strings.exportPanel.linkLong }));
+body.replaceChildren(...lines, field, uiEl("div", { class: "modal__actions" }, [copy, openTab]));
+} catch (error) {
+body.replaceChildren(
+uiEl("p", { class: "modal__text", text: text("exportPanel.linkFailed", { message: String((error && error.message) || error) }) }),
+);
+}
+})();
 }
 function mountExportPanel(host, api) {
 const { getState, subscribe } = api;
@@ -57466,6 +58624,7 @@ const openers = {
 table: () => exportTableDialog(api),
 scheme: () => exportSchemeDialog(api),
 elevation: () => exportElevationDialog(api),
+link: () => exportLinkDialog(api),
 };
 const toggle = uiIconButton("printer", {
 class: "ui-btn export__menu",
@@ -60829,7 +61988,7 @@ if (!appAllows("editMarks", source)) return MARK_CARD_FULL;
 if (source.simRunning === true) return MARK_CARD_FULL;
 return collapsed ? MARK_CARD_MINI : MARK_CARD_FULL;
 }
-function markCardModel(project, markId) {
+function markCardModel(project, markId, { viewer = false } = {}) {
 if (!project || !markId) return null;
 const mark = findMark(project, markId);
 if (!mark) return null;
@@ -60860,7 +62019,7 @@ rows,
 }
 add(strings.marks.room, room ? room.name : "");
 add(strings.marks.location, fields.location);
-add(strings.marks.comment, fields.original);
+if (!viewer) add(strings.marks.comment, fields.original);
 add(strings.scale.lengthLabel, fields.lengthText);
 add(strings.marks.wallLabel, fields.wallText);
 add(strings.markSizes.open, fields.sizes);
@@ -60996,7 +62155,7 @@ const mode = markCardState(state, collapsed);
 const model =
 mode === MARK_CARD_NONE || !canvasOnScreen(state)
 ? null
-: markCardModel(state.project, state.selectedMarkIds[0]);
+: markCardModel(state.project, state.selectedMarkIds[0], { viewer: appKind() === "view" });
 card.hidden = !model;
 dropDevice();
 const viewing = !appAllows("editMarks", state);
@@ -61642,9 +62801,19 @@ return { close };
 
 // src/panels/projects.js
 const SAVE_DELAY_MS = 400;
-function projectsMigrateStored(stored) {
+function projectsMigrateStored(stored, library = null) {
 const migrated = fillTypeSizes(migrateCommentType(migrateTypeKinds(stored).project).project).project;
-return migrateDevices(migrateScenarios(migrated).project).project;
+const pinned = migrateScenarioLib(migrateScenarios(migrated).project, library).project;
+return migrateDevices(pinned).project;
+}
+async function projectsLibraryDoor() {
+try {
+const index = await scenarioLibIndex({});
+if (!index || index.size === 0) return null;
+return { refOf: (source) => scenarioLibRefOf(source, index) };
+} catch {
+return null;
+}
 }
 function uniqueProjectName(list) {
 const base = strings.project.untitled;
@@ -61731,6 +62900,18 @@ lastProjectId = id;
 if (!id) return;
 if (known && known.some((item) => item.id === id)) return;
 refreshList().catch(() => {});
+}
+let pinnedProjectId = null;
+async function pinLibraryScripts(project) {
+const id = project ? project.id : null;
+if (!id || id === pinnedProjectId) return;
+pinnedProjectId = id;
+const library = await projectsLibraryDoor();
+if (!library) return;
+const now = getState().project;
+if (!now || now.id !== id) return;
+const pinned = migrateScenarioLib(now, library);
+if (pinned.changed) setState({ project: pinned.project });
 }
 async function openProjectById(id) {
 const stored = await loadProject(id);
@@ -61848,6 +63029,7 @@ if ("layout" in changed) renderList();
 if (!("project" in changed)) return;
 renderList();
 refreshIfUnknown(state.project);
+pinLibraryScripts(state.project).catch(() => {});
 if (state.project) scheduleSave(state.project);
 });
 renderList();
@@ -63420,6 +64602,10 @@ nextAt === null
 steps: SIM_BAR_STEPS.map((step) => ({ key: step.key, ms: step.ms })),
 };
 }
+function simBarControls({ kind, running }) {
+const view = kind === "view";
+return { start: view ? !running : true, reset: !view && running === true, command: running === true };
+}
 function simBarKeyAction(event, ctx) {
 if (!event || !ctx) return null;
 if (ctx.dialog || ctx.field || !ctx.onScheme || !ctx.running) return null;
@@ -63496,7 +64682,10 @@ return modal;
 }
 function simBarMount(host, api) {
 host.classList.add("sim-bar");
-const start = uiButton("", { class: "ui-btn sim-bar__start", on: { click: () => (simRunning() ? simStop() : simStart()) } });
+const start = uiButton("", {
+class: "ui-btn sim-bar__start",
+on: { click: () => (simRunning() ? (appKind() === "view" ? false : simStop()) : simStart()) },
+});
 const status = uiEl("span", { class: "sim-bar__status" });
 const warn = uiEl("span", { class: "sim-bar__warn", text: strings.sim.bar.noWorker });
 const reset = uiButton(strings.sim.bar.reset, { class: "ui-btn sim-bar__reset", title: strings.sim.bar.resetHint, on: { click: () => simReset() } });
@@ -63581,8 +64770,10 @@ start.classList.toggle("ui-btn--primary", !running);
 status.textContent = running ? strings.sim.bar.running : strings.sim.bar.stopped;
 status.classList.toggle("is-running", running);
 warn.hidden = !(running && simInPage());
-reset.hidden = !running;
-command.hidden = !running;
+const shown = simBarControls({ kind: appKind(), running });
+start.hidden = !shown.start;
+reset.hidden = !shown.reset;
+command.hidden = !shown.command;
 clock.hidden = !running;
 host.classList.toggle("is-running", running);
 host.classList.toggle("is-expanded", expanded);
@@ -63945,20 +65136,28 @@ if (!project) return null;
 const chosen = scenarioId ? findScenario(project, scenarioId) : null;
 return chosen || scenariosInOrder(project)[0] || null;
 }
-function scenariosListRows(project, { query = "", kind = "" } = {}, accessories = null, faults = null) {
+function scenariosListRows(project, { query = "", kind = "", libMissing = null } = {}, accessories = null, faults = null) {
 if (!project) return [];
 const ordered = scenariosInOrder(project);
 const wanted = scenariosKey(query);
 const home = accessories || homeAccessories(project);
+const gone = new Set(
+(Array.isArray(libMissing) ? libMissing : libMissing instanceof Set ? [...libMissing] : []).map((item) =>
+typeof item === "string" ? item : item && typeof item.hash === "string" ? item.hash : "",
+),
+);
 const rows = [];
 ordered.forEach((scenario, index) => {
 if (kind && scenario.kind !== kind) return;
 if (wanted && !scenariosKey(scenario.name).includes(wanted)) return;
 const fault = faults && faults.get ? faults.get(scenario.id) || null : null;
+const lib = scenarioLibOf(scenario);
 rows.push({
 id: scenario.id,
 name: scenario.name,
 kind: scenario.kind,
+lib,
+libMissing: Boolean(lib && gone.has(lib.hash)),
 active: scenario.active !== false && !(fault && fault.code === "hung"),
 hung: Boolean(fault && fault.code === "hung"),
 fault: scenarioScriptFaultText(fault, "list"),
@@ -64019,6 +65218,12 @@ return scenariosResult(project, moveScenario(project, scenarioId, target).projec
 function scenariosSetActive(project, scenarioId, on) {
 if (!findScenario(project, scenarioId)) return null;
 return scenariosResult(project, updateScenario(project, scenarioId, { active: on === true }).project, strings.history.scenarioActive);
+}
+function scenariosUpdateLib(project, scenarioId, entry) {
+const scenario = findScenario(project, scenarioId);
+if (!scenario || !scenarioLibOf(scenario) || !entry || typeof entry.hash !== "string") return null;
+const lib = { name: entry.name, version: entry.version, hash: entry.hash };
+return scenariosResult(project, updateScenario(project, scenarioId, { lib }).project, strings.history.scenarioLibUpdate);
 }
 function scenariosSetParams(project, scenarioId, patch) {
 if (!findScenario(project, scenarioId)) return null;
@@ -64292,6 +65497,15 @@ uiEl("span", { class: "scn-row__kind is-" + row.kind, text: strings.scenarios.li
 ]);
 const parts = [head, uiEl("p", { class: "scn-row__phrase", text: row.phrase }), activeLabel];
 if (row.fault) parts.push(uiEl("span", { class: "scn-row__fault", title: row.hung ? strings.scenarios.list.fault.hungHint : "", text: row.fault }));
+if (row.libMissing) {
+parts.push(
+uiEl("span", {
+class: "scn-row__fault",
+title: text("scenarioLib.missingHint", { name: row.lib.name || row.name, version: row.lib.version }),
+text: strings.scenarioLib.missing,
+}),
+);
+}
 if (row.issues > 0) parts.push(uiEl("span", { class: "scn-row__issues", title: strings.scenarios.list.issuesHint, text: text("scenarios.list.issues", { count: row.issues }) }));
 const item = uiEl("li", { class: "scn-row" + (selected ? " is-selected" : "") + (row.active ? "" : " is-inactive"), attrs: { "data-scenario": row.id } }, parts);
 item.addEventListener("click", () => open(row.id));
@@ -64318,7 +65532,12 @@ createScript.disabled = !scenariosHooks.has("loadScript");
 createScript.title = createScript.disabled ? strings.scenarios.list.createScriptLater : strings.scenarios.list.createScriptHint;
 createPaste.disabled = !scenariosHooks.has("pasteScript");
 const current = scenariosCurrent(now.project, now.scenarioId);
-const rows = scenariosListRows(now.project, view, homeAccessories(now.project), scenarioScriptFaults(state().project));
+const rows = scenariosListRows(
+now.project,
+{ ...view, libMissing: simLibraryMissing() },
+homeAccessories(now.project),
+scenarioScriptFaults(state().project),
+);
 listRows.replaceChildren(...rows.map((row) => renderRow(row, current !== null && row.id === current.id, editable)));
 const total = scenariosInOrder(now.project).length;
 const noScenarios = total === 0;
@@ -64588,23 +65807,92 @@ uiCheckRow(sequential, strings.scenarios.center.sequential, strings.scenarios.ce
 uiEl("label", { class: "scn-center__field" }, [uiEl("span", { text: strings.scenarios.center.description }), description]),
 );
 }
+let libIndex = null;
+let libIndexAsked = false;
+function libIndexAsk() {
+if (libIndexAsked) return;
+libIndexAsked = true;
+scenarioLibIndex({})
+.then((index) => {
+if (!index || index.size === 0) return;
+libIndex = index;
+later();
+})
+.catch(() => {});
+}
+async function downloadScript(scenario) {
+const lib = scenarioLibOf(scenario);
+if (!lib) {
+scenarioScriptDownload(scenario);
+return;
+}
+let source = null;
+try {
+source = await scenarioLibFetch(lib, {});
+} catch {
+source = null;
+}
+if (typeof source !== "string" || !source) {
+api.notify(text("scenarioLib.missingHint", { name: lib.name || scenario.name, version: lib.version }), "error");
+return;
+}
+scenarioScriptDownload({ ...scenario, source });
+}
+function libLines(scenario, lib, editable) {
+libIndexAsk();
+const lines = [uiEl("li", { class: "scn-script__lib", text: text("scenarioLib.version", { version: lib.version || "—" }) })];
+const gone = simLibraryMissing().some((item) => item.hash === lib.hash);
+if (gone) {
+lines.push(uiEl("li", { class: "scn-script__fault", text: strings.scenarioLib.missing }));
+lines.push(uiEl("li", { class: "scn-script__lib-hint", text: text("scenarioLib.missingHint", { name: lib.name || scenario.name, version: lib.version }) }));
+} else {
+lines.push(uiEl("li", { class: "scn-script__lib-hint", text: strings.scenarioLib.stored }));
+}
+const newer = libIndex ? scenarioLibNewer(lib, libIndex) : null;
+if (!newer) return lines;
+const row = uiEl("li", { class: "scn-script__lib-newer" }, [
+uiEl("span", { text: strings.scenarioLib.newer }),
+uiEl("span", { class: "scn-script__lib-hint", text: text("scenarioLib.newerHint", { version: lib.version || "—", next: newer.version }) }),
+]);
+if (editable) {
+row.append(
+uiButton(strings.scenarioLib.update, {
+class: "ui-btn ui-btn--primary",
+on: {
+click: () => {
+if (commit(scenariosUpdateLib(state().project, scenario.id, newer))) {
+api.notify(text("scenarioLib.updated", { name: newer.name || scenario.name, version: newer.version }), "success");
+}
+},
+},
+}),
+);
+}
+lines.push(row);
+return lines;
+}
 function renderScript(project, scenario, editable) {
+const lib = scenarioLibOf(scenario);
 const status = scenarioScriptStatus(scenario);
 const fault = scenarioScriptFaults(state().project).get(scenario.id) || null;
 const faultLine = scenarioScriptFaultText(fault, "list");
 const buttons = uiEl("div", { class: "scn-script__buttons" }, [
+...(lib
+? []
+: [
 uiButton(editable ? strings.scenarios.script.edit : strings.scenarios.script.editHint, {
 class: "ui-btn ui-btn--primary",
 title: strings.scenarios.script.editHint,
 on: { click: () => scenarioScriptEdit(centerContext(), scenario.id) },
 }),
+]),
 uiButton(strings.scenarios.script.editDownload, {
 class: "ui-btn",
 title: strings.scenarios.script.editDownloadHint,
-on: { click: () => scenarioScriptDownload(scenario) },
+on: { click: () => downloadScript(scenario) },
 }),
 ]);
-const lines = [];
+const lines = lib ? libLines(scenario, lib, editable) : [];
 if (faultLine) lines.push(uiEl("li", { class: "scn-script__fault", text: faultLine }));
 if (status.syntax) lines.push(uiEl("li", { class: "scn-script__syntax", text: scenarioScriptSyntaxText(status.syntax) }));
 if (status.warnings.length > 0) {
@@ -66889,7 +68177,6 @@ const openDoors = new Set();
 const openCurtains = new Set();
 let openRev = 1;
 let openSaid = 0;
-let homeHere = false;
 let homeReady = false;
 let homeKnown = true;
 let homeSeeded = false;
@@ -67707,7 +68994,7 @@ const state = getState();
 const selected = selectedIds();
 if (cardForced && !(selected.length === 1 && selected[0] === cardForced)) cardForced = null;
 const shown = selected.length === 1 && (volumeParamsRead().hideCard !== true || cardForced === selected[0]);
-const model = shown ? markCardModel(state.project, selected[0]) : null;
+const model = shown ? markCardModel(state.project, selected[0], { viewer: appKind() === "view" }) : null;
 if (homeCard) homeCard.dispose();
 homeCard = null;
 card.hidden = !model;
@@ -68041,14 +69328,13 @@ homeRefresh();
 }
 function homeEnsure() {
 if (closed || !homeReady) return;
-const want = volumeParamsRead().simulation === true && screenMode() === "volume";
-if (want && !simRunning()) {
-if (simStart()) homeHere = true;
-} else if (!want && homeHere) {
-homeHere = false;
-homePresenceGone();
-if (simRunning()) simStop();
-}
+const start = volumeHomeStarts({
+simulation: volumeParamsRead().simulation === true,
+screen: screenMode(),
+kind: appKind(),
+running: simRunning(),
+});
+if (start) simStart();
 homeSync();
 }
 function placeCard() {
@@ -69061,8 +70347,6 @@ if (homeCard) homeCard.dispose();
 homeCard = null;
 if (stopHome) stopHome();
 stopHome = null;
-if (homeHere && simRunning()) simStop();
-homeHere = false;
 closed = true;
 if (fpsTimer !== null) clearInterval(fpsTimer);
 if (settleTimer !== null) clearTimeout(settleTimer);
@@ -69219,6 +70503,10 @@ homeEnsure();
 syncCard();
 });
 return { destroy };
+}
+function volumeHomeStarts({ simulation, screen, kind, running }) {
+if (simulation !== true || running === true) return false;
+return kind === "view" || screen === "volume";
 }
 function volumeAllowed(state) {
 return appAllows("viewVolume", state);
@@ -74443,6 +75731,517 @@ registerPanel(PANEL_IDS.tools, mountToolsPanel);
 registerPanel(PANEL_IDS.headerHistory, mountHistoryPanel);
 registerPanel(PANEL_IDS.sizes, mountSizesPanel);
 registerPanel(PANEL_IDS.headerSizes, mountSizesButton);
+
+// src/panels/viewScenarios.js
+const VIEW_JOURNAL_SETTING = "viewJournalCollapsed";
+function viewScenariosRows(project, states) {
+if (!project) return [];
+const faults = new Map((states || []).filter((item) => item && item.fault).map((item) => [item.id, item.fault]));
+return scenariosListRows(project, {}, null, faults).map((row) => ({
+id: row.id,
+name: row.name,
+kind: row.kind,
+active: row.active,
+hung: row.hung,
+fault: row.fault || "",
+}));
+}
+function viewScenariosOpen(api) {
+const list = uiEl("ul", { class: "view-scn__list" });
+const journalHost = uiEl("div", { class: "view-scn__journal" });
+const body = uiEl("div", { class: "view-scn" }, [list, journalHost]);
+const journal = simJournalMount(journalHost, api, {
+title: strings.sim.log.title,
+setting: VIEW_JOURNAL_SETTING,
+collapsed: false,
+});
+function drawList() {
+const rows = viewScenariosRows(api.getState().project, simScenarios());
+if (rows.length === 0) {
+list.replaceChildren(uiEl("li", { class: "view-scn__empty", text: strings.view.scenariosEmpty }));
+return;
+}
+const running = simRunning();
+list.replaceChildren(
+...rows.map((row) => {
+const run = uiButton(strings.scenarios.list.run, {
+class: "ui-btn ui-btn--primary view-scn__run",
+title: running ? strings.scenarios.list.runHint : strings.scenarios.list.runStopped,
+on: { click: () => simScenarioRun(row.id) },
+});
+run.disabled = !running;
+return uiEl("li", { class: "view-scn__row" + (row.active ? " is-active" : "") }, [
+uiEl("span", { class: "view-scn__name", text: row.name }),
+uiEl("span", { class: "scn-row__kind is-" + row.kind, text: strings.scenarios.list.kinds[row.kind] || "" }),
+uiEl("span", {
+class: "view-scn__active" + (row.active ? "" : " is-off"),
+text: row.active ? strings.scenarios.list.active : "",
+title: strings.scenarios.list.activeReadOnly,
+}),
+...(row.fault ? [uiEl("span", { class: "view-scn__fault", text: row.fault })] : []),
+run,
+]);
+}),
+);
+}
+let frame = 0;
+const later = () => {
+if (frame) return;
+const ask = typeof requestAnimationFrame === "function" ? requestAnimationFrame : (fn) => setTimeout(fn, 16);
+frame = ask(() => {
+frame = 0;
+drawList();
+journal.draw();
+});
+};
+const unwatch = simWatch(() => later());
+const stop = () => unwatch();
+let modal = null;
+const close = uiButton(strings.dialog.close, {
+class: "ui-btn ui-btn--accent",
+on: {
+click: () => {
+stop();
+modal.close();
+},
+},
+});
+modal = uiModal({
+title: strings.view.scenarios,
+body,
+actions: [close],
+primary: close,
+onCancel: stop,
+});
+drawList();
+journal.draw();
+return modal;
+}
+
+// src/panels/viewStart.js
+const VIEW_START_ID = "view-start";
+const VIEW_START_PARAM = "o";
+const VIEW_PREVIEW_SETTING = "viewPreviewSeen";
+const VIEW_SLOT_SETTING = "viewSlot";
+function viewStartLinkOf(hash) {
+const source = String(hash || "").replace(/^#/, "");
+for (const part of source.split("&")) {
+const at = part.indexOf("=");
+if (at < 0 || part.slice(0, at) !== VIEW_START_PARAM) continue;
+const payload = part.slice(at + 1);
+return payload === "" ? null : payload;
+}
+return null;
+}
+function viewStartLinkKey(payload) {
+const source = String(payload || "");
+let hash = 0x811c9dc5;
+for (let i = 0; i < source.length; i += 1) {
+hash ^= source.charCodeAt(i);
+hash = Math.imul(hash, 0x01000193) >>> 0;
+}
+return source.length + ":" + hash.toString(16);
+}
+async function viewStartLinkLoad(hash, options = {}) {
+const payload = viewStartLinkOf(hash);
+if (payload === null) {
+return /(^|[#&])o=(&|$)/.test(String(hash || "")) ? { status: "empty" } : { status: "none" };
+}
+const key = viewStartLinkKey(payload);
+if (options.savedKey && options.savedKey === key) return { status: "same", key };
+const read = options.read || viewLinkRead;
+try {
+const result = await read(payload, { decompress: options.decompress });
+return {
+status: "ok",
+loaded: { project: result.project },
+madeAt: result.madeAt || null,
+key,
+warnings: result.warnings || [],
+};
+} catch (error) {
+return { status: "broken", reason: (error && error.reason) || (error && error.code === VIEW_LINK_BROKEN ? "payload" : "unknown") };
+}
+}
+function viewStartReplace(saved, next) {
+if (!saved) return "fresh";
+const name = (project) => String((project && project.name) || "").trim();
+return name(saved) === name(next) ? "silent" : "ask";
+}
+function viewStartValid(value) {
+if (typeof value !== "string" && typeof value !== "number") return false;
+return Number.isFinite(new Date(value).getTime());
+}
+function viewStartMadeAt(source) {
+const from = source || {};
+const project = from.project || {};
+for (const value of [from.madeAt, from.writtenAt, project.updatedAt]) {
+if (viewStartValid(value)) return value;
+}
+return null;
+}
+function viewStartDateText(value) {
+if (!viewStartValid(value)) return "";
+const at = new Date(value);
+const pad = (number) => String(number).padStart(2, "0");
+return pad(at.getDate()) + "." + pad(at.getMonth() + 1) + "." + String(at.getFullYear()).padStart(4, "0");
+}
+function viewStartForget(map, key) {
+const out = {};
+if (!map || typeof map !== "object") return out;
+for (const [own, value] of Object.entries(map)) if (own !== key) out[own] = value;
+return out;
+}
+function viewStartBare(project, schemeId) {
+if (!project || !schemeId) return false;
+const scheme = findScheme(project, schemeId);
+if (!scheme) return false;
+return !scheme.imageId && wallsOnScheme(project, schemeId).length === 0;
+}
+let viewOpenLoaded = null;
+let viewReadyResolve = null;
+const viewReady = new Promise((resolve) => {
+viewReadyResolve = resolve;
+});
+function viewStartReady() {
+return viewReady;
+}
+async function viewStartOpenLoaded(loaded, options = {}) {
+if (!viewOpenLoaded) return false;
+return viewOpenLoaded(loaded, options);
+}
+function mountViewStart(host, api) {
+const { getState, setState, notify, subscribe } = api;
+let ready = false;
+let previewSeen = true;
+let previewClosed = false;
+let noStore = false;
+let madeAt = null;
+let menuOpen = false;
+const nameNode = uiEl("span", { class: "view-head__name" });
+const dateNode = uiEl("span", { class: "view-head__date" });
+const scenariosButton = uiIconLabelButton("sliders", strings.view.scenarios, {
+title: strings.view.scenariosHint,
+class: "ui-btn view-head__scenarios",
+on: { click: () => viewScenariosOpen(api) },
+});
+const picker = uiEl("input", {
+class: "view-head__picker",
+type: "file",
+attrs: { accept: ".zip,application/zip", hidden: "hidden" },
+on: {
+change: async () => {
+const chosen = picker.files && picker.files[0];
+picker.value = "";
+if (chosen) await openFromFile(chosen);
+},
+},
+});
+const openOther = uiIconLabelButton("fileOpen", strings.view.openOther, {
+class: "ui-btn view-menu__item",
+on: {
+click: () => {
+closeMenu();
+picker.click();
+},
+},
+});
+const forgetButton = uiIconLabelButton("trash", strings.view.forget, {
+title: strings.view.forgetHint,
+class: "ui-btn view-menu__item",
+on: {
+click: () => {
+closeMenu();
+forgetObject();
+},
+},
+});
+const menuList = uiEl("div", { class: "view-menu__list", attrs: { role: "menu" } }, [openOther, forgetButton]);
+menuList.hidden = true;
+const menuButton = uiIconLabelButton("folder", strings.view.menu, {
+title: strings.view.menuHint,
+class: "ui-btn view-menu__button",
+on: { click: () => (menuOpen ? closeMenu() : openMenu()) },
+});
+menuButton.setAttribute("aria-haspopup", "true");
+menuButton.setAttribute("aria-expanded", "false");
+const menu = uiEl("div", { class: "view-menu" }, [menuButton, menuList]);
+const head = uiEl("div", { class: "view-head mount" }, [nameNode, dateNode, scenariosButton, menu, picker]);
+const header = typeof document !== "undefined" ? document.getElementById("app-header") : null;
+if (header) header.append(head);
+function openMenu() {
+menuOpen = true;
+menuList.hidden = false;
+menuButton.setAttribute("aria-expanded", "true");
+}
+function closeMenu() {
+menuOpen = false;
+menuList.hidden = true;
+menuButton.setAttribute("aria-expanded", "false");
+}
+if (typeof document !== "undefined") {
+document.addEventListener("pointerdown", (event) => {
+if (menuOpen && !menu.contains(event.target)) closeMenu();
+});
+document.addEventListener("keydown", (event) => {
+if (menuOpen && event.key === "Escape") closeMenu();
+});
+}
+function renderHead(project) {
+head.hidden = !project;
+if (!project) {
+if (typeof document !== "undefined") document.title = strings.view.title;
+return;
+}
+nameNode.textContent = project.name || strings.project.untitled;
+const date = viewStartDateText(madeAt);
+dateNode.textContent = date ? text("view.madeAt", { date }) : "";
+dateNode.title = date ? strings.view.madeAtHint : "";
+dateNode.hidden = !date;
+if (typeof document !== "undefined") document.title = text("view.titleNamed", { name: nameNode.textContent });
+}
+function render() {
+const state = getState();
+const project = state.project;
+renderHead(project);
+const notes = [];
+if (project && noStore) notes.push(uiEl("p", { class: "view-note view-note--store", text: strings.view.noStore }));
+if (project && !previewSeen && !previewClosed) {
+const close = uiButton(strings.view.previewClose, {
+class: "ui-btn view-note__close",
+on: {
+click: () => {
+previewClosed = true;
+previewSeen = true;
+Promise.resolve(setSetting(VIEW_PREVIEW_SETTING, true)).catch(() => {});
+render();
+},
+},
+});
+notes.push(uiEl("p", { class: "view-note view-note--preview" }, [uiEl("span", { text: strings.view.preview }), close]));
+}
+if (project && viewStartBare(project, state.schemeId)) {
+notes.push(uiEl("p", { class: "view-note view-note--bare", text: strings.view.schemeBare }));
+}
+const children = [];
+if (notes.length > 0) children.push(uiEl("div", { class: "view-notes" }, notes));
+if (!project && ready) {
+const open = uiButton(strings.view.open, {
+class: "ui-btn ui-btn--accent view-empty__open",
+title: strings.view.openHint,
+on: { click: () => picker.click() },
+});
+children.push(
+uiEl("div", { class: "view-empty" }, [
+uiEl("h1", { class: "view-empty__title", text: strings.view.title }),
+uiEl("p", { class: "view-empty__text", text: strings.view.empty }),
+open,
+...(noStore ? [uiEl("p", { class: "view-note view-note--store", text: strings.view.noStore })] : []),
+]),
+);
+}
+host.replaceChildren(...children);
+}
+function busy(line) {
+const body = uiEl("p", { class: "modal__text", text: line });
+return { modal: uiModal({ title: strings.file.readingTitle, body, actions: [], dismissable: false }), body };
+}
+const paint = () => new Promise((resolve) => setTimeout(resolve, 0));
+async function openFromFile(chosen) {
+const { modal, body } = busy(strings.file.reading);
+await paint();
+let loaded = null;
+try {
+loaded = await unpackProject(chosen, {
+onProgress: ({ done, total }) => {
+body.textContent = text("file.packingProgress", { done, total });
+},
+});
+} catch (error) {
+modal.close();
+const reason = String((error && error.message) || strings.errors.notAProject).replace(/[.\s]+$/, "");
+notify(text("view.fileRefused", { reason }), "error");
+return false;
+}
+modal.close();
+return openLoaded(loaded);
+}
+async function forgetSettings(project) {
+if (!project) return;
+const byId = [VIEW_SETTING, HIDDEN_OBJECTS_SETTING];
+for (const setting of byId) {
+const map = await getSetting(setting);
+if (map && typeof map === "object" && project.id in map) await setSetting(setting, viewStartForget(map, project.id));
+}
+if (project.key) {
+const sims = await getSetting(SIM_STATE_SETTING);
+if (sims && typeof sims === "object" && project.key in sims) await setSetting(SIM_STATE_SETTING, viewStartForget(sims, project.key));
+}
+}
+async function dropImages(project, keep = new Set()) {
+for (const scheme of (project && project.schemes) || []) {
+if (scheme.imageId && !keep.has(scheme.imageId)) await deleteImage(scheme.imageId);
+}
+}
+async function openLoaded(loaded, options = {}) {
+const state = getState();
+const saved = state.project;
+const verdict = viewStartReplace(saved, loaded.project);
+if (verdict === "ask") {
+const agreed = await uiConfirm({
+title: strings.view.replaceTitle,
+message: text("view.replaceMessage", { name: saved.name, next: loaded.project.name }),
+confirmLabel: strings.view.open,
+confirmClass: "ui-btn ui-btn--accent",
+});
+if (!agreed) return false;
+}
+const { modal } = busy(strings.file.reading);
+try {
+await paint();
+const memory = await getSetting(VIEW_SETTING);
+const images = loaded.images instanceof Map ? loaded.images : new Map();
+const imageIds = new Map();
+for (const [oldId, blob] of images) imageIds.set(oldId, await putImage(blob));
+const adopted = adoptLoadedProject(
+{ project: loaded.project, images },
+{ mode: verdict === "silent" ? "replace" : "new", currentId: saved ? saved.id : null, imageIds },
+);
+const project = adopted.project;
+await saveProject(project);
+const kept = new Set(project.schemes.map((scheme) => scheme.imageId).filter(Boolean));
+const schemes = schemesInOrder(project);
+const stay = verdict === "silent" && state.schemeId && schemes.some((scheme) => scheme.id === state.schemeId);
+madeAt = viewStartMadeAt({ madeAt: options.madeAt, writtenAt: loaded.writtenAt, project: loaded.project });
+const remembered = verdict === "silent" || Boolean(memory && typeof memory === "object" && memory[project.id]);
+setState({
+project,
+schemeId: stay ? state.schemeId : schemes.length > 0 ? schemes[0].id : null,
+selectedMarkIds: [],
+activeTypeId: null,
+});
+if (!remembered) setScreen("volume");
+await setSetting(LAST_PROJECT_KEY, project.id);
+await setSetting(VIEW_SLOT_SETTING, { id: project.id, madeAt, link: options.linkKey || null });
+if (saved) {
+await dropImages(saved, kept);
+if (saved.id !== project.id) {
+await deleteProject(saved.id);
+await forgetSettings(saved);
+}
+}
+noteStore();
+render();
+return true;
+} catch (error) {
+notify(text("view.fileRefused", { reason: String((error && error.message) || strings.errors.notAProject).replace(/[.\s]+$/, "") }), "error");
+return false;
+} finally {
+modal.close();
+}
+}
+viewOpenLoaded = openLoaded;
+async function forgetObject() {
+const project = getState().project;
+if (!project) return;
+const agreed = await uiConfirm({
+title: strings.view.forgetTitle,
+message: text("view.forgetMessage", { name: project.name }),
+confirmLabel: strings.view.forget,
+});
+if (!agreed) return;
+simStop();
+madeAt = null;
+setState({ project: null, schemeId: null, selectedMarkIds: [], activeTypeId: null });
+await deleteProject(project.id);
+await dropImages(project);
+await forgetSettings(project);
+await setSetting(LAST_PROJECT_KEY, null);
+await setSetting(VIEW_SLOT_SETTING, null);
+setTimeout(() => forgetSettings(project).catch(() => {}), 1200);
+render();
+notify(strings.view.forgetDone, "success");
+}
+function noteStore() {
+if (storeMode() === "memory") noStore = true;
+}
+onStoreProblem(() => {
+noStore = true;
+render();
+});
+subscribe((state, changed) => {
+if ("project" in changed || "schemeId" in changed) render();
+});
+async function startup() {
+try {
+await openStore();
+noteStore();
+previewSeen = (await getSetting(VIEW_PREVIEW_SETTING)) === true;
+const list = await listProjects();
+const lastId = await getSetting(LAST_PROJECT_KEY);
+const target = list.find((item) => item.id === lastId) || list[0] || null;
+const stored = target ? await loadProject(target.id) : null;
+if (stored) {
+const project = ensureProjectKey(projectsMigrateStored(stored));
+if (project.changed) await saveProject(project.project);
+const slot = await getSetting(VIEW_SLOT_SETTING);
+const sameSlot = slot && typeof slot === "object" && slot.id === project.project.id;
+madeAt = viewStartMadeAt({ madeAt: sameSlot ? slot.madeAt : null, project: project.project });
+const memory = await getSetting(VIEW_SETTING);
+const remembered = Boolean(memory && typeof memory === "object" && memory[project.project.id]);
+const schemes = schemesInOrder(project.project);
+setState({
+project: project.project,
+schemeId: schemes.length > 0 ? schemes[0].id : null,
+selectedMarkIds: [],
+activeTypeId: null,
+});
+if (!remembered) setScreen("volume");
+}
+} catch (error) {
+notify(strings.storage.memory, "error");
+}
+ready = true;
+render();
+viewReadyResolve();
+await openFromAddress();
+}
+function cleanAddress() {
+if (typeof history === "undefined" || typeof location === "undefined") return;
+try {
+history.replaceState(null, "", location.pathname + location.search);
+} catch (error) {
+}
+}
+async function openFromAddress() {
+if (typeof location === "undefined") return;
+const hash = location.hash;
+if (viewStartLinkOf(hash) === null && !/(^|[#&])o=/.test(hash)) return;
+let slot = null;
+try {
+slot = await getSetting(VIEW_SLOT_SETTING);
+} catch (error) {
+}
+const { modal } = busy(strings.view.linkBusy);
+let result = null;
+try {
+await paint();
+result = await viewStartLinkLoad(hash, {
+decompress: brotliReachable() ? brotliDecompress : null,
+savedKey: slot && typeof slot === "object" ? slot.link : null,
+});
+} finally {
+modal.close();
+cleanAddress();
+}
+if (result.status === "broken") notify(strings.view.linkBroken, "error");
+else if (result.status === "empty") notify(strings.view.linkEmpty, "error");
+else if (result.status === "ok") await openLoaded(result.loaded, { madeAt: result.madeAt, linkKey: result.key });
+}
+render();
+startup();
+}
+registerPanel(VIEW_START_ID, mountViewStart);
 
 // src/panels/warnings.js
 const WARNING_VIEW_ICON = 22;
