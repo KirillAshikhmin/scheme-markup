@@ -27,6 +27,11 @@ const webDir = path.join(root, "web");
 // иначе сборщик бандла втянул бы мегабайт кодека в обе страницы. Страница
 // грузит её динамическим `import("./vendor/…")` (`src/brotliCodec.js`).
 const vendorDir = path.join(webDir, "vendor");
+// Библиотека сценариев (G23): скрипты Sprut.Hub_Tools с отпечатком в имени и
+// реестр `index.json`. Собирает её руками `tools/scenario-lib.mjs`, итог лежит
+// в git; сборка о команде не знает и внешних папок не читает — просто кладёт
+// готовые файлы рядом со страницами, как копию кодека.
+const scenarioLibDir = path.join(webDir, "scenarios");
 const distDir = path.join(root, "dist");
 
 // Имя страницы в `dist/`: на неё тоже можно сослаться, и это не ошибка.
@@ -131,6 +136,27 @@ export async function listVendor() {
     .filter((file) => !path.basename(file).startsWith("."))
     .map((file) => ({
       name: "vendor/" + path.relative(vendorDir, file).split(path.sep).join("/"),
+      file,
+    }));
+}
+
+// Библиотека сценариев: едет в `dist/scenarios/` теми же файлами и именами,
+// что лежат в git. В офлайн-кэш установки она **не** идёт: объект ссылается на
+// два-три скрипта из нескольких десятков, и класть в кэш всю библиотеку
+// заказчику незачем — нужные страница скачивает при открытии и держит в своём
+// кэше (`src/scenarioLib.js`).
+export async function listScenarioLib() {
+  let files = [];
+  try {
+    files = await listFiles(scenarioLibDir, "");
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    return [];
+  }
+  return files
+    .filter((file) => !path.basename(file).startsWith("."))
+    .map((file) => ({
+      name: "scenarios/" + path.relative(scenarioLibDir, file).split(path.sep).join("/"),
       file,
     }));
 }
@@ -958,6 +984,7 @@ export async function buildPage() {
   const assets = await listAssets();
   const assetNames = assets.map((asset) => asset.name);
   const vendor = await listVendor();
+  const library = await listScenarioLib();
   const extras = [
     [MANIFEST_FILE, manifestJson() + "\n"],
     [VIEW_MANIFEST_FILE, viewManifestJson() + "\n"],
@@ -976,6 +1003,7 @@ export async function buildPage() {
     ...extras.map(([name]) => name),
     ...assetNames,
     ...vendor.map((file) => file.name),
+    ...library.map((file) => file.name),
   ];
 
   assertPlainText(html);
@@ -992,19 +1020,20 @@ export async function buildPage() {
   assertPlainText(guide, GUIDE_FILE);
   assertGuideOffline(guide, written);
 
-  return { html, view, extras, assets, vendor, worker, modules: sources.size };
+  return { html, view, extras, assets, vendor, library, worker, modules: sources.size };
 }
 
 export async function build() {
-  const { html, view, extras, assets, vendor, worker, modules } = await buildPage();
+  const { html, view, extras, assets, vendor, library, worker, modules } = await buildPage();
 
   await mkdir(distDir, { recursive: true });
   const out = path.join(distDir, PAGE_FILE);
   await writeFile(out, html, "utf8");
   for (const [name, content] of extras) await writeFile(path.join(distDir, name), content, "utf8");
-  // Ресурсы и копия кодека — побайтово: шрифт и wasm двоичные, через utf8 они
-  // бы не выжили.
-  for (const file of [...assets, ...vendor]) {
+  // Ресурсы, копия кодека и библиотека сценариев — побайтово: шрифт и wasm
+  // двоичные, через utf8 они бы не выжили, а скрипт библиотеки обязан доехать
+  // байт в байт — по нему сверяется отпечаток.
+  for (const file of [...assets, ...vendor, ...library]) {
     const target = path.join(distDir, file.name);
     await mkdir(path.dirname(target), { recursive: true });
     await writeFile(target, await readFile(file.file));
@@ -1018,6 +1047,7 @@ export async function build() {
     extras: extras.map(([name]) => name),
     assets: assets.map((asset) => asset.name),
     vendor: vendor.map((file) => file.name),
+    library: library.map((file) => file.name),
     workerBytes: Buffer.byteLength(worker.source, "utf8"),
     workerModules: worker.modules.length,
   };
@@ -1035,5 +1065,6 @@ if (runDirectly) {
   );
   if (result.assets.length > 0) console.log("ресурсы страницы: " + result.assets.join(", "));
   if (result.vendor.length > 0) console.log("копия кодека: " + result.vendor.join(", "));
+  if (result.library.length > 0) console.log("библиотека сценариев: " + result.library.length + " файлов в dist/scenarios/");
   console.log("рядом для веб-версии: " + result.extras.join(", "));
 }

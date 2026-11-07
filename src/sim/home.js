@@ -276,8 +276,15 @@ export function markDoorOf(project, markId) {
  * `{accessories, links, doors, scenarios, logicBindings}`. `links` — прямые
  * связи клавиш «чем управляет» (`markControlsByChannel`): `[{markId, channel,
  * targets: [markId]}]`; `doors` — `[{markId, openingId}]` для датчиков открытия.
+ *
+ * `opts.scenarios` — **уже разрешённые** записи сценариев (таск 05 просмотра,
+ * G25): исходники библиотечных скриптов подставляет страница
+ * (`src/scenarioLib.js`), потому что поток лишён сети и кода из строки.
+ * Здесь их берут как есть; нет их — дом собирается по записям объекта, ровно
+ * как раньше. Искать исходники этот модуль не умеет и не должен: он идёт в
+ * бандл потока.
  */
-export function buildHomeSpec(project) {
+export function buildHomeSpec(project, opts = null) {
   const accessories = homeAccessories(project);
   const followers = deviceFollowers(project);
   const lead = (markId) => followers.get(markId) || markId;
@@ -306,11 +313,12 @@ export function buildHomeSpec(project) {
   }
   // Сценарий и привязка, названные ведомой меткой, достаются ведущей: так
   // сценарий, собранный до того, как метки сгруппировали, не теряет устройства.
+  const given = opts && typeof opts === "object" && Array.isArray(opts.scenarios) ? opts.scenarios : null;
   return {
     accessories,
     links,
     doors,
-    scenarios: homeLeadMarks(structuredClone(scenariosInOrder(project)), followers),
+    scenarios: homeLeadMarks(structuredClone(given || scenariosInOrder(project)), followers),
     logicBindings: homeLeadMarks(structuredClone(logicBindingsOf(project)), followers),
   };
 }

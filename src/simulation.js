@@ -37,10 +37,13 @@
 //
 // Коды записей журнала, которые пишет страница (текст — `strings.sim.journal`):
 // `pageReloaded`, `editReset`, `noWorker`, `reset` (сброс остановленного дома),
-// `scenarioHung` (`{name, label, where}`), `hungUnknown` (`{count}`).
+// `scenarioHung` (`{name, label, where}`), `hungUnknown` (`{count}`),
+// `scenarioLibMissing` (`{name}` — библиотечный скрипт не доехал, таск 05
+// просмотра).
 import { appClockJump, appClockNow, appClockSimMs, appClockStep, appClockWatch } from "./appClock.js";
 import { appWeatherRead, appWeatherWatch } from "./appWeather.js";
 import { deviceFollowers, findMark, findType, markControlsByChannel, roomAtPlace, roomsInOrder, scenariosInOrder } from "./model.js";
+import { scenarioLibRef, scenarioLibResolve } from "./scenarioLib.js";
 import { getSetting, setSetting } from "./store.js";
 import { text } from "./strings.js";
 import { SIM_BRIDGE_REPLAY, createSimBridge } from "./sim/bridge.js";
@@ -97,11 +100,15 @@ export function simProjectKey(project) {
   return typeof project.id === "string" && project.id ? project.id : null;
 }
 
-/** Дом для потока: `buildHomeSpec` плюс координаты солнца и имена помещений. */
-export function simHomeOf(project) {
+/**
+ * Дом для потока: `buildHomeSpec` плюс координаты солнца и имена помещений.
+ * `opts.scenarios` — разрешённые записи сценариев (библиотека, таск 05
+ * просмотра); нет их — дом собирается по объекту, как раньше.
+ */
+export function simHomeOf(project, opts = null) {
   // Координаты — тем же чтением, что у солнца «Объёма»: одно небо на двоих.
   const { latDeg, lonDeg } = volumeSiteOf(project);
-  const spec = buildHomeSpec(project);
+  const spec = buildHomeSpec(project, opts);
   return {
     ...spec,
     site: latDeg === null || lonDeg === null ? null : { latDeg, lonDeg },
@@ -252,6 +259,9 @@ export function createSimulation(options = {}) {
   // Выбор погоды (правка после сборки сценариев): климат дома считает улицу по
   // нему же, что и «Объём».
   const weather = given.weather || { read: appWeatherRead, watch: appWeatherWatch };
+  // Библиотека сценариев (таск 05 просмотра): дверь одна — `resolve(project)`.
+  // Поток лишён сети, поэтому исходники подставляются здесь, до отправки дома.
+  const library = given.library || { resolve: scenarioLibResolve };
   const timers = given.timers || simulationTimers();
   let bridge = null;
   let clockOff = null;
@@ -294,6 +304,21 @@ export function createSimulation(options = {}) {
   let saveTimer = null;
   let lastSaveAt = -Infinity;
   let saveChain = Promise.resolve();
+
+  // ——— библиотечные скрипты ————————————————————————————————————————————————
+  //
+  // Исходники библиотеки в объекте не лежат (G24): запись сценария несёт
+  // ссылку `lib = {name, version, hash}`. Дому нужен текст, а поток его
+  // скачать не может — он без сети. Поэтому исходники подставляются здесь:
+  // кэш сеанса `libSources`, добор по надобности `libraryAsk`, пересборка дома
+  // `libraryLanded`. Пока скрипт в пути, сценарий уходит в дом помеченным —
+  // дом идёт, остальные сценарии работают (G26).
+  const libSources = new Map();
+  let libMissing = [];
+  const libTold = new Set();
+  let libAsked = null;
+  let libSeq = 0;
+  let libReady = null;
 
   let liveCache = null;
   let foreign = null;
@@ -541,6 +566,76 @@ export function createSimulation(options = {}) {
     post({ type: "load", spec });
   }
 
+  // ——— библиотека сценариев ————————————————————————————————————————————————
+
+  /**
+   * Записи сценариев для дома: вместо ссылки `lib` — исходник из кэша сеанса.
+   * Ссылок в объекте нет — `null`, и дом собирается ровно как раньше: объект
+   * без библиотеки ведёт себя так, будто её не существует.
+   */
+  function libBuild(next) {
+    const list = scenariosInOrder(next);
+    let any = false;
+    const missing = [];
+    const out = list.map((scenario) => {
+      const ref = scenarioLibRef(scenario);
+      if (!ref) return scenario;
+      any = true;
+      const source = libSources.get(ref.hash);
+      if (typeof source === "string") return { ...scenario, source };
+      // Помеченная запись: без текста и неактивная — как сценарий, выключенный
+      // сторожем (`simHungScenario`). Дом её не исполняет и об этом знает.
+      missing.push({
+        id: String(scenario.id || ""),
+        name: ref.name || simScenarioName(scenario, scenario.id),
+        version: ref.version,
+        hash: ref.hash,
+      });
+      return { ...scenario, source: "", active: false, libMissing: true };
+    });
+    return any ? { scenarios: out, missing } : null;
+  }
+
+  // Скрипты тянутся по надобности и только те, которых нет: за один и тот же
+  // набор ссылок второй раз не ходят — ни по сети, ни в кэш.
+  function libraryAsk() {
+    if (closed || libMissing.length === 0) return libReady;
+    const want = libMissing.map((item) => item.hash).join("\u0000");
+    if (want === libAsked) return libReady;
+    libAsked = want;
+    const seq = (libSeq += 1);
+    const own = project;
+    libReady = Promise.resolve()
+      .then(() => library.resolve(own))
+      .then((result) => libraryLanded(seq, result))
+      .catch(() => libraryLanded(seq, null));
+    return libReady;
+  }
+
+  // Скрипты доехали (или не доехали): дом пересобирается, поток получает его
+  // заново, а про каждый пропавший скрипт журнал говорит один раз за сеанс.
+  function libraryLanded(seq, result) {
+    if (closed || seq !== libSeq || !project) return libMissing;
+    for (const scenario of simList(result && result.scenarios)) {
+      const ref = scenarioLibRef(scenario);
+      if (ref && typeof scenario.source === "string" && scenario.source) libSources.set(ref.hash, scenario.source);
+    }
+    const built = libBuild(project);
+    libMissing = built ? built.missing : [];
+    home = simHomeOf(project, built);
+    const entries = [];
+    for (const item of libMissing) {
+      if (libTold.has(item.hash)) continue;
+      libTold.add(item.hash);
+      entries.push(entry("system", "scenarioLibMissing", { name: item.name }));
+    }
+    addLog(entries);
+    // Потока ещё нет — дом ему не нужен: он получит его, когда поднимется.
+    if (bridge) resend();
+    notify({ log: entries });
+    return libMissing;
+  }
+
   // ——— журнал и подписчики ————————————————————————————————————————————————
 
   function entry(kind, code, vars, extra = {}) {
@@ -686,7 +781,15 @@ export function createSimulation(options = {}) {
     }
     const before = switching ? new Map() : accessories;
     project = next;
-    home = simHomeOf(next);
+    // Другой объект — другие библиотечные ссылки: про свои пропавшие скрипты
+    // он говорит сам, а кэш скачанного остаётся — он общий на сеанс.
+    if (switching) {
+      libTold.clear();
+      libAsked = null;
+    }
+    const built = libBuild(next);
+    libMissing = built ? built.missing : [];
+    home = simHomeOf(next, built);
     accessories = new Map(home.accessories.map((accessory) => [accessory.markId, accessory]));
     if (switching) {
       key = nextKey;
@@ -721,6 +824,9 @@ export function createSimulation(options = {}) {
     addLog(entries);
     if (switching) restoreSaved(key);
     notify({ log: entries });
+    // Чего в кэше нет — скачать и пересобрать дом; в журнал о пропаже скажет
+    // `libraryLanded`, когда попытка кончится, а не раньше.
+    libraryAsk();
     return true;
   }
 
@@ -931,6 +1037,11 @@ export function createSimulation(options = {}) {
       ensureBridge();
       return optionForms(bindingId, scenarioId);
     },
+    // Библиотечные скрипты, которые не доехали: `[{id, name, version, hash}]`.
+    libraryMissing: () => libMissing.map((item) => ({ ...item })),
+    // Дождаться доборки и отдать список пропавших таким, каков он **сейчас**:
+    // обещание прошлой попытки помнило бы прошлый ответ.
+    libraryReady: () => Promise.resolve(libraryAsk()).then(() => libMissing.map((item) => ({ ...item }))),
     // Поднят ли поток (для тестов и замеров): до запуска и до вопросов экрана — нет.
     awake: () => bridge !== null,
     hung: () => ({ scenarios: [...hungScenarios.keys()], bindings: [...hungBindings.keys()] }),
@@ -1033,6 +1144,23 @@ export function simJournalClear() {
  */
 export function simSync(project) {
   return simSessionOf().sync(project);
+}
+
+/**
+ * Библиотечные скрипты открытого объекта, которые не доехали (G26):
+ * `[{id, name, version, hash}]`. Этим список сценариев говорит «скрипт не
+ * найден», а журнал уже сказал своё.
+ */
+export function simLibraryMissing() {
+  return simSessionOf().libraryMissing();
+}
+
+/**
+ * Дождаться библиотеки: обещание отдаёт тот же список пропавших. Нужно тому,
+ * кто открывает объект и хочет показать дом уже со скриптами.
+ */
+export function simLibraryReady() {
+  return simSessionOf().libraryReady();
 }
 
 /** Ближайшее событие имитации (мс часов) или `null` — «Ничего не запланировано». */
