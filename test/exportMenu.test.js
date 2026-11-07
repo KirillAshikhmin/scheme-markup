@@ -61,10 +61,10 @@ function items(state) {
   return map;
 }
 
-test("меню всегда перечисляет те же три выгрузки, и порядок у них свой", () => {
+test("меню всегда перечисляет те же выгрузки, и порядок у них свой", () => {
   const { project, schemeId } = world();
   const ids = exportMenuItems({ project, schemeId }).map((item) => item.id);
-  assert.deepEqual(ids, ["table", "scheme", "elevation"]);
+  assert.deepEqual(ids, ["table", "scheme", "elevation", "link"]);
   // Пустое состояние не укорачивает меню: пункт исчезнувший и пункт погасший
   // отвечают на разные вопросы, а ответ нужен именно на «почему нельзя».
   assert.deepEqual(exportMenuItems(null).map((item) => item.id), ids);
@@ -110,4 +110,13 @@ test("стены оживляют развёртки и без единой ме
   // монтажника, пустая таблица — пустой лист.
   assert.equal(walled.get("table").reason, strings.exportPanel.noMarks);
   assert.equal(walled.get("scheme").reason, strings.exportPanel.noMarks);
+});
+
+test("«Ссылкой»: без объекта погашен с причиной, с объектом жив", () => {
+  const { project, schemeId } = world();
+  assert.equal(items(null).get("link").reason, strings.exportPanel.linkNoProject);
+  assert.equal(items({ project: null, schemeId: null }).get("link").reason, strings.exportPanel.linkNoProject);
+  // Меток и схемы может не быть — ссылка собирает объект целиком.
+  assert.equal(items({ project, schemeId }).get("link").reason, null);
+  assert.equal(items({ project, schemeId }).get("link").label, strings.exportPanel.link);
 });

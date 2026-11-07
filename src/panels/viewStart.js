@@ -19,6 +19,7 @@
 // страница просмотра и «Разметка» на одном origin друг друга не видят.
 import { LAST_PROJECT_KEY, HIDDEN_OBJECTS_SETTING, VIEW_SETTING, registerPanel, setScreen } from "../app.js";
 import { adoptLoadedProject } from "../autosave.js";
+import { brotliDecompress, brotliReachable } from "../brotliCodec.js";
 import { ensureProjectKey, findScheme, schemesInOrder, wallsOnScheme } from "../model.js";
 import { unpackProject } from "../projectFile.js";
 import { SIM_STATE_SETTING, simStop } from "../simulation.js";
@@ -36,6 +37,7 @@ import {
   storeMode,
 } from "../store.js";
 import { strings, text } from "../strings.js";
+import { VIEW_LINK_BROKEN, viewLinkRead } from "../viewLink.js";
 import { projectsMigrateStored } from "./projects.js";
 import { uiButton, uiConfirm, uiEl, uiIconLabelButton, uiModal } from "./ui.js";
 import { viewScenariosOpen } from "./viewScenarios.js";
@@ -64,6 +66,46 @@ export function viewStartLinkOf(hash) {
     return payload === "" ? null : payload;
   }
   return null;
+}
+
+/** Ключ нагрузки (длина и FNV-1a): по нему видно, что слот уже взят из этой ссылки. */
+export function viewStartLinkKey(payload) {
+  const source = String(payload || "");
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < source.length; i += 1) {
+    hash ^= source.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return source.length + ":" + hash.toString(16);
+}
+
+/**
+ * Разобрать адрес страницы (G12): `{status}` — `"none"` (ссылки нет), `"empty"`
+ * (`#o=` без нагрузки), `"broken"` (порча, обрезка, нет кодека), `"same"` (слот
+ * уже взят из этой ссылки: копии не плодим, G12.2) или `"ok"` с `loaded`
+ * (`{project}`), `madeAt`, `key`, `warnings`. Не бросает. `options`:
+ * `{decompress, savedKey, read}`.
+ */
+export async function viewStartLinkLoad(hash, options = {}) {
+  const payload = viewStartLinkOf(hash);
+  if (payload === null) {
+    return /(^|[#&])o=(&|$)/.test(String(hash || "")) ? { status: "empty" } : { status: "none" };
+  }
+  const key = viewStartLinkKey(payload);
+  if (options.savedKey && options.savedKey === key) return { status: "same", key };
+  const read = options.read || viewLinkRead;
+  try {
+    const result = await read(payload, { decompress: options.decompress });
+    return {
+      status: "ok",
+      loaded: { project: result.project },
+      madeAt: result.madeAt || null,
+      key,
+      warnings: result.warnings || [],
+    };
+  } catch (error) {
+    return { status: "broken", reason: (error && error.reason) || (error && error.code === VIEW_LINK_BROKEN ? "payload" : "unknown") };
+  }
 }
 
 /**
@@ -390,7 +432,7 @@ function mountViewStart(host, api) {
       });
       if (!remembered) setScreen("volume");
       await setSetting(LAST_PROJECT_KEY, project.id);
-      await setSetting(VIEW_SLOT_SETTING, { id: project.id, madeAt });
+      await setSetting(VIEW_SLOT_SETTING, { id: project.id, madeAt, link: options.linkKey || null });
       if (saved) {
         await dropImages(saved, kept);
         if (saved.id !== project.id) {
@@ -486,6 +528,48 @@ function mountViewStart(host, api) {
     ready = true;
     render();
     viewReadyResolve();
+    // Адрес — только после подъёма слота: иначе объект из ссылки разошёлся бы
+    // с сохранённым (G12).
+    await openFromAddress();
+  }
+
+  // ——— открытие по ссылке (G12, G12.1, G12.2) ———————————————————————
+
+  function cleanAddress() {
+    if (typeof history === "undefined" || typeof location === "undefined") return;
+    try {
+      history.replaceState(null, "", location.pathname + location.search);
+    } catch (error) {
+      /* адрес не чистится — объект всё равно открыт */
+    }
+  }
+
+  async function openFromAddress() {
+    if (typeof location === "undefined") return;
+    const hash = location.hash;
+    if (viewStartLinkOf(hash) === null && !/(^|[#&])o=/.test(hash)) return;
+    let slot = null;
+    try {
+      slot = await getSetting(VIEW_SLOT_SETTING);
+    } catch (error) {
+      /* нет базы — ключа нет, и объект откроется */
+    }
+    const { modal } = busy(strings.view.linkBusy);
+    let result = null;
+    try {
+      await paint();
+      result = await viewStartLinkLoad(hash, {
+        decompress: brotliReachable() ? brotliDecompress : null,
+        savedKey: slot && typeof slot === "object" ? slot.link : null,
+      });
+    } finally {
+      modal.close();
+      // Объект не должен остаться в истории браузера — чистим при любом исходе.
+      cleanAddress();
+    }
+    if (result.status === "broken") notify(strings.view.linkBroken, "error");
+    else if (result.status === "empty") notify(strings.view.linkEmpty, "error");
+    else if (result.status === "ok") await openLoaded(result.loaded, { madeAt: result.madeAt, linkKey: result.key });
   }
 
   render();

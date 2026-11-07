@@ -6,7 +6,10 @@
 // с состоянием сеанса: фильтр, схема и её план берутся ровно те, что на экране,
 // поэтому скрытое фильтром не попадает ни в таблицу, ни в картинку, ни в легенду.
 import { PANEL_IDS, appAllows, registerPanel } from "../app.js";
+import { brotliCompress, brotliReachable } from "../brotliCodec.js";
+import { scenarioLibIndex, scenarioLibRefOf } from "../scenarioLib.js";
 import { strings, text } from "../strings.js";
+import { VIEW_LINK_PARAM, viewLinkPack } from "../viewLink.js";
 import {
   elevationPlan,
   findRoom,
@@ -1335,7 +1338,107 @@ export function exportMenuItems(state) {
       hint: strings.elevationSheet.dialog,
       reason: walls === 0 ? strings.elevationSheet.noWalls : null,
     },
+    {
+      id: "link",
+      label: strings.exportPanel.link,
+      hint: strings.exportPanel.linkHint,
+      // Ссылка собирает объект целиком: меток, схемы и стен ей не нужно.
+      reason: !project ? strings.exportPanel.linkNoProject : !brotliReachable() ? strings.exportPanel.linkNoCodec : null,
+    },
   ];
+}
+
+// ——— «Ссылкой» (таск 04 просмотра; G09, G16) ———————————————————————————
+
+/** Страница просмотра рядом со страницей «Разметки». */
+export const EXPORT_LINK_PAGE = "view.html";
+/** Длиннее — в сообщение мессенджера не влезает (строка окна говорит об этом прямо). */
+export const EXPORT_LINK_MESSENGER_MAX = 4000;
+
+export function exportLinkLong(chars) {
+  return chars > EXPORT_LINK_MESSENGER_MAX;
+}
+
+/**
+ * Собрать ссылку: `{url, chars, stats}`; `chars` — знаки нагрузки (то, что
+ * называет окно). `options`: `{compress, index, base, madeAt}`; `index` — реестр
+ * библиотеки сценариев (`Map` из `scenarioLibIndex`): его узнавание оборачивается
+ * в `{refOf}`, как ждёт `viewLinkPack`, — плоский `Map` ему не годится.
+ */
+export async function exportLinkBuild(project, options = {}) {
+  const index = options.index instanceof Map ? options.index : new Map();
+  const packed = await viewLinkPack(project, {
+    compress: options.compress,
+    libraryIndex: { refOf: (source) => scenarioLibRefOf(source, index) },
+    madeAt: options.madeAt,
+  });
+  return {
+    url: String(options.base || EXPORT_LINK_PAGE) + "#" + VIEW_LINK_PARAM + "=" + packed.text,
+    chars: packed.stats.chars,
+    stats: packed.stats,
+  };
+}
+
+function exportLinkBase() {
+  // Строкой, а не `new URL(…)`: проверка сборки принимает такой вызов за ссылку на файл.
+  return location.href.replace(/[#?].*$/, "").replace(/[^/]*$/, "") + EXPORT_LINK_PAGE;
+}
+
+function exportLinkDialog(api) {
+  const project = api.getState().project;
+  if (!project) return;
+  const body = uiEl("div", { class: "export__link" }, [uiEl("p", { class: "modal__text", text: strings.exportPanel.linkBusy })]);
+  const modal = uiModal({
+    title: strings.exportPanel.linkDialog,
+    body,
+    actions: [uiButton(strings.dialog.close, { class: "ui-btn", on: { click: () => modal.close() } })],
+  });
+  (async () => {
+    try {
+      let index = new Map();
+      try {
+        index = await scenarioLibIndex();
+      } catch (error) {
+        /* реестра нет — исходники поедут текстом, потерь нет */
+      }
+      const built = await exportLinkBuild(project, { compress: brotliCompress, index, base: exportLinkBase() });
+      const field = uiEl("textarea", { class: "export__linkText", attrs: { readonly: "readonly", rows: "4" } });
+      field.value = built.url;
+      const copy = uiButton(strings.exportPanel.linkCopy, {
+        class: "ui-btn ui-btn--accent",
+        on: {
+          click: async () => {
+            try {
+              await navigator.clipboard.writeText(built.url);
+              api.notify(strings.exportPanel.linkCopied, "success");
+            } catch (error) {
+              field.focus();
+              field.select();
+              api.notify(strings.exportPanel.linkCopyFailed, "error");
+            }
+          },
+        },
+      });
+      const openTab = uiButton(strings.exportPanel.linkOpen, {
+        class: "ui-btn",
+        on: { click: () => window.open(built.url, "_blank", "noopener") },
+      });
+      const lines = [
+        uiEl("p", { class: "modal__text", text: text("exportPanel.linkLength", { chars: built.chars }) }),
+        uiEl("p", {
+          class: "modal__text",
+          text: text("exportPanel.linkScenarios", { linked: built.stats.scenarios.linked, inlined: built.stats.scenarios.inlined }),
+        }),
+        uiEl("p", { class: "modal__text", text: strings.exportPanel.linkSkipped }),
+      ];
+      if (exportLinkLong(built.chars)) lines.push(uiEl("p", { class: "modal__text export__linkLong", text: strings.exportPanel.linkLong }));
+      body.replaceChildren(...lines, field, uiEl("div", { class: "modal__actions" }, [copy, openTab]));
+    } catch (error) {
+      body.replaceChildren(
+        uiEl("p", { class: "modal__text", text: text("exportPanel.linkFailed", { message: String((error && error.message) || error) }) }),
+      );
+    }
+  })();
 }
 
 function mountExportPanel(host, api) {
@@ -1346,6 +1449,7 @@ function mountExportPanel(host, api) {
     table: () => exportTableDialog(api),
     scheme: () => exportSchemeDialog(api),
     elevation: () => exportElevationDialog(api),
+    link: () => exportLinkDialog(api),
   };
 
   const toggle = uiIconButton("printer", {
