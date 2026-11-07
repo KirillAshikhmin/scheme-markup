@@ -463,3 +463,81 @@ test("хвост любой длины переживает укладку в ba
     assert.equal(read.madeAt, "2026-11-08T07:30:00.000Z" + tail, tail);
   }
 });
+
+// Пробелы в конце строки и пустая строка — тоже значение (ревью таска 03):
+// внутри многострочного шаблона они часть строки, и стрижка комментариев
+// обязана оставить их на месте. Пробелы здесь собираются из `SPACES`, чтобы их
+// не унёс ни один редактор.
+const SPACES = "   ";
+const TRICKY_LINES = [
+  "// шапка сценария",
+  "const greeting = `строка один" + SPACES,
+  "",
+  "строка два`; // хвост строки",
+  "const spaced = 1;" + SPACES,
+  "/* блок",
+  "   второй строкой",
+  "   третьей строкой */",
+  "const after = greeting /* между */ + spaced;",
+];
+const TRICKY_STRIPPED = [
+  "",
+  "const greeting = `строка один" + SPACES,
+  "",
+  "строка два`; ",
+  "const spaced = 1;" + SPACES,
+  "",
+  "",
+  "",
+  "const after = greeting   + spaced;",
+];
+
+function withSource(project, name, source) {
+  return { ...project, scenarios: project.scenarios.map((item) => (item.name === name ? { ...item, source } : item)) };
+}
+
+test("стрижка отличается от исходника только выкинутыми комментариями", async () => {
+  const { project } = scriptedHouse();
+  const source = TRICKY_LINES.join("\n");
+  const packed = await viewLinkPack(withSource(project, "Свет по движению", source), codec);
+  const { payload } = payloadOf(packed.text);
+  const now = payload.p.scenarios.find((item) => item.name === "Свет по движению").source;
+  assert.equal(now, TRICKY_STRIPPED.join("\n"));
+  // И поимённо о том, из-за чего проверка завелась: хвостовой пробел в шаблоне
+  // и пустая строка внутри шаблона целы, строк столько же.
+  assert.equal(now.split("\n").length, source.split("\n").length, "строк столько же");
+  assert.ok(now.includes("строка один" + SPACES), "хвостовой пробел в шаблоне цел");
+  assert.ok(now.includes("`строка один" + SPACES + "\n\nстрока два`"), "пустая строка в шаблоне цела");
+  assert.ok(now.includes("const spaced = 1;" + SPACES), "хвостовой пробел в коде цел");
+  assert.equal(now.includes("шапка сценария"), false, "комментарий срезан");
+  assert.equal(now.includes("второй строкой"), false, "блочный комментарий срезан");
+});
+
+test("значение многострочного шаблона после стрижки то же", async () => {
+  const { project } = scriptedHouse();
+  const source = TRICKY_LINES.join("\n");
+  const packed = await viewLinkPack(withSource(project, "Свет по движению", source), codec);
+  const { payload } = payloadOf(packed.text);
+  const now = payload.p.scenarios.find((item) => item.name === "Свет по движению").source;
+  // Сверка смыслом, а не текстом: что скажет движок JS на исходный текст и что
+  // на стриженый. Разошлись — заказчику уехала другая строка.
+  const valuesOf = (text) => new Function(text + "\nreturn [greeting, spaced, after];")();
+  assert.deepStrictEqual(valuesOf(now), valuesOf(source));
+  assert.deepStrictEqual(valuesOf(now)[0], "строка один" + SPACES + "\n\nстрока два");
+});
+
+test("строчный комментарий кончается на любом конце строки", async () => {
+  // 0x2028 — разделитель строк языка, и комментарий кончается на нём так же,
+  // как на переводе строки. Знак собирается кодом: в исходнике теста он был бы
+  // настоящим переводом строки, и проверка проверяла бы не то.
+  const separator = String.fromCharCode(0x2028);
+  const source = "const a = 1; // хвост" + separator + "const b = 2;";
+  const { project } = scriptedHouse();
+  const packed = await viewLinkPack(withSource(project, "Свет по движению", source), codec);
+  const { payload } = payloadOf(packed.text);
+  const now = payload.p.scenarios.find((item) => item.name === "Свет по движению").source;
+  assert.equal(now, "const a = 1; " + separator + "const b = 2;");
+  const valuesOf = (text) => new Function(text + "\nreturn [a, b];")();
+  assert.deepStrictEqual(valuesOf(now), [1, 2]);
+  assert.deepStrictEqual(valuesOf(now), valuesOf(source));
+});
