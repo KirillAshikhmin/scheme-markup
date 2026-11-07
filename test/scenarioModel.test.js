@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 
 import {
   FORMAT_VERSION,
-  FORMAT_VERSION_MAX,
+  FORMAT_VERSION_SCENARIOS,
   addLogicBinding,
   addMark,
   addScenario,
@@ -212,7 +212,7 @@ async function projectText(project) {
 test("версия файла: 5 без сценариев и привязок, 6 — с ними", async () => {
   const box = house();
   assert.equal(FORMAT_VERSION, 5);
-  assert.equal(FORMAT_VERSION_MAX, 6);
+  assert.equal(FORMAT_VERSION_SCENARIOS, 6);
   assert.equal(projectFormatVersion(box.project), 5);
   const withScenario = addScenario(box.project, motionLight(box));
   assert.equal(projectFormatVersion(withScenario.project), 6);
@@ -229,7 +229,7 @@ test("версия файла: 5 без сценариев и привязок, 
   assert.ok(JSON.parse(rich.text).formatVersion > 5);
 });
 
-test("файл версии 6 читается, версии 7 — честный отказ futureVersion", async () => {
+test("файл версии 6 читается, версии 8 — честный отказ futureVersion", async () => {
   const box = house();
   const project = addScenario(box.project, motionLight(box)).project;
   const text = (await projectText(project)).text;
@@ -238,8 +238,10 @@ test("файл версии 6 читается, версии 7 — честны�
   assert.equal(six.project.formatVersion, 6);
   assert.equal(scenariosOf(six.project).length, 1);
 
-  const seven = await writeZip([{ name: PROJECT_ENTRY, data: text.replace('"formatVersion": 6', '"formatVersion": 7') }]);
-  await assert.rejects(unpackProject(seven), (error) => error.code === "futureVersion" && error.message.includes("7"));
+  // Версия 7 — ссылка на библиотечный скрипт (таск 06 просмотра), она тоже
+  // читается; из будущего теперь всё, что выше неё.
+  const eight = await writeZip([{ name: PROJECT_ENTRY, data: text.replace('"formatVersion": 6', '"formatVersion": 8') }]);
+  await assert.rejects(unpackProject(eight), (error) => error.code === "futureVersion" && error.message.includes("8"));
 });
 
 test("упаковано = распаковано: сценарии, привязки, профили типов и свои настройки меток", async () => {

@@ -8,6 +8,7 @@ import {
   FORMAT_VERSION_MAX,
   fillTypeSizes,
   migrateCommentType,
+  migrateScenarioLib,
   migrateScenarios,
   migrateTypeKinds,
   projectFormatVersion,
@@ -359,11 +360,18 @@ function looksLikeProject(value) {
 
 // Единственное место, где живут миграции формата: версия из будущего отвергается,
 // прошлые версии доводятся до текущей здесь.
-function migrateProject(loaded) {
+//
+// `options.library` — дверь узнавания библиотечного скрипта (`(source) -> ref |
+// null`, её делает `src/scenarioLib.js`). Её передаёт тот, у кого есть реестр:
+// `unpackProject` — от вызывающего, упаковка — не передаёт вовсе (объект к тому
+// времени уже переведён, а заново узнавать нечего). Двери нет — текст
+// сценариев остаётся текстом, и файл читается ровно как прежде (G68).
+function migrateProject(loaded, options = {}) {
   const version = Number(loaded.formatVersion);
   if (!Number.isFinite(version) || version < 1) throw fileError("foreignProject");
-  // Читаются обе версии этой сборки: 5 — объект без сценариев, 6 — с ними
-  // (таск 01 сценариев). Версия выше — файл более новой сборки.
+  // Читаются все версии этой сборки: 5 — объект без сценариев, 6 — с ними
+  // (таск 01 сценариев), 7 — со ссылками на библиотеку (таск 06 просмотра).
+  // Версия выше — файл более новой сборки.
   if (version > FORMAT_VERSION_MAX) {
     throw fileError("futureVersion", { version, current: FORMAT_VERSION_MAX });
   }
@@ -390,10 +398,15 @@ function migrateProject(loaded) {
   // у типа без размеров они проставляются по шаблону. Трогается только
   // справочник — метки новых полей не получают.
   // Сценарии (таск 01): терпимое чтение, у объекта без них — тот же объект.
+  // Ссылка на библиотечный скрипт (таск 06 просмотра): текст, совпавший с
+  // библиотечным побайтово, уезжает в `scenario.lib`; без реестра — ничего.
   // Аксессуары (правка после сборки сценариев): выключатель без реле — с
   // реле, кондиционер — термостат; ссылки сценариев переезжают вслед.
   const migrated = migrateDevices(
-    migrateScenarios(fillTypeSizes(migrateCommentType(migrateTypeKinds(filled).project).project).project).project,
+    migrateScenarioLib(
+      migrateScenarios(fillTypeSizes(migrateCommentType(migrateTypeKinds(filled).project).project).project).project,
+      options.library,
+    ).project,
   ).project;
   // Миграция могла убрать нечитаемые записи — версия считается по итогу.
   const current = projectFormatVersion(migrated);
@@ -623,22 +636,28 @@ function projectPrefix(entries) {
 }
 
 /**
- * Читает файл проекта: `{project, images}`, где images — Map «imageId → Blob».
- * Чужой или битый файл отвергается ошибкой с `.code` из strings.errors,
- * текущий объект при этом не трогается — вызывающий получает исключение
- * до того, как что-то заменит.
+ * Читает файл проекта: `{project, images, member, projectKey, writtenAt}`, где
+ * images — Map «imageId → Blob». Чужой или битый файл отвергается ошибкой с
+ * `.code` из strings.errors, текущий объект при этом не трогается — вызывающий
+ * получает исключение до того, как что-то заменит.
+ *
+ * `options.library` — дверь узнавания библиотечного скрипта (см.
+ * `migrateProject`): с ней текст сценария, совпавший с библиотечным побайтово,
+ * уезжает в ссылку сразу при чтении файла.
  */
 export async function unpackProject(blob, options = {}) {
   if (!blob) throw fileError("notAProject");
   const entries = await readZip(blob);
-  return readProjectEntries(entries, typeof options.onProgress === "function" ? options.onProgress : null);
+  return readProjectEntries(entries, typeof options.onProgress === "function" ? options.onProgress : null, {
+    library: options.library,
+  });
 }
 
 // Сборка объекта из уже прочитанных записей. Отдельно от `unpackProject`
 // потому, что сверка (`verifyProjectFile`) читает архив один раз и смотрит
 // и на записи, и на собранный объект: второй полный проход по десятку планов
 // стоит дороже всей упаковки.
-function readProjectEntries(entries, onProgress) {
+function readProjectEntries(entries, onProgress, options = {}) {
   const prefix = projectPrefix(entries);
   if (prefix === null) throw fileError("noProjectJson");
 
@@ -649,7 +668,7 @@ function readProjectEntries(entries, onProgress) {
     throw fileError("brokenProjectJson");
   }
   if (!looksLikeProject(loaded)) throw fileError("foreignProject");
-  const project = migrateProject(loaded);
+  const project = migrateProject(loaded, { library: options.library });
 
   const imageNames = [...entries.keys()].filter(
     (name) => name.startsWith(prefix + SCHEMES_DIR) && name.length > (prefix + SCHEMES_DIR).length,
@@ -669,19 +688,29 @@ function readProjectEntries(entries, onProgress) {
   // читать как «ничей файл» честнее, чем ронять на ней открытие объекта.
   let member = null;
   let projectKey = null;
+  let writtenAt = null;
   const writer = entries.get(prefix + WRITER_ENTRY);
   if (writer) {
     try {
       const parsed = JSON.parse(decodeText(writer));
       if (parsed && typeof parsed.member === "string" && parsed.member) member = parsed.member;
       if (parsed && typeof parsed.projectKey === "string" && parsed.projectKey) projectKey = parsed.projectKey;
+      // Когда файл записан — единственная дата, которую знает сам файл.
+      // Страница просмотра ставит её в шапку («выгружено такого-то числа»):
+      // `project.updatedAt` там врёт, он про последнюю правку объекта, а не
+      // про выгрузку. Непохожее на дату не берётся вовсе — лучше без даты,
+      // чем «Invalid Date» в шапке у заказчика.
+      if (parsed && typeof parsed.writtenAt === "string" && !Number.isNaN(Date.parse(parsed.writtenAt))) {
+        writtenAt = parsed.writtenAt;
+      }
     } catch {
       member = null;
       projectKey = null;
+      writtenAt = null;
     }
   }
 
   // `projectKey` — то, что записано в отметке; главный ключ живёт в объекте
   // (`project.key`), и решения принимаются по нему.
-  return { project, images, member, projectKey };
+  return { project, images, member, projectKey, writtenAt };
 }

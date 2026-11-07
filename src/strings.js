@@ -914,6 +914,7 @@ export const strings = {
     scenarioFromTemplate: "сценарий из заготовки",
     scenarioActive: "активность сценария",
     scenarioParams: "параметры сценария",
+    scenarioLibUpdate: "обновление библиотечного сценария",
     scenarioBlockAdd: "добавление блока сценария",
     scenarioBlockRemove: "удаление блока сценария",
     scenarioBlockMove: "перестановка блоков сценария",
@@ -3815,6 +3816,7 @@ export const strings = {
     update: "Обновить",
     updated: "Сценарий «{name}» обновлён до версии {version}",
     version: "Версия {version}",
+    stored: "Текст скрипта хранится в библиотеке, а не в объекте. Чтобы поправить его своей рукой, скачайте и загрузите своим сценарием.",
   },
   scenarios: {
     phrase: {

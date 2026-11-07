@@ -31,12 +31,14 @@ import {
   logicBindingsOf,
   moveScenario,
   roomsInOrder,
+  scenarioLibOf,
   scenariosInOrder,
   setTypeDevice,
   typeDeviceUnknown,
   typesInOrder,
   updateScenario,
 } from "../model.js";
+import { scenarioLibFetch, scenarioLibIndex, scenarioLibNewer } from "../scenarioLib.js";
 import {
   SCENARIO_TEMPLATES,
   scenarioBlockHas,
@@ -52,7 +54,7 @@ import {
 } from "../scenarioTree.js";
 import { DEVICE_KINDS } from "../sim/catalog.js";
 import { homeAccessories, markAccessory } from "../sim/home.js";
-import { simRunning, simScenarioActive, simScenarioRun, simWatch } from "../simulation.js";
+import { simLibraryMissing, simRunning, simScenarioActive, simScenarioRun, simWatch } from "../simulation.js";
 import { getSetting, setSetting } from "../store.js";
 import { strings, text } from "../strings.js";
 import { deviceCardView } from "./deviceCard.js";
@@ -111,21 +113,32 @@ export function scenariosCurrent(project, scenarioId) {
  * `faults` — `Map<id сценария, fault>` от имитации: у строки появляются `fault`
  * (слова: «остановлен: завис», «ошибка в строке 3») и `hung`; зависший
  * сценарий показан выключенным — включение возвращает его.
+ * `libMissing` — отпечатки библиотечных скриптов, которые не доехали
+ * (`simLibraryMissing`): такая строка говорит «скрипт не найден», а не молчит
+ * (G26).
  */
-export function scenariosListRows(project, { query = "", kind = "" } = {}, accessories = null, faults = null) {
+export function scenariosListRows(project, { query = "", kind = "", libMissing = null } = {}, accessories = null, faults = null) {
   if (!project) return [];
   const ordered = scenariosInOrder(project);
   const wanted = scenariosKey(query);
   const home = accessories || homeAccessories(project);
+  const gone = new Set(
+    (Array.isArray(libMissing) ? libMissing : libMissing instanceof Set ? [...libMissing] : []).map((item) =>
+      typeof item === "string" ? item : item && typeof item.hash === "string" ? item.hash : "",
+    ),
+  );
   const rows = [];
   ordered.forEach((scenario, index) => {
     if (kind && scenario.kind !== kind) return;
     if (wanted && !scenariosKey(scenario.name).includes(wanted)) return;
     const fault = faults && faults.get ? faults.get(scenario.id) || null : null;
+    const lib = scenarioLibOf(scenario);
     rows.push({
       id: scenario.id,
       name: scenario.name,
       kind: scenario.kind,
+      lib,
+      libMissing: Boolean(lib && gone.has(lib.hash)),
       active: scenario.active !== false && !(fault && fault.code === "hung"),
       hung: Boolean(fault && fault.code === "hung"),
       fault: scenarioScriptFaultText(fault, "list"),
@@ -206,6 +219,23 @@ export function scenariosMoveBy(project, scenarioId, delta) {
 export function scenariosSetActive(project, scenarioId, on) {
   if (!findScenario(project, scenarioId)) return null;
   return scenariosResult(project, updateScenario(project, scenarioId, { active: on === true }).project, strings.history.scenarioActive);
+}
+
+/**
+ * Обновить библиотечный сценарий до версии из реестра (G27). `entry` — запись
+ * реестра (`scenarioLibNewer`).
+ *
+ * **Переводится только сценарий, уже стоящий на ссылке.** Сценарий с текстом
+ * (в том числе поправленный своей рукой) эта команда не трогает никогда:
+ * подменить чужой скрипт библиотечным молча нельзя, и «обновить» здесь значит
+ * «та же библиотечная вещь, другая версия», а не «возьми вместо моего текста
+ * вот этот».
+ */
+export function scenariosUpdateLib(project, scenarioId, entry) {
+  const scenario = findScenario(project, scenarioId);
+  if (!scenario || !scenarioLibOf(scenario) || !entry || typeof entry.hash !== "string") return null;
+  const lib = { name: entry.name, version: entry.version, hash: entry.hash };
+  return scenariosResult(project, updateScenario(project, scenarioId, { lib }).project, strings.history.scenarioLibUpdate);
 }
 
 /** Параметры сценария: `onStart`, `sequential`, `description`. */
@@ -573,6 +603,17 @@ function mountScenariosScreen(host, api) {
     ]);
     const parts = [head, uiEl("p", { class: "scn-row__phrase", text: row.phrase }), activeLabel];
     if (row.fault) parts.push(uiEl("span", { class: "scn-row__fault", title: row.hung ? strings.scenarios.list.fault.hungHint : "", text: row.fault }));
+    // Библиотечный скрипт не доехал (G26): сценарий в доме не работает, и
+    // строка говорит об этом сама — без журнала не догадаться.
+    if (row.libMissing) {
+      parts.push(
+        uiEl("span", {
+          class: "scn-row__fault",
+          title: text("scenarioLib.missingHint", { name: row.lib.name || row.name, version: row.lib.version }),
+          text: strings.scenarioLib.missing,
+        }),
+      );
+    }
     if (row.issues > 0) parts.push(uiEl("span", { class: "scn-row__issues", title: strings.scenarios.list.issuesHint, text: text("scenarios.list.issues", { count: row.issues }) }));
     const item = uiEl("li", { class: "scn-row" + (selected ? " is-selected" : "") + (row.active ? "" : " is-inactive"), attrs: { "data-scenario": row.id } }, parts);
     item.addEventListener("click", () => open(row.id));
@@ -600,7 +641,12 @@ function mountScenariosScreen(host, api) {
     createScript.title = createScript.disabled ? strings.scenarios.list.createScriptLater : strings.scenarios.list.createScriptHint;
     createPaste.disabled = !scenariosHooks.has("pasteScript");
     const current = scenariosCurrent(now.project, now.scenarioId);
-    const rows = scenariosListRows(now.project, view, homeAccessories(now.project), scenarioScriptFaults(state().project));
+    const rows = scenariosListRows(
+      now.project,
+      { ...view, libMissing: simLibraryMissing() },
+      homeAccessories(now.project),
+      scenarioScriptFaults(state().project),
+    );
     listRows.replaceChildren(...rows.map((row) => renderRow(row, current !== null && row.id === current.id, editable)));
     const total = scenariosInOrder(now.project).length;
     const noScenarios = total === 0;
@@ -895,25 +941,112 @@ function mountScenariosScreen(host, api) {
     );
   }
 
+  // ——— библиотечный скрипт у сценария (G24, G26, G27) ———
+  //
+  // Реестр лежит рядом со страницей; спрашивается он один раз и только когда
+  // в середине правда стоит сценарий со ссылкой — объекту без библиотеки
+  // запрос ни к чему.
+  let libIndex = null;
+  let libIndexAsked = false;
+  function libIndexAsk() {
+    if (libIndexAsked) return;
+    libIndexAsked = true;
+    scenarioLibIndex({})
+      .then((index) => {
+        if (!index || index.size === 0) return;
+        libIndex = index;
+        later();
+      })
+      .catch(() => {});
+  }
+
+  // Скачать текст библиотечного скрипта: в объекте его нет, он в библиотеке.
+  async function downloadScript(scenario) {
+    const lib = scenarioLibOf(scenario);
+    if (!lib) {
+      scenarioScriptDownload(scenario);
+      return;
+    }
+    let source = null;
+    try {
+      source = await scenarioLibFetch(lib, {});
+    } catch {
+      source = null;
+    }
+    if (typeof source !== "string" || !source) {
+      api.notify(text("scenarioLib.missingHint", { name: lib.name || scenario.name, version: lib.version }), "error");
+      return;
+    }
+    scenarioScriptDownload({ ...scenario, source });
+  }
+
+  /**
+   * Строки о библиотечном скрипте: версия, «скрипт не найден» (G26) и «есть
+   * версия новее — обновить?» (G27). Обновление — обычный шаг истории, и
+   * отменяется им же; **сам объект на новую версию не переходит сам** — своя
+   * версия пришпилена отпечатком, и решает человек.
+   */
+  function libLines(scenario, lib, editable) {
+    libIndexAsk();
+    const lines = [uiEl("li", { class: "scn-script__lib", text: text("scenarioLib.version", { version: lib.version || "—" }) })];
+    const gone = simLibraryMissing().some((item) => item.hash === lib.hash);
+    if (gone) {
+      lines.push(uiEl("li", { class: "scn-script__fault", text: strings.scenarioLib.missing }));
+      lines.push(uiEl("li", { class: "scn-script__lib-hint", text: text("scenarioLib.missingHint", { name: lib.name || scenario.name, version: lib.version }) }));
+    } else {
+      lines.push(uiEl("li", { class: "scn-script__lib-hint", text: strings.scenarioLib.stored }));
+    }
+    const newer = libIndex ? scenarioLibNewer(lib, libIndex) : null;
+    if (!newer) return lines;
+    const row = uiEl("li", { class: "scn-script__lib-newer" }, [
+      uiEl("span", { text: strings.scenarioLib.newer }),
+      uiEl("span", { class: "scn-script__lib-hint", text: text("scenarioLib.newerHint", { version: lib.version || "—", next: newer.version }) }),
+    ]);
+    if (editable) {
+      row.append(
+        uiButton(strings.scenarioLib.update, {
+          class: "ui-btn ui-btn--primary",
+          on: {
+            click: () => {
+              if (commit(scenariosUpdateLib(state().project, scenario.id, newer))) {
+                api.notify(text("scenarioLib.updated", { name: newer.name || scenario.name, version: newer.version }), "success");
+              }
+            },
+          },
+        }),
+      );
+    }
+    lines.push(row);
+    return lines;
+  }
+
   // Логический и глобальный сценарий: кнопки «Код» и «Скачать», состояние
-  // текста (синтаксис, совместимость с хабом) и где он привязан.
+  // текста (синтаксис, совместимость с хабом) и где он привязан. У сценария со
+  // ссылкой на библиотеку текста в объекте нет: кнопки «Код» у него нет —
+  // показывать пустое поле вместо скрипта значило бы соврать, — а «Скачать»
+  // берёт текст из библиотеки.
   function renderScript(project, scenario, editable) {
+    const lib = scenarioLibOf(scenario);
     const status = scenarioScriptStatus(scenario);
     const fault = scenarioScriptFaults(state().project).get(scenario.id) || null;
     const faultLine = scenarioScriptFaultText(fault, "list");
     const buttons = uiEl("div", { class: "scn-script__buttons" }, [
-      uiButton(editable ? strings.scenarios.script.edit : strings.scenarios.script.editHint, {
-        class: "ui-btn ui-btn--primary",
-        title: strings.scenarios.script.editHint,
-        on: { click: () => scenarioScriptEdit(centerContext(), scenario.id) },
-      }),
+      ...(lib
+        ? []
+        : [
+            uiButton(editable ? strings.scenarios.script.edit : strings.scenarios.script.editHint, {
+              class: "ui-btn ui-btn--primary",
+              title: strings.scenarios.script.editHint,
+              on: { click: () => scenarioScriptEdit(centerContext(), scenario.id) },
+            }),
+          ]),
       uiButton(strings.scenarios.script.editDownload, {
         class: "ui-btn",
         title: strings.scenarios.script.editDownloadHint,
-        on: { click: () => scenarioScriptDownload(scenario) },
+        on: { click: () => downloadScript(scenario) },
       }),
     ]);
-    const lines = [];
+    const lines = lib ? libLines(scenario, lib, editable) : [];
     if (faultLine) lines.push(uiEl("li", { class: "scn-script__fault", text: faultLine }));
     if (status.syntax) lines.push(uiEl("li", { class: "scn-script__syntax", text: scenarioScriptSyntaxText(status.syntax) }));
     if (status.warnings.length > 0) {

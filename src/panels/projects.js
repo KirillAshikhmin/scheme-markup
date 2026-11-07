@@ -6,9 +6,11 @@ import {
   ensureProjectKey,
   fillTypeSizes,
   migrateCommentType,
+  migrateScenarioLib,
   migrateScenarios,
   migrateTypeKinds,
 } from "../model.js";
+import { scenarioLibIndex, scenarioLibRefOf } from "../scenarioLib.js";
 import {
   deleteImage,
   deleteProject,
@@ -39,11 +41,31 @@ const SAVE_DELAY_MS = 400;
  * отдаёт тот же объект, — и прежний объект из базы открывается байт в байт
  * таким, каким лёг туда (G68).
  */
-export function projectsMigrateStored(stored) {
+export function projectsMigrateStored(stored, library = null) {
   const migrated = fillTypeSizes(migrateCommentType(migrateTypeKinds(stored).project).project).project;
   // Сценарии и привязки логики (таск 01 сценариев): терпимое чтение. Затем
-  // аксессуары (правка после сборки сценариев) — тем же порядком, что у файла.
-  return migrateDevices(migrateScenarios(migrated).project).project;
+  // ссылка на библиотечный скрипт (таск 06 просмотра): текст, совпавший с
+  // библиотечным побайтово, уезжает в `scenario.lib`; двери узнавания нет —
+  // объект остаётся прежним (G68). Затем аксессуары (правка после сборки
+  // сценариев) — тем же порядком, что у файла.
+  const pinned = migrateScenarioLib(migrateScenarios(migrated).project, library).project;
+  return migrateDevices(pinned).project;
+}
+
+/**
+ * Дверь узнавания библиотечного скрипта для миграций: `{refOf(source)}` или
+ * `null`, если реестра нет (нет сети на первом открытии, выкладка без
+ * библиотеки). Реестр просят у `scenarioLib` — он сам решает, брать его из
+ * сети, из кэша браузера или из памяти сеанса, и за сеанс спрашивает один раз.
+ */
+export async function projectsLibraryDoor() {
+  try {
+    const index = await scenarioLibIndex({});
+    if (!index || index.size === 0) return null;
+    return { refOf: (source) => scenarioLibRefOf(source, index) };
+  } catch {
+    return null;
+  }
 }
 
 function uniqueProjectName(list) {
@@ -195,6 +217,41 @@ function mountProjectsPanel(host, api) {
     refreshList().catch(() => {});
   }
 
+  /**
+   * Перевод текста сценариев на ссылку в библиотеку — **после** открытия, а не
+   * во время (G24).
+   *
+   * Реестр лежит рядом со страницей, и за ним идут в сеть. Держать на этом
+   * открытие объекта нельзя: первый кадр приложения ждал бы запроса, который
+   * к показу объекта никакого отношения не имеет. Поэтому объект открывается
+   * ровно как прежде, а когда реестр доехал — текст, совпавший с библиотечным
+   * побайтово, уезжает в `scenario.lib`.
+   *
+   * Это **миграция, а не правка**: истории отмены не появляется, `updatedAt`
+   * не трогается (`migrateScenarioLib` возвращает объект без него), а в базу
+   * укороченный объект ложится тем же `scheduleSave`, которым ложится любая
+   * смена `state.project`. Второй раз он не переведётся: у записи со ссылкой
+   * текста уже нет, и миграция отдаёт тот же объект.
+   *
+   * Один вход на все трубы: объект из базы, из файла и из ссылки приходит в
+   * состояние, и этого достаточно — своего крючка каждому пути не нужно. Дом к
+   * этому времени ещё не запущен (его поднимают кнопкой или входом в
+   * «Объём»), поэтому смена записи сценария ничьих таймеров не сбрасывает.
+   */
+  let pinnedProjectId = null;
+  async function pinLibraryScripts(project) {
+    const id = project ? project.id : null;
+    if (!id || id === pinnedProjectId) return;
+    pinnedProjectId = id;
+    const library = await projectsLibraryDoor();
+    if (!library) return;
+    const now = getState().project;
+    // Объект успели сменить, пока ехал реестр — переводить уже нечего.
+    if (!now || now.id !== id) return;
+    const pinned = migrateScenarioLib(now, library);
+    if (pinned.changed) setState({ project: pinned.project });
+  }
+
   async function openProjectById(id) {
     const stored = await loadProject(id);
     if (!stored) {
@@ -343,6 +400,7 @@ function mountProjectsPanel(host, api) {
     if (!("project" in changed)) return;
     renderList();
     refreshIfUnknown(state.project);
+    pinLibraryScripts(state.project).catch(() => {});
     if (state.project) scheduleSave(state.project);
   });
 

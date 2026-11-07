@@ -61,7 +61,21 @@ export const FORMAT_VERSION = 5;
 //     Профиль устройства у типа и своя настройка метки (`type.device`,
 //     `mark.device`) версию не поднимают: прежняя сборка их не читает, но и не
 //     теряет — поля едут внутри типа и метки целиком.
-export const FORMAT_VERSION_MAX = 6;
+export const FORMAT_VERSION_SCENARIOS = 6;
+
+// 7 — ссылка на библиотечный скрипт вместо его текста (`scenario.lib`, таск 06
+//     просмотра, G24). Текст логического и глобального сценария — десятки
+//     килобайт, и каждый объект носил свою копию; теперь скрипты лежат рядом со
+//     страницей (`web/scenarios/`), а в записи остаётся `{name, version, hash}`.
+//     **Только у объекта, где такая ссылка есть** (`projectFormatVersion`):
+//     объект с текстом остаётся версией 6, а объект со ссылкой прежняя сборка
+//     честно откажется открывать — иначе она показала бы сценарий без текста и
+//     сочла его пустым, а слияние папки выбросило бы незнакомое ей поле.
+//     Перевод текста на ссылку — только при **побайтовом** совпадении с
+//     библиотечным (`migrateScenarioLib`, G24.1): скрипт, поправленный своей
+//     рукой, остаётся текстом в объекте, и подменять его библиотечным нельзя
+//     ни при каких обстоятельствах.
+export const FORMAT_VERSION_MAX = 7;
 
 // Условные обозначения, которые предлагает сетка выбора. Их различают на
 // чёрно-белой распечатке в размере метки, поэтому семейства разведены контуром,
@@ -10678,6 +10692,31 @@ function scenarioFlag(value, fallback) {
   return value === true || value === false ? value : fallback;
 }
 
+// Ссылка на библиотечный скрипт в записи сценария: `{name, version, hash}`
+// (G24). Отпечаток — SHA-256 текста целиком (64 знака), и он здесь **главное**:
+// имя и версия только для глаз, а узнаёт скрипт отпечаток
+// (`src/scenarioLib.js`). Кривой отпечаток ссылкой не считается — иначе объект
+// стоял бы на ссылке в никуда и остался без текста вовсе.
+//
+// Порядок ключей задан здесь: `project.json` сверяется текстом с текстом
+// (`projectFile.verifyProjectFile`), и ключи, расставленные по-разному, развели
+// бы упаковку со сверкой.
+function scenarioLibPin(value) {
+  if (!deviceObject(value)) return null;
+  const hash = typeof value.hash === "string" ? value.hash.trim().toLowerCase() : "";
+  if (!/^[0-9a-f]{64}$/.test(hash)) return null;
+  return {
+    name: typeof value.name === "string" ? value.name : "",
+    version: typeof value.version === "string" ? value.version : "",
+    hash,
+  };
+}
+
+/** Ссылка на библиотечный скрипт у записи сценария или `null`. */
+export function scenarioLibOf(scenario) {
+  return scenarioLibPin(scenario && typeof scenario === "object" ? scenario.lib : null);
+}
+
 // Поля сценария из правки — по белому списку и с умолчаниями. Остальное в
 // `source` (`id`, `order`, `kind`) решает вызывающая команда.
 function scenarioFields(source, current) {
@@ -10692,7 +10731,24 @@ function scenarioFields(source, current) {
   if (kind === "block") {
     if (has("targets")) next.targets = Array.isArray(source.targets) ? clone(source.targets) : [];
   } else {
-    if (has("source")) next.source = typeof source.source === "string" ? source.source : "";
+    // Текст и ссылка на библиотеку — одно место записи, а не два (G24):
+    // записанный текст снимает ссылку, записанная ссылка снимает текст.
+    // Поэтому человек, поправивший библиотечный скрипт в редакторе, получает
+    // **свой** сценарий (ссылка уходит сама), а обновление до новой версии
+    // (`{lib}`) не оставляет под ссылкой чужого текста.
+    if (has("source")) {
+      next.source = typeof source.source === "string" ? source.source : "";
+      delete next.lib;
+    }
+    if (has("lib")) {
+      const lib = scenarioLibPin(source.lib);
+      if (lib) {
+        next.lib = lib;
+        delete next.source;
+      } else {
+        delete next.lib;
+      }
+    }
     if (has("origin")) next.origin = SCENARIO_ORIGINS.includes(source.origin) ? source.origin : SCENARIO_ORIGINS[0];
     if (has("fileName")) next.fileName = typeof source.fileName === "string" ? source.fileName : "";
     if (has("template")) {
@@ -10846,13 +10902,60 @@ function dropLogicBindings(project, removed) {
 }
 
 /**
- * Версия формата файла по содержимому: `FORMAT_VERSION_MAX` (6), если в
- * объекте есть хотя бы один сценарий или привязка логики, иначе
- * `FORMAT_VERSION` (5). Объект без сценариев читается прежней сборкой как
- * раньше, со сценариями — честно не читается (см. историю версий выше).
+ * Версия формата файла по содержимому: `FORMAT_VERSION_MAX` (7) — у объекта,
+ * где хотя бы один сценарий стоит на ссылке в библиотеку (`scenario.lib`);
+ * `FORMAT_VERSION_SCENARIOS` (6) — где есть сценарий или привязка логики;
+ * иначе `FORMAT_VERSION` (5). Объект без сценариев читается прежней сборкой
+ * как раньше, со сценариями и со ссылками — честно не читается (см. историю
+ * версий выше).
  */
 export function projectFormatVersion(project) {
-  return scenariosList(project).length > 0 || logicBindingsList(project).length > 0 ? FORMAT_VERSION_MAX : FORMAT_VERSION;
+  const list = scenariosList(project);
+  if (list.some((item) => scenarioLibOf(item))) return FORMAT_VERSION_MAX;
+  return list.length > 0 || logicBindingsList(project).length > 0 ? FORMAT_VERSION_SCENARIOS : FORMAT_VERSION;
+}
+
+/**
+ * Перевод текста сценария на ссылку в библиотеку — одна на оба конвейера
+ * открытия (файл и база браузера), G24/G24.1.
+ *
+ * `library` — дверь узнавания: функция `(source) -> {name, version, hash} |
+ * null` или объект с таким `refOf`. Её делает `src/scenarioLib.js`
+ * (`scenarioLibRefOf`), а модель про отпечатки, реестр и сеть не знает ничего:
+ * иначе модель зависела бы от хранилища и сети, а она чистая.
+ *
+ * **Переводится только побайтовое совпадение.** Узнавание — дело двери, и она
+ * отвечает «да» лишь на тот текст, который лежит в библиотеке целиком; скрипт,
+ * поправленный своей рукой (а такой у заказчика есть), остаётся текстом в
+ * объекте. Молча подменить чужой скрипт библиотечным эта миграция не может: у
+ * неё нет текстов библиотеки, только ответ «этот текст — вот эта запись».
+ *
+ * Двери нет — возвращается **тот же** объект: страница без реестра (нет сети на
+ * первом открытии) открывает объект ровно как прежде, а переведёт его в
+ * следующий раз. Идемпотентна: у записи со ссылкой текста уже нет, и второй
+ * проход ничего не меняет.
+ */
+export function migrateScenarioLib(project, library) {
+  const refOf = typeof library === "function" ? library : deviceObject(library) && typeof library.refOf === "function" ? library.refOf : null;
+  if (!refOf || !project || !Array.isArray(project.scenarios)) return { project, changed: false };
+  let changed = false;
+  const scenarios = project.scenarios.map((scenario) => {
+    if (!deviceObject(scenario) || scenario.kind === "block" || scenarioLibOf(scenario)) return scenario;
+    const source = typeof scenario.source === "string" ? scenario.source : "";
+    if (!source) return scenario;
+    const lib = scenarioLibPin(refOf(source));
+    if (!lib) return scenario;
+    changed = true;
+    // Текст уходит, ссылка остаётся: порядок полей записи сохраняется, а
+    // `source` занимал в файле и в ссылке десятки килобайт на сценарий.
+    const next = {};
+    for (const key of Object.keys(scenario)) {
+      if (key === "source") next.lib = lib;
+      else next[key] = scenario[key];
+    }
+    return next;
+  });
+  return changed ? { project: { ...project, scenarios }, changed } : { project, changed: false };
 }
 
 /**
