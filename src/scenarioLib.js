@@ -145,7 +145,7 @@ function libHashOf(value) {
 
 // ——— реестр ———————————————————————————————————————————————————————————————
 
-function libEntryOf(item) {
+function libEntryOf(item, current) {
   const hash = libHashOf(item);
   const file = item && typeof item.file === "string" ? item.file.trim() : "";
   if (!hash || !file) return null;
@@ -156,6 +156,10 @@ function libEntryOf(item) {
     hash,
     size: Number.isFinite(item.size) ? Number(item.size) : 0,
     file,
+    // `true` — отпечаток нынешней сборки библиотеки, `false` — прежней (файл
+    // остался, потому что на нём стоят готовые объекты), `null` — реестр об
+    // этом не говорит вовсе (реестр прежнего вида или собранный руками).
+    current,
   });
 }
 
@@ -174,9 +178,16 @@ export function scenarioLibIndexRead(json) {
     }
   }
   const list = data && typeof data === "object" && Array.isArray(data.scripts) ? data.scripts : [];
+  // Библиотека только прирастает: файл прежнего отпечатка не удаляется, иначе
+  // объект, стоящий на нём, остался бы без текста навсегда. Поэтому в реестре
+  // живут и прежние записи, а `current` называет отпечатки нынешней сборки.
+  // Нет списка — «неизвестно», и «есть версия новее» решается одними версиями,
+  // как прежде.
+  const said = data && typeof data === "object" && Array.isArray(data.current);
+  const current = said ? new Set(data.current.filter((hash) => typeof hash === "string").map((hash) => hash.trim().toLowerCase())) : null;
   const out = new Map();
   for (const item of list) {
-    const entry = item && typeof item === "object" ? libEntryOf(item) : null;
+    const entry = item && typeof item === "object" ? libEntryOf(item, current === null ? null : current.has(libHashOf(item))) : null;
     if (entry) out.set(entry.hash, entry);
   }
   return out;
@@ -221,20 +232,46 @@ function libVersionRank(version) {
  * Есть ли в библиотеке версия новее той, на которой стоит объект (G27). Сам
  * объект не меняется никогда — это предложение, и решает человек. Имя —
  * единственное, что связывает версии одного скрипта: отпечаток у новой другой.
+ *
+ * Правил два, и второе важнее, чем кажется:
+ *
+ *   1. есть запись того же имени с версией **выше** — она и есть «новее»;
+ *   2. версии не решают (у глобальных скриптов `version` в `info` нет вовсе —
+ *      таких в живом объекте большинство, а у логических версию поднимают не
+ *      всегда) — «новее» считается запись **нынешней сборки** библиотеки
+ *      (`entry.current`), если объект стоит на другом отпечатке. Без этого
+ *      правила безверсионному скрипту не пришло бы даже предложения обновить,
+ *      и он остался бы на прежнем отпечатке навсегда.
+ *
+ * Реестр, который о нынешней сборке не говорит (`current === null`), решает
+ * одними версиями — как прежде.
  */
 export function scenarioLibNewer(ref, index) {
   const own = ref && typeof ref === "object" ? ref : null;
   const name = own && typeof own.name === "string" ? own.name : "";
   if (!name) return null;
-  const rank = libVersionRank(own.version);
-  if (rank < 0) return null;
+  const hash = libHashOf(own);
   const map = index instanceof Map ? index : scenarioLibIndexRead(index);
+  const rank = libVersionRank(own.version);
+  // Родня по имени, кроме того отпечатка, на котором объект стоит.
+  const kin = [...map.values()].filter((entry) => entry.name === name && entry.hash !== hash);
   let best = null;
-  for (const entry of map.values()) {
-    if (entry.name !== name || libVersionRank(entry.version) <= rank) continue;
-    if (!best || libVersionRank(entry.version) > libVersionRank(best.version)) best = entry;
+  if (rank >= 0) {
+    for (const entry of kin) {
+      if (libVersionRank(entry.version) <= rank) continue;
+      if (!best || libVersionRank(entry.version) > libVersionRank(best.version)) best = entry;
+    }
   }
-  return best;
+  if (best) return best;
+  // Правило 2: нынешняя сборка библиотеки. Запись с версией **ниже** своей не
+  // предлагается и так — откат библиотеки не повод звать её «новее».
+  return (
+    kin.find((entry) => {
+      if (entry.current !== true) return false;
+      const theirs = libVersionRank(entry.version);
+      return rank < 0 || theirs < 0 || theirs >= rank;
+    }) || null
+  );
 }
 
 // ——— сеть, кэш и память сеанса ——————————————————————————————————————————————

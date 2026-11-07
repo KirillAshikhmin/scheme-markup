@@ -14,9 +14,26 @@
 //   в байт** так, как его прочтёт страница (`hubScriptRead`: срезан только
 //   BOM), и
 //   `web/scenarios/index.json` — реестр `{version, scripts: [{name, version,
-//   kind, hash, size, file}]}`, отсортированный по имени файла. Времени в
-//   реестре нет: повторный запуск на тех же исходниках даёт тот же текст байт
-//   в байт.
+//   kind, hash, size, file}], current: [отпечатки этой сборки]}`,
+//   отсортированный по имени файла. Времени в реестре нет: повторный запуск на
+//   тех же исходниках даёт тот же текст байт в байт.
+//
+// ——— библиотека только прирастает ————————————————————————————————————————
+//
+// Объект хранит **отпечаток** текста (`scenario.lib.hash`), и единственная
+// копия этого текста — файл библиотеки. Значит файл прежнего отпечатка нельзя
+// удалять никогда: обновили скрипт из `Sprut.Hub_Tools` — отпечаток сменился,
+// в папке появился второй файл, а первый остался, и объект, переведённый на
+// ссылку месяц назад, по-прежнему разрешается (иначе он остался бы без текста
+// навсегда — а это потеря работы заказчика задним числом, G68).
+//
+// Поэтому сборка **прирастающая**: записи прошлого реестра, чьи файлы лежат на
+// месте, переезжают в новый реестр как есть, файлы вида
+// `<ключ>@<16 знаков>.js` не удаляются, а `current` называет отпечатки
+// **этой** сборки — по нему «Сценарии» предлагают обновление и тогда, когда
+// версий в скриптах нет вовсе (у глобальных их нет; `scenarioLibNewer`).
+// Пропавший файл прежнего отпечатка — тревога в выводе команды, а не
+// молчание.
 //
 // Берутся только файлы из папок `source/` (у одного инструмента их может быть
 // несколько) и только то, что `hubScriptRead` признал логическим или
@@ -77,9 +94,16 @@ export function scenarioLibVersionOf(source) {
   return found ? found[2].trim() : "";
 }
 
-/** Текст реестра: порядок задан именем файла, времени в нём нет. */
-export function scenarioLibIndexText(entries) {
-  const scripts = [...(entries || [])]
+/**
+ * Текст реестра: порядок задан именем файла, времени в нём нет.
+ * `entries` — скрипты **этой** сборки, `kept` — записи прежних сборок, чьи
+ * файлы остались в папке (ссылка, стоящая в объекте, обязана разрешаться и
+ * через год). `current` — отпечатки этой сборки; по нему страница отличает
+ * «то, что в библиотеке сейчас» от прежнего отпечатка.
+ */
+export function scenarioLibIndexText(entries, kept = []) {
+  const current = [...new Set((entries || []).map((entry) => String(entry.hash || "")))].filter(Boolean).sort();
+  const scripts = [...(entries || []), ...(kept || [])]
     .map((entry) => ({
       name: String(entry.name || ""),
       version: String(entry.version || ""),
@@ -89,7 +113,35 @@ export function scenarioLibIndexText(entries) {
       file: String(entry.file || ""),
     }))
     .sort((a, b) => (a.file === b.file ? (a.hash < b.hash ? -1 : 1) : a.file < b.file ? -1 : 1));
-  return JSON.stringify({ version: SCENARIO_LIB_VERSION, scripts }, null, 2) + "\n";
+  return JSON.stringify({ version: SCENARIO_LIB_VERSION, scripts, current }, null, 2) + "\n";
+}
+
+/** Файл библиотеки по имени: `<ключ>@<16 знаков отпечатка>.js`. */
+function libScriptFile(name) {
+  return /^[A-Za-z0-9._-]+@[0-9a-f]{16}\.js$/.test(name);
+}
+
+/**
+ * Записи прежнего реестра, чьи файлы лежат на месте, и список пропавших.
+ * Запись без файла — тревога: объект, стоящий на этом отпечатке, останется без
+ * текста, и узнать об этом надо здесь, а не от заказчика.
+ */
+function libPrevious(out) {
+  const kept = [];
+  const lost = [];
+  let data = null;
+  try {
+    data = JSON.parse(readFileSync(join(out, SCENARIO_LIB_INDEX), "utf8"));
+  } catch {
+    return { kept, lost };
+  }
+  const scripts = data && Array.isArray(data.scripts) ? data.scripts : [];
+  for (const entry of scripts) {
+    if (!entry || typeof entry.hash !== "string" || typeof entry.file !== "string") continue;
+    if (existsSync(join(out, entry.file))) kept.push(entry);
+    else lost.push(entry);
+  }
+  return { kept, lost };
 }
 
 function libWalk(dir, out) {
@@ -233,6 +285,12 @@ function libReadme(root, entries) {
     "",
     "Собрано из `" + basename(resolve(root)) + "`, скриптов: " + entries.length + ".",
     "",
+    "**Файлы отсюда не удаляются.** Отпечаток в имени файла — это и есть ссылка",
+    "из объекта: обновился скрипт — рядом встаёт файл нового отпечатка, а",
+    "прежний остаётся, иначе объект, переведённый на него раньше, остался бы",
+    "без текста навсегда. Какие отпечатки принадлежат нынешней сборке, говорит",
+    "`current` в реестре; по нему «Сценарии» предлагают обновление.",
+    "",
     "Пересобрать:",
     "",
     "```bash",
@@ -244,15 +302,28 @@ function libReadme(root, entries) {
 
 /**
  * Собрать `web/scenarios/`: файлы скриптов, реестр, лицензию и памятку о
- * происхождении; лишнее от прошлой сборки убрать. Внешней папки нет — `{ok:
- * false, reason: "noSource"}` и ни одной записи на диск.
+ * происхождении. Сборка **прирастающая**: файлы и записи прежних отпечатков
+ * остаются (на них стоят готовые объекты), убирается только лишнее, не похожее
+ * на скрипт библиотеки. Внешней папки нет — `{ok: false, reason: "noSource"}`
+ * и ни одной записи на диск.
+ *
+ * Ответ: `{ok, reason, root, out, written, kept, lost, removed, entries}`.
+ * `kept` — записи прежних сборок, переехавшие в новый реестр; `lost` — записи,
+ * чьих файлов в папке нет (ссылки на них уже не разрешить).
  */
 export async function scenarioLibBuild({ root = SOURCE_DEFAULT, out = OUT_DEFAULT } = {}) {
   const collected = await scenarioLibCollect(root);
-  if (collected === null) return { ok: false, reason: "noSource", root: resolve(root), out: resolve(out), written: [], removed: [], entries: [] };
+  if (collected === null) {
+    return { ok: false, reason: "noSource", root: resolve(root), out: resolve(out), written: [], kept: [], lost: [], removed: [], entries: [] };
+  }
 
   const entries = collected.map((item) => item.entry);
   mkdirSync(out, { recursive: true });
+  const previous = libPrevious(out);
+  const fresh = new Set(entries.map((entry) => entry.hash));
+  // Прежние записи переезжают как есть: имя и версия у отпечатка свои, и
+  // переписывать их нынешними значило бы соврать о том, что лежит в файле.
+  const kept = previous.kept.filter((entry) => !fresh.has(entry.hash));
   const written = [];
   const keep = new Set([SCENARIO_LIB_INDEX, "LICENSE", README_NAME]);
   for (const item of collected) {
@@ -260,7 +331,7 @@ export async function scenarioLibBuild({ root = SOURCE_DEFAULT, out = OUT_DEFAUL
     written.push(item.entry.file);
     keep.add(item.entry.file);
   }
-  writeFileSync(join(out, SCENARIO_LIB_INDEX), scenarioLibIndexText(entries), "utf8");
+  writeFileSync(join(out, SCENARIO_LIB_INDEX), scenarioLibIndexText(entries, kept), "utf8");
   written.push(SCENARIO_LIB_INDEX);
   const license = join(resolve(root), "LICENSE");
   if (existsSync(license)) {
@@ -270,13 +341,17 @@ export async function scenarioLibBuild({ root = SOURCE_DEFAULT, out = OUT_DEFAUL
   writeFileSync(join(out, README_NAME), libReadme(root, entries), "utf8");
   written.push(README_NAME);
 
+  // Убирается только то, что не похоже на скрипт библиотеки: чужой файл,
+  // папка, остаток переименования. Файл вида `<ключ>@<16 знаков>.js` не
+  // удаляется никогда — он может быть единственной копией текста, на котором
+  // стоит готовый объект.
   const removed = [];
   for (const name of readdirSync(out)) {
-    if (name.startsWith(".") || keep.has(name)) continue;
+    if (name.startsWith(".") || keep.has(name) || libScriptFile(name)) continue;
     rmSync(join(out, name), { recursive: true, force: true });
     removed.push(name);
   }
-  return { ok: true, reason: null, root: resolve(root), out: resolve(out), written, removed, entries };
+  return { ok: true, reason: null, root: resolve(root), out: resolve(out), written, kept, lost: previous.lost, removed, entries };
 }
 
 const runDirectly = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
@@ -292,7 +367,16 @@ if (runDirectly) {
     console.log("скриптов: " + result.entries.length + ", " + (bytes / 1024).toFixed(1) + " КБ, реестр: " + SCENARIO_LIB_INDEX);
     const noVersion = result.entries.filter((entry) => !entry.version).map((entry) => entry.file);
     if (noVersion.length > 0) console.log("без версии в `info` (" + noVersion.length + "): " + noVersion.join(", "));
-    if (result.removed.length > 0) console.log("убрано от прошлой сборки: " + result.removed.join(", "));
+    if (result.kept.length > 0) console.log("прежних отпечатков в реестре: " + result.kept.length + " (объекты стоят на них)");
+    if (result.removed.length > 0) console.log("убрано лишнее: " + result.removed.join(", "));
+    // Пропавший файл — не мелочь: объекты, переведённые на этот отпечаток,
+    // текста больше не получат. Восстанавливать его надо из git, а не молча
+    // пересобирать библиотеку дальше.
+    if (result.lost.length > 0) {
+      console.error("ТРЕВОГА: в папке нет файлов прежних отпечатков (" + result.lost.length + "): " + result.lost.map((entry) => entry.file).join(", "));
+      console.error("Объекты, стоящие на этих ссылках, останутся без текста. Верни файлы из git и пересобери.");
+      process.exitCode = 1;
+    }
     console.log("папка: " + result.out);
   }
 }

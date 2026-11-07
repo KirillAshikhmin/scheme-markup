@@ -367,13 +367,18 @@ test("команда собирает папку и реестр, а повто�
   mkdirSync(join(root, "SwitchCallbackControl", "source"), { recursive: true });
   writeFileSync(join(root, "SwitchCallbackControl", "source", "SwitchCallbackControl.Global.js"), SWITCH_GLOBAL);
   writeFileSync(join(root, "LICENSE"), "MIT License\n");
-  // Мусор прошлой сборки: команда убирает за собой.
+  // Лишнее от прошлой сборки: чужой файл команда убирает. А файл вида
+  // `<ключ>@<16 знаков>.js` — **не** убирает: на нём может стоять готовый
+  // объект, и он единственная копия текста (таск 06 просмотра).
+  writeFileSync(join(out, "лишнее.txt"), "мусор");
   writeFileSync(join(out, "stale@0000000000000000.js"), "старое");
 
   const first = await scenarioLibBuild({ root, out });
   assert.equal(first.ok, true);
   assert.equal(first.entries.length, 2);
-  assert.ok(first.removed.includes("stale@0000000000000000.js"), "мусор убран");
+  assert.ok(first.removed.includes("лишнее.txt"), "чужой файл убран");
+  assert.deepEqual(first.removed.includes("stale@0000000000000000.js"), false, "файл прежнего отпечатка убирать нельзя");
+  assert.ok(existsSync(join(out, "stale@0000000000000000.js")));
   assert.ok(existsSync(join(out, SCENARIO_LIB_INDEX)), "реестр записан");
   assert.ok(existsSync(join(out, "LICENSE")), "лицензия едет вместе с копией");
 

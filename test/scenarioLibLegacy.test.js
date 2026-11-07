@@ -14,7 +14,9 @@
 //      идёт на своей версии.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 import { addLogicBinding, addScenario, findScenario, migrateScenarioLib, scenarioLibOf } from "../src/model.js";
 import { PROJECT_ENTRY, packProject, readZip, unpackProject } from "../src/projectFile.js";
@@ -27,9 +29,12 @@ import {
   scenarioLibForget,
   scenarioLibHash,
   scenarioLibIndexRead,
+  scenarioLibNewer,
   scenarioLibRefOf,
   scenarioLibResolve,
 } from "../src/scenarioLib.js";
+import { scenariosUpdateLib } from "../src/panels/scenarios.js";
+import { scenarioLibBuild } from "../tools/scenario-lib.mjs";
 import { createSimEngine } from "../src/sim/engine.js";
 import { buildHomeSpec } from "../src/sim/home.js";
 import { createHubOwner } from "../src/sim/hubApi.js";
@@ -244,7 +249,84 @@ test("реестр с версией новее поведение готово�
   assert.equal(scenarioLibOf(findScenario(pinned, box.ids.logic)).version, "1.0");
 });
 
-// ——— 4. скрипт не доехал (G26) ————————————————————————————————————————————
+// ——— 4. библиотека только прирастает ——————————————————————————————————————
+//
+// Самое опасное место всей затеи: после перевода **единственная** копия текста
+// скрипта — файл библиотеки. Обновили библиотеку из `Sprut.Hub_Tools` —
+// отпечаток сменился; если файл прежнего отпечатка исчезнет, переведённый
+// месяц назад объект останется без текста навсегда. Поэтому сборка
+// прирастающая, и это проверяется настоящей командой на настоящем скрипте.
+
+// Сеть поддельной библиотеки, читающая собранную папку с диска.
+function libFolder(out) {
+  return {
+    fetch: async (url) => {
+      const name = url === SCENARIO_LIB_DIR + "/" + SCENARIO_LIB_INDEX ? SCENARIO_LIB_INDEX : url.slice(SCENARIO_LIB_DIR.length + 1);
+      const file = join(out, name);
+      if (!existsSync(file)) return { ok: false, text: async () => "" };
+      return { ok: true, text: async () => readFileSync(file, "utf8") };
+    },
+    store: { get: () => null, set: () => {} },
+  };
+}
+
+test("обновление библиотеки не отбирает текст у переведённого объекта: прежний отпечаток остаётся разрешимым", async () => {
+  const root = mkdtempSync(join(tmpdir(), "scenario-lib-grow-src-"));
+  const out = mkdtempSync(join(tmpdir(), "scenario-lib-grow-out-"));
+  const where = join(root, "SwitchCallbackControl", "source");
+  mkdirSync(where, { recursive: true });
+  // Глобальный скрипт: версии в нём нет вовсе — ровно тот случай, которого
+  // большинство в живом объекте заказчика.
+  const was = sprut("SwitchCallbackControl.Global.js").source;
+  writeFileSync(join(where, "SwitchCallbackControl.Global.js"), was);
+  assert.equal((await scenarioLibBuild({ root, out })).ok, true);
+
+  const first = scenarioLibIndexRead(readFileSync(join(out, SCENARIO_LIB_INDEX), "utf8"));
+  const wasHash = scenarioLibHash(was);
+  assert.equal(first.get(wasHash).version, "", "у глобального скрипта версии нет");
+  assert.equal(first.get(wasHash).current, true);
+
+  // Объект переведён на эту сборку.
+  const made = (() => {
+    const box = simHouse();
+    const added = addScenario(box.project, { kind: "global", name: first.get(wasHash).name, source: was });
+    return { project: migrateScenarioLib(added.project, { refOf: (source) => scenarioLibRefOf(source, first) }).project, id: added.scenario.id };
+  })();
+  assert.equal(scenarioLibOf(findScenario(made.project, made.id)).hash, wasHash);
+
+  // Библиотека обновилась: текст другой, имя то же, версии по-прежнему нет.
+  const now = was + "\n// правка в Sprut.Hub_Tools\n";
+  writeFileSync(join(where, "SwitchCallbackControl.Global.js"), now);
+  const again = await scenarioLibBuild({ root, out });
+  assert.deepEqual(again.lost, [], "файл прежнего отпечатка пропал — объекты остались без текста");
+  assert.equal(again.kept.length, 1, "прежняя запись не переехала в новый реестр");
+  assert.deepEqual(again.removed, [], "сборка удалила файл скрипта");
+
+  const second = scenarioLibIndexRead(readFileSync(join(out, SCENARIO_LIB_INDEX), "utf8"));
+  assert.ok(second.has(wasHash), "прежний отпечаток выпал из реестра — ссылку не разрешить");
+  assert.ok(existsSync(join(out, second.get(wasHash).file)), "файл прежнего отпечатка удалён");
+  assert.equal(second.get(wasHash).current, false);
+  assert.equal(second.get(scenarioLibHash(now)).current, true);
+
+  // Объект разрешается **своим** текстом, а не новым.
+  scenarioLibForget();
+  const kept = await scenarioLibResolve(made.project, libFolder(out));
+  assert.deepEqual(kept.missing, []);
+  assert.equal(kept.scenarios.find((item) => item.id === made.id).source, was);
+
+  // И предложение обновиться приходит, хотя версий нет ни у одной записи.
+  const newer = scenarioLibNewer(scenarioLibOf(findScenario(made.project, made.id)), second);
+  assert.equal(newer.hash, scenarioLibHash(now), "безверсионному скрипту не пришло «обновить?»");
+
+  const step = scenariosUpdateLib(made.project, made.id, newer);
+  assert.ok(step && step.label);
+  scenarioLibForget();
+  const fresh = await scenarioLibResolve(step.project, libFolder(out));
+  assert.equal(fresh.scenarios.find((item) => item.id === made.id).source, now, "после обновления дом не взял новый текст");
+  assert.equal(scenarioLibOf(findScenario(made.project, made.id)).hash, wasHash, "прежний объект цел — отмена вернёт его");
+});
+
+// ——— 5. скрипт не доехал (G26) ————————————————————————————————————————————
 
 test("скрипта в библиотеке нет: дом идёт без него, запись помечена, текст не выдуман", async () => {
   scenarioLibForget();

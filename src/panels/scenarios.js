@@ -1000,7 +1000,9 @@ function mountScenariosScreen(host, api) {
     if (!newer) return lines;
     const row = uiEl("li", { class: "scn-script__lib-newer" }, [
       uiEl("span", { text: strings.scenarioLib.newer }),
-      uiEl("span", { class: "scn-script__lib-hint", text: text("scenarioLib.newerHint", { version: lib.version || "—", next: newer.version }) }),
+      // Версии у глобальных скриптов нет вовсе — тогда «новее» означает
+      // «нынешняя сборка библиотеки», и прочерк честнее пустого места.
+      uiEl("span", { class: "scn-script__lib-hint", text: text("scenarioLib.newerHint", { version: lib.version || "—", next: newer.version || "—" }) }),
     ]);
     if (editable) {
       row.append(
