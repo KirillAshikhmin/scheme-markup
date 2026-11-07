@@ -18,7 +18,7 @@
 // `canvas.js` не подключает — карточка устройства живёт в модуле, который
 // `canvas.js` подключает сам, а цикл сборка запрещает: записывающую функцию
 // ему отдаёт режим «Сценарии» (`scenarioScriptCommitter`).
-import { getState, layoutAllowsState, reportAppError, subscribe } from "../app.js";
+import { appAllows, getState, reportAppError, subscribe } from "../app.js";
 import { exportText } from "../exporter.js";
 import {
   addLogicBinding,
@@ -434,7 +434,7 @@ function scenarioScriptApply(result) {
 
 // Правка сценариев: компьютер и планшет, и в раскладке просмотра (F2).
 function scenarioScriptCanEdit() {
-  return layoutAllowsState("editScenarios", getState());
+  return appAllows("editScenarios", getState());
 }
 
 // ——— экранная половина: форма опций ————————————————————————————————————

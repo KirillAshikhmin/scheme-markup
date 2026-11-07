@@ -5,7 +5,7 @@
 // объекты. Общим остаётся только шаблон: снимок справочника в настройках
 // браузера, с которого панель объектов создаёт следующий объект; уже
 // созданные остаются как были.
-import { PANEL_IDS, layoutAllows, registerPanel, reportAppError } from "../app.js";
+import { PANEL_IDS, appAllows, registerPanel, reportAppError } from "../app.js";
 import { strings, text } from "../strings.js";
 import { migrateDevices } from "../deviceMigrate.js";
 import { markSizesSummary, openTypeSizesPicker } from "./markSizes.js";
@@ -1099,7 +1099,7 @@ export function openTypesDictionary(api) {
       on: {
         click: async () => {
           const before = project();
-          const editable = layoutAllows("editMarks", api.getState().layout);
+          const editable = appAllows("editMarks", api.getState());
           const answer = await openDeviceWindow({
             title: deviceWindowTitle(before, { typeId: type.id }),
             hint: strings.deviceWindow.typeHint,
@@ -1603,9 +1603,8 @@ function mountTypesPanel(host, api) {
   });
   // Кнопка возврата показывается, только когда шаблон и правда сохранён.
   resetButton.hidden = true;
-  host.replaceChildren(
-    uiEl("div", { class: "dict-panel" }, [dictionaryButton, equipmentButton, saveButton, resetButton]),
-  );
+  const box = uiEl("div", { class: "dict-panel" }, [dictionaryButton, equipmentButton, saveButton, resetButton]);
+  host.replaceChildren(box);
 
   async function saveTemplate() {
     const state = getState();
@@ -1625,6 +1624,9 @@ function mountTypesPanel(host, api) {
     const template = await getSetting(TYPE_TEMPLATE_KEY);
     resetButton.hidden = !template;
     const state = getState();
+    // Справочник типов — своё умение (`dictionary`): на странице просмотра его
+    // нет вовсе, коды типов заказчику читать незачем.
+    box.hidden = !appAllows("dictionary", state);
     dictionaryButton.disabled = !state.project;
     equipmentButton.disabled = !state.project;
     saveButton.disabled = !state.project;

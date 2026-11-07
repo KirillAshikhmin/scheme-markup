@@ -16,7 +16,7 @@ import {
   OBJECTS_SETTING,
   PLAN_SETTING,
   SCHEME_FONT_SETTING,
-  layoutAllows,
+  appAllows,
   PANEL_IDS,
   registerPanel,
 } from "../app.js";
@@ -905,8 +905,8 @@ function mountSizesButton(host, api) {
   host.replaceChildren(button);
 
   function render() {
-    const layout = getState().layout;
-    host.hidden = layout !== "mobile" || !layoutAllows("viewSizes", layout);
+    const state = getState();
+    host.hidden = state.layout !== "mobile" || !appAllows("viewSizes", state);
   }
 
   subscribe((state, changed) => {
@@ -934,7 +934,7 @@ function mountHistoryPanel(host, api) {
   host.replaceChildren(uiEl("div", { class: "history-actions" }, [undoButton, redoButton]));
 
   function render() {
-    const shown = layoutAllows("undo", getState().layout);
+    const shown = appAllows("undo", getState());
     host.hidden = !shown;
     if (!shown) return;
     undoButton.disabled = !canUndo();

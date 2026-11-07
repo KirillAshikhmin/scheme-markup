@@ -383,3 +383,26 @@ test("памятка — своя страница: свой ключ в кэш�
   const { answer } = sendFetch(offline, navigation(GUIDE_URL + "?from=telegram"));
   assert.equal(await (await answer).text(), GUIDE_HTML, "без сети по ссылке на памятку открывается памятка");
 });
+
+// Страница просмотра объекта (таск 01 просмотра) — вторая страница той же
+// сборки. Соседней чужой она не является: по её адресу приходит заказчик по
+// ссылке от интегратора, и без сети по нему должен открываться просмотр, а не
+// «Разметка». Ключ у неё свой — иначе её тело легло бы на место офлайн-копии
+// приложения (D46), а правило для прочих соседних адресов должно остаться.
+test("страница просмотра — своя страница: свой ключ в кэше и свой ответ без сети", async () => {
+  const VIEW_URL = ORIGIN + "view.html";
+  const VIEW_HTML = "<html>просмотр</html>";
+  const env = await startWorker({
+    respond: (url) => (url.split("?")[0] === VIEW_URL ? new Response(VIEW_HTML, { status: 200 }) : pageResponse()),
+  });
+  const warm = sendFetch(env, navigation(VIEW_URL));
+  assert.equal(await (await warm.answer).text(), VIEW_HTML);
+  await Promise.all(warm.waits);
+  assert.deepEqual(putsOf(env), [VIEW_URL], "ключ просмотра — его собственный адрес, а не ключ приложения");
+
+  const offline = await startWorker({ respond: () => Promise.reject(new TypeError("Failed to fetch")) });
+  offline.stores.set(env.cacheName, env.stores.get(env.cacheName));
+  // Адрес с объектом в хэше — та же страница: хэш служебному скрипту не виден.
+  const { answer } = sendFetch(offline, navigation(VIEW_URL + "?from=telegram"));
+  assert.equal(await (await answer).text(), VIEW_HTML, "без сети по ссылке на просмотр открывается просмотр");
+});

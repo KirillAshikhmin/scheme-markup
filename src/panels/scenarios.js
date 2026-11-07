@@ -18,7 +18,7 @@
 // Живое состояние дома (запущен ли, значения) сюда приходит только из
 // `simulation.js` и в объект не пишется; а всё, что в файле — сценарии и
 // профили типов, — только через `canvasCommit` со своим ярлыком истории.
-import { PANEL_IDS, layoutAllowsState, registerPanel, reportAppError, scheduleFrame } from "../app.js";
+import { PANEL_IDS, appAllows, registerPanel, reportAppError, scheduleFrame } from "../app.js";
 import { appClockWatch } from "../appClock.js";
 import { canvasCommit } from "../canvas.js";
 import {
@@ -377,7 +377,7 @@ export function scenariosFiredTracker(ttl = SCENARIO_FIRED_MS) {
  * просмотра (`tablet`, F2), телефон — нет.
  */
 export function scenariosCanEdit(layout, tablet = false) {
-  return layoutAllowsState("editScenarios", { layout, tablet });
+  return appAllows("editScenarios", { layout, tablet });
 }
 
 /**
@@ -385,7 +385,7 @@ export function scenariosCanEdit(layout, tablet = false) {
  * и на телефоне (история 4.29, F2): это шаг истории, как на компьютере.
  */
 export function scenariosCanToggle(layout, tablet = false) {
-  return layoutAllowsState("toggleScenarios", { layout, tablet });
+  return appAllows("toggleScenarios", { layout, tablet });
 }
 
 // ——— двери для следующих шагов сборки ———————————————————————————————————

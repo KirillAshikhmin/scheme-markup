@@ -628,6 +628,36 @@ body {
   display: none;
 }
 
+/* ——— слот объекта на странице просмотра (таск 01 просмотра) ——————————————
+   Пустое состояние, строка о предпросмотре и память одного объекта живут одной
+   панелью (`panels/viewStart.js`) поверх поля: пока объекта нет, поля и так
+   нет, а когда он открыт — панели здесь рисовать нечего, и пустой узел места
+   не занимает (`:empty`).
+
+   Сквозь слой клики проходят, а сквозь то, что в нём нарисовано, — нет: иначе
+   он отнял бы у поля и щипок, и ход по плану. Поэтому `pointer-events` снят со
+   слоя и возвращён его детям. */
+#view-start {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 16px;
+  pointer-events: none;
+}
+
+#view-start:empty {
+  display: none;
+}
+
+#view-start > * {
+  pointer-events: auto;
+}
+
 #dialog-host:empty {
   display: none;
 }

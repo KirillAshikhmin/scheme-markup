@@ -1,6 +1,6 @@
 // Объекты: список в шапке, переключение, переименование, удаление,
 // первый запуск и автосохранение в браузер.
-import { LAST_PROJECT_KEY, layoutAllows, PANEL_IDS, registerPanel } from "../app.js";
+import { appAllows, LAST_PROJECT_KEY, PANEL_IDS, registerPanel } from "../app.js";
 import {
   createProject,
   ensureProjectKey,
@@ -152,12 +152,15 @@ function mountProjectsPanel(host, api) {
       select.append(uiEl("option", { value: item.id, text: item.name }));
     }
     select.value = id;
+    // Список объектов — своё умение (`switchProject`): на странице просмотра
+    // объект один, и выбирать не из чего.
+    select.hidden = !appAllows("switchProject", state);
     const has = Boolean(id);
     propsButton.disabled = !has;
     removeButton.disabled = !has;
     // Режим просмотра: объект выбирается, но не заводится, не переименовывается
     // и не удаляется — на объекте с телефоном это только риск.
-    const editable = layoutAllows("editProject", getState().layout);
+    const editable = appAllows("editProject", getState());
     createButton.hidden = !editable;
     propsButton.hidden = !editable;
     removeButton.hidden = !editable;

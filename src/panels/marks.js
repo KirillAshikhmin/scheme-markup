@@ -4,7 +4,7 @@
 // Почему список, а не карточка метки: заказчик заполняет «Расположение» и
 // «Комментарий» не в момент постановки, а потом, разом, по списку.
 // Поэтому правка здесь на месте, а отдельного окна у метки нет вовсе.
-import { layoutAllows, PANEL_IDS, registerPanel, reportAppError } from "../app.js";
+import { appAllows, PANEL_IDS, registerPanel, reportAppError } from "../app.js";
 import { getSetting, setSetting } from "../store.js";
 import { strings, text } from "../strings.js";
 import {
@@ -951,7 +951,7 @@ function mountMarksPanel(host, api) {
   // отмеченного сверяется со свежим снимком, прежде чем стать шагом истории.
   async function editControls(markId) {
     const state = getState();
-    if (!state.project || !layoutAllows("editMarks", state.layout)) return;
+    if (!state.project || !appAllows("editMarks", state)) return;
     const picked = await openMarkControlsPicker(state.project, markId);
     if (!picked) return;
     const fresh = getState();
@@ -973,7 +973,7 @@ function mountMarksPanel(host, api) {
   // свежий снимок, а не на тот, с которым окно открывали.
   async function editSizes(markId) {
     const state = getState();
-    if (!state.project || !layoutAllows("editMarks", state.layout)) return;
+    if (!state.project || !appAllows("editMarks", state)) return;
     const picked = await openMarkSizesPicker(state.project, markId);
     if (!picked) return;
     const fresh = getState();
@@ -1000,7 +1000,7 @@ function mountMarksPanel(host, api) {
     // Ведомая метка (правка после сборки сценариев): аксессуар у меток с одним
     // обозначением один — окно его показывает, а правят его у первой.
     const leader = markDeviceLeader(state.project, markId);
-    const editable = layoutAllows("editMarks", state.layout) && !leader;
+    const editable = appAllows("editMarks", state) && !leader;
     const label = labelOf(state.project, markId);
     const leaderSaid = leader
       ? text("deviceWindow.follower", { label, count: markDeviceShared(state.project, markId) })
@@ -1041,7 +1041,7 @@ function mountMarksPanel(host, api) {
   // «Вернуть как у типа» прямо из строки: то же, что кнопка окна.
   function resetDevice(markId) {
     const state = getState();
-    if (!state.project || !layoutAllows("editMarks", state.layout)) return;
+    if (!state.project || !appAllows("editMarks", state)) return;
     try {
       const next = setMarkDevice(state.project, markId, undefined);
       if (next.project !== state.project) canvasCommit(state.project, next.project, strings.history.markDeviceReset);
@@ -1076,7 +1076,7 @@ function mountMarksPanel(host, api) {
       ),
     );
     select.value = side;
-    if (!layoutAllows("editMarks", state.layout)) select.disabled = true;
+    if (!appAllows("editMarks", state)) select.disabled = true;
     select.addEventListener("change", () => {
       const now = getState();
       if (!now.project) return;
@@ -1292,7 +1292,7 @@ function mountMarksPanel(host, api) {
           view.fields.device.own
             ? uiEl("span", { class: "mark-row__deviceOwn", text: strings.deviceWindow.own })
             : null,
-          view.fields.device.own && layoutAllows("editMarks", state.layout)
+          view.fields.device.own && appAllows("editMarks", state)
             ? uiButton(strings.deviceWindow.reset, {
                 class: "ui-btn mark-row__deviceReset",
                 title: strings.deviceWindow.resetTitle,
@@ -1395,7 +1395,7 @@ function mountMarksPanel(host, api) {
     });
     // Режим просмотра: строка читается и подводит к метке на плане, но поля
     // в ней не правятся — правка живёт на широком экране.
-    if (!layoutAllows("editMarks", state.layout)) {
+    if (!appAllows("editMarks", state)) {
       for (const field of node.querySelectorAll("input")) field.readOnly = true;
       for (const field of node.querySelectorAll("select")) field.disabled = true;
       // Кнопка связи — тоже правка: в режиме просмотра она не нажимается.
@@ -1412,13 +1412,16 @@ function mountMarksPanel(host, api) {
   // спрашивает у неё «а есть ли дыры?» — и получает ответ строкой, а не
   // пустым окном. В режиме просмотра правок нет вовсе, там её не показываем.
   function syncCompact(state) {
-    foot.hidden = !layoutAllows("editMarks", state.layout);
+    foot.hidden = !appAllows("editMarks", state);
     compactButton.disabled = !state.project;
   }
 
   // Заголовок фильтров: галочка, акцент на суженном списке и счётчик. Что
   // именно в нём написано, решает `marksFiltersHead` — её и проверяет тест.
   function syncFilters(state, shown, total) {
+    // Фильтры — своё умение (`filters`): на странице просмотра их нет вовсе,
+    // как нет таблиц и выгрузок. Список меток остаётся — метку ищут по номеру.
+    top.hidden = !appAllows("filters", state);
     const head = marksFiltersHead({ collapsed: filtersCollapsed, filter: state.filter, shown, total });
     filtersBody.hidden = filtersCollapsed;
     top.classList.toggle("is-collapsed", filtersCollapsed);
@@ -1437,6 +1440,9 @@ function mountMarksPanel(host, api) {
   function render() {
     pending = false;
     const state = getState();
+    // Сам список — тоже умение (`markList`): страница, где его не спрашивают,
+    // показала бы его и там, где смотреть не на что.
+    host.hidden = !appAllows("markList", state);
     syncCompact(state);
     if (!state.project || !state.schemeId) {
       syncFilters(state, 0, 0);

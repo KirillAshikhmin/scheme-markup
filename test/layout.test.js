@@ -7,11 +7,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  APP_KINDS,
   LAYOUT_ABILITIES,
   LAYOUT_MODES,
   LAYOUT_NARROW_WIDTH,
   LAYOUT_PHONE_SIDE,
   LAYOUT_TABLET_ABILITIES,
+  VIEW_ABILITIES,
+  appAllows,
+  appKindFor,
   layoutAllows,
   layoutAllowsState,
   layoutModeFor,
@@ -131,4 +135,92 @@ test("планшет в просмотре правит сценарии, ост
   assert.equal(layoutAllowsState("toggleScenarios", phoneState), true, "телефон не включает сценарии");
   assert.equal(layoutAllowsState("toggleScenarios", { layout: "desktop" }), true);
   assert.equal(layoutAllowsState("unknownAbility", tablet), false);
+});
+
+// ——— род страницы: «Разметка» правит, «Просмотр объекта» только смотрит (R15i) ———
+//
+// Запрет правки на второй странице выражен тем же перечнем умений, что решает
+// раскладки, а не вторым условием в каждой кнопке. Поэтому дверь одна
+// (`appAllows`) и таблица у неё двумерная: умение × род страницы × раскладка.
+
+test("род страницы читается из разметки, чужое слово — «Разметка»", () => {
+  assert.deepEqual([...APP_KINDS], ["edit", "view"]);
+  assert.equal(appKindFor({ dataset: { app: "view" } }), "view");
+  assert.equal(appKindFor({ dataset: { app: "edit" } }), "edit");
+  assert.equal(appKindFor({ dataset: {} }), "edit");
+  assert.equal(appKindFor({ dataset: { app: "чужое" } }), "edit");
+  // Узла нет вовсе (страница собрана не нами, тесты в Node) — правка на месте.
+  assert.equal(appKindFor(null), "edit");
+  assert.equal(appKindFor(undefined), "edit");
+});
+
+test("в «Разметке» новая дверь отвечает ровно то же, что раскладка", () => {
+  const views = [
+    { layout: "desktop" },
+    { layout: "mobile" },
+    { layout: "mobile", tablet: true },
+    { layout: "чужой режим" },
+  ];
+  for (const ability of [...Object.keys(LAYOUT_ABILITIES), "editEverything"]) {
+    for (const state of views) {
+      assert.equal(
+        appAllows(ability, { ...state, app: "edit" }),
+        layoutAllowsState(ability, state),
+        ability + " в раскладке " + state.layout,
+      );
+    }
+  }
+  // Род страницы не назван — это «Разметка»: панели и тесты, которые о нём не
+  // знают, правку не теряют.
+  assert.equal(appAllows("editMarks", { layout: "desktop" }), true);
+  assert.equal(appAllows("editMarks", null), false);
+});
+
+test("в просмотре правка запрещена и на широком экране, и на планшете, и на телефоне", () => {
+  const forbidden = [
+    "editMarks",
+    "editDrawing",
+    "editSchemes",
+    "editRooms",
+    "editProject",
+    "editScenarios",
+    "toggleScenarios",
+    "undo",
+    "saveFile",
+    "dictionary",
+    "tables",
+    "exportFiles",
+    "filters",
+    "warnings",
+    "switchProject",
+    "viewSizes",
+    "viewScenarios",
+    "markLinks",
+  ];
+  for (const ability of forbidden) {
+    for (const layout of LAYOUT_MODES) {
+      for (const tablet of [false, true]) {
+        assert.equal(
+          appAllows(ability, { app: "view", layout, tablet }),
+          false,
+          ability + ": в просмотре этого нет (" + layout + (tablet ? ", планшет" : "") + ")",
+        );
+      }
+    }
+  }
+});
+
+test("в просмотре можно смотреть: план, объём, схемы, список меток, поиск, открыть файл", () => {
+  assert.deepEqual([...VIEW_ABILITIES].sort(), ["markList", "openFile", "search", "switchScheme", "viewPlan", "viewVolume"]);
+  for (const ability of VIEW_ABILITIES) {
+    for (const layout of LAYOUT_MODES) {
+      assert.equal(appAllows(ability, { app: "view", layout }), true, ability + " в раскладке " + layout);
+    }
+  }
+  // Белый список не расширяет раскладку: умения, которого нет в таблице, в
+  // просмотре тоже нет.
+  assert.equal(appAllows("editEverything", { app: "view", layout: "desktop" }), false);
+  // Чужой род страницы считается «Разметкой», а не «можно всё»: опечатка в
+  // разметке не должна открывать правку там, где её не ждут.
+  assert.equal(appAllows("editMarks", { app: "просмотр", layout: "desktop" }), true);
 });

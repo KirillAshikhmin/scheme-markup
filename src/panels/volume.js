@@ -31,7 +31,7 @@
 // потому, что «без него не понять, где стоишь», а «показать заказчику»
 // начинается с общего вида. Поэтому первый кадр — вся схема сверху, а человек
 // переходит к первому лицу, уже зная, куда попал.
-import { PANEL_IDS, cancelFrame, layoutAllows, registerPanel, scheduleFrame, screenMode } from "../app.js";
+import { PANEL_IDS, appAllows, cancelFrame, registerPanel, scheduleFrame, screenMode } from "../app.js";
 import { FULLSCREEN_EVENTS, canvasFrameLinks, canvasFullscreenBare, canvasFullscreenOn } from "../canvas.js";
 import { createFieldPlate, plateUnseen } from "./plate.js";
 import {
@@ -5522,7 +5522,7 @@ function createVolume({ api, hosts }) {
 
 /** Доступен ли объёмный режим в этой раскладке. */
 export function volumeAllowed(state) {
-  return layoutAllows("viewVolume", state && state.layout);
+  return appAllows("viewVolume", state);
 }
 
 /**

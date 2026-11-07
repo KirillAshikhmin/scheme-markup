@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { strings } from "../src/strings.js";
+import { strings, text } from "../src/strings.js";
 
 const SRC_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "src");
 // Разделы словаря, ключи которых собираются из кодов, а не пишутся в разметке.
@@ -90,3 +90,16 @@ for (const section of DYNAMIC_SECTIONS) {
     assert.deepEqual(dead, [], "строка есть, а кода никто не бросает и не показывает");
   });
 }
+
+// Разметка держит только ключи, а строки живут в словаре — и промах здесь тоже
+// молчаливый: `text` вернёт сам ключ, и в шапке страницы встанет «view.title».
+// Страниц с таска 01 просмотра две, и обе проверяются одной мерой.
+test("ключи разметки обеих страниц есть в словаре", () => {
+  for (const page of ["index.html", "view.html"]) {
+    const html = readFileSync(join(SRC_DIR, page), "utf8");
+    const keys = [...html.matchAll(/data-(?:text|title)="([^"]+)"/g)].map(([, key]) => key);
+    assert.ok(keys.length > 0, page + ": в разметке нет ни одного ключа словаря");
+    const missing = keys.filter((key) => text(key) === key).sort();
+    assert.deepEqual(missing, [], page + ": ключ без строки");
+  }
+});

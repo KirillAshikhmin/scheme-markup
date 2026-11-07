@@ -13,6 +13,59 @@ import { usedImageIds } from "./model.js";
 export const STORE_DB_NAME = "scheme-markup";
 export const STORE_DB_VERSION = 1;
 export const STORE_NAMES = { projects: "projects", images: "images", settings: "settings" };
+
+// ——— два пространства на один origin (таск 01 просмотра) ———————————————————
+//
+// Страниц у сервиса две, и обе лежат в одной папке, то есть на одном origin —
+// база IndexedDB у них была бы одна. Так нельзя: интегратор, открывший
+// просмотр у себя, нашёл бы просмотренные копии в списке своей «Разметки», а
+// объект из ссылки — с переписанными идентификаторами — лёг бы туда новым
+// объектом. Настройки показа разводятся тем же: они лежат в той же базе.
+//
+// Поэтому у просмотра своё пространство — своя база с теми же тремя
+// хранилищами. Вызывающие о нём не знают: `storeUse` зовётся один раз при
+// старте (`app.appUseKind`), и дальше весь остальной API прежний.
+export function storeNamespace(kind) {
+  return kind === "view" ? STORE_DB_NAME + "-view" : STORE_DB_NAME;
+}
+
+let storeDbName = STORE_DB_NAME;
+
+/** Имя базы, в которой сейчас работает хранилище. */
+export function storeDatabaseName() {
+  return storeDbName;
+}
+
+/**
+ * Выбрать пространство. Зовётся один раз при старте, до первого обращения к
+ * хранилищу; успей база открыться раньше — снимок сбрасывается, и следующее
+ * обращение откроет уже своё пространство. Молча оставить открытой чужую базу
+ * было бы хуже отказа: объекты просмотра легли бы в список «Разметки».
+ */
+export function storeUse(kind) {
+  const name = storeNamespace(kind);
+  if (name === storeDbName) return storeDbName;
+  storeDbName = name;
+  if (storeDb) {
+    try {
+      storeDb.onclose = null;
+      storeDb.close();
+    } catch (error) {
+      /* закрытая база закрытой и остаётся */
+    }
+  }
+  storeDb = null;
+  storeOpening = null;
+  storeModeValue = "unknown";
+  storeReported = false;
+  storeWriteReported = false;
+  // Память сеанса принадлежала прежнему пространству: её записи в новое не едут.
+  storeMemory.projects.clear();
+  storeMemory.images.clear();
+  storeMemory.settings.clear();
+  storeMemberCache = null;
+  return storeDbName;
+}
 // Ниже этого порога свободного места пользователя предупреждают заранее.
 export const STORE_LOW_SPACE_BYTES = 50 * 1024 * 1024;
 // Открытие базы иногда не отвечает вовсе (приватное окно, заблокированная
@@ -77,7 +130,7 @@ function openDatabase() {
     const timer = setTimeout(() => finish(reject, new Error("indexeddb-timeout")), STORE_OPEN_TIMEOUT_MS);
     let request;
     try {
-      request = indexedDB.open(STORE_DB_NAME, STORE_DB_VERSION);
+      request = indexedDB.open(storeDbName, STORE_DB_VERSION);
     } catch (error) {
       clearTimeout(timer);
       finish(reject, error);

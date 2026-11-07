@@ -2,7 +2,7 @@
 // Панели других тасков монтируются по идентификатору контейнера из index.html
 // и не правят ни этот файл, ни разметку.
 import { strings, text } from "./strings.js";
-import { getSetting, setSetting } from "./store.js";
+import { getSetting, setSetting, storeUse } from "./store.js";
 // Расположение — одно на три режима, и считает его `screenPlace.js` (таск 178,
 // 193). Каркас только кладёт его в настройки и достаёт обратно: второго счёта
 // у памяти вида нет.
@@ -486,6 +486,93 @@ export function layoutAllowsState(ability, state) {
   return source.layout === "mobile" && source.tablet === true && LAYOUT_TABLET_ABILITIES.includes(ability);
 }
 
+// ——— род страницы: «Разметка» и «Просмотр объекта» (таск 01 просмотра, R15i) ——
+//
+// Страниц у сервиса две, и обе собраны одним бандлом (`build.js`): различаются
+// они разметкой — на странице просмотра просто нет тех точек монтирования,
+// которыми правят. Этого мало: на широком экране правка разрешена раскладкой, и
+// холст, карточка метки и список меток пустили бы заказчика двигать метки.
+//
+// Поэтому у сеанса есть **род страницы**, и запрет выражен тем же перечнем
+// умений, что уже решает раскладки, — белым списком `VIEW_ABILITIES` и одной
+// новой дверью `appAllows`. Второго условия в каждой кнопке не заводится: их
+// было бы столько же, сколько кнопок, и разъехались бы они на первой правке.
+//
+// Род читается **один раз при старте** из разметки (`#app[data-app]`) и в
+// состояние сеанса через `setState` не попадает: это не выбор человека, а то,
+// какую страницу он открыл.
+export const APP_KINDS = ["edit", "view"];
+// Чужое слово в разметке — «Разметка»: страница, собранная не нами, не должна
+// превращаться в просмотр, а опечатка — отнимать правку у инженера.
+export const APP_KIND_DEFAULT = "edit";
+
+/**
+ * Что умеет страница просмотра. Белый список, а не чёрный: новое умение
+ * появляется в `LAYOUT_ABILITIES` и к заказчику само не приезжает — его нужно
+ * назвать здесь, то есть решить, что ему там место.
+ *
+ * Шесть умений, и все — чтение: план «Схемы», «Объём», выбор схемы, список
+ * меток, поиск метки по номеру и открытие файла объекта. Остального у
+ * заказчика нет: ни «Чертежа», ни правки меток, типов, схем, помещений и
+ * объекта, ни отмены, ни «Сохранить файл», ни справочника, ни таблиц, ни
+ * выгрузок, ни фильтров, ни предупреждений, ни списка объектов, ни
+ * «Интерфейса проекта».
+ *
+ * «Сценарии» в список не входят нарочно: их список и журнал приходят окном из
+ * шапки, а третьим режимом в задаче не бывает (в ней два). Отметка «Активный»
+ * и правка сценариев — запись в объект, и `canvasCommitAllowed` закрывает их
+ * тем же перечнем.
+ */
+export const VIEW_ABILITIES = Object.freeze([
+  "viewPlan",
+  "viewVolume",
+  "switchScheme",
+  "markList",
+  "search",
+  "openFile",
+]);
+
+let appKindValue = APP_KIND_DEFAULT;
+
+/** Род страницы по её корню: `#app[data-app="view"]`. Неизвестное — «Разметка». */
+export function appKindFor(root) {
+  const said = root && root.dataset ? root.dataset.app : null;
+  return APP_KINDS.includes(said) ? said : APP_KIND_DEFAULT;
+}
+
+/** Род этой страницы: `"edit"` или `"view"`. */
+export function appKind() {
+  return appKindValue;
+}
+
+/**
+ * Назвать род страницы. Зовётся один раз, до первого обращения к хранилищу:
+ * от рода зависит, в какой базе браузера живут объекты и настройки, а первым
+ * к хранилищу тянется не каркас, а панель файла (она поднимается по
+ * `DOMContentLoaded`).
+ */
+export function appUseKind(kind) {
+  appKindValue = APP_KINDS.includes(kind) ? kind : APP_KIND_DEFAULT;
+  storeUse(appKindValue);
+  return appKindValue;
+}
+
+/**
+ * Умение по состоянию каркаса и роду страницы — **единственная дверь прав**.
+ * Раскладка решает как раньше (`layoutAllowsState`), род страницы только
+ * сужает: в просмотре доступно лишь то, что названо в `VIEW_ABILITIES`.
+ *
+ * Род берётся из состояния (`state.app`, его кладёт `getState`), а если
+ * состояние о нём молчит — у самой страницы: панели, собранные на заглушках
+ * DOM, и тесты раскладки о роде не знают и правку терять не должны.
+ */
+export function appAllows(ability, state) {
+  const source = state || {};
+  const kind = APP_KINDS.includes(source.app) ? source.app : appKindValue;
+  if (kind === "view" && !VIEW_ABILITIES.includes(ability)) return false;
+  return layoutAllowsState(ability, source);
+}
+
 // ——— кадр: один планировщик на три поверхности ————————————————————————
 //
 // `requestAnimationFrame` есть везде, где эта страница работает, но не в Node:
@@ -511,9 +598,14 @@ export function cancelFrame(id) {
 
 // Неизвестный режим недоступен, как и неизвестное умение: опечатка уводит
 // человека на схему, а не оставляет его на пустом экране.
-export function screenAllowed(screen, layout) {
+//
+// Вторым доводом принимается и состояние целиком: род страницы спрашивается
+// той же дверью, что у всех прочих умений (`appAllows`), и на странице
+// просмотра «Чертёж» и «Сценарии» исчезают из переключателя сами. Раскладка
+// строкой осталась — так её зовут поверхности и так её проверяют тесты.
+export function screenAllowed(screen, state) {
   const ability = SCREEN_ABILITIES[screen];
-  return Boolean(ability) && layoutAllows(ability, layout);
+  return Boolean(ability) && appAllows(ability, typeof state === "string" ? { layout: state } : state);
 }
 
 // Что показывает переключатель в этой раскладке. На узком экране кнопок две:
@@ -582,6 +674,9 @@ let appStarted = false;
 export function getState() {
   return {
     ...appState,
+    // Род страницы — не выбор человека, а то, какую страницу он открыл:
+    // `setState` его не меняет, а панели получают его в снимке, как раскладку.
+    app: appKindValue,
     selectedMarkIds: [...appState.selectedMarkIds],
     hiddenObjectIds: [...appState.hiddenObjectIds],
     filter: { ...appState.filter },
@@ -1354,7 +1449,14 @@ export function startApp() {
 
 // Старт откладывается за границу текущего скрипта: в собранном файле панели
 // и модели определяются ниже по бандлу, и каркас не должен опережать их.
+//
+// А род страницы читается **сразу**, не дожидаясь старта: от него зависит, в
+// какой базе браузера живут объекты и настройки, и первое обращение к
+// хранилищу случается раньше `startApp` — в обработчике `DOMContentLoaded`
+// панели файла. К этой минуте разметка уже разобрана: бандл стоит последним
+// скриптом в конце `<body>`.
 if (typeof document !== "undefined") {
+  appUseKind(appKindFor(document.getElementById("app")));
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", startApp, { once: true });
   } else {

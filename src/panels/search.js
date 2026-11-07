@@ -5,7 +5,7 @@
 // схему, если метка на другой, и подводит к ней холст — ради этого поиск
 // и заведён. Подбор вариантов живёт в `model.searchProject`, здесь только
 // список, клавиши и прыжок.
-import { layoutAllows, PANEL_IDS, registerPanel } from "../app.js";
+import { appAllows, PANEL_IDS, registerPanel } from "../app.js";
 import { findMark, findScheme, searchProject } from "../model.js";
 import { strings, text } from "../strings.js";
 import { UI_SIGN_SMALL, uiDialogDepth, uiEl, uiFieldTarget, uiIconButton, uiSignCell } from "./ui.js";
@@ -231,7 +231,7 @@ function mountSearchPanel(host, api) {
 
   subscribe((state, changed) => {
     if ("layout" in changed) {
-      host.hidden = !layoutAllows("search", state.layout);
+      host.hidden = !appAllows("search", state);
       if (host.hidden) closeSearch();
     }
     if ("project" in changed && state.project) {
@@ -242,7 +242,7 @@ function mountSearchPanel(host, api) {
       if (centerOn(pending)) pending = null;
     }
   });
-  host.hidden = !layoutAllows("search", getState().layout);
+  host.hidden = !appAllows("search", getState());
 }
 
 registerPanel(PANEL_IDS.headerSearch, mountSearchPanel);

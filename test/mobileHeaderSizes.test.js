@@ -55,8 +55,9 @@ test("G272: кнопка «Интерфейс проекта» есть в ша�
   assert.equal(layoutAllows("viewSizes", "mobile"), true);
   assert.deepEqual(LAYOUT_ABILITIES.viewSizes, ["desktop", "mobile"]);
   // На большом экране кнопки нет: раздел стоит в колонке, и вторая дверь к тем
-  // же полям там лишняя.
-  assert.match(TOOLS_JS, /layout !== "mobile" \|\| !layoutAllows\("viewSizes", layout\)/);
+  // же полям там лишняя. Умение спрашивается одной дверью прав `appAllows`
+  // (таск 01 просмотра): прямых вызовов раскладки в панелях больше нет.
+  assert.match(TOOLS_JS, /state\.layout !== "mobile" \|\| !appAllows\("viewSizes", state\)/);
   // Называется кнопка тем же словом, что раздел: двух имён у одних полей быть
   // не должно.
   assert.match(TOOLS_JS, /uiIconButton\("sliders", \{\s*\n\s*label: strings\.panels\.sizes,/);

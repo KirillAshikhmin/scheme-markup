@@ -17,7 +17,7 @@
 // простыня на полтора десятка строк поверх плана; строкой панели тот же вопрос
 // ждёт, пока до него дойдут руки. Отметка «разобрано» как была в объекте
 // (`type.kindGuessed`), так и осталась: она уезжает вместе с файлом.
-import { layoutAllows, PANEL_IDS, registerPanel, reportAppError, setScreen } from "../app.js";
+import { appAllows, PANEL_IDS, registerPanel, reportAppError, setScreen } from "../app.js";
 import {
   acceptProblem,
   acceptedProblems,
@@ -736,7 +736,7 @@ function mountWarningsPanel(host, api) {
   // счётчик не реагирует, иначе он мигал бы на каждый ход.
   function refresh(state) {
     model = warningsModel(state.project);
-    const shown = Boolean(state.project) && layoutAllows("warnings", state.layout);
+    const shown = Boolean(state.project) && appAllows("warnings", state);
     host.hidden = !shown;
     if (!shown && open) setOpen(false);
     renderToggle();

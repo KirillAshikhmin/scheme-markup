@@ -17,7 +17,7 @@
 // выделенная метка уже показывает свою связную группу (`canvasFrameLinks`,
 // таски 79 и 84). Правило от раскладки не зависит, и в просмотре работает так
 // же — карточке остаётся только назвать связи словами.
-import { PANEL_IDS, layoutAllows, registerPanel } from "../app.js";
+import { PANEL_IDS, appAllows, registerPanel } from "../app.js";
 import {
   MARK_KINDS,
   MARK_ORDER_BACK,
@@ -101,7 +101,7 @@ export function markCardState(state, collapsed = false) {
   // Карточка про одну метку: у выделенных пачкой общих полей нет, а
   // показывать первую попавшуюся — врать.
   if (!source.project || selected.length !== 1) return MARK_CARD_NONE;
-  if (!layoutAllows("editMarks", source.layout)) return MARK_CARD_FULL;
+  if (!appAllows("editMarks", source)) return MARK_CARD_FULL;
   // Пока дом запущен, карточка — пульт устройства (таск 08): ярлычком его не
   // свернуть, иначе клавиши и ползунки пропали бы из-под руки.
   if (source.simRunning === true) return MARK_CARD_FULL;
@@ -203,7 +203,7 @@ export function markCardModel(project, markId) {
  */
 export function markCardLifts(state) {
   const source = state || {};
-  return !layoutAllows("editMarks", source.layout) || source.simRunning === true;
+  return !appAllows("editMarks", source) || source.simRunning === true;
 }
 
 /**
@@ -430,7 +430,7 @@ function mountMarkCard(host, api) {
     dropDevice();
     // В просмотре карточка показывает метку целиком и стоит колонкой; на
     // компьютере она ужата в ряды и пропускает клик на план под собой.
-    const viewing = !layoutAllows("editMarks", state.layout);
+    const viewing = !appAllows("editMarks", state);
     card.classList.toggle("mark-card--compact", !viewing);
     card.classList.toggle("mark-card--mini", mode === MARK_CARD_MINI);
     if (!model) {
@@ -484,7 +484,7 @@ function mountMarkCard(host, api) {
     // мыши (`pointer-events: none`), но кнопки в ней клик ловят — ради них
     // исключение и сделано.
     const commentRow =
-      model.comment && layoutAllows("editMarks", state.layout)
+      model.comment && appAllows("editMarks", state)
         ? uiEl("div", { class: "mark-card__row mark-card__row--act" }, [
             uiButton(strings.markCard.editComment, {
               class: "ui-btn mark-card__edit",

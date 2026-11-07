@@ -5,7 +5,7 @@
 // делает `exporter.js`. Здесь — выбор разбивки, области и множителя, да связь
 // с состоянием сеанса: фильтр, схема и её план берутся ровно те, что на экране,
 // поэтому скрытое фильтром не попадает ни в таблицу, ни в картинку, ни в легенду.
-import { PANEL_IDS, registerPanel } from "../app.js";
+import { PANEL_IDS, appAllows, registerPanel } from "../app.js";
 import { strings, text } from "../strings.js";
 import {
   elevationPlan,
@@ -1398,32 +1398,47 @@ function mountExportPanel(host, api) {
   }
 
   function renderDrop() {
+    const state = getState();
+    // Таблица меток — своё умение (`tables`), и спрашивает его панель, а не
+    // сам пункт: `exportMenuItems` чистая и о роде страницы не знает.
     drop.replaceChildren(
-      ...exportMenuItems(getState()).map((item) => {
-        const row = uiButton(item.label, {
-          class: "ui-btn export__item",
-          title: item.reason || item.hint,
-          attrs: { role: "menuitem" },
-          on: { click: () => pick(item) },
-        });
-        row.disabled = Boolean(item.reason);
-        if (item.reason) {
-          row.textContent = "";
-          row.append(
-            uiEl("span", { class: "export__itemName", text: item.label }),
-            uiEl("span", { class: "export__itemWhy", text: item.reason }),
-          );
-        }
-        return row;
-      }),
+      ...exportMenuItems(state)
+        .filter((item) => item.id !== "table" || appAllows("tables", state))
+        .map((item) => {
+          const row = uiButton(item.label, {
+            class: "ui-btn export__item",
+            title: item.reason || item.hint,
+            attrs: { role: "menuitem" },
+            on: { click: () => pick(item) },
+          });
+          row.disabled = Boolean(item.reason);
+          if (item.reason) {
+            row.textContent = "";
+            row.append(
+              uiEl("span", { class: "export__itemName", text: item.label }),
+              uiEl("span", { class: "export__itemWhy", text: item.reason }),
+            );
+          }
+          return row;
+        }),
     );
+  }
+
+  // Кнопка живёт по умению `exportFiles`: страница, где выгрузок нет, значка
+  // принтера не показывает — пустое меню хуже отсутствующего.
+  function syncShown() {
+    const shown = appAllows("exportFiles", getState());
+    toggle.hidden = !shown;
+    if (!shown && open) setOpen(false);
   }
 
   // Состояние меню живёт в сеансе (G68) и в объект не попадает ничем: раскрыто
   // оно или нет, знает только эта панель, и при перерисовке меню закрывается.
   subscribe(() => {
+    syncShown();
     if (open) renderDrop();
   });
+  syncShown();
 
   // Закрывается тем же, чем открывается: повторным нажатием, нажатием мимо и
   // Escape — ровно как список предупреждений рядом. Диалогом панель не

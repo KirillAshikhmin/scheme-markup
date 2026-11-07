@@ -19,7 +19,7 @@
 // холст (`canvas.canvasFrameLinks` → `render.drawMarkLinks`). Отметка живёт в
 // настройках браузера, как отметка линейки: это оснастка разбора, а не свойство
 // разметки, и в объект с файлом проекта ей не за чем.
-import { layoutAllows, LINKS_SETTING, PANEL_IDS, registerPanel } from "../app.js";
+import { appAllows, LINKS_SETTING, PANEL_IDS, registerPanel } from "../app.js";
 import { findScheme } from "../model.js";
 import { markLinks } from "../render.js";
 import { setSetting } from "../store.js";
@@ -80,7 +80,7 @@ function mountLinksPanel(host, api) {
   }
 
   function refresh(state) {
-    const shown = Boolean(state.project) && layoutAllows("markLinks", state.layout);
+    const shown = Boolean(state.project) && appAllows("markLinks", state);
     host.hidden = !shown;
     const on = state.linksShown === true;
     toggle.classList.toggle("is-on", on);

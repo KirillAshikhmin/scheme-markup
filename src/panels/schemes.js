@@ -14,7 +14,7 @@
 // двумя кнопками и обходится без окна: нажал — повернулось, Ctrl+Z вернул.
 // Окно осталось за тем, ради чего и заведено, — за новой картинкой.
 import {
-  layoutAllows,
+  appAllows,
   PANEL_IDS,
   registerPanel,
   SECTION_IDS,
@@ -801,7 +801,10 @@ function mountSchemesPanel(host, api) {
     const state = getState();
     const project = state.project;
     // Режим просмотра: схему выбирают, но не грузят, не правят и не удаляют.
-    const editable = layoutAllows("editSchemes", state.layout);
+    const editable = appAllows("editSchemes", state);
+    // Сам список — переключатель схем, и это своё умение (`switchScheme`):
+    // выбрать схему можно и там, где её не правят.
+    list.hidden = !appAllows("switchScheme", state);
     list.replaceChildren();
     addButton.disabled = !project;
     addButton.hidden = !editable;

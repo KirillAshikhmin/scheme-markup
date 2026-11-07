@@ -8,6 +8,7 @@
 // можно только здесь.
 import {
   PANEL_IDS,
+  appAllows,
   registerPanel,
   reportAppError,
   SCREEN_DEFAULT,
@@ -183,7 +184,8 @@ function mountRoomsPanel(host, api) {
     title: strings.rooms.addAndTraceHint,
     on: { click: () => addAndTrace() },
   });
-  host.replaceChildren(list, uiEl("div", { class: "rooms__add" }, [input, addButton, traceButton]));
+  const addRow = uiEl("div", { class: "rooms__add" }, [input, addButton, traceButton]);
+  host.replaceChildren(list, addRow);
 
   function project() {
     return getState().project;
@@ -484,6 +486,9 @@ function mountRoomsPanel(host, api) {
 
   function render() {
     const state = getState();
+    // Помещения заводят и правят по своему умению (`editRooms`): на странице
+    // просмотра их читают контуром на плане, а завести новое нечем.
+    addRow.hidden = !appAllows("editRooms", state);
     if (!state.project) {
       list.replaceChildren(uiEl("p", { class: "panel__empty", text: strings.projects.empty }));
       setSectionBadge(SECTION_IDS.rooms, "");

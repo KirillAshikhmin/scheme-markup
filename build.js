@@ -23,12 +23,33 @@ const srcDir = path.join(root, "src");
 // смотрит — он берёт из `src/` только `.js` и `.css`.
 const assetsDir = path.join(srcDir, "assets");
 const webDir = path.join(root, "web");
+// Копия brotli (G18): единственная зависимость сборки лежит **вне `src/`** —
+// иначе сборщик бандла втянул бы мегабайт кодека в обе страницы. Страница
+// грузит её динамическим `import("./vendor/…")` (`src/brotliCodec.js`).
+const vendorDir = path.join(webDir, "vendor");
 const distDir = path.join(root, "dist");
 
 // Имя страницы в `dist/`: на неё тоже можно сослаться, и это не ошибка.
 export const PAGE_FILE = "index.html";
 // Манифест установки: единственный файл, ссылка на который обязательна.
 export const MANIFEST_FILE = "manifest.webmanifest";
+// ——— вторая страница: просмотр объекта (таск 01 просмотра) ————————————————
+//
+// Собирается **тем же путём**, что главная: тот же бандл, те же стили, те же
+// проверки — различается только шаблон разметки. Своего бандла у неё нет
+// нарочно: в страницу попадает каждый файл `src/**/*.js`, списка включения в
+// сборке не существует, и второй состав пришлось бы заводить и поддерживать.
+// Цена решения честная: страница заказчика весит столько же, сколько
+// «Разметка».
+//
+// В `extras` она не «как есть» (так лежит памятка `guide.html`), а шаблоном со
+// вклеенным кодом; имя её попадает в `written`, а служебный скрипт узнаёт её
+// среди соседних адресов папки по тому же правилу, что памятку (D46).
+export const VIEW_PAGE_FILE = "view.html";
+// Свой манифест: значок с домашнего экрана ведёт в просмотр, а не в «Разметку»
+// (G20.1). Ссылка на него в `src/view.html` обязательна — её и проверяет
+// `assertLocalLinks`.
+export const VIEW_MANIFEST_FILE = "view.webmanifest";
 // Значок приложения: тот же рисунок, что во вкладке, — он не рисуется заново,
 // а достаётся из `<link rel="icon">` и кладётся файлом. Одна картинка на все
 // размеры: SVG тянется без потерь, и разъехаться двум рисункам негде.
@@ -37,7 +58,7 @@ const ICON_FILE = "icon.svg";
 // квадрат). Обрез гарантированно не задевает только центральные 80%, а у
 // значка вкладки рамка плана идёт почти от края.
 const ICON_MASKABLE_FILE = "icon-maskable.svg";
-const WORKER_FILE = "sw.js";
+export const WORKER_FILE = "sw.js";
 // Памятка — тот же рассказ, что в `AGENTS.md`, но страницей на сайте (таск 236,
 // G355). Исходник лежит в `web/` рядом со служебным скриптом и едет в `dist/`
 // как есть: в `src/` ему нельзя — туда смотрит сборщик бандла, и памятка стала
@@ -83,6 +104,33 @@ export async function listAssets() {
     .filter((file) => !path.basename(file).startsWith("."))
     .map((file) => ({
       name: path.relative(srcDir, file).split(path.sep).join("/"),
+      file,
+    }));
+}
+
+// Файлы кодека, которые нужны **сразу** и без сети: страница просмотра
+// разбирает ссылку при открытии. Они и только они идут в `__ASSETS__`, то есть
+// в офлайн-кэш установки. Кодировщик (1,03 МБ) нужен только «Разметке» и
+// только по нажатию «Ссылкой» — мегабайт в кэш заказчику не кладётся.
+export const VENDOR_CACHED = Object.freeze([
+  "vendor/brotli-dec-wasm/brotli_dec_wasm.js",
+  "vendor/brotli-dec-wasm/brotli_dec_wasm_bg.wasm",
+]);
+
+// Копия кодека целиком (оба направления и лицензии): едет в `dist/vendor/`
+// побайтово, как ресурсы страницы. Лицензия обязана лежать рядом с копией.
+export async function listVendor() {
+  let files = [];
+  try {
+    files = await listFiles(vendorDir, "");
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    return [];
+  }
+  return files
+    .filter((file) => !path.basename(file).startsWith("."))
+    .map((file) => ({
+      name: "vendor/" + path.relative(vendorDir, file).split(path.sep).join("/"),
       file,
     }));
 }
@@ -698,12 +746,14 @@ function assertOwnFile(raw, own) {
 }
 
 // Страница приложения: каждый её адрес — свой файл рядом, и ссылка на манифест
-// обязательна.
-export function assertLocalLinks(html, files) {
+// обязательна. Манифест называется аргументом: страниц две, и у каждой он свой
+// — у просмотра чужой означал бы, что с домашнего экрана открывается
+// «Разметка» (G20.1).
+export function assertLocalLinks(html, files, manifest = MANIFEST_FILE) {
   const own = new Set(files);
   for (const raw of pageLinks(html)) assertOwnFile(raw, own);
-  if (!html.includes('href="' + MANIFEST_FILE + '"')) {
-    throw new Error("Пропала ссылка на " + MANIFEST_FILE + ": с сайта страницу перестанут предлагать к установке");
+  if (!html.includes('href="' + manifest + '"')) {
+    throw new Error("Пропала ссылка на " + manifest + ": с сайта страницу перестанут предлагать к установке");
   }
 }
 
@@ -775,13 +825,44 @@ export function maskableSvgFrom(svg) {
 // подпапке, и «/» указывал бы в корень чужого сайта. Ориентация не задана
 // нарочно — работают и стоймя, и лёжа.
 export function manifestJson() {
+  return manifestFor({
+    name: strings.app.title,
+    short_name: strings.app.installShortName,
+    description: strings.app.installDescription,
+    start_url: ".",
+  });
+}
+
+/**
+ * Манифест страницы просмотра (G20.1): «значок с домашнего экрана ведёт в
+ * просмотр, а не в «Разметку»». Своё имя и своё описание — под значком это
+ * такая же видимая строка, как заголовок окна; `start_url` — сама страница.
+ *
+ * Значки те же два: это один сервис, и двух рисунков у него быть не должно.
+ *
+ * Область (`scope`) — та же папка, а не одна страница. Опознание приложения
+ * считается от `start_url` (своего `id` мы не задаём), поэтому два значка на
+ * домашнем экране не сливаются; а узкая область выбросила бы из приложения
+ * соседние адреса той же папки — и ссылку с хвостом, и служебный скрипт,
+ * область видимости которого и есть папка.
+ */
+export function viewManifestJson() {
+  return manifestFor({
+    name: strings.view.title,
+    short_name: strings.view.installShortName,
+    description: strings.view.installDescription,
+    start_url: "./" + VIEW_PAGE_FILE,
+  });
+}
+
+function manifestFor({ name, short_name: shortName, description, start_url: startUrl }) {
   return JSON.stringify(
     {
-      name: strings.app.title,
-      short_name: strings.app.installShortName,
-      description: strings.app.installDescription,
+      name,
+      short_name: shortName,
+      description,
       lang: "ru",
-      start_url: ".",
+      start_url: startUrl,
       scope: ".",
       // `id` не задан нарочно: он считается от происхождения сайта, а не от
       // папки манифеста, и «.» указал бы в корень — на GitHub Pages туда же,
@@ -813,12 +894,19 @@ export function manifestJson() {
 // Имя файла страницы — туда же, и по той же причине: по нему скрипт узнаёт свою
 // страницу среди соседних адресов той же папки (D46), а хозяин имени один —
 // `PAGE_FILE` здесь.
-export async function workerScript(html, assets) {
+export async function workerScript(html, assets, view = "") {
   const source = await readFile(path.join(webDir, WORKER_FILE), "utf8");
-  const version = createHash("sha256").update(html).digest("hex").slice(0, 12);
+  // Отпечаток считается по **обеим** страницам: разметка просмотра правится
+  // отдельно от кода, и без неё в отпечатке у заказчика осталась бы прежняя
+  // офлайн-копия его страницы.
+  const version = createHash("sha256").update(html).update(view).digest("hex").slice(0, 12);
   const result = source
     .replaceAll("__CACHE_VERSION__", version)
     .replaceAll("__PAGE_FILE__", "./" + PAGE_FILE)
+    // Страница просмотра — вторая страница той же сборки: по этому имени
+    // служебный скрипт узнаёт её среди соседних адресов папки и отдаёт без
+    // сети её, а не «Разметку» (D46).
+    .replaceAll("__VIEW_FILE__", "./" + VIEW_PAGE_FILE)
     // Имя памятки — тоже отсюда: по нему скрипт узнаёт её среди соседних
     // адресов папки и отдаёт без сети её, а не схему (таск 236).
     .replaceAll("__GUIDE_FILE__", "./" + GUIDE_FILE)
@@ -851,59 +939,85 @@ export async function buildPage() {
   const cssFiles = await listFiles(srcDir, ".css");
   const css = stripCssComments((await Promise.all(cssFiles.map((file) => readFile(file, "utf8")))).join("\n"));
 
-  const template = await readFile(path.join(srcDir, "index.html"), "utf8");
-  const html = template
-    .replace(/[ \t]*<link[^>]+rel="stylesheet"[^>]*>\s*/i, "    <style>\n" + css + "\n    </style>\n")
-    .replace(
-      /[ \t]*<script[^>]+src="app\.js"[^>]*><\/script>\s*/i,
-      "    <script>\n(function () {\n" + script + "\n})();\n    </script>\n",
-    );
+  // Шаблон страницы: стиль и скрипт встают внутрь неё. Обе страницы собираются
+  // этой же подстановкой — различается только разметка.
+  const pageFrom = (template) =>
+    template
+      .replace(/[ \t]*<link[^>]+rel="stylesheet"[^>]*>\s*/i, "    <style>\n" + css + "\n    </style>\n")
+      .replace(
+        /[ \t]*<script[^>]+src="app\.js"[^>]*><\/script>\s*/i,
+        "    <script>\n(function () {\n" + script + "\n})();\n    </script>\n",
+      );
 
-  // Ресурсы страницы (шрифт) и файлы веб-версии. Проверка ссылок идёт по этому
-  // же списку: страница вправе сослаться только на то, что сборка положила.
+  const html = pageFrom(await readFile(path.join(srcDir, "index.html"), "utf8"));
+  const view = pageFrom(await readFile(path.join(srcDir, VIEW_PAGE_FILE), "utf8"));
+
+  // Ресурсы страницы (шрифт), копия кодека и файлы веб-версии. Проверка ссылок
+  // идёт по этому же списку: страница вправе сослаться только на то, что
+  // сборка положила.
   const assets = await listAssets();
   const assetNames = assets.map((asset) => asset.name);
+  const vendor = await listVendor();
   const extras = [
     [MANIFEST_FILE, manifestJson() + "\n"],
+    [VIEW_MANIFEST_FILE, viewManifestJson() + "\n"],
+    [VIEW_PAGE_FILE, view],
     [ICON_FILE, iconSvgFrom(html) + "\n"],
     [ICON_MASKABLE_FILE, maskableSvgFrom(iconSvgFrom(html)) + "\n"],
-    [WORKER_FILE, await workerScript(html, assetNames)],
+    // В офлайн-кэш установки идут шрифт и распаковщик кодека: без первого
+    // подписи на объекте без сети рисуются запасным шрифтом, без второго не
+    // откроется ссылка.
+    [WORKER_FILE, await workerScript(html, [...assetNames, ...VENDOR_CACHED], view)],
     // Памятка едет в `dist/` как есть: ни склейки, ни подстановок в ней нет.
     [GUIDE_FILE, await readFile(path.join(webDir, GUIDE_FILE), "utf8")],
   ];
-  const written = [PAGE_FILE, ...extras.map(([name]) => name), ...assetNames];
+  const written = [
+    PAGE_FILE,
+    ...extras.map(([name]) => name),
+    ...assetNames,
+    ...vendor.map((file) => file.name),
+  ];
 
   assertPlainText(html);
   assertOffline(html, written);
-  // Памятка — вторая страница той же папки, и правило офлайна на неё
+  // Страница просмотра проходит те же проверки, что главная, — и ссылку на
+  // **свой** манифест: чужой означал бы, что с домашнего экрана открывается
+  // «Разметка».
+  assertPlainText(view, VIEW_PAGE_FILE);
+  assertCodeInside(view);
+  assertLocalLinks(view, written, VIEW_MANIFEST_FILE);
+  // Памятка — ещё одна страница той же папки, и правило офлайна на неё
   // распространяется: ни одного файла с чужого хоста (`assertGuideOffline`).
   const guide = extras.find(([name]) => name === GUIDE_FILE)[1];
   assertPlainText(guide, GUIDE_FILE);
   assertGuideOffline(guide, written);
 
-  return { html, extras, assets, worker, modules: sources.size };
+  return { html, view, extras, assets, vendor, worker, modules: sources.size };
 }
 
 export async function build() {
-  const { html, extras, assets, worker, modules } = await buildPage();
+  const { html, view, extras, assets, vendor, worker, modules } = await buildPage();
 
   await mkdir(distDir, { recursive: true });
   const out = path.join(distDir, PAGE_FILE);
   await writeFile(out, html, "utf8");
   for (const [name, content] of extras) await writeFile(path.join(distDir, name), content, "utf8");
-  for (const asset of assets) {
-    const target = path.join(distDir, asset.name);
+  // Ресурсы и копия кодека — побайтово: шрифт и wasm двоичные, через utf8 они
+  // бы не выжили.
+  for (const file of [...assets, ...vendor]) {
+    const target = path.join(distDir, file.name);
     await mkdir(path.dirname(target), { recursive: true });
-    // Побайтово: шрифт — двоичный файл, через utf8 он бы не выжил.
-    await writeFile(target, await readFile(asset.file));
+    await writeFile(target, await readFile(file.file));
   }
 
   return {
     file: out,
     bytes: Buffer.byteLength(html, "utf8"),
+    viewBytes: Buffer.byteLength(view, "utf8"),
     modules,
     extras: extras.map(([name]) => name),
     assets: assets.map((asset) => asset.name),
+    vendor: vendor.map((file) => file.name),
     workerBytes: Buffer.byteLength(worker.source, "utf8"),
     workerModules: worker.modules.length,
   };
@@ -915,9 +1029,11 @@ if (runDirectly) {
   console.log(
     "dist/index.html: " + (result.bytes / 1024).toFixed(1) + " КБ, модулей: " + result.modules,
   );
+  console.log("dist/" + VIEW_PAGE_FILE + ": " + (result.viewBytes / 1024).toFixed(1) + " КБ (тот же бандл)");
   console.log(
     "поток имитации внутри страницы: " + (result.workerBytes / 1024).toFixed(1) + " КБ, модулей: " + result.workerModules,
   );
   if (result.assets.length > 0) console.log("ресурсы страницы: " + result.assets.join(", "));
+  if (result.vendor.length > 0) console.log("копия кодека: " + result.vendor.join(", "));
   console.log("рядом для веб-версии: " + result.extras.join(", "));
 }

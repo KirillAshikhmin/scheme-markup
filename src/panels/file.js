@@ -8,7 +8,7 @@
 // Своей точки монтирования в разметке у панели нет: она создаёт контейнер в
 // шапке сама, после того как каркас поднялся (`startApp` откладывается на конец
 // загрузки, и наш обработчик встаёт в очередь следом).
-import { LAST_PROJECT_KEY, layoutAllows, panelApi } from "../app.js";
+import { LAST_PROJECT_KEY, appAllows, panelApi } from "../app.js";
 import { schemesInOrder } from "../model.js";
 import { unpackProject } from "../projectFile.js";
 import { deleteImage, putImage, saveProject, setSetting } from "../store.js";
@@ -610,8 +610,11 @@ function mountFilePanel(host, api) {
     const projectId = state.project ? state.project.id : null;
     // Режим просмотра: файл открывают, чтобы посмотреть. Сохранять нечего —
     // объект не менялся, — поэтому на узком экране остаётся одна кнопка.
-    const saving = layoutAllows("saveFile", state.layout);
+    const saving = appAllows("saveFile", state);
     saveButton.hidden = !saving;
+    // Открыть файл — своё умение (`openFile`): страница просмотра на нём и
+    // стоит, а страница, которой файл открывать нечем, кнопку не показывает.
+    openButton.hidden = !appAllows("openFile", state);
     const exported = autosaveLastExport(projectId);
     const stamp = exported ? Date.parse(exported) : Number.NaN;
     let mark = "never";

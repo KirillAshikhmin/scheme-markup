@@ -19,6 +19,8 @@ import { fileURLToPath } from "node:url";
 import {
   MANIFEST_FILE,
   PAGE_FILE,
+  VIEW_MANIFEST_FILE,
+  VIEW_PAGE_FILE,
   assertLocalLinks,
   buildPage,
   iconSvgFrom,
@@ -372,4 +374,29 @@ test("страница со строкой потока имитации про�
   );
   assert.equal(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(html), false);
   assert.equal(/<script[^>]+src=/i.test(html), false);
+});
+
+// ——— вторая страница той же сборки (таск 01 просмотра) ————————————————————
+
+test("служебный скрипт знает и вторую страницу, и считает версию по обеим", async () => {
+  const worker = await workerScript("<html>страница</html>", [FONT_FILE], "<html>просмотр</html>");
+  assert.match(worker, new RegExp('"\\./' + VIEW_PAGE_FILE.replace(/[.]/g, "\\$&") + '"'));
+  assert.doesNotMatch(worker, /__[A-Z_]+__/);
+  // Правка разметки просмотра обязана сменить имя кэша: иначе у заказчика
+  // осталась бы прежняя офлайн-копия его страницы.
+  const other = await workerScript("<html>страница</html>", [FONT_FILE], "<html>другой просмотр</html>");
+  assert.notEqual(worker, other);
+});
+
+test("ссылка на манифест обязательна у каждой страницы — у просмотра на свой", () => {
+  const own = [...DIST, VIEW_MANIFEST_FILE, VIEW_PAGE_FILE];
+  assert.doesNotThrow(() =>
+    assertLocalLinks('<link rel="manifest" href="' + VIEW_MANIFEST_FILE + '" />', own, VIEW_MANIFEST_FILE),
+  );
+  // Чужой манифест не считается: с домашнего экрана иначе открывалась бы
+  // «Разметка» вместо просмотра.
+  assert.throws(
+    () => assertLocalLinks('<link rel="manifest" href="' + MANIFEST_FILE + '" />', own, VIEW_MANIFEST_FILE),
+    /установк/i,
+  );
 });

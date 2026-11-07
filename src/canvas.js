@@ -12,8 +12,7 @@ import {
   cancelFrame,
   ELEVATION_GROW_SETTING,
   ELEVATION_VIEWS_SETTING,
-  layoutAllows,
-  layoutAllowsState,
+  appAllows,
   PANEL_IDS,
   registerPanel,
   reportAppError,
@@ -226,7 +225,7 @@ export function canvasPanSpeed(heldMs) {
 // постановка) гаснут разом, без второго списка: щелчок по метке в это время —
 // нажатие на устройство, а не выделение для правки.
 export function canvasEditAllowed(state) {
-  return Boolean(state) && layoutAllows("editMarks", state.layout) && !canvasSimLocked(state);
+  return Boolean(state) && appAllows("editMarks", state) && !canvasSimLocked(state);
 }
 
 /**
@@ -1398,9 +1397,9 @@ export function canvasCommitAllowed(state, before, after) {
   if (canvasEditAllowed(state)) return true;
   if (!state) return false;
   const kind = canvasCommitKind(before, after);
-  if (kind === "scenarioActive") return layoutAllowsState("toggleScenarios", state);
-  if (kind === "scenarios") return layoutAllowsState("editScenarios", state);
-  if (kind === "profiles") return layoutAllowsState("editScenarios", state) && !canvasSimLocked(state);
+  if (kind === "scenarioActive") return appAllows("toggleScenarios", state);
+  if (kind === "scenarios") return appAllows("editScenarios", state);
+  if (kind === "profiles") return appAllows("editScenarios", state) && !canvasSimLocked(state);
   return false;
 }
 
@@ -2177,7 +2176,7 @@ function canvasSchemeGuides(state, scheme) {
 // которой её снять. Сама отметка при этом цела — повернул обратно, и связи на
 // месте.
 function canvasLinksShown(state) {
-  return Boolean(state && state.linksShown === true && layoutAllows("markLinks", state.layout));
+  return Boolean(state && state.linksShown === true && appAllows("markLinks", state));
 }
 
 /**

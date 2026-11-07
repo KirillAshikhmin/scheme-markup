@@ -8,7 +8,7 @@
 //
 // Метку выбирает общее окно выбора из `markControls.js` — второго такого в
 // сборке нет: и место, и связи спрашиваются им же.
-import { layoutAllows, reportAppError } from "../app.js";
+import { appAllows, reportAppError } from "../app.js";
 import { strings, text } from "../strings.js";
 import {
   addEquipment,
@@ -56,7 +56,7 @@ export function openEquipmentWindow(api, options = {}) {
   }
 
   function editable() {
-    return layoutAllows("editMarks", api.getState().layout);
+    return appAllows("editMarks", api.getState());
   }
 
   function fail(error) {
