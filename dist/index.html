@@ -14249,6 +14249,7 @@ return globalThis.crypto.randomUUID();
 function idCounterKey(collection) {
 return "#" + collection;
 }
+const ID_GONE = "0";
 const ID_COUNTER_SHARED_KEY = "#id";
 function idNumberOf(id) {
 if (typeof id !== "string" || !/^[1-9][0-9]*$/.test(id)) return null;
@@ -19453,11 +19454,11 @@ return next;
 if (!changed) return { project, guessed: [] };
 return { project: { ...project, markTypes }, guessed };
 }
-function idsMovedTree(value, moves) {
+function idsMovedTree(value, kinds, move) {
 if (Array.isArray(value)) {
 let out = value;
 for (let index = 0; index < value.length; index += 1) {
-const next = idsMovedTree(value[index], moves);
+const next = idsMovedTree(value[index], kinds, move);
 if (next === value[index]) continue;
 if (out === value) out = [...value];
 out[index] = next;
@@ -19467,8 +19468,8 @@ return out;
 if (!value || typeof value !== "object") return value;
 let out = value;
 for (const key of Object.keys(value)) {
-const moved = moves[key] ? moves[key].get(value[key]) : undefined;
-const next = moved === undefined ? idsMovedTree(value[key], moves) : moved;
+const kind = typeof value[key] === "string" ? kinds[key] : undefined;
+const next = kind === undefined ? idsMovedTree(value[key], kinds, move) : move(kind, value[key]);
 if (next === value[key]) continue;
 if (out === value) out = { ...value };
 out[key] = next;
@@ -19509,7 +19510,7 @@ scenarioDeviceMissing: ["scenarios"],
 scenarioServiceMissing: ["scenarios"],
 });
 const ID_KEY_PROBLEM_CODES = Object.freeze(Object.keys(ID_KEY_SUBJECTS));
-function idsMovedKey(key, maps) {
+function idsMovedKey(key, moveBy) {
 const at = String(key == null ? "" : key).indexOf(":");
 if (at < 0) return key;
 const code = key.slice(0, at);
@@ -19522,11 +19523,10 @@ const moved = key
 .map((segment, index) => {
 const spec = segments[index];
 const collection = typeof spec === "string" ? spec : spec && spec.of;
-const map = collection ? maps.get(collection) : null;
-if (!map) return segment;
+if (!collection) return segment;
 const move = (piece) => {
-const next = map.get(piece);
-if (next === undefined) return piece;
+const next = moveBy(collection, piece);
+if (next === piece) return piece;
 touched = true;
 return next;
 };
@@ -19597,7 +19597,7 @@ renumbered += 1;
 }
 }
 if (renumbered === 0) return { project, changed: false, renumbered: 0 };
-const patch = idsRewrite(project, maps, idsAidMoves(project, maps.get("marks")));
+const patch = idsRewrite(project, maps, idsAidMoves(project, maps.get("marks")), true);
 const counters = { ...project.counters };
 delete counters[ID_COUNTER_SHARED_KEY];
 for (const [collection, last] of mints) counters[idCounterKey(collection)] = last;
@@ -19651,18 +19651,20 @@ if (old !== undefined) moves.set(String(old), String(idNumberOf(now)));
 }
 return moves;
 }
-function idsMovedAddress(value, aids) {
+function idsMovedAddress(value, aids, gone) {
 if (typeof value !== "string") return value;
 const match = ID_ADDRESS_RE.exec(value);
 if (!match) return value;
 const moved = aids.get(match[1]);
-return moved === undefined ? value : moved + match[2];
+if (moved !== undefined) return moved + match[2];
+return gone ? ID_GONE + match[2] : value;
 }
-function idsRewrite(project, maps, aids) {
+function idsRewrite(project, maps, aids, whole) {
 const moveBy = (collection, value) => {
 const map = maps.get(collection);
 const moved = map ? map.get(value) : undefined;
-return moved === undefined ? value : moved;
+if (moved !== undefined) return moved;
+return whole && idNumberOf(value) !== null ? ID_GONE : value;
 };
 const patch = {};
 for (const owner of ID_OWNERS) {
@@ -19706,19 +19708,20 @@ return fresh;
 });
 }
 if (Array.isArray(patch.scenarios)) {
-const moves = { markId: maps.get("marks"), scenarioId: maps.get("scenarios") };
+const kinds = { markId: "marks", scenarioId: "scenarios" };
 patch.scenarios = patch.scenarios.map((scenario) =>
 scenario && scenario.kind === "block" && scenario.targets
-? { ...scenario, targets: idsMovedTree(scenario.targets, moves) }
+? { ...scenario, targets: idsMovedTree(scenario.targets, kinds, moveBy) }
 : scenario,
 );
 }
 if (Array.isArray(patch.logicBindings) && aids && aids.size > 0) {
+const gone = Boolean(whole) && (project.marks || []).some((mark) => idNumberOf(mark && mark.id) !== null);
 patch.logicBindings = patch.logicBindings.map((binding) => {
 if (!deviceObject(binding) || !deviceObject(binding.options)) return binding;
 let options = binding.options;
 for (const [key, value] of Object.entries(binding.options)) {
-const moved = idsMovedAddress(value, aids);
+const moved = idsMovedAddress(value, aids, gone);
 if (moved === value) continue;
 if (options === binding.options) options = { ...binding.options };
 options[key] = moved;
@@ -19729,7 +19732,7 @@ return options === binding.options ? binding : { ...binding, options };
 const accepted = acceptedOf(project);
 if (accepted.length > 0 && maps.size > 0) {
 patch.accepted = accepted.map((record) => {
-const key = idsMovedKey(record.key, maps);
+const key = idsMovedKey(record.key, moveBy);
 return key === record.key ? record : { ...record, key };
 });
 }
@@ -19747,7 +19750,7 @@ if (map.size > 0) maps.set(collection, map);
 }
 if (maps.size === 0) return { project, changed: false };
 return {
-project: { ...project, ...idsRewrite(project, maps, idsAidMoves(project, maps.get("marks"))) },
+project: { ...project, ...idsRewrite(project, maps, idsAidMoves(project, maps.get("marks")), false) },
 changed: true,
 };
 }
@@ -20211,7 +20214,8 @@ const source = deviceObject(scenario) ? scenario : {};
 if (!SCENARIO_KINDS.includes(source.kind)) throw modelError("scenarioKindUnknown");
 const list = scenariosList(project);
 const mint = idMint(project);
-const id = typeof source.id === "string" && source.id && !findScenario(project, source.id) ? source.id : mint.next("scenarios");
+const given = typeof source.id === "string" && idNumberOf(source.id) !== null && !findScenario(project, source.id);
+const id = given ? source.id : mint.next("scenarios");
 const base = {
 id,
 kind: source.kind,

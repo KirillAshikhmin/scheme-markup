@@ -14,7 +14,7 @@ import { createSimEngine } from "../src/sim/engine.js";
 import { buildHomeSpec } from "../src/sim/home.js";
 import { simCharMeta } from "../src/sim/catalog.js";
 import { blocksCommandTexts, blocksOwner, blocksPrepare, blocksRepeatAllowed, commandKey } from "../src/sim/blocks.js";
-import { addScenario, addType, deleteMark, moveScenario, setMarkDevice } from "../src/model.js";
+import { addScenario, addType, deleteMark, idsReplace, moveScenario, setMarkDevice } from "../src/model.js";
 import { simBigHouse, simHouse, simPut, simRecorder } from "./fixtures/simHome.js";
 
 // Полдень пятницы 23 октября 2026 года в местных миллисекундах часов имитации.
@@ -52,7 +52,20 @@ const other = (verb, scenarioId, id = nid("s")) => ({ type: "scenario", id, verb
 function house({ scenarios = () => [], owners = [], box = simHouse(), start = true, prepare } = {}) {
   const id = (label) => box.marks[label];
   if (prepare) prepare(box, id);
-  for (const scenario of scenarios(id, box)) box.project = addScenario(box.project, { kind: "block", ...scenario }).project;
+  // Сценарии ставятся дверью модели, а **имена** из теста («s1», «acts»)
+  // возвращаются им следом: `addScenario` своего идентификатора вызывающему
+  // больше не отдаёт, если это не номер (защита G392-ремонта — иначе объект
+  // переставал быть пронумерованным по видам), а тестам удобнее звать сценарий
+  // словом. `idsReplace` переименовывает его вместе со всеми ссылками на него.
+  const named = [];
+  for (const scenario of scenarios(id, box)) {
+    const added = addScenario(box.project, { kind: "block", ...scenario });
+    box.project = added.project;
+    if (typeof scenario.id === "string" && scenario.id && scenario.id !== added.scenario.id) {
+      named.push([added.scenario.id, scenario.id]);
+    }
+  }
+  if (named.length > 0) box.project = idsReplace(box.project, { scenarios: new Map(named) }).project;
   const recorder = simRecorder();
   const engine = createSimEngine({ emit: recorder.emit, owners: [...owners, blocksOwner()] });
   engine.load(buildHomeSpec(box.project));
@@ -504,16 +517,18 @@ test("«Последовательное выполнение»: сценари�
   assert.deepEqual(home.notes(), ["А", "Б", "В"]);
 
   const box = simHouse();
+  const ids = new Map();
   for (const name of ["А", "Б", "В"]) {
-    box.project = addScenario(box.project, {
+    const added = addScenario(box.project, {
       kind: "block",
-      id: "q" + name,
       name,
       sequential: true,
       targets: [when([trig(ref(box.marks["ДД2"], "MotionDetected"), "eq", true)], [note(name)])],
-    }).project;
+    });
+    box.project = added.project;
+    ids.set(name, added.scenario.id);
   }
-  box.project = moveScenario(box.project, "qВ", 0).project;
+  box.project = moveScenario(box.project, ids.get("В"), 0).project;
   const moved = house({ box });
   moved.sensor("ДД2");
   assert.deepEqual(moved.notes(), ["В", "А", "Б"], "порядок не из order");

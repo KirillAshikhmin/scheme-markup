@@ -32,6 +32,7 @@ import {
   addScenario,
   addScheme,
   createProject,
+  deleteMark,
   idCounterKey,
   idNumberOf,
   idsReplace,
@@ -406,8 +407,12 @@ function sharedNumbers(project) {
   }
   if (guides.size > 0) moves.set("guides", guides);
   const numbered = idsReplace(project, moves).project;
+  // Счётчики видов снимаются, остаётся один общий — так объект формата 8 и
+  // выглядит; оставь их, и `idsNumberedByKind` сочла бы его уже своим.
+  const counters = {};
+  for (const [key, value] of Object.entries(numbered.counters)) if (!key.startsWith("#")) counters[key] = value;
   return {
-    project: { ...numbered, counters: { ...numbered.counters, [ID_COUNTER_SHARED_KEY]: last }, formatVersion: 8 },
+    project: { ...numbered, counters: { ...counters, [ID_COUNTER_SHARED_KEY]: last }, formatVersion: 8 },
     moves,
   };
 }
@@ -535,4 +540,146 @@ test("G391: объект, прошедший ссылку, не перенуме
   assert.deepEqual(read.project.logicBindings, opened.logicBindings, "привязки в ссылке поехали");
   const again = projectsMigrateStored(read.project);
   assert.equal(again, read.project, "объект из ссылки перенумеровался заново");
+});
+
+// ——— битая ссылка после открытия не оживает чужой меткой ————————————————————
+//
+// Самая дорогая находка ремонта. Объект **формата 8** держит ссылку на
+// удалённую метку **числом**: `scenario.targets[].markId` и адрес аксессуара в
+// `logicBinding.options`. `deleteMark` их не чистит — это состояние
+// спроектировано, и про него говорит жёлтая строка `scenarioDeviceMissing`.
+//
+// Перенумерация ставит метки 1…N **со смыканием дыр**, и новые номера берутся
+// из того же диапазона. Оставь неизвестное число как есть — и `markId: "2"`
+// удалённой метки после открытия показывает на **живую чужую** метку: сценарий
+// управляет не тем прибором, а жёлтая строка исчезает. Поэтому неизвестное
+// число гасится (`ID_GONE`), и проверка говорит то же, что говорила.
+//
+// Проверяются оба носителя битой ссылки и **обе** трубы.
+function sharedWithDangling() {
+  const made = createProject({ name: "Битая ссылка" });
+  const scheme = addScheme(made, { name: "1 этаж", width: 1000, height: 800 });
+  let project = scheme.project;
+  const typeOf = (code) => project.markTypes.find((type) => type.code === code).id;
+  const put = (code, x) => {
+    const added = addMark(project, { schemeId: scheme.scheme.id, typeId: typeOf(code), kind: "point", points: [{ x, y: 0.3 }] });
+    project = added.project;
+    return added.mark.id;
+  };
+  const lamp = put("Т", 0.2);
+  const doomed = put("ДД", 0.3);
+  const other = put("Т", 0.4);
+  const third = put("Т", 0.5);
+  const scenario = addScenario(project, { kind: "block", name: "Свет по движению" });
+  project = scenario.project;
+  const logic = addScenario(project, { kind: "logic", name: "Логика" });
+  project = logic.project;
+  // Привязка стоит на **другой** метке: иначе `deleteMark` унесла бы её вместе
+  // с меткой (`dropLogicBindings`), и адреса в опциях не осталось бы вовсе.
+  project = addLogicBinding(project, {
+    scenarioId: logic.scenario.id,
+    markId: lamp,
+    options: { motion1: "", excludeAccessoriesId: "" },
+  }).project;
+  // Блочный сценарий ссылается на метку, которую сейчас удалят.
+  project = {
+    ...project,
+    scenarios: project.scenarios.map((item) =>
+      item.id === scenario.scenario.id
+        ? { ...item, targets: [{ type: "if", blocks: [{ type: "act", markId: doomed, service: 0 }] }] }
+        : item,
+    ),
+  };
+
+  // Номера под общим счётчиком — как их выдала прод-сборка: метки первыми.
+  const shared = sharedNumbers(project);
+  const was = shared.moves.get("marks").get(doomed);
+  const live = shared.moves.get("marks");
+  const numbered = {
+    ...shared.project,
+    logicBindings: shared.project.logicBindings.map((binding) => ({
+      ...binding,
+      options: { ...binding.options, motion1: was + ".13.15", excludeAccessoriesId: was },
+    })),
+  };
+  // И метку удаляют — ссылки остаются висеть числом.
+  const gone = deleteMark(numbered, was).project;
+  return {
+    project: { ...gone, counters: { ...gone.counters, [ID_COUNTER_SHARED_KEY]: numbered.counters[ID_COUNTER_SHARED_KEY] } },
+    dead: was,
+    // Метка, которая после смыкания дыр встанет на освободившийся номер.
+    heir: live.get(other),
+    thirdWas: live.get(third),
+  };
+}
+
+test("G391: битая ссылка объекта формата 8 не оживает чужой меткой — у каждой трубы", async () => {
+  const box = sharedWithDangling();
+  // Пример тот: номер удалённой метки меньше числа оставшихся, то есть после
+  // смыкания дыр его займёт живая метка.
+  assert.ok(Number(box.dead) < box.project.marks.length + 1, "пример не тот: номер не переиспользуется");
+  const before = validate(box.project).filter((item) => item.code === "scenarioDeviceMissing");
+  assert.equal(before.length, 1, "пример не тот: до открытия жёлтой строки нет");
+
+  const fromFile = (await unpackProject(await packProject(box.project, new Map()))).project;
+  const stored = projectsMigrateStored(box.project);
+  assert.equal(stable(fromFile), stable(stored), "файл и база открыли объект по-разному");
+
+  for (const [name, project] of [["база браузера", stored], ["файл", fromFile]]) {
+    const live = new Set(project.marks.map((mark) => mark.id));
+    // Номер удалённой метки теперь занят живой — ровно то, из-за чего ссылку и
+    // нельзя оставлять числом.
+    assert.ok(live.has(box.dead), name + ": пример не тот, номер никем не занят");
+
+    // 1. Дерево блочного сценария.
+    const block = project.scenarios.find((item) => item.kind === "block");
+    const markId = block.targets[0].blocks[0].markId;
+    assert.equal(live.has(markId), false, name + ": ссылка сценария ожила чужой меткой");
+    const problems = validate(project);
+    const missing = problems.filter((item) => item.code === "scenarioDeviceMissing");
+    assert.equal(missing.length, 1, name + ": жёлтая строка про удалённое устройство пропала");
+    assert.deepEqual(
+      problems.filter((item) => item.code === "scenarioServiceMissing"),
+      [],
+      name + ": код жёлтой строки подменился",
+    );
+
+    // 2. Адрес аксессуара в опциях привязки — обе формы.
+    const options = project.logicBindings[0].options;
+    assert.equal(live.has(String(options.motion1).split(".")[0]), false, name + ": адрес характеристики ожил чужой меткой");
+    assert.equal(live.has(String(options.excludeAccessoriesId)), false, name + ": адрес аксессуара ожил чужой меткой");
+
+    // 3. Дом идёт и говорит про ненайденный адрес, а не молча правит чужой
+    //    прибор: это и есть то состояние, в котором объект был до открытия.
+    const started = homeStart(project);
+    assert.ok(started.accessories > 0, name + ": дом пуст");
+  }
+
+  // Второе открытие ничего не переписывает: погашенная ссылка числом не
+  // является, и перенумерация её не трогает.
+  assert.equal(projectsMigrateStored(stored), stored, "второе открытие переписало объект");
+});
+
+// А у объекта **поры uuid** ничего не гасится: битый uuid совпасть с новым
+// номером не может, и ссылка остаётся ровно той строкой, какой была (G68).
+test("G391: битая ссылка объекта поры uuid остаётся как была", () => {
+  const box = sharedWithDangling();
+  const dead = "old-его-уже-нет";
+  const blockOf = (project) => project.scenarios.find((item) => item.kind === "block").targets[0].blocks[0].markId;
+  const before = legacyIdsBefore(box.project);
+  const legacy = {
+    ...before,
+    scenarios: before.scenarios.map((item) =>
+      item.kind === "block" ? { ...item, targets: [{ type: "if", blocks: [{ type: "act", markId: dead, service: 0 }] }] } : item,
+    ),
+  };
+  assert.equal(blockOf(legacy), dead);
+
+  const stored = projectsMigrateStored(legacy);
+  assert.equal(blockOf(stored), dead, "битый uuid тронут перенумерацией");
+  assert.equal(
+    validate(stored).filter((item) => item.code === "scenarioDeviceMissing").length,
+    1,
+    "жёлтая строка про удалённое устройство пропала",
+  );
 });

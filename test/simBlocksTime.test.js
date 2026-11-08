@@ -11,7 +11,7 @@ import { createSimEngine } from "../src/sim/engine.js";
 import { buildHomeSpec } from "../src/sim/home.js";
 import { sunTimes } from "../src/sim/schedule.js";
 import { blocksOwner } from "../src/sim/blocks.js";
-import { addScenario } from "../src/model.js";
+import { addScenario, idsReplace } from "../src/model.js";
 import { simHouse, simRecorder } from "./fixtures/simHome.js";
 
 const SEC = 1000;
@@ -51,7 +51,20 @@ const period = (from, to, trigger, days = ALL) => ({ type: "period", id: nid("p"
 
 function house({ scenarios = () => [], box = simHouse(), site = null, at = T0, start = true } = {}) {
   const id = (label) => box.marks[label];
-  for (const scenario of scenarios(id, box)) box.project = addScenario(box.project, { kind: "block", ...scenario }).project;
+  // Сценарии ставятся дверью модели, а **имена** из теста («s1», «acts»)
+  // возвращаются им следом: `addScenario` своего идентификатора вызывающему
+  // больше не отдаёт, если это не номер (защита G392-ремонта — иначе объект
+  // переставал быть пронумерованным по видам), а тестам удобнее звать сценарий
+  // словом. `idsReplace` переименовывает его вместе со всеми ссылками на него.
+  const named = [];
+  for (const scenario of scenarios(id, box)) {
+    const added = addScenario(box.project, { kind: "block", ...scenario });
+    box.project = added.project;
+    if (typeof scenario.id === "string" && scenario.id && scenario.id !== added.scenario.id) {
+      named.push([added.scenario.id, scenario.id]);
+    }
+  }
+  if (named.length > 0) box.project = idsReplace(box.project, { scenarios: new Map(named) }).project;
   const recorder = simRecorder();
   const engine = createSimEngine({ emit: recorder.emit, owners: [blocksOwner()] });
   engine.load({ ...buildHomeSpec(box.project), site });

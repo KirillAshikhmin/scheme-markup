@@ -22,6 +22,7 @@ import {
   markDeviceOf,
   migrateScenarios,
   moveScenario,
+  idNumberOf,
   projectFormatVersion,
   scenariosInOrder,
   scenariosOf,
@@ -88,7 +89,19 @@ test("сценарии: добавить, изменить, удалить, пе
   assert.equal(second.scenario.name, strings.sim.scenarioUntitled, "пустое имя — имя по умолчанию");
   const third = addScenario(second.project, { kind: "global", name: "Библиотека", id: first.scenario.id });
   assert.notEqual(third.scenario.id, first.scenario.id, "занятый id выдан второму сценарию");
-  assert.equal(addScenario(third.project, { kind: "global", id: "свой-id" }).scenario.id, "свой-id");
+  // Свой идентификатор принимается, только если он **свободный номер**: номер
+  // 9001 своим и остаётся, а строка, которая номером не является, отвергается.
+  // Прими её — и объект перестал бы быть пронумерованным по видам
+  // (`idsNumberedByKind`), `projectFormatVersion` показал бы восьмёрку, а
+  // следующее открытие перенумеровало бы **весь** объект, сдвинув адреса
+  // аксессуаров у всех меток.
+  assert.equal(addScenario(third.project, { kind: "global", id: "9001" }).scenario.id, "9001");
+  for (const bad of ["свой-id", crypto.randomUUID(), "0", "01", "", " 7 "]) {
+    const made = addScenario(third.project, { kind: "global", id: bad });
+    assert.notEqual(made.scenario.id, bad, "идентификатором принято «" + bad + "»");
+    assert.ok(idNumberOf(made.scenario.id) !== null, "сценарий заведён не номером");
+    assert.equal(projectFormatVersion(made.project), 9, "объект перестал быть пронумерованным по видам");
+  }
   assert.throws(() => addScenario(box.project, { kind: "macro" }), (error) => error.code === "scenarioKindUnknown");
 
   let project = third.project;

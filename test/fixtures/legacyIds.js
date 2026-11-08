@@ -117,7 +117,13 @@ export function legacyIdsBack(before, after) {
   for (const key of LEGACY_COLLECTIONS) {
     const old = Array.isArray(before && before[key]) ? before[key] : [];
     const list = Array.isArray(after && after[key]) ? after[key] : [];
-    if (old.length === 0 || old.length !== list.length) continue;
+    // Коллекция, **подросшая** от другой миграции (вещи приборам достраивает
+    // `migrateThingMarks`, и дописывает их в конец), сверяется по общему
+    // началу: у прежних сущностей место то же. Прежде такая коллекция
+    // выпадала из сверки целиком — и её переименование не проверялось ничем.
+    // Укоротившаяся (комментарий-тип уехал на встроенный) по-прежнему
+    // выпадает: там сущности сдвинулись, и сопоставлять их по месту нельзя.
+    if (old.length === 0 || old.length > list.length) continue;
     old.forEach((item, at) => {
       const now = list[at];
       put(key, item && item.id, now && now.id);

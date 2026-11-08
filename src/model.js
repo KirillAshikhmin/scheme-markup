@@ -1142,6 +1142,15 @@ export function idCounterKey(collection) {
 }
 
 /**
+ * **Ссылка в никуда после перенумерации.** Ноль идентификатором не бывает
+ * никогда (`idNumberOf("0")` — `null`, номера идут с единицы), и поэтому им
+ * гасится неизвестная ссылка-число: ожить чужой сущностью она больше не
+ * может, а проверки, спрашивающие «жива ли она», видят строку и говорят то же,
+ * что говорили. Подробнее — у `idsMigrate`.
+ */
+export const ID_GONE = "0";
+
+/**
  * **Надгробие общего счётчика** (формат 8, ADR 030): один `"#id"` на весь
  * объект. Нужен ровно для одного — узнать объект, который нумеровался общим
  * счётчиком, и перенумеровать его по видам; перенумерация ключ убирает.
@@ -11021,14 +11030,19 @@ export function migrateTypeKinds(project) {
 // ——— перенумерация: uuid → номера (G08, G09, G11) ———————————————————————————
 
 // Ссылка непростой формы: дерево блоков сценария. `markId` и `scenarioId`
-// лежат в нём на любой глубине, и обход идёт **по значению**, а не по формам
+// лежат в нём на любой глубине, и обход идёт **по имени поля**, а не по формам
 // блоков: форму ведёт `scenarioTree.js`, а ссылку переписывают здесь — ровно
-// так же, как `scenarioMarkRefs` собирает её при удалении метки.
-function idsMovedTree(value, moves) {
+// так же, как `scenarioMarkRefs` собирает её при удалении метки. Имя поля и
+// называет вид: `markId` — метка, `scenarioId` — сценарий.
+//
+// `kinds` — имя поля → вид, `move` — дверь переезда (`idsRewrite.moveBy`): она
+// же и гасит неизвестное число, поэтому ссылка на удалённую метку не оживает
+// чужой.
+function idsMovedTree(value, kinds, move) {
   if (Array.isArray(value)) {
     let out = value;
     for (let index = 0; index < value.length; index += 1) {
-      const next = idsMovedTree(value[index], moves);
+      const next = idsMovedTree(value[index], kinds, move);
       if (next === value[index]) continue;
       if (out === value) out = [...value];
       out[index] = next;
@@ -11038,8 +11052,8 @@ function idsMovedTree(value, moves) {
   if (!value || typeof value !== "object") return value;
   let out = value;
   for (const key of Object.keys(value)) {
-    const moved = moves[key] ? moves[key].get(value[key]) : undefined;
-    const next = moved === undefined ? idsMovedTree(value[key], moves) : moved;
+    const kind = typeof value[key] === "string" ? kinds[key] : undefined;
+    const next = kind === undefined ? idsMovedTree(value[key], kinds, move) : move(kind, value[key]);
     if (next === value[key]) continue;
     if (out === value) out = { ...value };
     out[key] = next;
@@ -11136,7 +11150,7 @@ const ID_KEY_SUBJECTS = Object.freeze({
  */
 export const ID_KEY_PROBLEM_CODES = Object.freeze(Object.keys(ID_KEY_SUBJECTS));
 
-function idsMovedKey(key, maps) {
+function idsMovedKey(key, moveBy) {
   const at = String(key == null ? "" : key).indexOf(":");
   if (at < 0) return key;
   const code = key.slice(0, at);
@@ -11149,11 +11163,10 @@ function idsMovedKey(key, maps) {
     .map((segment, index) => {
       const spec = segments[index];
       const collection = typeof spec === "string" ? spec : spec && spec.of;
-      const map = collection ? maps.get(collection) : null;
-      if (!map) return segment;
+      if (!collection) return segment;
       const move = (piece) => {
-        const next = map.get(piece);
-        if (next === undefined) return piece;
+        const next = moveBy(collection, piece);
+        if (next === piece) return piece;
         touched = true;
         return next;
       };
@@ -11243,11 +11256,23 @@ function idsNumberedByKind(project) {
  * ключи в хранилищах браузера, общих для **всех** объектов (G08.1). Два
  * объекта с номером 1 затёрли бы друг друга, а картинки — чужие подложки.
  *
- * **Ссылка в никуда остаётся ссылкой в никуда.** Значение, которого нет среди
- * прежних идентификаторов **своего вида**, не трогается вовсе — иначе битая
- * ссылка могла бы случайно совпасть с чьим-то новым номером и ожить чужой. По
- * этой же причине цел встроенный тип комментария (`COMMENT_TYPE_ID`): его в
- * коллекциях нет, и `mark.typeId: "comment"` проходит насквозь.
+ * **Ссылка в никуда остаётся ссылкой в никуда, и для числа этого мало.**
+ * Значение, которого нет среди прежних идентификаторов **своего вида**, живой
+ * сущностью стать не вправе — иначе битая ссылка совпала бы с чьим-то новым
+ * номером и ожила чужой. Пока идентификаторы были uuid, довода хватало:
+ * «оставить как есть» и означало «в никуда», потому что битый uuid совпасть не
+ * мог. На номерах это перестало держаться: перенумерация смыкает дыры, новые
+ * номера берутся из того же диапазона, и `markId: "10"` удалённой метки после
+ * открытия показывал бы на **живую чужую** метку — сценарий управлял бы не тем
+ * прибором, а жёлтая строка про удалённое устройство исчезала бы.
+ *
+ * Поэтому неизвестная ссылка-**число** гасится: вместо номера встаёт `ID_GONE`.
+ * Это по-прежнему строка (значит все проверки, которые спрашивают «а жива ли
+ * она» — `scenarioDeviceMissing`, `controlsMissing`, `markWithoutRoom` и
+ * прочие, — говорят то же, что говорили), но строка, которой не бывает у
+ * сущности. Неизвестное значение, которое числом **не** является (uuid прежней
+ * разметки, встроенный тип комментария `COMMENT_TYPE_ID`), проходит насквозь
+ * как проходило: совпасть оно не может, и трогать его не за что.
  *
  * **Цена, принятая заказчиком:** адрес аксессуара считается из номера метки, и
  * адреса, вписанные числами прямо в текст его JS-сценариев, после
@@ -11302,7 +11327,9 @@ export function idsMigrate(project) {
   // это не является.
   if (renumbered === 0) return { project, changed: false, renumbered: 0 };
 
-  const patch = idsRewrite(project, maps, idsAidMoves(project, maps.get("marks")));
+  // Таблицы полны — здесь в них каждый идентификатор объекта, и неизвестное
+  // число гасится (`whole`).
+  const patch = idsRewrite(project, maps, idsAidMoves(project, maps.get("marks")), true);
   const counters = { ...project.counters };
   // Общий счётчик — надгробие (ADR 030): он отвечал за все виды сразу, и
   // оставить его значило бы хранить в объекте число, по которому ничего не
@@ -11414,14 +11441,25 @@ function idsAidMoves(project, markMoves) {
 
 // Один адрес: переезжает **аксессуарная** часть, сервис и характеристика
 // остаются своими номерами (они считаются из профиля и перенумерации не
-// касаются). Значение не похоже на адрес или аксессуар не переезжал — то же
-// значение.
-function idsMovedAddress(value, aids) {
+// касаются). Значение не похоже на адрес — то же значение.
+//
+// `gone` — метки объекта **были пронумерованы**, то есть аксессуарная часть
+// адреса и номер метки жили в одном числовом пространстве. Тогда адрес, чьего
+// аксессуара в таблице переездов нет, называет метку, которой в объекте нет, и
+// оставить его числом нельзя: смыкание дыр подведёт под это число живую метку,
+// и сценарий станет управлять чужим прибором молча. Гасим: вместо
+// аксессуарной части встаёт `ID_GONE`, и дом честно скажет `hubAddressMissing`
+// — ровно то, что он говорил до открытия.
+//
+// У объекта поры uuid адресами были девятизначные хэши, и короткое число в
+// опциях адресом не являлось вовсе — там гасить нечего и нельзя.
+function idsMovedAddress(value, aids, gone) {
   if (typeof value !== "string") return value;
   const match = ID_ADDRESS_RE.exec(value);
   if (!match) return value;
   const moved = aids.get(match[1]);
-  return moved === undefined ? value : moved + match[2];
+  if (moved !== undefined) return moved + match[2];
+  return gone ? ID_GONE + match[2] : value;
 }
 
 /**
@@ -11434,15 +11472,26 @@ function idsMovedAddress(value, aids) {
  * (`idsAidMoves`). Таблицы «без вида» здесь нет и быть не может: номера свои у
  * каждого вида, и одна общая таблица увезла бы помещение 5 вместе с меткой 5.
  *
+ * `whole` — **таблицы полны**: в них лежит каждый идентификатор объекта, и
+ * значит значение, которого в своей таблице нет, не называет ни одной живой
+ * сущности. Так зовёт `idsMigrate`, и только тогда неизвестное число гасится
+ * (`ID_GONE`): иначе оно совпало бы с чьим-то новым номером и ожило чужим.
+ * `idsReplace` называет лишь несколько переездов, её таблицы неполны, и гасить
+ * по ним нельзя — там «нет в таблице» значит «не переезжает».
+ *
  * Двух таких проходов в сборке быть не должно: `idsMigrate` зовёт его на весь
  * объект, `idsReplace` — на поимённо названные номера, и переписывают они
  * одно и то же место.
  */
-function idsRewrite(project, maps, aids) {
+function idsRewrite(project, maps, aids, whole) {
   const moveBy = (collection, value) => {
     const map = maps.get(collection);
     const moved = map ? map.get(value) : undefined;
-    return moved === undefined ? value : moved;
+    if (moved !== undefined) return moved;
+    // Вид назван, значения в его таблице нет — ссылка в никуда. Число гасим,
+    // всё прочее (uuid прежней разметки, встроенный `COMMENT_TYPE_ID`)
+    // оставляем: совпасть с новым номером оно не может.
+    return whole && idNumberOf(value) !== null ? ID_GONE : value;
   };
   const patch = {};
   for (const owner of ID_OWNERS) {
@@ -11490,12 +11539,14 @@ function idsRewrite(project, maps, aids) {
     });
   }
 
-  // Дерево блоков сценария: `markId` и `scenarioId` на любой глубине.
+  // Дерево блоков сценария: `markId` и `scenarioId` на любой глубине. Вид
+  // называет имя поля, а переезд (и гашение неизвестного числа) идёт той же
+  // дверью, что у всех остальных ссылок.
   if (Array.isArray(patch.scenarios)) {
-    const moves = { markId: maps.get("marks"), scenarioId: maps.get("scenarios") };
+    const kinds = { markId: "marks", scenarioId: "scenarios" };
     patch.scenarios = patch.scenarios.map((scenario) =>
       scenario && scenario.kind === "block" && scenario.targets
-        ? { ...scenario, targets: idsMovedTree(scenario.targets, moves) }
+        ? { ...scenario, targets: idsMovedTree(scenario.targets, kinds, moveBy) }
         : scenario,
     );
   }
@@ -11504,11 +11555,14 @@ function idsRewrite(project, maps, aids) {
   // Переезжает аксессуарная часть адреса; остальные опции (числа, выключатели,
   // имена) остаются как есть.
   if (Array.isArray(patch.logicBindings) && aids && aids.size > 0) {
+    // Гасить неизвестный адрес можно только там, где он и был номером метки:
+    // у объекта, чьи метки пронумерованы, и при полных таблицах.
+    const gone = Boolean(whole) && (project.marks || []).some((mark) => idNumberOf(mark && mark.id) !== null);
     patch.logicBindings = patch.logicBindings.map((binding) => {
       if (!deviceObject(binding) || !deviceObject(binding.options)) return binding;
       let options = binding.options;
       for (const [key, value] of Object.entries(binding.options)) {
-        const moved = idsMovedAddress(value, aids);
+        const moved = idsMovedAddress(value, aids, gone);
         if (moved === value) continue;
         if (options === binding.options) options = { ...binding.options };
         options[key] = moved;
@@ -11524,7 +11578,7 @@ function idsRewrite(project, maps, aids) {
   const accepted = acceptedOf(project);
   if (accepted.length > 0 && maps.size > 0) {
     patch.accepted = accepted.map((record) => {
-      const key = idsMovedKey(record.key, maps);
+      const key = idsMovedKey(record.key, moveBy);
       return key === record.key ? record : { ...record, key };
     });
   }
@@ -11566,7 +11620,7 @@ export function idsReplace(project, moves) {
   }
   if (maps.size === 0) return { project, changed: false };
   return {
-    project: { ...project, ...idsRewrite(project, maps, idsAidMoves(project, maps.get("marks"))) },
+    project: { ...project, ...idsRewrite(project, maps, idsAidMoves(project, maps.get("marks")), false) },
     changed: true,
   };
 }
@@ -12244,7 +12298,14 @@ export function addScenario(project, scenario = {}) {
   if (!SCENARIO_KINDS.includes(source.kind)) throw modelError("scenarioKindUnknown");
   const list = scenariosList(project);
   const mint = idMint(project);
-  const id = typeof source.id === "string" && source.id && !findScenario(project, source.id) ? source.id : mint.next("scenarios");
+  // Свой идентификатор вызывающего принимается, только если он **номер** и
+  // свободен. Без проверки на номер сюда прошёл бы uuid — и объект перестал бы
+  // быть пронумерованным по видам: `projectFormatVersion` показал бы восьмёрку,
+  // а следующее открытие перенумеровало бы **весь** объект, сдвинув адреса
+  // аксессуаров у всех меток. Живых вызовов с `id` сейчас нет, и это защита, а
+  // не починка: цена промаха — адресация всего дома, а стоит она одного условия.
+  const given = typeof source.id === "string" && idNumberOf(source.id) !== null && !findScenario(project, source.id);
+  const id = given ? source.id : mint.next("scenarios");
   const base = {
     id,
     kind: source.kind,
