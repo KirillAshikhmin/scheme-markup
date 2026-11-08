@@ -53074,6 +53074,23 @@ const stacks = canvasStacks(state, scheme);
 const shift = stacks ? stacks.get(markId) : null;
 return shift ? shift.px : null;
 }
+function canvasBlockFromPx(state, scheme, markId) {
+const stack = canvasStackShift(state, scheme, markId);
+let x = stack ? Number(stack.x) || 0 : 0;
+let y = stack ? Number(stack.y) || 0 : 0;
+const project = state ? state.project : null;
+const mark = project ? findMark(project, markId) : null;
+const shown = mark ? visibleMark(project, mark) : null;
+if (mark && shown && shown !== mark && scheme) {
+const from = mark.points[mark.points.length - 1];
+const to = shown.points[shown.points.length - 1];
+if (from && to) {
+x += (to.x - from.x) * schemeWidthPx(scheme);
+y += (to.y - from.y) * schemeHeightPx(scheme);
+}
+}
+return x === 0 && y === 0 ? null : { x, y };
+}
 function canvasRotateLabel(markId) {
 const state = canvasState();
 const scheme = canvasScheme(state);
@@ -53442,7 +53459,7 @@ try {
 const result = addToGroup(state.project, markId, side, {
 step: canvasBlockStep(state),
 typeId: canvasPlacedTypeId(state),
-fromPx: canvasStackShift(state, canvasScheme(state), markId),
+fromPx: canvasBlockFromPx(state, canvasScheme(state), markId),
 });
 canvasCommit(state.project, result.project, strings.history.addBlock, { selection: [result.mark.id] });
 } catch (error) {
@@ -54679,19 +54696,27 @@ const ids = blockMembers(project, group.markIds).map((mark) => mark.id);
 if (!ids.includes(markId)) ids.push(markId);
 return ids.length > 1 ? ids : [markId];
 }
+function canvasMoveLinkedId(project, ids) {
+for (const id of ids || []) {
+const mark = findMark(project, id);
+if (mark && visibleMark(project, mark) !== mark) return id;
+}
+return null;
+}
 function canvasMoveMarks(project, ids, shift) {
+if (canvasMoveLinkedId(project, ids)) return project;
 let next = project;
 for (const id of ids || []) {
 const mark = findMark(next, id);
 if (!mark) continue;
-if (visibleMark(next, mark) !== mark) continue;
 const points = mark.points.map((point) => ({ x: point.x + shift.x, y: point.y + shift.y }));
 next = updateMark(next, id, { points }).project;
 }
 return next;
 }
-function canvasSayLinkedMove(project, markId) {
-const mark = findMark(project, markId);
+function canvasSayLinkedMove(project, ids) {
+const markId = canvasMoveLinkedId(project, ids);
+const mark = markId ? findMark(project, markId) : null;
 const object = mark ? findSchemeObject(project, markObjectId(mark)) : null;
 if (!object || !canvasApi) return;
 canvasApi.notify(
@@ -54889,7 +54914,7 @@ if ((drag.kind === "mark" || drag.kind === "label") && canvasPreview) {
 const label = canvasMoveStepLabel(drag.before, drag);
 const after = canvasPreview;
 canvasPreview = null;
-if (after === drag.before) canvasSayLinkedMove(drag.before, drag.markId);
+if (after === drag.before) canvasSayLinkedMove(drag.before, drag.moving || [drag.markId]);
 else canvasCommit(drag.before, after, label, { selection: [drag.markId] });
 if (drag.kind === "mark") canvasOfferLink(drag.markId);
 }

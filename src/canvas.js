@@ -1905,6 +1905,37 @@ function canvasStackShift(state, scheme, markId) {
   return shift ? shift.px : null;
 }
 
+/**
+ * **Откуда отсчитывать шаг ручки «+»** — в пикселях плана, как и ждёт
+ * `model.addToGroup` в своём `fromPx`.
+ *
+ * Знак метки уезжает от записанной точки двумя способами, и они складываются:
+ * стопка совпавших (G181) отодвигает его отрисовкой, а связь с вещью (R01)
+ * кладёт его на вещь. Ручка «+» нарисована у знака и ловится у знака
+ * (`visibleMark`), значит и новая метка блока обязана встать **под ручку**.
+ * Пока сюда шло одно смещение стопки, у связанной метки она вставала у
+ * записанной точки: сразу после миграции — в 849 мм от ручки, а после сдвига
+ * вещи — в 2214 мм. Своего мнения о том и о другом у модели нет и быть не
+ * может: ей передают готовое смещение, как передают `step`.
+ */
+export function canvasBlockFromPx(state, scheme, markId) {
+  const stack = canvasStackShift(state, scheme, markId);
+  let x = stack ? Number(stack.x) || 0 : 0;
+  let y = stack ? Number(stack.y) || 0 : 0;
+  const project = state ? state.project : null;
+  const mark = project ? findMark(project, markId) : null;
+  const shown = mark ? visibleMark(project, mark) : null;
+  if (mark && shown && shown !== mark && scheme) {
+    const from = mark.points[mark.points.length - 1];
+    const to = shown.points[shown.points.length - 1];
+    if (from && to) {
+      x += (to.x - from.x) * schemeWidthPx(scheme);
+      y += (to.y - from.y) * schemeHeightPx(scheme);
+    }
+  }
+  return x === 0 && y === 0 ? null : { x, y };
+}
+
 // Ручка «+» ставит метку выбранного типа: выбрана «Р» — рядом с выключателем
 // встаёт розетка со своим номером, как в настоящем подрозетнике. Активного типа
 // нет (режим выделения) — модель берёт тип соседней метки.
@@ -2543,7 +2574,7 @@ function canvasBlockPoint(markId, side) {
     const result = addToGroup(state.project, markId, side, {
       step: canvasBlockStep(state),
       typeId: canvasPlacedTypeId(state),
-      fromPx: canvasStackShift(state, canvasScheme(state), markId),
+      fromPx: canvasBlockFromPx(state, canvasScheme(state), markId),
     });
     canvasCommit(state.project, result.project, strings.history.addBlock, { selection: [result.mark.id] });
   } catch (error) {
@@ -4430,28 +4461,48 @@ export function canvasMoveIds(project, markId, groupId, solo) {
  * Исчезнувшая метка молча пропускается: список собран на нажатии, а между
  * нажатием и ведением объект мог успеть измениться (отмена из другой панели).
  */
+/**
+ * **Метка, которую везти нельзя** — первая из списка, чей знак стоит на вещи
+ * (`visibleMark`), или `null`. Чистая и наружу: по ней жест решает и что
+ * делать, и о ком сказать.
+ *
+ * Пока правило стояло внутри цикла и пропускало такую метку поодиночке,
+ * перенос **блока** с одной связанной меткой молча рвал блок: соседи ехали,
+ * связанная стояла, шаг истории писался, а слова не говорилось — отказ звучал
+ * только когда не поехало вообще ничего.
+ */
+export function canvasMoveLinkedId(project, ids) {
+  for (const id of ids || []) {
+    const mark = findMark(project, id);
+    if (mark && visibleMark(project, mark) !== mark) return id;
+  }
+  return null;
+}
+
 export function canvasMoveMarks(project, ids, shift) {
+  // Связанный прибор не везётся: его знак стоит на вещи, и сдвиг записанной
+  // точки не двигает картинку ни на пиксель. Записать его значило бы увезти
+  // точку молча — и после «Отвязать» метка прыгнула бы туда, куда её тащили.
+  // Жест при этом останавливается **целиком**: блок едет весь или не едет
+  // вовсе. Раз от этого объект не меняется ни в одном поле, отпускание не
+  // пишет шага истории и говорит, что делать (`canvasSayLinkedMove`).
+  if (canvasMoveLinkedId(project, ids)) return project;
   let next = project;
   for (const id of ids || []) {
     const mark = findMark(next, id);
     if (!mark) continue;
-    // Связанный прибор не везётся: его знак стоит на вещи (`visibleMark`), и
-    // сдвиг записанной точки не двигает картинку ни на пиксель. Записать его
-    // значило бы увезти точку молча — и после «Отвязать» метка прыгнула бы
-    // туда, куда её тащили. Такая метка пропускается, а раз от этого объект
-    // не меняется ни в одном поле, отпускание не пишет шага истории и
-    // говорит, что делать (`canvasSayLinkedMove`).
-    if (visibleMark(next, mark) !== mark) continue;
     const points = mark.points.map((point) => ({ x: point.x + shift.x, y: point.y + shift.y }));
     next = updateMark(next, id, { points }).project;
   }
   return next;
 }
 
-// Отказ словом: взятую метку везёт её вещь, а не рука. Называется и метка, и
-// вещь — иначе человек ищет, что мешает.
-function canvasSayLinkedMove(project, markId) {
-  const mark = findMark(project, markId);
+// Отказ словом: взятое везёт его вещь, а не рука. Называется и метка, и вещь —
+// иначе человек ищет, что мешает; у блока названа та метка, которая держит
+// весь жест, а не та, за которую взялись.
+function canvasSayLinkedMove(project, ids) {
+  const markId = canvasMoveLinkedId(project, ids);
+  const mark = markId ? findMark(project, markId) : null;
   const object = mark ? findSchemeObject(project, markObjectId(mark)) : null;
   if (!object || !canvasApi) return;
   canvasApi.notify(
@@ -4782,7 +4833,7 @@ function canvasPointerUp(event) {
       // Выделение остаётся на взятой метке: панель свойств и карточка говорят
       // об одной метке, и после переноса блока человек правит ту, за которую
       // взялся, а не получает пустую панель «выделено три».
-      if (after === drag.before) canvasSayLinkedMove(drag.before, drag.markId);
+      if (after === drag.before) canvasSayLinkedMove(drag.before, drag.moving || [drag.markId]);
       else canvasCommit(drag.before, after, label, { selection: [drag.markId] });
       // Метку перенесли на вещь — то же предложение связать, что и при
       // постановке (R04.1): решает человек, отказ ничего не меняет.
