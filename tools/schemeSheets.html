@@ -52,10 +52,15 @@
       }
 
       /**
-       * Состояние дома для кадра: названные светильники схемы горят в полную
-       * силу. Вид устройства спрашивается у модели (`markDeviceOf`), а не
+       * Состояние дома для кадра: названные светильники и экраны схемы горят в
+       * полную силу. Вид устройства спрашивается у модели (`markDeviceOf`), а не
        * угадывается по коду типа.
+       *
+       * Экраны здесь с таска 255 (G400): на работающем экране есть картинка, и
+       * снимок приёмки с нею иначе не снять — дом тут не запускается.
        */
+      const LIVE_KINDS = { light: "light", tv: "tv" };
+
       function liveOf(project, schemeId, lamps) {
         const all = String(lamps).toLowerCase() === "all";
         const want = new Set(String(lamps).split(",").map((item) => item.trim().toLowerCase()).filter(Boolean));
@@ -63,11 +68,12 @@
         for (const mark of project.marks || []) {
           if (mark.schemeId !== schemeId) continue;
           const device = model.markDeviceOf(project, mark.id);
-          if (!device || device.kind !== "light") continue;
+          const kind = device ? LIVE_KINDS[device.kind] : null;
+          if (!kind) continue;
           const type = model.findType(project, mark.typeId);
           const sign = String((type && type.code) || "") + String(mark.number || "");
           if (!all && !want.has(sign.toLowerCase())) continue;
-          live.set(mark.id, { on: true, level: 1, kind: "light", roomId: mark.roomId || null, fade: 1 });
+          live.set(mark.id, { on: true, level: 1, kind, roomId: mark.roomId || null, fade: 1 });
         }
         return live;
       }

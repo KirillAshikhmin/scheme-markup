@@ -31,6 +31,7 @@ import {
   VOLUME_EYE_MM,
   VOLUME_FLOOR_RGB,
   VOLUME_GLOW_RGB,
+  VOLUME_LAMP_LIGHT_SHARE,
   VOLUME_LED_ALERT_RGB,
   VOLUME_LED_KEY_RGB,
   VOLUME_LED_OFF_RGB,
@@ -230,8 +231,17 @@ function frameLog(scene, camera, tint, live) {
 // И ещё раз в тот же день: рама окна тоже стала объёмной («добей мелочи» —
 // плоская рама осталась единственной вещью в 1 пиксель с торца). Прежние
 // числа: `{1762, 5d427364}` и `{652, 1615d166}`.
+//
+// **Переснят таском 255** (G394): «У телевизора сделай тонкие рамки». Горит
+// теперь не всё лицо экрана, а стекло под рамкой в десять миллиметров
+// (`VOLUME_ART_FRAME_MM`), и у выключенного телевизора стенда это **одна**
+// новая грань — тёмное стекло, из-за которого рамку и видно: первый кадр
+// подорожал ровно на неё (десять вызовов), второй не изменился вовсе — в нём
+// телевизор стоит к камере боком, и отпечаток у него прежний, байт в байт.
+// Картинки на экране в этих кадрах нет: дом не запущен, экран не горит
+// (`face.art === "screen"`). Прежнее число первого кадра: `{1813, f096f354}`.
 const BEFORE_T09 = [
-  { calls: 1813, hash: "f096f354" },
+  { calls: 1823, hash: "72662cf1" },
   { calls: 703, hash: "7bc09bce" },
 ];
 
@@ -332,7 +342,7 @@ test("2.12: включённая лампа светится по яркости
   assert.deepEqual(standFrame(stand, scene, NIGHT.tint, { glow: new Map(), rooms: new Map() }), plain);
 });
 
-test("2.12: экран включённого телевизора загорается своим цветом", () => {
+test("2.12: экран включённого телевизора загорается своим цветом — и показывает картинку (таск 255)", () => {
   const stand = simStand();
   const scene = volumeScene(stand.project, stand.schemeId, { roofOff: true });
   const camera = { at: { x: 0, y: 0, z: 1300 }, yaw: Math.PI, pitch: 0 };
@@ -341,11 +351,30 @@ test("2.12: экран включённого телевизора загора�
     glow: new Map([[stand.marks.tv, { level: 1, rgb: VOLUME_SCREEN_RGB }]]),
     rooms: new Map(),
   });
-  const changed = on.filter((polygon, index) => polygon.fill !== plain[index].fill);
-  assert.ok(changed.length > 0, "экран не загорелся");
-  assert.ok(changed.every((polygon) => polygon.pick === stand.marks.tv));
-  const [r, g, b] = String(changed[0].fill).match(/[\d.]+/g).map(Number);
-  assert.ok(b > r, "экран светится тёплым, а не своим холодным цветом: " + changed[0].fill);
+  // **Включённый экран показывает картинку** (таск 255, G400), поэтому
+  // многоугольников у кадра больше, чем у выключенного: природа на стекле — это
+  // грани, и без горящего экрана кадр их не рисует вовсе. Сравнивать по номеру
+  // в очереди после этого нельзя — сравниваются многоугольники телевизора.
+  const tvOf = (frame) => frame.filter((polygon) => polygon.pick === stand.marks.tv);
+  assert.ok(on.length > plain.length, "картинка не прибавила ни одного многоугольника");
+  assert.equal(on.length - plain.length, tvOf(on).length - tvOf(plain).length, "прибавилось не у телевизора");
+  // Стекло стоит на том же месте в обоих кадрах — оно есть и у выключенного, —
+  // и только оно у включённого сменило цвет: по этому его здесь и находят.
+  const fillsOff = new Map(tvOf(plain).map((polygon) => [polygon.xy.join(","), polygon.fill]));
+  const glass = tvOf(on).filter((polygon) => {
+    const was = fillsOff.get(polygon.xy.join(","));
+    return was !== undefined && was !== polygon.fill;
+  });
+  assert.equal(glass.length, 1, "сменило цвет не одно стекло, а " + glass.length + " граней");
+  const [r, g, b] = String(glass[0].fill).match(/[\d.]+/g).map(Number);
+  assert.ok(b > r, "экран светится тёплым, а не своим холодным цветом: " + glass[0].fill);
+  // Светлее выключенного — весь экран, а не только стекло: фигуры картинки
+  // светятся своим цветом без тона часа, как диод (`led`).
+  const lightsOf = (frame) =>
+    tvOf(frame).reduce((sum, polygon) => sum + (polygon.fill ? lightOf(polygon.fill) : 0), 0);
+  assert.ok(lightsOf(on) > lightsOf(plain), "включённый телевизор не стал светлее выключенного");
+  // Выключенный — тёмное стекло в рамке и больше ничего: ни одной фигуры.
+  assert.equal(tvOf(plain).length, tvOf(on).length - 7, "у выключенного экрана картинка всё-таки нарисована");
 });
 
 test("2.12: комната с включённым светом ночью светлее по яркости, днём — чуть теплее и светлее", () => {
@@ -375,7 +404,13 @@ test("2.12: комната с включённым светом ночью св�
     const before = lightOf(noon[index].fill);
     const after = lightOf(polygon.fill);
     if (after > before) brighter += 1;
-    assert.ok(after >= before - 1 && after <= before * 1.15 + 1, "днём свет комнаты не тот: " + polygon.fill + " против " + noon[index].fill);
+    // Порог — что больше: 15 % своей светлоты или та доля белого, которую свет
+    // комнаты и так добавляет (`VOLUME_LAMP_LIGHT_SHARE`). Второе слагаемое
+    // появилось с таском 255: стекло выключенного экрана тёмное почти в ноль
+    // (28,30,49), и доля света лампы весит у него больше, чем 15 % от него
+    // самого. «В белое не уходит» держат оба порога одинаково.
+    const lift = Math.max(before * 1.15, before + 3 * 255 * VOLUME_LAMP_LIGHT_SHARE);
+    assert.ok(after >= before - 1 && after <= lift + 1, "днём свет комнаты не тот: " + polygon.fill + " против " + noon[index].fill);
   });
   assert.ok(brighter >= 10, "днём горящую лампу не видно: " + brighter);
   // Улица и чужое не светлеют: наружные стороны стен и земля — как были.

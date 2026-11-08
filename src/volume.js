@@ -49,8 +49,9 @@
 // `tools/`) «Объём» читают отсюда, прежним списком имён. Слои снизу вверх, каждый
 // читает только нижние:
 //
-//   measures → faces → camera → shapes → order → palette → sky → walls → sun →
-//   marks → floors → walk → scene → lamps → signs → frame → pick → backdrop → around
+//   measures → faces → camera → shapes → order → palette → sky → art → walls →
+//   sun → marks → floors → walk → scene → lamps → signs → frame → pick →
+//   backdrop → around
 //
 // Где что — `docs/architecture.md`, §6.2; символ по имени — `ast-index symbol`.
 
@@ -163,6 +164,8 @@ import {
 } from "./volume/shapes.js";
 import {
   volumeFaceSide,
+  volumeInTree,
+  volumeOrderAll,
   volumeOrderRank,
   volumeOrderStack,
   volumeOrderTree,
@@ -174,6 +177,14 @@ import {
   VOLUME_BACKDROP_KINDS,
   volumeBackdropKindOf,
 } from "./volume/palette.js";
+import {
+  VOLUME_ART_FRAME_MM,
+  VOLUME_ART_LIFT_MM,
+  volumeArtFace,
+  volumeArtFaceCount,
+  volumeArtFaces,
+  volumeArtNames,
+} from "./volume/art.js";
 import {
   VOLUME_FOG_MM,
   VOLUME_FOG_RGB,
@@ -452,6 +463,8 @@ import {
 
 export {
   VOLUME_ARCH_SEGMENTS,
+  VOLUME_ART_FRAME_MM,
+  VOLUME_ART_LIFT_MM,
   VOLUME_AROUND_FLY_S,
   VOLUME_AROUND_MAX_MM,
   VOLUME_AROUND_MIN_MM,
@@ -602,6 +615,10 @@ export {
   VOLUME_WALL_SAME_DEG,
   VOLUME_WINDOW_LIFT,
   volumeArea,
+  volumeArtFace,
+  volumeArtFaceCount,
+  volumeArtFaces,
+  volumeArtNames,
   volumeAroundCamera,
   volumeAroundDistance,
   volumeAroundEye,
@@ -672,6 +689,7 @@ export {
   volumeHorizon,
   volumeHourAngleDeg,
   volumeHull,
+  volumeInTree,
   volumeIndoorTint,
   volumeInnerSide,
   volumeIsCeiling,
@@ -717,6 +735,7 @@ export {
   volumeOpeningFaceMm,
   volumeOpeningShut,
   volumeOpeningWalkable,
+  volumeOrderAll,
   volumeOrderRank,
   volumeOrderStack,
   volumeOrderTree,

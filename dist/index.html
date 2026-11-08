@@ -24211,6 +24211,7 @@ return named.map((item) => item.label).join(", ");
 // src/objectModels/kit.js
 const MODEL_MATERIALS = ["body", "dark", "light", "metal", "glass"];
 const MODEL_CLEARS = ["sheer", "glass"];
+const MODEL_ARTS = ["nature", "desktop", "geometry"];
 const MODEL_CYL_SIDES = 8;
 function modelPart(kind, name, part) {
 const material = MODEL_MATERIALS.includes(part.material) ? part.material : "body";
@@ -24222,6 +24223,7 @@ bulb: Number.isInteger(part.bulb) ? part.bulb : null,
 material,
 toFloor: part.toFloor === true,
 clear: MODEL_CLEARS.includes(part.clear) ? part.clear : null,
+art: MODEL_ARTS.includes(part.art) ? part.art : null,
 x: part.x === undefined ? -0.5 : part.x,
 y: part.y === undefined ? -0.5 : part.y,
 z: part.z === undefined ? 0 : part.z,
@@ -35803,6 +35805,8 @@ channel: options.channel === undefined ? null : options.channel,
 doorId: options.doorId || null,
 floor: null,
 lit: Boolean(options.lit),
+led: Boolean(options.led),
+art: options.art || null,
 bulb: Number.isInteger(options.bulb) ? options.bulb : null,
 room: options.room || null,
 thing: false,
@@ -36156,7 +36160,7 @@ const boxAt = (at) => (boxes && at >= 0 && boxes[at]) || null;
 const parts = [];
 for (let group = 0; group < (groups || []).length; group += 1) {
 const faces = groups[group];
-const inTree = (faces || []).filter((face) => !face.line && face.layer === VOLUME_LAYER_BODY);
+const inTree = (faces || []).filter((face) => volumeInTree(face));
 const span = volumeFacesSpan(inTree);
 if (!span) continue;
 const last = parts[parts.length - 1];
@@ -36273,8 +36277,7 @@ function volumeOrderTree(faces, cuts = null) {
 const statics = [];
 const doors = [];
 for (const face of faces || []) {
-if (!face || face.line) continue;
-if (face.layer !== undefined && face.layer !== VOLUME_LAYER_BODY) continue;
+if (!face || !volumeInTree(face)) continue;
 (face.doorId ? doors : statics).push(face);
 }
 let base = null;
@@ -36414,7 +36417,7 @@ volumeOrderAll(node.back, out);
 return out;
 }
 function volumeInTree(face) {
-return !face.line && (face.layer === undefined || face.layer === VOLUME_LAYER_BODY);
+return !face.line && !face.art && (face.layer === undefined || face.layer === VOLUME_LAYER_BODY);
 }
 function volumeMiddleOf(points) {
 let x = 0;
@@ -36844,6 +36847,158 @@ parseInt(hex.slice(1, 3), 16),
 parseInt(hex.slice(3, 5), 16),
 parseInt(hex.slice(5, 7), 16),
 ];
+}
+
+// src/volume/art.js
+const VOLUME_ART_FRAME_MM = 10;
+const VOLUME_ART_LIFT_MM = 2;
+const VOLUME_ART_GLASS = 0.5;
+const VOLUME_ART_SIDES = 8;
+const VOLUME_ART_SKY = volumeSkyColors(20);
+function artRect(x1, y1, x2, y2) {
+return [
+[x1, y1],
+[x2, y1],
+[x2, y2],
+[x1, y2],
+];
+}
+const VOLUME_ARTS = Object.freeze({
+nature: [
+{ rgb: VOLUME_ART_SKY.top, points: artRect(-0.5, 0.08, 0.5, 0.5) },
+{ rgb: VOLUME_ART_SKY.low, points: artRect(-0.5, -0.1, 0.5, 0.08) },
+{ rgb: [255, 243, 196], disc: [0.29, 0.29, 0.075] },
+{
+rgb: volumePaintRgb(VOLUME_HILL_NEAR),
+points: [
+[-0.5, -0.1],
+[-0.5, 0.0],
+[-0.3, 0.1],
+[-0.08, -0.02],
+[0.1, 0.07],
+[0.34, -0.04],
+[0.5, 0.03],
+[0.5, -0.1],
+],
+},
+{ rgb: VOLUME_LAND_RGB, points: artRect(-0.5, -0.5, 0.5, -0.1) },
+{
+rgb: volumePaintRgb(VOLUME_CROWN),
+points: [
+[-0.37, -0.2],
+[-0.26, 0.17],
+[-0.15, -0.2],
+],
+},
+{
+rgb: volumePaintRgb(VOLUME_CROWN_DARK),
+points: [
+[0.1, -0.26],
+[0.19, 0.04],
+[0.28, -0.26],
+],
+},
+],
+desktop: [
+{ rgb: [104, 140, 190], points: artRect(-0.5, -0.5, 0.5, 0.5) },
+{ rgb: [238, 242, 248], points: artRect(-0.42, -0.16, 0.04, 0.36) },
+{ rgb: [86, 118, 160], points: artRect(-0.42, 0.26, 0.04, 0.36) },
+{ rgb: [246, 248, 252], points: artRect(-0.08, -0.36, 0.42, 0.16) },
+{ rgb: [86, 118, 160], points: artRect(-0.08, 0.06, 0.42, 0.16) },
+],
+geometry: [
+{ rgb: [214, 151, 66], disc: [-0.16, 0.1, 0.24] },
+{
+rgb: [46, 72, 122],
+points: [
+[0.2, -0.04],
+[0.38, 0.14],
+[0.2, 0.32],
+[0.02, 0.14],
+],
+},
+{
+rgb: [176, 66, 56],
+points: [
+[-0.34, -0.34],
+[-0.1, -0.06],
+[0.14, -0.34],
+],
+},
+{ rgb: volumePaintRgb(VOLUME_TRUNK), points: artRect(0.2, -0.36, 0.4, -0.26) },
+],
+});
+function volumeArtNames() {
+return Object.keys(VOLUME_ARTS).sort();
+}
+function volumeArtFaceCount(name, lit = false) {
+const art = VOLUME_ARTS[name];
+if (!art) return 0;
+return art.length + (lit ? 1 : 0);
+}
+function volumeArtFace(frame, part) {
+if (!frame || !part || !(frame.heightMm > 0)) return null;
+if (part.kind !== "box") return null;
+const bottomMm = part.toFloor ? 0 : frame.bottomMm + part.z * frame.heightMm;
+const topMm = frame.bottomMm + (part.z + part.height) * frame.heightMm;
+const widthMm = Math.abs(part.width) * frame.widthMm;
+const heightMm = topMm - bottomMm;
+if (!(widthMm > 0) || !(heightMm > 0)) return null;
+const normal = { x: -frame.f.x, y: -frame.f.y, z: 0 };
+const alongX = part.x + part.width / 2;
+return {
+at: {
+x: frame.at.x + frame.u.x * alongX * frame.widthMm + frame.f.x * part.y * frame.depthMm + normal.x * VOLUME_ART_LIFT_MM,
+y: frame.at.y + frame.u.y * alongX * frame.widthMm + frame.f.y * part.y * frame.depthMm + normal.y * VOLUME_ART_LIFT_MM,
+z: (bottomMm + topMm) / 2,
+},
+u: { x: frame.u.x, y: frame.u.y, z: 0 },
+normal,
+widthMm,
+heightMm,
+};
+}
+function volumeArtFaces(frame, part, rgb, out = [], options = {}) {
+const art = VOLUME_ARTS[part && part.art];
+const face = art ? volumeArtFace(frame, part) : null;
+if (!face) return out;
+const screen = part.lit === true;
+const frameMm = Math.min(VOLUME_ART_FRAME_MM, face.widthMm / 4, face.heightMm / 4);
+const glassW = face.widthMm - frameMm * 2;
+const glassH = face.heightMm - frameMm * 2;
+const at = (fx, fy) => ({
+x: face.at.x + face.u.x * fx * glassW,
+y: face.at.y + face.u.y * fx * glassW,
+z: face.at.z + fy * glassH,
+});
+const quad = (points, color, kind, lit) =>
+out.push(
+volumeFace(points.map(([fx, fy]) => at(fx, fy)), color, {
+...options,
+normal: face.normal,
+art: kind,
+lit,
+led: kind === "screen",
+}),
+);
+if (screen) {
+quad(artRect(-0.5, -0.5, 0.5, 0.5), rgb.map((value) => Math.round(value * VOLUME_ART_GLASS)), "glass", true);
+}
+for (const shape of art) {
+quad(shape.disc ? artDisc(shape.disc, glassW, glassH) : shape.points, shape.rgb, screen ? "screen" : "canvas", false);
+}
+return out;
+}
+function artDisc([cx, cy, r], glassW, glassH) {
+const short = Math.min(glassW, glassH);
+const rx = (r * short) / glassW;
+const ry = (r * short) / glassH;
+const points = [];
+for (let side = 0; side < VOLUME_ART_SIDES; side += 1) {
+const angle = ((side + 0.5) * Math.PI * 2) / VOLUME_ART_SIDES;
+points.push([cx + Math.cos(angle) * rx, cy + Math.sin(angle) * ry]);
+}
+return points;
 }
 
 // src/volume/walls.js
@@ -38620,7 +38775,7 @@ modelBox("drawerLow", { x: -0.44, width: 0.88, y: -0.5, depth: 0.16, z: 0.06, he
 modelBox("case", { y: -0.34, depth: 0.84 }),
 ),
 picture: modelParts(
-modelBox("canvas", { x: -0.42, width: 0.84, y: -0.5, depth: 0.5, z: 0.08, height: 0.84, material: "light" }),
+modelBox("canvas", { x: -0.42, width: 0.84, y: -0.5, depth: 0.5, z: 0.08, height: 0.84, material: "light", art: "geometry" }),
 modelBox("frame", { y: 0, depth: 0.5 }),
 ),
 stove: modelParts(
@@ -38653,7 +38808,7 @@ modelBox("legRight", { x: 0.34, width: 0.1, y: -0.2, depth: 0.4, z: 0, height: 0
 ),
 deskSet: modelParts(
 modelBox("top", { x: -0.48, width: 0.96, y: 0.05, depth: 0.45, z: 0.56, height: 0.06, material: "light" }),
-modelBox("screen", { x: -0.24, width: 0.48, y: 0.3, depth: 0.08, z: 0.62, height: 0.33, material: "dark" }),
+modelBox("screen", { x: -0.24, width: 0.48, y: 0.3, depth: 0.08, z: 0.62, height: 0.33, material: "dark", lit: true, art: "desktop" }),
 modelBox("chairSeat", { x: -0.2, width: 0.4, y: -0.4, depth: 0.4, z: 0.3, height: 0.1 }),
 modelBox("chairBack", { x: -0.2, width: 0.4, y: -0.4, depth: 0.08, z: 0.4, height: 0.6, material: "light" }),
 ),
@@ -38880,7 +39035,7 @@ modelBox("rungLow", { x: -0.3, width: 0.6, y: -0.25, depth: 0.5, z: 0.2, height:
 modelBox("rungHigh", { x: -0.3, width: 0.6, y: -0.25, depth: 0.5, z: 0.58, height: 0.1, material: "metal" }),
 ),
 tv: modelParts(
-modelBox("screen", { x: -0.47, width: 0.94, y: -0.5, depth: 0.1, z: 0.04, height: 0.92, material: "dark", lit: true }),
+modelBox("screen", { x: -0.47, width: 0.94, y: -0.5, depth: 0.1, z: 0.04, height: 0.92, material: "dark", lit: true, art: "nature" }),
 modelBox("case", { x: -0.46, width: 0.92, y: -0.4, depth: 0.3, z: 0.06, height: 0.88 }),
 modelBox("bracket", { x: -0.1, width: 0.2, y: -0.1, depth: 0.6, z: 0.3, height: 0.4, material: "metal" }),
 ),
@@ -39319,6 +39474,7 @@ kind: line ? "line" : "point",
 view,
 curtainSide: MARK_CURTAIN_SIDES.includes(mark.curtainSide) ? mark.curtainSide : null,
 spare: box.guessed,
+objectId: null,
 postMm,
 model: view ? objectModelChannels(objectModelByKey(view.name), typeChannels(project, mark.typeId)) : null,
 };
@@ -39346,6 +39502,7 @@ heightMm: centre,
 prisms: [{ corners: volumeBoxCorners(at, u, sideLen, sideDepth), bottomMm: bottom, topMm: top }],
 repeat: null,
 anchor: { x: at.x, y: at.y, z: centre },
+objectId: owned.object.id,
 frame: { at, bottomMm: bottom, u, f, widthMm: sideLen, depthMm: sideDepth, heightMm: high },
 face: {
 origin: { x: at.x - (f.x * sideDepth) / 2, y: at.y - (f.y * sideDepth) / 2, z: centre },
@@ -39569,6 +39726,7 @@ topMm,
 material: part.material,
 name: part.name,
 lit: part.lit,
+art: part.art || null,
 bulb: Number.isInteger(part.bulb) ? part.bulb : null,
 channel: part.channel === undefined ? null : part.channel,
 clear: part.clear || null,
@@ -39648,7 +39806,7 @@ const own = (part) => ({
 markId: options.markId || null,
 clear: (part && part.clear) || options.clear || false,
 channel: part && part.channel !== undefined ? part.channel : null,
-lit: Boolean(part && part.lit),
+lit: Boolean(part && part.lit && !part.art),
 bulb: part && Number.isInteger(part.bulb) ? part.bulb : null,
 });
 for (const part of parts) {
@@ -39658,6 +39816,10 @@ else if (part.kind === "cone") volumeConeFaces(frame, part, volumeModelRgb(part.
 for (const prism of volumeModelPrisms(frame, parts)) {
 const fill = volumeModelRgb(prism.material, rgb);
 volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, fill, out, own(prism));
+}
+for (const part of parts) {
+if (!part.art) continue;
+volumeArtFaces(frame, part, volumeModelRgb(part.material, rgb), out, own(part));
 }
 return out;
 }
@@ -40050,14 +40212,16 @@ heightMm: prism.topMm - prism.bottomMm,
 }
 function volumeObjectFaces(project, schemeId, object, fallbackHeightMm, out = [], clear = true) {
 const own = clear !== false;
+const device = object ? markOfObject(project, object.id) : null;
+const markId = device ? device.id : null;
 const model = volumeObjectModel(project, object);
 const frame = model ? volumeObjectFrame(project, schemeId, object, fallbackHeightMm) : null;
 const stair = frame && objectStairKey(model.key)
 ? objectStairModel(model.key, { widthMm: frame.widthMm, depthMm: frame.depthMm, heightMm: frame.heightMm, mirror: object.mirror === true })
 : null;
-if (frame) return volumeModelFaces(frame, stair ? { key: model.key, parts: stair } : model, VOLUME_OBJECT_RGB, out, { clear: own });
+if (frame) return volumeModelFaces(frame, stair ? { key: model.key, parts: stair } : model, VOLUME_OBJECT_RGB, out, { clear: own, markId });
 for (const prism of volumeObjectPrisms(project, schemeId, object, fallbackHeightMm)) {
-volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, VOLUME_OBJECT_RGB, out, { clear: own });
+volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, VOLUME_OBJECT_RGB, out, { clear: own, markId });
 }
 return out;
 }
@@ -41269,8 +41433,10 @@ topMm: span.topMm,
 }
 const objectBoxes = [];
 const occluders = [];
+const modelled = new Set();
 for (const object of objects) {
 const objectFrom = faces.length;
+if (volumeObjectModel(project, object)) modelled.add(object.id);
 volumeObjectFaces(project, schemeId, object, schemeHeight.mm, faces, options.objectsClear !== false);
 if (rooms.length > 0 && faces.length > objectFrom) volumeTagRoom(faces, objectFrom, where, volumeMiddleOf(faces[objectFrom].p));
 volumeTagThing(faces, objectFrom, object.id);
@@ -41286,7 +41452,10 @@ const marks = volumeMarks(project, schemeId, { marks: options.marks, rooms, wall
 const markImages = options.markImages !== false;
 for (const place of marks.placed) {
 const markFrom = faces.length;
+const thingBody = place.objectId !== null && modelled.has(place.objectId);
+if (!thingBody) {
 volumeMarkFaces(place, faces, options.curtainShares ? volumeCurtainShare(options.curtainShares, place.markId) : 0);
+}
 if (rooms.length > 0) volumeTagRoom(faces, markFrom, where, volumeMarkProbe(place));
 volumeTagThing(faces, markFrom);
 if (markImages || !place.model) volumeMarkViewLines(place, faces);
@@ -42783,6 +42952,7 @@ rank += 1;
 }
 for (const face of scene.faces) {
 if (volumeInTree(face)) continue;
+if (face.art === "screen" && !(lit && lit.glow && lit.glow.get(face.markId))) continue;
 take(face, face.layer === VOLUME_LAYER_BODY ? rankOf(face) : null);
 }
 for (const face of extra || []) {

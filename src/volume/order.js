@@ -40,7 +40,10 @@ export function volumeOrderStack(groups, boxes = null) {
   const parts = [];
   for (let group = 0; group < (groups || []).length; group += 1) {
     const faces = groups[group];
-    const inTree = (faces || []).filter((face) => !face.line && face.layer === VOLUME_LAYER_BODY);
+    // Вопрос «лежит ли грань в дереве» один на стопку и на схему
+    // (`volumeInTree`): разойдись они — картинка экрана, которой в дереве одной
+    // схемы нет, в стопке в него попала бы.
+    const inTree = (faces || []).filter((face) => volumeInTree(face));
     const span = volumeFacesSpan(inTree);
     if (!span) continue;
     const last = parts[parts.length - 1];
@@ -277,8 +280,10 @@ export function volumeOrderTree(faces, cuts = null) {
   const statics = [];
   const doors = [];
   for (const face of faces || []) {
-    if (!face || face.line) continue;
-    if (face.layer !== undefined && face.layer !== VOLUME_LAYER_BODY) continue;
+    // Что в дерево не идёт, знает `volumeInTree`, и спрашивается это **здесь**:
+    // грань, попавшая в дерево в обход него, нарисовалась бы дважды — обходом
+    // дерева и потоком бесхозных граней кадра.
+    if (!face || !volumeInTree(face)) continue;
     (face.doorId ? doors : statics).push(face);
   }
   // Память — только у сцены одной схемы (`cuts` пуст): у этажа стопки точки
@@ -476,9 +481,17 @@ export function volumeOrderAll(node, out = []) {
   return out;
 }
 
-/** Грань яруса тел — та, что лежит в дереве порядка. */
+/**
+ * Грань яруса тел — та, что лежит в дереве порядка.
+ *
+ * Картинка на лице тела (таск 255, `face.art`) в дерево не идёт: она лежит в
+ * плоскости, параллельной лицу, в двух миллиметрах от него, и плоскость
+ * разбиения рядом с плоскостью лица стоила бы резов по всей сцене — ровно от
+ * этого держатся вне дерева диоды и контуры. Место в очереди ей, как им,
+ * считается по середине (`volumeOrderRank`).
+ */
 export function volumeInTree(face) {
-  return !face.line && (face.layer === undefined || face.layer === VOLUME_LAYER_BODY);
+  return !face.line && !face.art && (face.layer === undefined || face.layer === VOLUME_LAYER_BODY);
 }
 
 /** Середина грани или линии: ею считается место в очереди у тех, кого нет в дереве. */

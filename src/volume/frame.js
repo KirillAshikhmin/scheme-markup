@@ -153,6 +153,13 @@ export function volumeFrame(scene, camera, box, extra = null, tint = null, live 
   }
   for (const face of scene.faces) {
     if (volumeInTree(face)) continue;
+    // **Картинка на работающем экране** (таск 255, G400): её грани лежат в
+    // сцене всегда — геометрия у них от габарита вещи, а не от состояния дома,
+    // — а видны, пока прибор горит. Выключенный экран — тёмное стекло в рамке и
+    // больше ничего, как выключенный и выглядит; дома нет вовсе — то же самое.
+    // Фигуры полотна (`canvas`) к этому отношения не имеют: картина висит
+    // всегда.
+    if (face.art === "screen" && !(lit && lit.glow && lit.glow.get(face.markId))) continue;
     take(face, face.layer === VOLUME_LAYER_BODY ? rankOf(face) : null);
   }
   for (const face of extra || []) {

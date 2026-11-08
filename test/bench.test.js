@@ -11,14 +11,17 @@ test("сцены стенда: квартира с мебелью и зал — 
   const flat = BENCH_SCENES.flat();
   assert.equal(flat.lamps.length, 5);
   assert.equal(flat.doors.length, 2);
-  // Девять вещей: шесть прежних плюс гардеробная, обувница и вешалка — их
-  // поставили в сцену, чтобы подъём предела тел до пятнадцати (G06) было чем
-  // замерить.
-  assert.equal(flat.project.schemeObjects.length, 9);
+  // Двенадцать вещей: шесть прежних, гардеробная, обувница и вешалка (подъём
+  // предела тел до пятнадцати, G06) и телевизор, компьютерный стол с картиной
+  // — ими меряется картинка на лице прибора (таск 255, G400).
+  assert.equal(flat.project.schemeObjects.length, 12);
+  // Два экрана сцены — вещи-устройства: без включённого устройства кадр
+  // картинку не рисует вовсе, и мерить было бы нечего.
+  assert.equal(flat.screens.length, 2);
   const hall = BENCH_SCENES.hall();
   assert.equal(hall.lamps.length, 20);
   assert.equal(hall.project.schemeObjects.length, 48);
-  assert.equal(benchLive(flat).size, 5);
+  assert.equal(benchLive(flat).size, 7, "пять ламп и два экрана");
   assert.equal(benchCameras(flat).length, 24);
 });
 

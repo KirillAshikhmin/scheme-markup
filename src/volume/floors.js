@@ -9,6 +9,7 @@ import {
   SCHEME_ANCHOR_OBJECT_KEYS,
   WALL_HEIGHT_FALLBACK_MM,
   findRoom,
+  markOfObject,
   openingOpens,
   openingVentCell,
   openingWalkThrough,
@@ -378,12 +379,35 @@ export function volumeObjectFrame(project, schemeId, object, fallbackHeightMm) {
  * (G68), и ни столкновения (`volumeObjectPrisms` → `volumePrismSolid`), ни
  * чертёж, ни выгрузки о ней не знают. Сквозь прозрачный шкаф по-прежнему не
  * пройти.
+ *
+ * ——— у вещи-устройства хозяин есть (таск 255, G394) ———
+ *
+ * Хозяин грани (`markId`) — это метка, которой грань принадлежит: по нему кадр
+ * зажигает светящееся тело (`volumeLiveFill`), отвечает на щелчок и на взгляд.
+ * У вещи чертежа хозяина не было вовсе, и **ровно поэтому монитор
+ * компьютерного стола не включался**: признак «может светиться» у тела можно
+ * поставить, а искать по нему состояние дома было нечем — живое состояние лежит
+ * по `markId`.
+ *
+ * Вещь можно сделать устройством (R02.1, `objectDeviceMake`): электрика живёт
+ * на связанной метке, а тело даёт вещь. Поэтому хозяин граней такой вещи —
+ * **её метка**, и достаётся он им здесь, одним ответом модели
+ * (`markOfObject`). Следствий три, и все три верные: экран светится от своего
+ * устройства, щелчок по вещи-устройству открывает его карточку, а взгляд
+ * сквозь такую вещь больше не проходит — правило `volumeSightAt` звучит
+ * «пропускается то, за чем всё равно никого не выделить», и за
+ * вещью-устройством есть кого.
+ *
+ * Вещь без устройства остаётся как была: хозяина у её граней нет, и светиться
+ * ей нечем.
  */
 export function volumeObjectFaces(project, schemeId, object, fallbackHeightMm, out = [], clear = true) {
   // Отметка «Прозрачные объекты» (правка после сборки сценариев): «если
   // выключить, то становятся не прозрачными. По умолчанию вкл.» Снята — вещь
   // плотная, как стена; тюль шторы — тело метки, его отметка не трогает.
   const own = clear !== false;
+  const device = object ? markOfObject(project, object.id) : null;
+  const markId = device ? device.id : null;
   const model = volumeObjectModel(project, object);
   const frame = model ? volumeObjectFrame(project, schemeId, object, fallbackHeightMm) : null;
   // Лестница собирается по своему габариту и отражению (правка 2026-10-27):
@@ -391,9 +415,12 @@ export function volumeObjectFaces(project, schemeId, object, fallbackHeightMm, o
   const stair = frame && objectStairKey(model.key)
     ? objectStairModel(model.key, { widthMm: frame.widthMm, depthMm: frame.depthMm, heightMm: frame.heightMm, mirror: object.mirror === true })
     : null;
-  if (frame) return volumeModelFaces(frame, stair ? { key: model.key, parts: stair } : model, VOLUME_OBJECT_RGB, out, { clear: own });
+  if (frame) return volumeModelFaces(frame, stair ? { key: model.key, parts: stair } : model, VOLUME_OBJECT_RGB, out, { clear: own, markId });
+  // У вещи без модели тело — её габарит, и хозяин у него тот же; **свечения
+  // нет**: светится экран, а не шкаф, и коробка по габариту не знает, где у
+  // неё лицо (у метки без модели правило своё — `volumeMarkFaces`).
   for (const prism of volumeObjectPrisms(project, schemeId, object, fallbackHeightMm)) {
-    volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, VOLUME_OBJECT_RGB, out, { clear: own });
+    volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, VOLUME_OBJECT_RGB, out, { clear: own, markId });
   }
   return out;
 }

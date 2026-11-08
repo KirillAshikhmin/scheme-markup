@@ -61,6 +61,7 @@ import {
   volumeFloorPlace,
   volumeHeightMm,
   volumeObjectFaces,
+  volumeObjectModel,
   volumeObjectPrisms,
   volumePolysOverlap,
   volumePrismBlocks,
@@ -916,6 +917,9 @@ export function volumeScene(project, schemeId, options = {}) {
   // Что отбрасывает тень от ламп (`volumeLampShades`): габариты вещей чертежа
   // с их помещением.
   const occluders = [];
+  // Вещи, которые нарисованы своей моделью (таск 255): их связанным приборам
+  // тело не нужно — см. ниже, у меток.
+  const modelled = new Set();
   for (const object of objects) {
     // Рисуется модель или габарит — решает одно место (`volumeObjectFaces`).
     //
@@ -943,6 +947,7 @@ export function volumeScene(project, schemeId, options = {}) {
     // (`volumeStairNear`), а не по упору в него, и теперь срабатывает ещё
     // вернее: встать можно прямо на лестницу.
     const objectFrom = faces.length;
+    if (volumeObjectModel(project, object)) modelled.add(object.id);
     volumeObjectFaces(project, schemeId, object, schemeHeight.mm, faces, options.objectsClear !== false);
     // Вещь в комнате — её (таск 09 сценариев): включённый свет светлит и диван.
     if (rooms.length > 0 && faces.length > objectFrom) volumeTagRoom(faces, objectFrom, where, volumeMiddleOf(faces[objectFrom].p));
@@ -969,9 +974,27 @@ export function volumeScene(project, schemeId, options = {}) {
   const markImages = options.markImages !== false;
   for (const place of marks.placed) {
     const markFrom = faces.length;
-    // Позиция шторы (таск 09 сценариев) — только когда её дали: без имитации
-    // доводов позиции нет, и штора та же, что до таска.
-    volumeMarkFaces(place, faces, options.curtainShares ? volumeCurtainShare(options.curtainShares, place.markId) : 0);
+    // **У вещи-устройства тело одно — её собственное** (таск 255). Связанная
+    // метка берёт у вещи место и габарит (таск 251), и до этого таска рисовала
+    // в них **свою** модель: у телевизора, которому миграция достроила вещь,
+    // одно и то же тело рисовалось дважды, а у компьютерного стола поверх
+    // стола вставал телевизор во весь его габарит — и монитор, ради которого
+    // таск и затеян, оказывался за ним.
+    //
+    // Поэтому тело метке даёт вещь, а метка несёт электрику: хозяин у граней
+    // вещи — она сама (`volumeObjectFaces` → `markOfObject`), и по ним ловятся
+    // щелчок, взгляд и свечение. Видно прибор по его изображению поверх вещи
+    // (`volumeMarkViewLines`) и по признакам работы на её лице
+    // (`volumeLiveSigns`) — место, габарит и лицо у места остались прежними.
+    //
+    // Вещь без модели (свой вид чертежа) рисуется габаритом, и у неё метка
+    // тело оставляет: иначе прибор пропал бы вовсе.
+    const thingBody = place.objectId !== null && modelled.has(place.objectId);
+    if (!thingBody) {
+      // Позиция шторы (таск 09 сценариев) — только когда её дали: без имитации
+      // доводов позиции нет, и штора та же, что до таска.
+      volumeMarkFaces(place, faces, options.curtainShares ? volumeCurtainShare(options.curtainShares, place.markId) : 0);
+    }
     // Метка в комнате — её (таск 09 сценариев). Щуп — от лица вещи внутрь: у
     // метки на стене лицо лежит на кромке контура.
     if (rooms.length > 0) volumeTagRoom(faces, markFrom, where, volumeMarkProbe(place));

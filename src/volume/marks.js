@@ -41,6 +41,7 @@ import {
   volumeRoomAt,
 } from "./shapes.js";
 import { volumeMiddleOf } from "./order.js";
+import { volumeArtFaces } from "./art.js";
 import {
   VOLUME_CURTAIN_BUNCH,
   volumeCurtainFramesTo,
@@ -1030,6 +1031,9 @@ export function volumeMarkPlacement(project, mark, where = [], seat = null) {
     // каждая сторона, здесь не хранится: это правило `markBoxMm`, и
     // спрашивают его у неё.
     spare: box.guessed,
+    // Вещь, у которой метка взяла место (таск 255): `null` — метка стоит сама
+    // по себе. Ставится в ветке связанного прибора ниже.
+    objectId: null,
     // Модуль, которым нарисован пост блока вместо догаданного габарита (таск
     // 247, G373), или `null` — у всех остальных. Числом, а не отметкой: строку
     // о запасном габарите собирает `markSpare.js` в слое данных, и выдумывать
@@ -1083,6 +1087,11 @@ export function volumeMarkPlacement(project, mark, where = [], seat = null) {
       prisms: [{ corners: volumeBoxCorners(at, u, sideLen, sideDepth), bottomMm: bottom, topMm: top }],
       repeat: null,
       anchor: { x: at.x, y: at.y, z: centre },
+      // Чья это вещь (таск 255): по ней сборка сцены решает, рисовать ли метке
+      // тело. У вещи с моделью тело своё, и второе, в том же габарите, — это
+      // два прибора на месте одного (разбор — `volumeScene`). Место, габарит и
+      // лицо остаются здесь: по ним целится выделение, связь и знак работы.
+      objectId: owned.object.id,
       frame: { at, bottomMm: bottom, u, f, widthMm: sideLen, depthMm: sideDepth, heightMm: high },
       // Лицо — наружная грань, против `f`: как у вещи на стене.
       face: {
@@ -1490,6 +1499,10 @@ export function volumeModelPrisms(frame, parts) {
       // «Может светиться» (таск 09 сценариев): доезжает до грани
       // (`volumeModelFaces`), а горит ли — решает кадр по состоянию дома.
       lit: part.lit,
+      // Картинка на лице тела (таск 255) — **не** на гранях призмы: она
+      // рисуется своими гранями (`volumeArtFaces`), а здесь нужна одним ответом
+      // — у тела с картинкой горит стекло, а не всё тело (`volumeModelFaces`).
+      art: part.art || null,
       // Какая лампа устройства зажигает тело (правка после сборки сценариев).
       bulb: Number.isInteger(part.bulb) ? part.bulb : null,
       // Номер канала клавиши (таск 177): у остальных тел его нет вовсе.
@@ -1629,7 +1642,12 @@ export function volumeModelFaces(frame, model, rgb, out = [], options = {}) {
     // выделен», решает окно, а в объект не пишется ничего (G68, таск 177).
     channel: part && part.channel !== undefined ? part.channel : null,
     // «Может светиться» (таск 09 сценариев): признак тела доезжает до грани.
-    lit: Boolean(part && part.lit),
+    //
+    // **У тела с картинкой светится стекло, а не всё тело** (таск 255, G394):
+    // признак в описании остаётся при теле — экран «может светиться», — а
+    // горит под рамкой стекло (`volumeArtFaces`). Загорись и тело, рамки не
+    // стало бы видно вовсе: светилось бы всё лицо, как до этого таска.
+    lit: Boolean(part && part.lit && !part.art),
     bulb: part && Number.isInteger(part.bulb) ? part.bulb : null,
   });
   for (const part of parts) {
@@ -1641,6 +1659,12 @@ export function volumeModelFaces(frame, model, rgb, out = [], options = {}) {
     // через `own(prism)`, а горит ли тело — решает кадр по состоянию дома.
     const fill = volumeModelRgb(prism.material, rgb);
     volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, fill, out, own(prism));
+  }
+  // Картинка на лице тела — последней (таск 255, G400): она ложится **поверх**
+  // лица, и в кадре порядок граней одной плоскости решает порядок записи.
+  for (const part of parts) {
+    if (!part.art) continue;
+    volumeArtFaces(frame, part, volumeModelRgb(part.material, rgb), out, own(part));
   }
   return out;
 }

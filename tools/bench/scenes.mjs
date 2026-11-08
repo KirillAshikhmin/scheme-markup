@@ -14,7 +14,7 @@ function sceneBase(width, height, meters) {
   let project = M.setPlanScale(added.project, added.scheme.id, { a: { x: 0, y: 0.5 }, b: { x: 1, y: 0.5 }, meters }).project;
   project = M.setPlanOrigin(project, added.scheme.id, { at: { x: 0.5, y: 0.5 }, turn: 0 }).project;
   project = M.setSchemeWallHeight(project, added.scheme.id, 2700).project;
-  return { project, schemeId: added.scheme.id, lamps: [], doors: [] };
+  return { project, schemeId: added.scheme.id, lamps: [], doors: [], screens: [] };
 }
 
 function wallOf(box, a, b) {
@@ -62,11 +62,18 @@ const BENCH_THINGS = {
   wardrobeOpen: [1600, 600, 2200],
   shoeRack: [800, 350, 1000],
   coatRack: [900, 300, 1800],
+  // Телевизор, компьютерный стол и картина стоят в сцене с таска 255 (G400) —
+  // по той же причине, по которой в ней гардеробная: картинку на лице прибора
+  // платит кадр, и без этих трёх вещей замер «до и после» её не увидел бы.
+  // Высота над полом — четвёртым числом: ТВ и картина висят на стене.
+  tv: [1240, 80, 720, 500],
+  deskSet: [1400, 1400, 1200, 0],
+  picture: [800, 40, 600, 1300],
 };
 
 function thingAt(box, catalogKey, x, y, turnDeg = 0) {
-  const [widthMm, depthMm, heightMm] = BENCH_THINGS[catalogKey];
-  box.project = M.addSchemeObject(box.project, {
+  const [widthMm, depthMm, heightMm, heightAboveFloorMm = 0] = BENCH_THINGS[catalogKey];
+  const made = M.addSchemeObject(box.project, {
     schemeId: box.schemeId,
     catalogKey,
     shape: "rect",
@@ -74,8 +81,24 @@ function thingAt(box, catalogKey, x, y, turnDeg = 0) {
     widthMm,
     depthMm,
     heightMm,
+    heightAboveFloorMm,
     turnDeg,
-  }).project;
+  });
+  box.project = made.project;
+  return made.schemeObject;
+}
+
+/**
+ * Вещь-устройство (таск 255): метка типа ТВ на месте вещи. Ею меряется картинка
+ * на работающем экране — телевизора и монитора: без включённого устройства
+ * кадр её не рисует вовсе.
+ */
+function deviceAt(box, catalogKey, x, y, turnDeg = 0) {
+  const object = thingAt(box, catalogKey, x, y, turnDeg);
+  const type = box.project.markTypes.find((item) => item.code === "ТВ");
+  const made = M.objectDeviceMake(box.project, object.id, type.id);
+  box.project = made.project;
+  box.screens.push(made.mark.id);
 }
 
 /** Квартира с мебелью: `{project, schemeId, lamps, doors}`. */
@@ -120,6 +143,12 @@ export function benchFlat() {
   thingAt(box, "wardrobeOpen", 4200, -1300, 180);
   thingAt(box, "shoeRack", 600, 1100);
   thingAt(box, "coatRack", -300, 1250);
+  // Три вещи таска 255: телевизор на стене гостиной напротив дивана,
+  // компьютерный стол в спальне и картина над комодом. ТВ и стол — устройства
+  // (`benchLive` их включает), картина висит сама.
+  deviceAt(box, "tv", -2750, 1650, 180);
+  deviceAt(box, "deskSet", 3600, 1000);
+  thingAt(box, "picture", 1500, -1680);
   return box;
 }
 
@@ -143,9 +172,17 @@ export function benchHall() {
 /** Все сцены стенда по имени. */
 export const BENCH_SCENES = Object.freeze({ flat: benchFlat, hall: benchHall });
 
-/** Живое состояние: все лампы сцены горят полностью — как `simLive` у запущенного дома. */
+/**
+ * Живое состояние: все лампы сцены горят полностью — как `simLive` у
+ * запущенного дома. Экраны вещей-устройств (таск 255) включены тем же махом:
+ * картинка на лице прибора есть только у работающего, и мерить её выключенной
+ * значило бы не мерить вовсе.
+ */
 export function benchLive(box) {
-  return new Map(box.lamps.map((id) => [id, { on: true, level: 1, kind: "light", roomId: null }]));
+  return new Map([
+    ...box.lamps.map((id) => [id, { on: true, level: 1, kind: "light", roomId: null }]),
+    ...(box.screens || []).map((id) => [id, { on: true, level: 1, kind: "tv", roomId: null }]),
+  ]);
 }
 
 /**
