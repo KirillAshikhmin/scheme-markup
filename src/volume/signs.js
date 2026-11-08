@@ -27,9 +27,11 @@ import { volumeFace, volumeLine } from "./faces.js";
 //     пока есть что сказать: зелёный — включено, оранжевый — греет, голубой —
 //     охлаждает или кран открыт, красный — датчик сработал или замок заперт;
 //   — **поток** — линии со стрелкой: воздух бризера — от лица в комнату,
-//     вытяжки и вентиляции — из комнаты в лицо (она забирает воздух, правка
-//     2026-10-27), холодный и тёплый воздух кондиционера (он стекает вниз),
-//     дуги звука у колонки. Длина — по скорости и громкости.
+//     вытяжки и вентиляции — в лицо (они забирают воздух, правка 2026-10-27),
+//     холодный и тёплый воздух кондиционера (он стекает вниз), дуги звука у
+//     колонки. Длина — по скорости и громкости. Чем вещь дышит — её лицо или
+//     другая сторона тела (у вытяжки низ зонта, таск 259) — говорит
+//     `volumeFlowRun`.
 //
 // Светится и то и другое своим цветом, без тона часа: ночью диод в тёмной
 // комнате виден, как виден настоящий.
@@ -86,7 +88,9 @@ export function volumeLiveSigns(scene, live, out = []) {
     if (!place.face) continue;
     if (item.kind === "light" || item.kind === "tv" || item.kind === "curtain") continue;
     volumeSignLeds(place, item, out);
-    if (item.flow) volumeSignFlow(place, item.flow, out);
+    // Сцена нужна потоку, чтобы знать, что стоит у струи на пути
+    // (`volumeFlowRun`): под зонтом вытяжки — плита.
+    if (item.flow) volumeSignFlow(scene, place, item.flow, out);
   }
   return out;
 }
@@ -311,14 +315,85 @@ function volumeSignLeds(place, item, out) {
   corner(flow === "heat" ? VOLUME_LED_HEAT_RGB : flow === "cool" ? VOLUME_LED_COOL_RGB : VOLUME_LED_ON_RGB, true);
 }
 
+// ——— откуда вещь тянет воздух (таск 259, G401) ——————————————————————————————
+//
+// Слова заказчика: «почему у вытяжки стрелки идут сбоку, надо снизу».
+//
+// Струя идёт **по нормали того лица, которым вещь дышит**, и это правило одно
+// на всех — ни «если вытяжка», ни «если вентиляция» в рисовании нет. Менялось
+// не оно, а лицо: у бризера, вентиляции, кондиционера и колонки дышит лицо
+// вещи (`place.face`, та же грань, на которой стоят диоды), а у вытяжки воздух
+// входит **низом зонта** — и нормаль у этого лица смотрит вниз, поэтому
+// `intake`, разворачивающий струю навстречу, сам поднимает её в зонт.
+//
+// Мировой вертикали в рисовании от этого не завелось: вниз смотрит нормаль
+// лица, а не отдельный вектор, — и у потолочной вещи, которая и так лежит
+// лицом к полу, лицо получается то же, что было (`face` ветки потолка в
+// `volumeMarkPlacement` — это и есть низ её тела).
+//
+// Таблица — имена изображений, и она единственное место, где сказано, кто
+// дышит не лицом. Новая такая вещь — строка в ней, а не ветка в рисовании.
+const VOLUME_FLOW_SIDE = Object.freeze({ hood: "under" });
+/** Щель между струёй и тем, из-под чего она поднимается, мм. */
+const VOLUME_FLOW_GAP_MM = 50;
+/** Короче этого струю не укорачивают: от неё осталась бы одна стрелка. */
+const VOLUME_FLOW_MIN_MM = 120;
+
 /**
- * Поток у лица вещи. Воздух — три волнистые струи по нормали лица со стрелкой
- * на конце: у бризера от лица, у вытяжки к лицу (`intake` — те же струи,
- * пройденные навстречу, стрелка упирается в решётку); кондиционер — четыре
- * струи от нижнего края, стекающие вниз; звук — три дуги перед лицом.
+ * Чем вещь дышит и докуда её струе можно дойти: `{face, reachMm}`. `reachMm`
+ * равен `null` — предела нет, как не было (струя бризера уходит в комнату на
+ * всю свою длину, и ничего под собой не спрашивает).
+ *
+ * Предел считается там, где лицо смотрит не в комнату: под зонтом вытяжки
+ * стоит плита, и струя на всю длину начиналась бы внутри неё. Берётся верх
+ * самого высокого габарита вещи чертежа под лицом (`scene.occluders` — те же
+ * габариты, которыми вещи бросают тень) минус щель. Своя вещь не считается: у
+ * прибора, собранного из вещи и метки, габарит — это он сам (таск 255).
  */
-function volumeSignFlow(place, flow, out) {
-  const face = place.face;
+function volumeFlowRun(scene, place) {
+  const side = place.view ? VOLUME_FLOW_SIDE[place.view.name] : null;
+  const frame = place.frame;
+  if (side !== "under" || !frame) return { face: place.face, reachMm: null };
+  const face = {
+    origin: { x: frame.at.x, y: frame.at.y, z: frame.bottomMm },
+    u: { x: frame.u.x, y: frame.u.y, z: 0 },
+    v: { x: frame.f.x, y: frame.f.y, z: 0 },
+    normal: { x: 0, y: 0, z: -1 },
+    widthMm: frame.widthMm,
+    heightMm: frame.depthMm,
+  };
+  return { face, reachMm: volumeFlowClearMm(scene, place, face) };
+}
+
+/** Сколько свободно под лицом или `null` — под ним ничего не стоит. */
+function volumeFlowClearMm(scene, place, face) {
+  const halfU = face.widthMm / 2;
+  const halfV = face.heightMm / 2;
+  // Габарит повёрнутого прямоугольника в плане: вещь стоит под зонтом, а не
+  // под его осями, и мерить пересечение по осям плана достаточно.
+  const spanX = Math.abs(face.u.x) * halfU + Math.abs(face.v.x) * halfV;
+  const spanY = Math.abs(face.u.y) * halfU + Math.abs(face.v.y) * halfV;
+  let topMm = -Infinity;
+  for (const occluder of (scene && scene.occluders) || []) {
+    if (occluder.id === place.objectId || !(occluder.topMm < face.origin.z)) continue;
+    if (occluder.box.minX > face.origin.x + spanX || occluder.box.maxX < face.origin.x - spanX) continue;
+    if (occluder.box.minY > face.origin.y + spanY || occluder.box.maxY < face.origin.y - spanY) continue;
+    topMm = Math.max(topMm, occluder.topMm);
+  }
+  if (topMm === -Infinity) return null;
+  return Math.max(VOLUME_FLOW_MIN_MM, face.origin.z - topMm - VOLUME_FLOW_GAP_MM);
+}
+
+/**
+ * Поток у лица, которым вещь дышит (`volumeFlowRun`). Воздух — три волнистые
+ * струи по нормали этого лица со стрелкой на конце: у бризера от лица, у
+ * вытяжки и вентиляции к лицу (`intake` — те же струи, пройденные навстречу,
+ * стрелка упирается в решётку или в зонт); кондиционер — четыре струи от
+ * нижнего края, стекающие вниз; звук — три дуги перед лицом.
+ */
+function volumeSignFlow(scene, place, flow, out) {
+  const run = volumeFlowRun(scene, place);
+  const face = run.face;
   const n = face.normal;
   const u = face.u;
   const v = face.v;
@@ -344,7 +419,8 @@ function volumeSignFlow(place, flow, out) {
     }
     return;
   }
-  const length = 300 + 600 * level;
+  const want = 300 + 600 * level;
+  const length = run.reachMm === null ? want : Math.min(want, run.reachMm);
   const down = { x: 0, y: 0, z: -1 };
   const falls = flow.kind === "cool" || flow.kind === "heat";
   const starts = falls ? [-0.36, -0.12, 0.12, 0.36].map((fx) => at(fx, 0.45)) : [-0.25, 0, 0.25].map((fx) => at(fx, 0));

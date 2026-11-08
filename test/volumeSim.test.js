@@ -15,6 +15,7 @@ import {
   addOutline,
   addRoom,
   addScheme,
+  addSchemeObject,
   addWall,
   applyMarkWalls,
   applyRoomOutlines,
@@ -722,4 +723,78 @@ test("признаки работы: диод под каждой клавише
   const frame = volumeFrame(scene, camera, { width: 800, height: 500 }, [lit], { rgb: [18, 26, 54], share: 0.8 }, null);
   const shown = frame.find((polygon) => polygon.pick === box.marks.double && polygon.fill === "rgb(" + VOLUME_LED_KEY_RGB.join(",") + ")");
   assert.ok(shown, "горящий диод ночью потемнел");
+});
+
+// ——— откуда вещь тянет воздух (таск 259, G401) ——————————————————————————————
+//
+// Слова заказчика: «почему у вытяжки стрелки идут сбоку, надо снизу».
+
+test("259: вытяжка тянет низом зонта, вентиляция — лицом, и струя не уходит в плиту", () => {
+  const box = simStand();
+  // Вытяжка на южной стене и плита под её зонтом: 600 × 600 × 900 от пола.
+  put(box, "hood", "ВЫТ", [{ x: 1500, y: 1350 }]);
+  put(box, "vent", "ВЕНТ", [{ x: -1850, y: -900 }]);
+  const stoveless = box.project;
+  box.project = addSchemeObject(box.project, {
+    schemeId: box.schemeId,
+    catalogKey: "stove",
+    shape: "rect",
+    atMm: { x: 1500, y: 1148 },
+    widthMm: 600,
+    depthMm: 600,
+    turnDeg: 0,
+    heightMm: 900,
+    heightAboveFloorMm: 0,
+  }).project;
+
+  // Работает один вентилятор на прогон: хозяина у струи нет (линии кадра
+  // `markId` не носят), и смешивать две вещи в одном списке нельзя.
+  const blowing = (project, key) => {
+    const scene = volumeScene(project, box.schemeId, { roofOff: true });
+    const fan = markAccessory(project, box.marks[key]).services.find((service) => service.type === "Fan").index;
+    const live = volumeSimLive(
+      project,
+      liveOf({ ...box, project }, { [box.marks[key]]: { [fan + ".Active"]: "ACTIVE", [fan + ".RotationSpeed"]: 100 } }),
+    );
+    return { scene, flows: volumeLiveSigns(scene, live).filter((face) => face.line) };
+  };
+
+  const { scene, flows: hoodFlows } = blowing(box.project, "hood");
+  const hood = scene.marks.find((item) => item.markId === box.marks.hood);
+  // Низ зонта — низ тела вытяжки: посадка 1700 минус половина высоты 350.
+  assert.equal(hood.frame.bottomMm, 1525);
+  assert.equal(hoodFlows.length, 3, "у вытяжки не три струи");
+  for (const flow of hoodFlows) {
+    assert.equal(flow.arrow, true);
+    const tip = flow.p[flow.p.length - 1];
+    const from = flow.p[0];
+    // Стрелка упирается в зонт снизу, а струя приходит из-под него.
+    assert.ok(Math.abs(tip.z - hood.frame.bottomMm) < 20, "стрелка не у низа зонта: " + tip.z);
+    assert.ok(hood.frame.bottomMm - from.z > 400, "струя не снизу: " + (hood.frame.bottomMm - from.z));
+    // Горизонтально струя стоит под зонтом, а не уходит в комнату сбоку.
+    const away = Math.hypot(from.x - hood.frame.at.x, from.y - hood.frame.at.y);
+    assert.ok(away < 400, "струя ушла от зонта в сторону: " + away);
+    // И не начинается внутри плиты: её верх — 900.
+    assert.ok(from.z > 900, "струя начинается в плите: " + from.z);
+  }
+  // Укоротила струю именно плита: без неё она уходит ниже её верха.
+  const loose = blowing(stoveless, "hood").flows;
+  assert.ok(
+    Math.min(...loose.map((flow) => flow.p[0].z)) < 900,
+    "без плиты струя та же, то есть предел считается не по ней",
+  );
+
+  // Вентиляция осталась при своём: струя лежит по нормали лица, стрелка — в
+  // решётку, и вниз она не загибается.
+  const ventFlows = blowing(box.project, "vent").flows;
+  const vent = scene.marks.find((item) => item.markId === box.marks.vent);
+  assert.equal(ventFlows.length, 3, "у вентиляции не три струи");
+  const outOf = (point) =>
+    (point.x - vent.face.origin.x) * vent.face.normal.x + (point.y - vent.face.origin.y) * vent.face.normal.y;
+  for (const flow of ventFlows) {
+    assert.ok(outOf(flow.p[0]) > 500, "струя вентиляции не из комнаты: " + outOf(flow.p[0]));
+    assert.ok(outOf(flow.p[flow.p.length - 1]) < 50, "стрелка вентиляции не у решётки");
+    const drop = Math.max(...flow.p.map((point) => point.z)) - Math.min(...flow.p.map((point) => point.z));
+    assert.ok(drop < 100, "струя вентиляции загнулась вниз: " + drop);
+  }
 });

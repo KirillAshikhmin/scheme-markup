@@ -42645,7 +42645,7 @@ continue;
 if (!place.face) continue;
 if (item.kind === "light" || item.kind === "tv" || item.kind === "curtain") continue;
 volumeSignLeds(place, item, out);
-if (item.flow) volumeSignFlow(place, item.flow, out);
+if (item.flow) volumeSignFlow(scene, place, item.flow, out);
 }
 return out;
 }
@@ -42825,8 +42825,41 @@ if (!item.on) return;
 const flow = item.flow ? item.flow.kind : null;
 corner(flow === "heat" ? VOLUME_LED_HEAT_RGB : flow === "cool" ? VOLUME_LED_COOL_RGB : VOLUME_LED_ON_RGB, true);
 }
-function volumeSignFlow(place, flow, out) {
-const face = place.face;
+const VOLUME_FLOW_SIDE = Object.freeze({ hood: "under" });
+const VOLUME_FLOW_GAP_MM = 50;
+const VOLUME_FLOW_MIN_MM = 120;
+function volumeFlowRun(scene, place) {
+const side = place.view ? VOLUME_FLOW_SIDE[place.view.name] : null;
+const frame = place.frame;
+if (side !== "under" || !frame) return { face: place.face, reachMm: null };
+const face = {
+origin: { x: frame.at.x, y: frame.at.y, z: frame.bottomMm },
+u: { x: frame.u.x, y: frame.u.y, z: 0 },
+v: { x: frame.f.x, y: frame.f.y, z: 0 },
+normal: { x: 0, y: 0, z: -1 },
+widthMm: frame.widthMm,
+heightMm: frame.depthMm,
+};
+return { face, reachMm: volumeFlowClearMm(scene, place, face) };
+}
+function volumeFlowClearMm(scene, place, face) {
+const halfU = face.widthMm / 2;
+const halfV = face.heightMm / 2;
+const spanX = Math.abs(face.u.x) * halfU + Math.abs(face.v.x) * halfV;
+const spanY = Math.abs(face.u.y) * halfU + Math.abs(face.v.y) * halfV;
+let topMm = -Infinity;
+for (const occluder of (scene && scene.occluders) || []) {
+if (occluder.id === place.objectId || !(occluder.topMm < face.origin.z)) continue;
+if (occluder.box.minX > face.origin.x + spanX || occluder.box.maxX < face.origin.x - spanX) continue;
+if (occluder.box.minY > face.origin.y + spanY || occluder.box.maxY < face.origin.y - spanY) continue;
+topMm = Math.max(topMm, occluder.topMm);
+}
+if (topMm === -Infinity) return null;
+return Math.max(VOLUME_FLOW_MIN_MM, face.origin.z - topMm - VOLUME_FLOW_GAP_MM);
+}
+function volumeSignFlow(scene, place, flow, out) {
+const run = volumeFlowRun(scene, place);
+const face = run.face;
 const n = face.normal;
 const u = face.u;
 const v = face.v;
@@ -42852,7 +42885,8 @@ out.push(volumeLine(points, color, { width: 1.6 }));
 }
 return;
 }
-const length = 300 + 600 * level;
+const want = 300 + 600 * level;
+const length = run.reachMm === null ? want : Math.min(want, run.reachMm);
 const down = { x: 0, y: 0, z: -1 };
 const falls = flow.kind === "cool" || flow.kind === "heat";
 const starts = falls ? [-0.36, -0.12, 0.12, 0.36].map((fx) => at(fx, 0.45)) : [-0.25, 0, 0.25].map((fx) => at(fx, 0));

@@ -52,14 +52,19 @@
       }
 
       /**
-       * Состояние дома для кадра: названные светильники и экраны схемы горят в
-       * полную силу. Вид устройства спрашивается у модели (`markDeviceOf`), а не
-       * угадывается по коду типа.
+       * Состояние дома для кадра: названные светильники, экраны и вентиляторы
+       * схемы работают в полную силу. Вид устройства спрашивается у модели
+       * (`markDeviceOf`), а не угадывается по коду типа.
        *
        * Экраны здесь с таска 255 (G400): на работающем экране есть картинка, и
-       * снимок приёмки с нею иначе не снять — дом тут не запускается.
+       * снимок приёмки с нею иначе не снять — дом тут не запускается. Потоки
+       * воздуха — с таска 259 (G401) и по той же причине: струи рисуются по
+       * живому состоянию, и куда они идут, видно только у работающей вещи.
+       * `flow` — то же, что даёт `simLiveOf` по сервису «Вентилятор»: приток у
+       * бризера, вытяжка у остальных.
        */
-      const LIVE_KINDS = { light: "light", tv: "tv" };
+      const LIVE_KINDS = { light: "light", tv: "tv", fan: "fan", breezer: "breezer" };
+      const LIVE_FLOWS = { fan: "intake", breezer: "air" };
 
       function liveOf(project, schemeId, lamps) {
         const all = String(lamps).toLowerCase() === "all";
@@ -73,7 +78,8 @@
           const type = model.findType(project, mark.typeId);
           const sign = String((type && type.code) || "") + String(mark.number || "");
           if (!all && !want.has(sign.toLowerCase())) continue;
-          live.set(mark.id, { on: true, level: 1, kind, roomId: mark.roomId || null, fade: 1 });
+          const flow = LIVE_FLOWS[kind] ? { kind: LIVE_FLOWS[kind], level: 1 } : null;
+          live.set(mark.id, { on: true, level: 1, kind, roomId: mark.roomId || null, fade: 1, flow });
         }
         return live;
       }
@@ -217,8 +223,12 @@
             // Горящие лампы (`--lamps`): дом тут не запускается — светом
             // занимается тот же `volumeLiveLight`, которому окно объёма отдаёт
             // состояние дома. Снимок приёмки со светом иначе не повторить.
-            const light = job.lamps ? volume.volumeLiveLight(scene, liveOf(project, schemeId, job.lamps), { physical: job.flatLight !== true, tint: mood.tint }) : null;
-            const polygons = volume.volumeFrame(scene, camera, box, [...shadow, ...spots], mood.tint, light);
+            const live = job.lamps ? liveOf(project, schemeId, job.lamps) : null;
+            const light = live ? volume.volumeLiveLight(scene, live, { physical: job.flatLight !== true, tint: mood.tint }) : null;
+            // Признаки работы (таск 259): диоды и струи воздуха — те же грани
+            // кадра, что в окне объёма, и приходят тем же путём — `extra`.
+            const signs = live ? volume.volumeLiveSigns(scene, live) : [];
+            const polygons = volume.volumeFrame(scene, camera, box, [...shadow, ...spots, ...signs], mood.tint, light);
             volume.volumeDraw(ctx, polygons);
             volume.volumeDrawBackdropNear(ctx, box, camera, mood, scene.landMm);
             const png = await exporter.viewPng(canvas, exporter.EXPORT_SCREEN_DPI);
