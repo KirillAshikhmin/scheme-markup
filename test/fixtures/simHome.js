@@ -239,7 +239,10 @@ const SIM_LEGACY_SWITCH_MARKS = [
  * `text` — `project.json`, который записала та сборка (байт в байт).
  */
 export function simLegacySwitchProject() {
-  const base = JSON.parse(readFileSync(new URL("./g68-legacy-project.packed.json", import.meta.url), "utf8"));
+  // Основа — сам объект прежней сборки, а не снимок его упаковки: у снимка
+  // сущности пронумерованы (открытие нумерует объект, ADR 030), а ссылки
+  // выключателей ниже писаны прежними uuid — схема и нагрузки у них оттуда.
+  const base = JSON.parse(readFileSync(new URL("../legacy-project.json", import.meta.url), "utf8"));
   const project = {
     ...base,
     updatedAt: "2026-10-22T23:25:34.152Z",
@@ -247,7 +250,12 @@ export function simLegacySwitchProject() {
     marks: [...base.marks, ...structuredClone(SIM_LEGACY_SWITCH_MARKS)],
     counters: { ...base.counters, В: 2, ВВ: 1 },
   };
-  const markOf = (typeId) => base.marks.find((mark) => mark.typeId === typeId).id;
+  // Метка нагрузки — по **коду** типа: номера у типов этого объекта появятся
+  // при открытии, а код переживает перенумерацию.
+  const markOf = (code) => {
+    const type = base.markTypes.find((item) => item.code === code);
+    return base.marks.find((mark) => mark.typeId === type.id).id;
+  };
   return {
     project,
     text: JSON.stringify(project, null, 2),
@@ -255,9 +263,9 @@ export function simLegacySwitchProject() {
       В1: SIM_LEGACY_SWITCH_MARKS[0].id,
       ВВ1: SIM_LEGACY_SWITCH_MARKS[1].id,
       В2: SIM_LEGACY_SWITCH_MARKS[2].id,
-      Т1: markOf("t-lamp"),
-      Р1: markOf("t-socket"),
-      Л1: markOf("t-tape"),
+      Т1: markOf("Т"),
+      Р1: markOf("Р"),
+      Л1: markOf("Л"),
     },
     types: { В: SIM_LEGACY_SWITCH_TYPES[0].id, ВВ: SIM_LEGACY_SWITCH_TYPES[1].id },
   };

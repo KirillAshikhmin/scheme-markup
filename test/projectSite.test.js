@@ -67,6 +67,7 @@ import { mergeProjects } from "../src/merge.js";
 import { projectTopFacing } from "../src/panels/projectProps.js";
 import { strings } from "../src/strings.js";
 
+import { legacyIdsRestored } from "./fixtures/legacyIds.js";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = join(HERE, "..", "src");
 const LEGACY_TEXT = readFileSync(join(HERE, "legacy-project.json"), "utf8").replace(/\n$/, "");
@@ -263,10 +264,12 @@ test("G68: объект прежней сборки раздела не полу
     false,
     "открытие дописало объекту свойства места",
   );
-  assert.deepEqual(restored.project.marks.map((mark) => mark.id), legacy.marks.map((mark) => mark.id));
-  assert.deepEqual(restored.project.marks.map((mark) => mark.number), legacy.marks.map((mark) => mark.number));
+  // Имена сущностей в сверке — прежние: открытие нумерует объект (ADR 030).
+  const same = legacyIdsRestored(legacy, restored.project);
+  assert.deepEqual(same.marks.map((mark) => mark.id), legacy.marks.map((mark) => mark.id));
+  assert.deepEqual(same.marks.map((mark) => mark.number), legacy.marks.map((mark) => mark.number));
   assert.deepEqual(restored.project.marks.map((mark) => labelOf(restored.project, mark.id)), labels);
-  assert.deepEqual(restored.project.counters, legacy.counters, "счётчики нумерации тронуты");
+  assert.deepEqual(same.counters, legacy.counters, "счётчики нумерации тронуты");
   // Заданные в таком объекте свойства остаются единственной правкой.
   const set = setProjectSite(legacy, { address: "Москва", coords: "55.7558, 37.6173", topAzimuthDeg: 90 }).project;
   assert.deepEqual(set.marks, legacy.marks);

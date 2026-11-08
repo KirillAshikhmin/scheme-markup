@@ -48,6 +48,7 @@ import { markCardModel } from "../src/panels/markCard.js";
 import { packProject, unpackProject } from "../src/projectFile.js";
 import { strings } from "../src/strings.js";
 
+import { legacyIdsForward, legacyIdsRestored } from "./fixtures/legacyIds.js";
 const WIDTH = 1000;
 const HEIGHT = 500;
 const view = { zoom: 1, offsetX: 0, offsetY: 0, markSize: 10, labelSize: 12 };
@@ -310,14 +311,21 @@ test("G68: комментарий прежней сборки открывает
   const opened = (await unpackProject(await packProject(old, new Map()))).project;
   // Открылся как закрывался: ни одна метка не изменилась ни на поле, ни на
   // долю. Миграции у таска нет вовсе — нового поля он не завёл.
-  assert.deepEqual(opened.marks, old.marks.map((mark) => ({ ...mark })), "метка прежнего объекта изменилась");
+  // Имена сущностей в сверке — прежние: открытие нумерует объект (ADR 030), и
+  // перенумерация обязана быть чистым переименованием.
+  const note = legacyIdsForward(old, opened).get("note-1") || "note-1";
+  assert.deepEqual(
+    legacyIdsRestored(old, opened).marks,
+    old.marks.map((mark) => ({ ...mark })),
+    "метка прежнего объекта изменилась",
+  );
   assert.equal(migrateCommentType(opened).changed, false);
 
   // Плашка и точка — ровно там, где их оставили: место плашки считается от
   // записанного смещения, место точки — от записанных долей.
   const scheme = opened.schemes[0];
-  assert.deepEqual(pointAt(opened, scheme, "note-1"), { x: 0.62 * WIDTH, y: 0.44 * HEIGHT });
-  const plate = plateOf(opened, scheme, "note-1");
+  assert.deepEqual(pointAt(opened, scheme, note), { x: 0.62 * WIDTH, y: 0.44 * HEIGHT });
+  const plate = plateOf(opened, scheme, note);
   assert.equal(plate.dx, 170);
   assert.equal(plate.dy, -90);
   assert.equal(plate.x, 0.62 * WIDTH + 170);
@@ -325,7 +333,7 @@ test("G68: комментарий прежней сборки открывает
 
   // И обе ручки на месте: клик по плашке берёт её, клик по точке — точку.
   assert.equal(hitTest(opened, scheme, { x: plate.x + 2, y: plate.y + plate.height / 2 }, view, null).part, "label");
-  assert.equal(hitTest(opened, scheme, pointAt(opened, scheme, "note-1"), view, null).part, "mark");
+  assert.equal(hitTest(opened, scheme, pointAt(opened, scheme, note), view, null).part, "mark");
 });
 
 // ——— видно, за что берёшься ————————————————————————————————————————————

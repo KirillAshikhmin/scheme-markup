@@ -13,6 +13,7 @@ import {
   projectFileName,
   WRITER_ENTRY,
   FORMAT_VERSION,
+  FORMAT_VERSION_IDS,
 } from "../src/projectFile.js";
 import {
   FORMAT_VERSION_MAX,
@@ -101,7 +102,7 @@ test("упакованный объект распаковывается без 
   const restored = await unpackProject(file);
 
   assert.deepEqual(restored.project, project);
-  assert.equal(restored.project.formatVersion, FORMAT_VERSION);
+  assert.equal(restored.project.formatVersion, FORMAT_VERSION_IDS);
   assert.equal(restored.project.marks.length, project.marks.length);
 
   assert.deepEqual([...restored.images.keys()].sort(), ["img-1", "img-2"]);
@@ -183,7 +184,7 @@ test("картинки лежат как есть, project.json сжат, вер
   }
 
   const restored = await unpackProject(file);
-  assert.equal(restored.project.formatVersion, FORMAT_VERSION);
+  assert.equal(restored.project.formatVersion, FORMAT_VERSION_IDS);
 });
 
 test("архив без сжатия читается так же, как сжатый", async () => {
@@ -479,7 +480,7 @@ test("файл версии 1 читается: контуров в нём не�
   delete old.outlines;
   const file = await writeZip([{ name: "project.json", data: JSON.stringify(old) }]);
   const restored = await unpackProject(file);
-  assert.equal(restored.project.formatVersion, FORMAT_VERSION);
+  assert.equal(restored.project.formatVersion, FORMAT_VERSION_IDS);
   assert.deepEqual(restored.project.outlines, []);
   assert.equal(restored.project.marks.length, project.marks.length);
 });

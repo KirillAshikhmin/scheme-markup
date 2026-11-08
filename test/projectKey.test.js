@@ -109,15 +109,25 @@ test("ключ отвечает там, где догадка врёт: напа
   assert.equal(areRelatedProjects(mine, theirs), true, "ключ не сработал");
 });
 
-test("файлы без ключа читаются по прежним правилам — догадкой", async () => {
+test("файлы без ключа: догадка отвечает о поре uuid, а перенумерованную копию узнаёт ключ", async () => {
   const mine = oldBuild(project("Дача Петровых"));
   const loaded = await unpackProject(await packProject(mine, new Map()));
   assert.equal(loaded.project.key, undefined, "в файле прежней сборки ключа быть не должно");
   assert.equal(loaded.projectKey, null, "в отметке взялся ключ, которого нет");
 
-  // Тот же объект у второго участника: свой идентификатор, общие схемы и метки.
-  const peer = { ...loaded.project, id: "peer-объект" };
+  // Тот же объект у второго участника, пока ни одна копия не открыта этой
+  // сборкой: свой идентификатор, общие uuid — догадка отвечает, как отвечала.
+  const peer = { ...mine, id: "peer-объект" };
   assert.equal(areRelatedProjects(mine, peer), true, "догадка выключена — старые файлы перестали сливаться");
+
+  // А копия, **открытая этой сборкой**, пронумерована (ADR 030), и общих uuid
+  // у неё с неоткрытой нет вовсе: догадка о такой копии молчит нарочно (общий
+  // номер родства не доказывает, см. `oldBuild`). Родство держит ключ — его
+  // объекту без ключа заводит открытие (`ensureProjectKey`).
+  assert.equal(areRelatedProjects(mine, { ...loaded.project, id: "peer-объект" }), false);
+  const keyed = ensureProjectKey(loaded.project).project;
+  assert.ok(keyed.key, "открытие не завело ключ объекту без ключа");
+  assert.equal(areRelatedProjects(keyed, { ...keyed, id: "peer-объект" }), true, "ключ не сработал");
 
   // И чужой объект без ключа по-прежнему чужой.
   assert.equal(areRelatedProjects(mine, oldBuild(project("Чужой объект"))), false);

@@ -44,6 +44,7 @@ import { elevationMarkBox } from "../src/render.js";
 import { unpackProject, writeZip } from "../src/projectFile.js";
 import { volumeScene } from "../src/volume.js";
 
+import { legacyIdsRestored } from "./fixtures/legacyIds.js";
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 async function openLegacyFile() {
@@ -159,12 +160,13 @@ test("объект прежнего формата рисуется теми ж�
 
   // ——— G68: размеров в объекте правка не коснулась ———
   //
-  // Открытие объекта прежнего формата правит ровно две вещи, и обе — не наши:
-  // версию формата и выведенный вид типа (`typeKindOf`, таск 150). Размеры
-  // после этого таска не переписываются вовсе: имена поменялись в подписях, а
-  // не в файле.
+  // Открытие объекта прежнего формата правит ровно три вещи, и ни одна — не
+  // наша: версию формата, выведенный вид типа (`typeKindOf`, таск 150) и номера
+  // сущностей (`idsMigrate`, ADR 030 — имена в сверке возвращаются прежними).
+  // Размеры после этого таска не переписываются вовсе: имена поменялись в
+  // подписях, а не в файле.
   assert.equal(loaded.formatVersion, 3, "фикстура обязана остаться объектом прежнего формата");
-  const opened = JSON.parse(JSON.stringify(project));
+  const opened = JSON.parse(JSON.stringify(legacyIdsRestored(loaded, project)));
   assert.deepEqual(
     { ...opened, formatVersion: 3, markTypes: opened.markTypes.map(({ kind, ...rest }) => rest) },
     { ...loaded, markTypes: loaded.markTypes.map(({ kind, ...rest }) => rest) },

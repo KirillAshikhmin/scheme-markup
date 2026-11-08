@@ -68,6 +68,7 @@ import { objectViewByName, objectViewClashes } from "../src/objectViews/registry
 import { packProject, unpackProject } from "../src/projectFile.js";
 import { strings } from "../src/strings.js";
 
+import { legacyIdsRestored } from "./fixtures/legacyIds.js";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const LEGACY_TEXT = readFileSync(join(HERE, "legacy-drawing-project.json"), "utf8");
 const legacyProject = () => JSON.parse(LEGACY_TEXT);
@@ -834,8 +835,10 @@ test("G68: файл с ушедшими вещами переживает кру
   const project = retiredProject();
   const file = await packProject(project, new Map());
   const { project: loaded } = await unpackProject(file);
-  assert.deepEqual(loaded.schemeObjects, project.schemeObjects, "у вещей чертежа появилось или пропало поле");
-  assert.deepEqual(loaded.schemeObjectKinds, project.schemeObjectKinds, "справочник видов поехал");
+  // Имена сущностей в сверке — прежние: открытие нумерует объект (ADR 030).
+  const same = legacyIdsRestored(project, loaded);
+  assert.deepEqual(same.schemeObjects, project.schemeObjects, "у вещей чертежа появилось или пропало поле");
+  assert.deepEqual(same.schemeObjectKinds, project.schemeObjectKinds, "справочник видов поехал");
 });
 
 test("вернувшуюся вещь снова ставят, а поставленную прежде по-прежнему можно двигать", () => {
@@ -890,10 +893,11 @@ test("G68: файл прежней сборки переживает круг «
   const project = legacyProject();
   const file = await packProject(project, new Map());
   const { project: loaded } = await unpackProject(file);
-  assert.equal(loaded.formatVersion, 5, "файл сохраняется нынешней версией формата");
-  assert.deepEqual(loaded.schemeObjectKinds, project.schemeObjectKinds, "справочник видов поехал");
-  assert.deepEqual(loaded.schemeObjects, project.schemeObjects, "у вещей чертежа появилось или пропало поле");
-  assert.deepEqual(loaded.walls, project.walls);
+  assert.equal(loaded.formatVersion, 8, "файл сохраняется нынешней версией формата");
+  const same = legacyIdsRestored(project, loaded);
+  assert.deepEqual(same.schemeObjectKinds, project.schemeObjectKinds, "справочник видов поехал");
+  assert.deepEqual(same.schemeObjects, project.schemeObjects, "у вещей чертежа появилось или пропало поле");
+  assert.deepEqual(same.walls, project.walls);
 });
 
 // ——— скрытие: только экран ————————————————————————————————————————————

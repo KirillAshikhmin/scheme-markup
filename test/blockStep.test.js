@@ -31,6 +31,7 @@ import {
   renderInternals,
 } from "../src/render.js";
 
+import { legacyIdsForward, legacyIdsRestored } from "./fixtures/legacyIds.js";
 const WIDTH = 1600;
 const HEIGHT = 1000;
 const SIZES = [4, 10, 16, 36];
@@ -185,24 +186,32 @@ test("уже размеченный блок не двигается: шаг м�
   };
   const blob = await packProject(old, new Map());
   const opened = (await unpackProject(blob)).project;
+  // Открытие нумерует объект (ADR 030) — сверка идёт на прежних именах, а
+  // сущности открытого объекта зовутся новыми номерами (`id`).
+  const same = legacyIdsRestored(old, opened);
+  const id = (was) => legacyIdsForward(old, opened).get(was) || was;
 
   assert.deepEqual(
-    opened.marks.map((mark) => ({ id: mark.id, number: mark.number, point: mark.points[0] })),
+    same.marks.map((mark) => ({ id: mark.id, number: mark.number, point: mark.points[0] })),
     old.marks.map((mark) => ({ id: mark.id, number: mark.number, point: mark.points[0] })),
     "метки старого блока переехали",
   );
-  assert.deepEqual(opened.groups, old.groups, "группа старого блока изменилась");
+  assert.deepEqual(same.groups, old.groups, "группа старого блока изменилась");
   // Подпись блока свёрнута в диапазон (D29) — и это единственное, что в старом
   // объекте читается иначе: метки, номера и точки те же, сама разметка не
   // тронута, свёртка живёт в подписи.
-  assert.equal(labelOf(opened, "group-1"), "Р1–3");
+  assert.equal(labelOf(opened, id("group-1")), "Р1–3");
   // Своя величина знака у старого объекта осталась своей.
   assert.equal(opened.view.markSize, 10);
 
   // Новая метка в том же блоке встаёт новым шагом — от величины этого объекта.
-  const grown = addToGroup(opened, "mark-3", "right", { step: blockStepPx(opened.view.markSize) });
+  const grown = addToGroup(opened, id("mark-3"), "right", { step: blockStepPx(opened.view.markSize) });
   assert.equal(grown.mark.points[0].x, 0.556 + blockStepPx(10) / 1000);
-  for (const id of ["mark-1", "mark-2", "mark-3"]) {
-    assert.deepEqual(findMark(grown.project, id).points, findMark(opened, id).points, "старая метка блока сдвинулась");
+  for (const was of ["mark-1", "mark-2", "mark-3"]) {
+    assert.deepEqual(
+      findMark(grown.project, id(was)).points,
+      findMark(opened, id(was)).points,
+      "старая метка блока сдвинулась",
+    );
   }
 });

@@ -164,7 +164,10 @@ for (const name of LEGACY) {
     const plain = (await unpackProject(blob)).project;
     const pinned = (await unpackProject(blob, { library: lib.door })).project;
     assert.equal(JSON.stringify(pinned), JSON.stringify(plain));
-    assert.ok(pinned.formatVersion < 7, "объекту без сценариев версия 7 не нужна");
+    // Версия — восьмая: открытие нумерует объект (ADR 030). Ступень ссылки на
+    // библиотеку при этом ему не нужна, и этим она и проверяется — поля `lib`
+    // в файле нет ни одного.
+    assert.equal(pinned.formatVersion, 8);
     const text = new TextDecoder().decode((await readZip(blob)).get(PROJECT_ENTRY));
     assert.ok(!text.includes('"lib"'), "в файл прежнего объекта дописано поле lib");
   });
@@ -190,7 +193,7 @@ test("объект со сценариями: файл и база браузе�
     assert.equal(findScenario(project, box.ids.mine).source, box.mine);
   }
   assert.equal(JSON.stringify(stored.scenarios), JSON.stringify(fromFile.scenarios), "конвейеры разошлись");
-  assert.equal(fromFile.formatVersion, 7);
+  assert.equal(fromFile.formatVersion, 8);
 
   // Файл стал короче почти на все выброшенные тексты: вместо каждого в записи
   // осталась ссылка (имя, версия, 64 знака отпечатка) — около двух сотен байт

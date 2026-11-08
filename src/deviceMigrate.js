@@ -26,7 +26,26 @@
 //
 // Модуль стоит отдельно от модели нарочно: ему нужны адреса хаба
 // (`sim/home.js`), а дом сам читает модель — в модели это был бы круг.
-import { findType, markDeviceLeader, markDeviceOf, typeDeviceOf } from "./model.js";
+import {
+  addSchemeObject,
+  findMark,
+  findType,
+  findWall,
+  markDeviceLeader,
+  markDeviceOf,
+  markIsComment,
+  markObjectId,
+  markOfObject,
+  markSizes,
+  markWall,
+  markWallSide,
+  planFractionToMm,
+  schemeObjectsOnScheme,
+  setMarkObject,
+  typeDeviceOf,
+  wallVectors,
+} from "./model.js";
+import { objectCatalogDefaults } from "./objectCatalog.js";
 import { simServiceMeta } from "./sim/catalog.js";
 import { deviceAids, deviceIdsOf } from "./sim/home.js";
 
@@ -435,4 +454,164 @@ export function migrateDevices(project) {
   if (scenariosChanged) out.scenarios = scenarios;
   if (bindingsChanged) out.logicBindings = logicBindings;
   return { project: out, changed: true, switches, conditioners };
+}
+
+// ——— метка прибора получает вещь (G01, история 15) ————————————————————————
+//
+// Слова заказчика о телевизоре и полотенцесушителе на готовых объектах:
+// «Перевести миграцией сразу».
+//
+// Таск 186 увёл телевизор, полотенцесушитель и вытяжку из вещей чертежа в
+// метки — «потому что он будет интерактивным». Прибор получил электрику и
+// потерял форму: угла у метки нет вовсе, и телевизор на плане встал по осям
+// плана, а не к дивану. Сборка «связь метки и вещи» вернула все три в каталог,
+// и теперь прибор — это **вещь плюс связанная метка**.
+//
+// Миграция **достраивает, а не заменяет**: метке типа ТВ, ПОС или ВЫТ рядом
+// заводится вещь с тем же местом и габаритом, и ставится связь. Сама метка не
+// меняется ничем, кроме поля связи, — поэтому номер, обозначение, аксессуар,
+// сценарии, привязки логики, связи «чем управляет» и роль вытяжки в климате
+// (она читается по коду типа) остаются теми же, а объект без таких меток не
+// меняется вовсе.
+//
+// Что **не** переводится, и это сознательно:
+//
+//   — метка с **переименованным кодом** типа («СУШ», «Пос», «Вытяжка» — такие
+//     есть у заказчика). Код — единственный однозначный признак; угадывать по
+//     имени значило бы применять догадку, а правило дома — «догадку показывают,
+//     а не применяют». Такая метка остаётся меткой, и человек связывает её с
+//     вещью рукой одним действием;
+//   — метка **без моста мм ↔ доли** (у схемы нет калибровки или привязки начала
+//     координат): места в миллиметрах для вещи не посчитать, а поставить её
+//     «куда-нибудь» значит нарисовать прибор не там, где он стоит;
+//   — метка-линия и метка со многими точками: форму ей провёл человек, и свести
+//     её к прямоугольнику нельзя;
+//   — метка, у которой связь уже есть: отсюда и идемпотентность.
+//
+// **Вещь, которая уже стоит, второй не обрастает.** Телевизор и
+// полотенцесушитель были вещами до таска 186, и на готовом объекте заказчика
+// они встречаются и вещью, и меткой сразу (в одном из четырёх — обе). Достроить
+// такой метке ещё одну вещь значило бы нарисовать на плане **второй**
+// телевизор — ровно то двоение, от которого связь и заводится. Поэтому
+// свободная вещь того же ключа каталога, **в габарит которой попала точка
+// метки**, не достраивается, а связывается: правило то же, по которому сборка
+// предлагает связь при постановке метки (`canvas.canvasLinkOffer`), только
+// строже — ключ каталога обязан совпасть, иначе метка молча уехала бы на тумбу
+// под телевизором.
+const MIGRATE_THING_KEYS = Object.freeze({ ТВ: "tv", ПОС: "towelDryer", ВЫТ: "hood" });
+
+// Габарит метки — в габарит вещи, с переводом осей. У метки `length` идёт вдоль
+// поверхности, `depth` — от неё, `width` — вверх, а `heightAboveFloor` — это
+// **середина** прибора; у вещи это `widthMm` × `depthMm` × `heightMm` и
+// `heightAboveFloorMm` — её **низ**. Ровно этим переводом пересчитаны умолчания
+// самих вещей в каталоге (`objectCatalog.js`), и второго описания перевода в
+// сборке быть не должно.
+function migrateThingSize(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.round(number) : fallback;
+}
+
+// Куда вещь смотрит: от стены, к которой привязана метка, в сторону той её
+// стороны, где метка стоит. Перёд вещи при нулевом повороте уходит вниз по
+// листу (`workshopFrontAxis`), то есть `n = (−sin, cos)`; отсюда и угол.
+// Привязки нет — нуля достаточно: без стены направления не знает никто.
+function migrateThingTurn(project, mark) {
+  const binding = markWall(mark);
+  const vectors = binding ? wallVectors(findWall(project, binding.wallId)) : null;
+  if (!vectors) return 0;
+  const side = markWallSide(project, mark);
+  const front = side === "right" ? { x: -vectors.n.x, y: -vectors.n.y } : vectors.n;
+  const degrees = (Math.atan2(-front.x, front.y) * 180) / Math.PI;
+  return ((Math.round(degrees) % 360) + 360) % 360;
+}
+
+// Насколько метка может стоять **мимо** габарита вещи и всё-таки считаться её
+// меткой. Число снято с объекта заказчика: нарисованный телевизор там стоит в
+// 239 мм от своего знака — знак на стене, корпус от стены, — а глубина вещи
+// всего 80 мм, и «точка внутри габарита» такую пару не узнаёт. Триста
+// миллиметров — это толщина стены с отделкой плюс корпус прибора; на этом
+// расстоянии второго телевизора в комнате не бывает, а полтора метра было бы
+// уже гаданием.
+const MIGRATE_THING_NEAR_MM = 300;
+
+// Свободная вещь того же ключа, под которой стоит метка, — или `null`. Из
+// нескольких берётся самая малая по площади, как у предложения связи на плане.
+// Попадание считается в осях самой вещи: вдоль — половина длины, поперёк —
+// половина глубины, и то и другое с запасом `MIGRATE_THING_NEAR_MM`.
+function migrateThingFound(project, mark, key, atMm) {
+  let best = null;
+  let bestArea = Infinity;
+  for (const object of schemeObjectsOnScheme(project, mark.schemeId)) {
+    if (object.catalogKey !== key || object.shape === "polyline") continue;
+    if (markOfObject(project, object.id)) continue;
+    const turn = ((Number(object.turnDeg) || 0) * Math.PI) / 180;
+    const dx = atMm.x - Number(object.atMm.x);
+    const dy = atMm.y - Number(object.atMm.y);
+    const along = Math.abs(dx * Math.cos(turn) + dy * Math.sin(turn));
+    const across = Math.abs(-dx * Math.sin(turn) + dy * Math.cos(turn));
+    if (along > Number(object.widthMm) / 2 + MIGRATE_THING_NEAR_MM) continue;
+    if (across > Number(object.depthMm) / 2 + MIGRATE_THING_NEAR_MM) continue;
+    const area = Number(object.widthMm) * Number(object.depthMm);
+    if (area >= bestArea) continue;
+    best = object;
+    bestArea = area;
+  }
+  return best;
+}
+
+/**
+ * Достроить вещи меткам приборов: `{project, changed, made, linked}` — сколько
+ * вещей собрано и сколько уже стоявших связано. Переводить нечего — **тот же**
+ * объект по ссылке, и `updatedAt` не трогается ни в одном случае: миграция —
+ * не правка разметки, в истории отмены от неё ничего не появляется.
+ */
+export function migrateThingMarks(project) {
+  const idle = { project, changed: false, made: 0, linked: 0 };
+  if (!project || !Array.isArray(project.marks) || !Array.isArray(project.markTypes)) return idle;
+  const ids = project.marks.map((mark) => (mark ? mark.id : null)).filter((id) => id != null && id !== "");
+  let next = project;
+  let made = 0;
+  let linked = 0;
+  for (const markId of ids) {
+    const mark = findMark(next, markId);
+    if (!mark || markIsComment(mark) || markObjectId(mark) !== null) continue;
+    if (mark.kind !== "point" || !Array.isArray(mark.points) || mark.points.length !== 1) continue;
+    const type = findType(next, mark.typeId);
+    const key = type ? MIGRATE_THING_KEYS[String(type.code || "").trim()] : undefined;
+    if (!key) continue;
+    const atMm = planFractionToMm(next, mark.schemeId, mark.points[0]);
+    const defaults = objectCatalogDefaults(key);
+    if (!atMm || !defaults) continue;
+    // Вещь того же ключа уже стоит под меткой — связываем её, а не строим
+    // вторую (двоение на плане).
+    const found = migrateThingFound(next, mark, key, atMm);
+    if (found) {
+      next = setMarkObject(next, markId, found.id).project;
+      linked += 1;
+      continue;
+    }
+    const sizes = markSizes(next, mark);
+    const heightMm = migrateThingSize(sizes.width, defaults.heightMm);
+    const middle = Number(sizes.heightAboveFloor);
+    const bottomMm = Number.isFinite(middle) && sizes.heightAboveFloor !== null
+      ? Math.max(0, Math.round(middle - heightMm / 2))
+      : defaults.heightAboveFloorMm;
+    const added = addSchemeObject(next, {
+      schemeId: mark.schemeId,
+      catalogKey: key,
+      shape: "rect",
+      atMm,
+      widthMm: migrateThingSize(sizes.length, defaults.widthMm),
+      depthMm: migrateThingSize(sizes.depth, defaults.depthMm),
+      heightMm,
+      heightAboveFloorMm: bottomMm,
+      turnDeg: migrateThingTurn(next, mark),
+    });
+    next = setMarkObject(added.project, markId, added.schemeObject.id).project;
+    made += 1;
+  }
+  if (made === 0 && linked === 0) return idle;
+  // Правки доехали через двери модели, а они честно двигают `updatedAt` —
+  // миграции он не положен: объект открылся, а не был правлен.
+  return { project: { ...next, updatedAt: project.updatedAt }, changed: true, made, linked };
 }

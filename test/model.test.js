@@ -515,9 +515,9 @@ test("телевизор и полотенцесушитель стоят мет
 
 test("новый объект создаётся из стартового справочника и пуст по меткам", () => {
   const project = createProject();
-  // Версия 5: к контурам помещений, виду типа и каналу связи добавился ключ
-  // встроенного каталога у вещи чертежа (таск 154).
-  assert.equal(project.formatVersion, 5);
+  // Версия 8: сущности нового объекта пронумерованы с рождения (ADR 030), и
+  // прежняя сборка посчитала бы адреса аксессуаров по-своему.
+  assert.equal(project.formatVersion, 8);
   assert.equal(project.categories.length, 12);
   assert.equal(project.markTypes.length, 56);
   assert.deepEqual(project.marks, []);

@@ -27,6 +27,7 @@ import { elevationMarkBox } from "../src/render.js";
 import { unpackProject, writeZip } from "../src/projectFile.js";
 import { VOLUME_MARK_LIFT_MM, volumeScene } from "../src/volume.js";
 
+import { legacyIdsRestored } from "./fixtures/legacyIds.js";
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 // ——— само правило ————————————————————————————————————————————————————————
@@ -199,7 +200,8 @@ test("файл прежнего формата: обе поверхности н
   // длина, у «ЗВ» — ни одного размера, и метки не получили ни одного поля.
   assert.deepEqual(byCode("ЛН").sizes, { length: 600 });
   assert.equal(byCode("ЗВ").sizes, undefined);
-  assert.deepEqual(project.marks, loaded.marks, "ни одна метка не изменилась");
+  // Имена сущностей в сверке — прежние: открытие нумерует объект (ADR 030).
+  assert.deepEqual(legacyIdsRestored(loaded, project).marks, loaded.marks, "ни одна метка не изменилась");
   assert.equal(JSON.stringify(loaded), JSON.stringify(JSON.parse(text)), "сборка сцены не тронула прочитанное");
 });
 

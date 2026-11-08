@@ -5,6 +5,7 @@ import {
   createProject,
   ensureProjectKey,
   fillTypeSizes,
+  idsMigrate,
   migrateCommentType,
   migrateScenarioLib,
   migrateScenarios,
@@ -25,7 +26,7 @@ import {
   storeMode,
 } from "../store.js";
 import { strings, text } from "../strings.js";
-import { migrateDevices } from "../deviceMigrate.js";
+import { migrateDevices, migrateThingMarks } from "../deviceMigrate.js";
 import { formatMegabytes, uiButton, uiConfirm, uiEl, uiIconButton, uiModal } from "./ui.js";
 import { projectPropsDialog } from "./projectProps.js";
 import { TYPE_TEMPLATE_KEY, typesTemplateFrom } from "./types.js";
@@ -49,7 +50,12 @@ export function projectsMigrateStored(stored, library = null) {
   // объект остаётся прежним (G68). Затем аксессуары (правка после сборки
   // сценариев) — тем же порядком, что у файла.
   const pinned = migrateScenarioLib(migrateScenarios(migrated).project, library).project;
-  return migrateDevices(pinned).project;
+  // Номера вместо uuid и вещи меткам приборов (G08–G11, G01) — тем же порядком,
+  // что у файла: перенумерация после миграций, которые удаляют сущности, и до
+  // перевода аксессуаров (он переселяет адреса в опциях привязок, а адрес — это
+  // номер метки).
+  const numbered = migrateThingMarks(idsMigrate(pinned).project).project;
+  return migrateDevices(numbered).project;
 }
 
 /**

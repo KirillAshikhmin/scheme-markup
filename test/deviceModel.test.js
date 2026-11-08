@@ -26,6 +26,7 @@ import {
   deviceExpand,
   findMark,
   findType,
+  labelOf,
   markDeviceOf,
   markDeviceOwn,
   markDeviceProfile,
@@ -527,12 +528,16 @@ for (const [name, print] of LEGACY) {
     // Конвейер базы браузера (`openProjectById`).
     const stored = projectsMigrateStored(legacy);
     assert.equal(JSON.stringify(stored, null, 2), storedBefore, "объект из базы открылся другим");
-    if (legacy.formatVersion === 5) assert.equal(stored, legacy, "миграция объекта текущего формата что-то переписала");
+    // Второе открытие уже ничего не переписывает — объект приходит **тем же**
+    // по ссылке. Это и есть идемпотентность всей цепочки миграций (G11.1):
+    // до номеров её держала сверка `stored === legacy`, а теперь перенумерация
+    // при первом открытии объект правит честно и один раз.
+    assert.equal(projectsMigrateStored(stored), stored, "второе открытие снова что-то переписало");
     // Нового в файле — ни ключа.
     for (const key of ['"device"', '"scenarios"', '"logicBindings"']) {
       assert.ok(!packed.includes(key), "в файл прежнего объекта дописано " + key);
     }
-    assert.equal(restored.formatVersion, 5);
+    assert.equal(restored.formatVersion, 8);
 
     // Профили при этом видны — выведенными по коду.
     for (const project of [restored, stored]) {
@@ -563,6 +568,11 @@ test("G68: объект с профилем выключателя до G11 (о�
   const blob = await packProject(legacy.project, new Map(), { date: new Date("2026-10-22T10:00:00Z") });
   const restored = (await unpackProject(blob)).project;
   const stored = projectsMigrateStored(legacy.project);
+  // Объект прежней сборки несёт uuid вместо номеров, а открытие нумерует его
+  // (ADR 030): метки и типы достаются по обозначению и по коду, а не по
+  // прежнему uuid.
+  const markAt = (project, label) => project.marks.find((mark) => labelOf(project, mark.id) === label).id;
+  const typeAt = (project, code) => project.markTypes.find((type) => type.code === code).id;
   assert.equal(JSON.stringify(restored.markTypes), JSON.stringify(stored.markTypes), "файл и база перевели справочник по-разному");
   assert.equal(JSON.stringify(restored.marks), JSON.stringify(stored.marks), "файл и база перевели метки по-разному");
   assert.equal(projectsMigrateStored(stored), stored, "второе открытие снова что-то переводит");
@@ -570,13 +580,13 @@ test("G68: объект с профилем выключателя до G11 (о�
   const RELAY = ["Switch", ["On"]];
   for (const project of [restored, stored]) {
     for (const code of ["В", "ВВ"]) {
-      const profile = typeDeviceOf(project, legacy.types[code]);
+      const profile = typeDeviceOf(project, typeAt(project, code));
       assert.equal(profile.kind, "switchRelay", code + ": вид остался без реле");
       assert.equal(profile.derived, false);
       assert.deepEqual(profile.services.map((service) => [service.type, service.chars]), [RELAY, KEY], code + ": реле на клавишу не встало");
     }
     const shape = (label) =>
-      markDeviceOf(project, legacy.marks[label]).services.map((service) => [service.type, service.channel, service.decoupled]);
+      markDeviceOf(project, markAt(project, label)).services.map((service) => [service.type, service.channel, service.decoupled]);
     assert.deepEqual(shape("В1"), [["Switch", 1, false], ["StatelessProgrammableSwitch", 1, false]]);
     assert.deepEqual(shape("ВВ1"), [
       ["Switch", 1, false],
@@ -588,8 +598,14 @@ test("G68: объект с профилем выключателя до G11 (о�
     // Связи «чем управляет» и прочее у меток не тронуты.
     for (const label of ["В1", "ВВ1", "В2"]) {
       const before = legacy.project.marks.find((mark) => mark.id === legacy.marks[label]);
-      const after = project.marks.find((mark) => mark.id === legacy.marks[label]);
-      assert.deepEqual(after.controls, before.controls, label + ": связи");
+      const after = project.marks.find((mark) => mark.id === markAt(project, label));
+      // Связь переехала на номер того же светильника — её переписала
+      // перенумерация, а не перевод профилей: имя нагрузки то же.
+      assert.deepEqual(
+        after.controls.map((item) => ({ ...item, id: labelOf(project, item.id) })),
+        before.controls.map((item) => ({ ...item, id: labelOf(legacy.project, item.id) })),
+        label + ": связи",
+      );
     }
   }
 });

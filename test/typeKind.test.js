@@ -32,8 +32,9 @@ import {
 } from "../src/model.js";
 import { typeIconPlan, typeSignPlan } from "../src/render.js";
 import { pickerGroupsOfKind } from "../src/panels/typePicker.js";
-import { FORMAT_VERSION, unpackProject, writeZip } from "../src/projectFile.js";
+import { FORMAT_VERSION_IDS, unpackProject, writeZip } from "../src/projectFile.js";
 
+import { legacyIdsRestored } from "./fixtures/legacyIds.js";
 const LINE = [
   { x: 0.2, y: 0.4 },
   { x: 0.8, y: 0.4 },
@@ -218,9 +219,12 @@ test("объект прежней версии формата открывает
   const { project } = markedProject();
   const old = asOldFormat(project);
   const file = await writeZip([{ name: "project.json", data: JSON.stringify(old) }]);
-  const restored = (await unpackProject(file)).project;
+  const opened = (await unpackProject(file)).project;
+  // Открытие нумерует объект (ADR 030), поэтому сверка идёт на прежних именах:
+  // перенумерация — чистое переименование и ничего больше.
+  const restored = legacyIdsRestored(old, opened);
 
-  assert.equal(restored.formatVersion, FORMAT_VERSION);
+  assert.equal(opened.formatVersion, FORMAT_VERSION_IDS);
   // Ни одна метка: ни точка, ни вершина линии, ни вид, ни смещение подписи.
   assert.deepEqual(restored.marks, old.marks);
   // Ни один номер и ни один счётчик.

@@ -53,6 +53,7 @@ import {
   renderInternals,
 } from "../src/render.js";
 
+import { legacyIdsRestored } from "./fixtures/legacyIds.js";
 const WIDTH = 1200;
 const HEIGHT = 800;
 const MARK_SIZE = 10;
@@ -511,9 +512,10 @@ test("G68: у объекта прежнего формата стопка не �
   const stacks = markStacks(opened, scheme, null, view);
   // Стопка собралась — это и есть починка невидимости…
   assert.equal(stacks.size, 2);
-  // …и при этом ни одна метка не изменилась ни на поле, ни на долю.
+  // …и при этом ни одна метка не изменилась ни на поле, ни на долю (имена
+  // сущностей в сверке — прежние: открытие нумерует объект, ADR 030).
   assert.deepEqual(
-    opened.marks,
+    legacyIdsRestored(old, opened).marks,
     old.marks.map((mark) => ({ ...mark })),
     "метка старого объекта изменилась",
   );

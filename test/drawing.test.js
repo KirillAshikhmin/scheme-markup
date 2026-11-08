@@ -23,7 +23,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   DRAWING_MM_MAX,
-  FORMAT_VERSION,
+  FORMAT_VERSION_IDS,
   OPENING_HINGES,
   OPENING_KINDS,
   OPENING_SWINGS,
@@ -82,6 +82,7 @@ import { packProject, unpackProject } from "../src/projectFile.js";
 import { mergeProjects } from "../src/merge.js";
 import { strings } from "../src/strings.js";
 
+import { legacyIdsRestored } from "./fixtures/legacyIds.js";
 // План 1200 × 800 точек, откалиброванный так, что в метре ровно 100 точек:
 // половина ширины (600 точек) объявлена шестью метрами. Тогда миллиметр — это
 // десятая доля точки, и перевод в доли считается в уме.
@@ -802,10 +803,15 @@ test("G68: объект прежней сборки доезжает через 
   //
   // Номер версии формата в сверку не входит: файл всегда сохраняется нынешней
   // версией, и её рост — не правка разметки. Проверяется он отдельной строкой.
+  //
+  // Имена сущностей в сверке возвращаются прежними (`legacyIdsRestored`):
+  // открытие нумерует объект (ADR 030), и это обязано быть чистым
+  // переименованием — всё остальное сверяется байт в байт, как и раньше.
   const strip = (value) => JSON.stringify({ ...value, formatVersion: null, markTypes: null }, null, 2);
-  assert.equal(strip(loaded), strip(JSON.parse(LEGACY_TEXT)), "в объекте без чертежа завелись новые поля");
-  assert.equal(loaded.formatVersion, FORMAT_VERSION, "файл сохраняется нынешней версией формата");
-  loaded.markTypes.forEach((type, index) => {
+  const same = legacyIdsRestored(legacyProject(), loaded);
+  assert.equal(strip(same), strip(JSON.parse(LEGACY_TEXT)), "в объекте без чертежа завелись новые поля");
+  assert.equal(loaded.formatVersion, FORMAT_VERSION_IDS, "файл сохраняется нынешней версией формата");
+  same.markTypes.forEach((type, index) => {
     const was = JSON.parse(LEGACY_TEXT).markTypes[index];
     const added = Object.keys(type).filter((key) => !Object.prototype.hasOwnProperty.call(was, key));
     assert.deepEqual(added, added.length ? ["sizes"] : [], "у типа появилось что-то кроме размеров");

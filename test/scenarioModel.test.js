@@ -37,6 +37,7 @@ import { projectsMigrateStored } from "../src/panels/projects.js";
 import { WARNING_TARGETS, warningPlace, warningsModel } from "../src/panels/warnings.js";
 import { strings } from "../src/strings.js";
 
+import { legacyIdsBefore } from "./fixtures/legacyIds.js";
 function house() {
   const added = addScheme(createProject(), { name: "1 этаж", imageId: null, width: 1000, height: 800 });
   let project = added.project;
@@ -209,39 +210,46 @@ async function projectText(project) {
   return { blob, text: new TextDecoder().decode((await readZip(blob)).get(PROJECT_ENTRY)) };
 }
 
-test("версия файла: 5 без сценариев и привязок, 6 — с ними", async () => {
+test("версия файла: лестница 5 и 6 — у объекта до номеров, 8 — у пронумерованного", async () => {
   const box = house();
   assert.equal(FORMAT_VERSION, 5);
   assert.equal(FORMAT_VERSION_SCENARIOS, 6);
-  assert.equal(projectFormatVersion(box.project), 5);
+  // Лестница 5/6 считается по содержимому и осталась верной для объекта **до**
+  // перенумерации: файл прежней сборки читается ею как читался. Снимем номера
+  // — и ответ прежний.
+  const uuids = legacyIdsBefore;
+  assert.equal(projectFormatVersion(uuids(box.project)), 5);
   const withScenario = addScenario(box.project, motionLight(box));
-  assert.equal(projectFormatVersion(withScenario.project), 6);
+  assert.equal(projectFormatVersion(uuids(withScenario.project)), 6);
   // Пустые списки — всё равно объект без сценариев.
-  assert.equal(projectFormatVersion({ ...box.project, scenarios: [], logicBindings: [] }), 5);
-  assert.equal(projectFormatVersion(deleteScenario(withScenario.project, withScenario.scenario.id).project), 5);
+  assert.equal(projectFormatVersion({ ...uuids(box.project), scenarios: [], logicBindings: [] }), 5);
+  // А объект этой сборки пронумерован, и версия у него одна — восьмая (ADR 030).
+  assert.equal(projectFormatVersion(box.project), 8);
+  assert.equal(projectFormatVersion(withScenario.project), 8);
+  assert.equal(projectFormatVersion(deleteScenario(withScenario.project, withScenario.scenario.id).project), 8);
 
   const plain = await projectText(box.project);
-  assert.equal(JSON.parse(plain.text).formatVersion, 5, "объект без сценариев пишется версией 5");
+  assert.equal(JSON.parse(plain.text).formatVersion, 8, "пронумерованный объект пишется версией 8");
   const rich = await projectText(withScenario.project);
-  assert.equal(JSON.parse(rich.text).formatVersion, 6, "объект со сценарием пишется версией 6");
-  // Прежняя сборка принимала версии не выше 5: файл со сценариями она честно
-  // отвергнет «файлом из более новой версии», а не потеряет сценарии слиянием.
+  assert.equal(JSON.parse(rich.text).formatVersion, 8, "объект со сценарием пишется версией 8");
+  // Прежняя сборка принимала версии не выше 5: такой файл она честно отвергнет
+  // «файлом из более новой версии», а не потеряет сценарии и адреса слиянием.
   assert.ok(JSON.parse(rich.text).formatVersion > 5);
 });
 
-test("файл версии 6 читается, версии 8 — честный отказ futureVersion", async () => {
+test("файл версии 8 читается, версии 9 — честный отказ futureVersion", async () => {
   const box = house();
   const project = addScenario(box.project, motionLight(box)).project;
   const text = (await projectText(project)).text;
-  assert.match(text, /"formatVersion": 6/);
-  const six = await unpackProject(await writeZip([{ name: PROJECT_ENTRY, data: text }]));
-  assert.equal(six.project.formatVersion, 6);
-  assert.equal(scenariosOf(six.project).length, 1);
+  assert.match(text, /"formatVersion": 8/);
+  const eight = await unpackProject(await writeZip([{ name: PROJECT_ENTRY, data: text }]));
+  assert.equal(eight.project.formatVersion, 8);
+  assert.equal(scenariosOf(eight.project).length, 1);
 
-  // Версия 7 — ссылка на библиотечный скрипт (таск 06 просмотра), она тоже
-  // читается; из будущего теперь всё, что выше неё.
-  const eight = await writeZip([{ name: PROJECT_ENTRY, data: text.replace('"formatVersion": 6', '"formatVersion": 8') }]);
-  await assert.rejects(unpackProject(eight), (error) => error.code === "futureVersion" && error.message.includes("8"));
+  // Версия 8 — номера вместо uuid (ADR 030), последняя из читаемых; из
+  // будущего теперь всё, что выше неё.
+  const nine = await writeZip([{ name: PROJECT_ENTRY, data: text.replace('"formatVersion": 8', '"formatVersion": 9') }]);
+  await assert.rejects(unpackProject(nine), (error) => error.code === "futureVersion" && error.message.includes("9"));
 });
 
 test("упаковано = распаковано: сценарии, привязки, профили типов и свои настройки меток", async () => {

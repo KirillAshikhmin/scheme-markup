@@ -38,6 +38,7 @@ import {
 import { WORKSHOP_GRID_STEPS_MM, workshopGridOptions } from "../src/panels/workshop.js";
 import { packProject, unpackProject } from "../src/projectFile.js";
 
+import { legacyIdsRestored } from "./fixtures/legacyIds.js";
 const HERE = dirname(fileURLToPath(import.meta.url));
 // Байты `project.json` опубликованной сборки: объект со схемой, комнатой,
 // метками, размерами и штампом — тот же файл, которым таск 123 держит чертёж.
@@ -118,10 +119,13 @@ test("G68: объект прежней сборки шага не получае
     false,
     "открытие дописало объекту шаг сетки",
   );
-  assert.deepEqual(restored.project.marks.map((mark) => mark.id), legacy.marks.map((mark) => mark.id));
-  assert.deepEqual(restored.project.marks.map((mark) => mark.number), legacy.marks.map((mark) => mark.number));
+  // Имена сущностей — на прежние: открытие нумерует объект (ADR 030), и
+  // разметка обязана остаться той же до единого поля.
+  const same = legacyIdsRestored(legacy, restored.project);
+  assert.deepEqual(same.marks.map((mark) => mark.id), legacy.marks.map((mark) => mark.id));
+  assert.deepEqual(same.marks.map((mark) => mark.number), legacy.marks.map((mark) => mark.number));
   assert.deepEqual(restored.project.marks.map((mark) => labelOf(restored.project, mark.id)), labels);
-  assert.deepEqual(restored.project.counters, legacy.counters, "счётчики нумерации тронуты");
+  assert.deepEqual(same.counters, legacy.counters, "счётчики нумерации тронуты");
   // Шаг, заданный в таком объекте, остаётся единственной правкой: метки,
   // номера и подписи после неё те же.
   const set = setGridStep(legacy, 250).project;

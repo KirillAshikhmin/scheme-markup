@@ -12,6 +12,7 @@ import { readFileSync } from "node:fs";
 
 import {
   FORMAT_VERSION,
+  FORMAT_VERSION_LIB,
   FORMAT_VERSION_MAX,
   FORMAT_VERSION_SCENARIOS,
   addLogicBinding,
@@ -35,6 +36,7 @@ import {
 import { scenariosUpdateLib } from "../src/panels/scenarios.js";
 import { simHouse } from "./fixtures/simHome.js";
 
+import { legacyIdsBefore } from "./fixtures/legacyIds.js";
 const SPRUT = new URL("./fixtures/sprut/", import.meta.url);
 const WEB = new URL("../web/scenarios/", import.meta.url);
 
@@ -83,42 +85,47 @@ async function jsonOf(project) {
 
 // ——— версия формата ————————————————————————————————————————————————————————
 
-test("версия файла: 7 — только у объекта со ссылкой на библиотеку", async () => {
+test("версия файла: 7 — ступень ссылки на библиотеку, у пронумерованного объекта — 8", async () => {
   assert.equal(FORMAT_VERSION, 5);
   assert.equal(FORMAT_VERSION_SCENARIOS, 6);
-  assert.equal(FORMAT_VERSION_MAX, 7);
+  assert.equal(FORMAT_VERSION_LIB, 7);
+  assert.equal(FORMAT_VERSION_MAX, 8);
 
   const source = sprutSource("HideIfTurnOn.js");
   const lib = library([{ key: "HideIfTurnOn", name: "Скрыть при включении", source }]);
   const made = logicProject([{ name: "Скрыть при включении", source }]);
-  assert.equal(projectFormatVersion(made.project), 6, "объект с текстом сценария — версия 6");
+  // Ступени 6 и 7 считаются по содержимому и отвечают объекту **до**
+  // перенумерации: файл прежней сборки читается ими как читался.
+  assert.equal(projectFormatVersion(legacyIdsBefore(made.project)), 6, "объект с текстом сценария — версия 6");
 
   const pinned = migrateScenarioLib(made.project, lib.door);
   assert.equal(pinned.changed, true);
-  assert.equal(projectFormatVersion(pinned.project), 7, "объект со ссылкой — версия 7");
-  // Ссылки больше нет — версия возвращается на 6: её считает содержимое, а не
+  assert.equal(projectFormatVersion(legacyIdsBefore(pinned.project)), 7, "объект со ссылкой — версия 7");
+  // Ссылки больше нет — версия возвращается на 5: её считает содержимое, а не
   // отметка в поле.
-  assert.equal(projectFormatVersion(deleteScenario(pinned.project, made.ids[0]).project), 5);
+  assert.equal(projectFormatVersion(legacyIdsBefore(deleteScenario(pinned.project, made.ids[0]).project)), 5);
+  // А объект этой сборки пронумерован, и версия у него одна — восьмая (ADR 030).
+  assert.equal(projectFormatVersion(pinned.project), 8);
 
   const written = await jsonOf(pinned.project);
-  assert.equal(written.formatVersion, 7, "файл пишется версией 7");
+  assert.equal(written.formatVersion, 8, "файл пишется версией 8");
   assert.equal(written.scenarios[0].source, undefined, "текста скрипта в файле больше нет");
   assert.ok(JSON.stringify(written).length < JSON.stringify(await jsonOf(made.project)).length - source.length / 2, "файл стал короче");
 });
 
-test("файл версии 7 читается, версии 8 — честный отказ futureVersion", async () => {
+test("файл версии 8 читается, версии 9 — честный отказ futureVersion", async () => {
   const source = sprutSource("MotionLightAutomation.js");
   const lib = library([{ key: "MotionLightAutomation", name: "Свет по движению", source }]);
   const made = logicProject([{ name: "Свет по движению", source }]);
   const pinned = migrateScenarioLib(made.project, lib.door).project;
   const text = JSON.stringify(await jsonOf(pinned), null, 2);
 
-  const seven = await unpackProject(await writeZip([{ name: PROJECT_ENTRY, data: text }]));
-  assert.equal(seven.project.formatVersion, 7);
-  assert.deepEqual(scenarioLibOf(seven.project.scenarios[0]), scenarioLibOf(pinned.scenarios[0]));
+  const eight = await unpackProject(await writeZip([{ name: PROJECT_ENTRY, data: text }]));
+  assert.equal(eight.project.formatVersion, 8);
+  assert.deepEqual(scenarioLibOf(eight.project.scenarios[0]), scenarioLibOf(pinned.scenarios[0]));
 
-  const eight = await writeZip([{ name: PROJECT_ENTRY, data: text.replace('"formatVersion": 7', '"formatVersion": 8') }]);
-  await assert.rejects(unpackProject(eight), (error) => error.code === "futureVersion" && error.message.includes("8"));
+  const nine = await writeZip([{ name: PROJECT_ENTRY, data: text.replace('"formatVersion": 8', '"formatVersion": 9') }]);
+  await assert.rejects(unpackProject(nine), (error) => error.code === "futureVersion" && error.message.includes("9"));
 });
 
 // ——— только побайтовое совпадение ———————————————————————————————————————————
@@ -263,7 +270,7 @@ test("упаковано = распаковано: ссылка, привязк�
   const restored = (await unpackProject(blob)).project;
   assert.deepEqual(restored.scenarios, project.scenarios, "сценарии вернулись поле в поле");
   assert.deepEqual(restored.logicBindings, project.logicBindings);
-  assert.equal(restored.formatVersion, 7);
+  assert.equal(restored.formatVersion, 8);
 });
 
 test("unpackProject отдаёт writtenAt из writer.json, а битую отметку не выдумывает", async () => {

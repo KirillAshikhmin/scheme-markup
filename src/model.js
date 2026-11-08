@@ -75,7 +75,25 @@ export const FORMAT_VERSION_SCENARIOS = 6;
 //     библиотечным (`migrateScenarioLib`, G24.1): скрипт, поправленный своей
 //     рукой, остаётся текстом в объекте, и подменять его библиотечным нельзя
 //     ни при каких обстоятельствах.
-export const FORMAT_VERSION_MAX = 7;
+export const FORMAT_VERSION_LIB = 7;
+
+// 8 — номера вместо uuid (`idsMigrate`, сборка «связь метки и вещи», G08–G11;
+//     ADR 030). Здесь кончается лестница «версия по содержимому»: прежние
+//     ступени поднимала **новая коллекция или новое поле**, а эта —
+//     идентификатор **каждой** сущности. Объект, прошедший открытие, пронумерован
+//     целиком, поэтому версию 8 получает любой объект этой сборки, а не только
+//     тот, у кого завелось что-то новое.
+//
+//     Что теряет прежняя сборка, прочитав такой файл: адрес аксессуара она
+//     считает хэшем от id (`deviceAid` до таска 04), и у метки с номером
+//     получила бы совсем другой адрес — живые адреса в опциях привязок логики
+//     (`logicBindings[].options`) указали бы в пустоту, а дом пошёл бы «как
+//     будто датчик не привязан». Связь метки с вещью (`mark.objectId`) она
+//     тоже не знает и потеряла бы её при слиянии папки. Поэтому честный отказ
+//     «файл сделан более новой версией» лучше тихой потери.
+export const FORMAT_VERSION_IDS = 8;
+
+export const FORMAT_VERSION_MAX = 8;
 
 // Условные обозначения, которые предлагает сетка выбора. Их различают на
 // чёрно-белой распечатке в размере метки, поэтому семейства разведены контуром,
@@ -1138,8 +1156,15 @@ function idMint(project) {
 //   — `project.id`, `project.key`, `scheme.imageId` — ключи в хранилищах
 //     браузера, общих для всех объектов (G08.1). Номер им не положен;
 //   — `mark.controls` («чем управляет»), `mark.device.doorId`, дерево блоков
-//     сценария и ключи принятых предупреждений — ссылки непростой формы, и
-//     каждая переписывается своим куском `idsMigrate` поимённо.
+//     сценария, ключи принятых предупреждений и адреса аксессуаров в опциях
+//     привязок логики — ссылки непростой формы, и каждая переписывается своим
+//     куском `idsMigrate` поимённо;
+//   — **собственные `id` блоков внутри сценария** (`scenario.targets[].id` и
+//     так далее вглубь). Это не сущности объекта, а ключи узлов дерева: ими
+//     живёт только редактор блоков (`scenarioTree.js`), и ни одна коллекция,
+//     ни один сценарий и ни одна привязка на них не ссылаются. Поэтому они
+//     остаются такими, какими их записал редактор, — в объектах заказчика это
+//     единственные uuid, уцелевшие после перенумерации.
 const ID_OWNERS = [
   // Метки первыми — слова заказчика «начиная с 1»: в готовом объекте они и
   // получают 1…N подряд.
@@ -1303,7 +1328,10 @@ export function createProject(template) {
   const source = template && template.categories && template.markTypes ? clone(template) : defaultTemplate();
   const stamp = nowIso();
   const project = {
-    formatVersion: FORMAT_VERSION,
+    // Версия, которой пишет эта сборка: сущности нового объекта пронумерованы
+    // с рождения (ADR 030), и прежняя сборка посчитала бы адреса аксессуаров
+    // по-своему. Та же версия выходит и из `projectFormatVersion`.
+    formatVersion: FORMAT_VERSION_IDS,
     // Номер объекту **не положен**: его `id` и `key` — ключи в хранилищах
     // браузера, общих для всех объектов, и два объекта с номером 1 затёрли бы
     // друг друга (G08.1). То же у `scheme.imageId`: это ключ подложки в общем
@@ -10986,9 +11014,111 @@ export function idsMigrate(project) {
   }
   for (const was of twice) all.delete(was);
 
-  const patch = idsRewrite(project, maps, all);
+  const patch = idsRewrite(project, maps, all, idsAidMoves(project, maps.get("marks")));
   patch.counters = { ...project.counters, [ID_COUNTER_KEY]: last };
   return { project: { ...project, ...patch }, changed: true, renumbered: last };
+}
+
+// ——— адрес аксессуара в опциях привязки логики ——————————————————————————
+//
+// **Пятая ссылка непростой формы, и единственная, которая ссылается не
+// идентификатором.** Логический сценарий хаба сам собирает список устройств из
+// адресов (`getUUID`: аксессуар `aid`, сервис `aid.sid`, характеристика
+// `aid.sid.cid`), человек выбирает строку в окне «Опции», и выбранный **адрес
+// строкой** ложится в `logicBindings[].options`. В объектах заказчика это
+// живые ссылки: тринадцать адресов на четыре объекта — датчики движения,
+// ручное управление, датчики влажности, «не трогать этот аксессуар».
+//
+// Перенумерация меняет `aid` (он и есть номер метки, ADR 012 + таск 04),
+// поэтому адрес в опциях обязан переехать вместе с меткой. Не переедет — дом
+// пойдёт, но сценарий «включать свет по датчику» датчика не найдёт, и человек
+// об этом узнает не сразу: отличить «датчик не привязан» от «привязан не туда»
+// на глаз нельзя.
+//
+// В **текстах** сценариев адреса трогать не надо: разбор объектов заказчика
+// показал, что числами там стоят только константы (`100000`, `86400000`) и
+// адреса в комментариях. Цена, принятая заказчиком, относится именно к текстам:
+// адрес, вписанный рукой в исходник, после перенумерации указывает в пустоту, и
+// об этом говорит журнал.
+const ID_ADDRESS_RE = /^([0-9]+)((?:\.[0-9]+){0,2})$/;
+
+// Адрес аксессуара, каким его считала сборка **до** номеров: FNV-1a по строке
+// `mark.id` в диапазон 100000000…999999999, совпадения разведены пробой вверх
+// по кольцу в порядке id (`deviceAid`/`deviceAidsOf` в `sim/home.js` до таска
+// 04). Надгробие: ничего, кроме миграции, этого счёта больше не знает и знать
+// не должно — но без него адреса в опциях готового объекта не переселить, а
+// заказчик их не вписывал руками, их выбрала сборка.
+const ID_LEGACY_AID_MIN = 100000000;
+const ID_LEGACY_AID_MAX = 999999999;
+const ID_LEGACY_AID_TEXT = new TextEncoder();
+
+function idsLegacyAid(markId) {
+  let hash = 0x811c9dc5;
+  for (const byte of ID_LEGACY_AID_TEXT.encode(String(markId))) {
+    hash ^= byte;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return ID_LEGACY_AID_MIN + (hash % (ID_LEGACY_AID_MAX - ID_LEGACY_AID_MIN + 1));
+}
+
+function idsLegacyAids(project) {
+  const ids = (Array.isArray(project.marks) ? project.marks : [])
+    .map((mark) => mark && mark.id)
+    .filter((id) => typeof id === "string")
+    .sort();
+  const taken = new Set();
+  const aids = new Map();
+  for (const id of ids) {
+    if (aids.has(id)) continue;
+    let aid = idsLegacyAid(id);
+    while (taken.has(aid)) aid = aid === ID_LEGACY_AID_MAX ? ID_LEGACY_AID_MIN : aid + 1;
+    taken.add(aid);
+    aids.set(id, aid);
+  }
+  return aids;
+}
+
+/**
+ * Переезд адресов: `Map<было, стало>` строками, по переезду **меток**.
+ *
+ * Собирается отдельно от таблиц идентификаторов, а не берётся из них, и это не
+ * лишний проход: номер уникален по всем видам, но `aid` — номер **метки**, и
+ * переезд стены с номера 17 не вправе задеть адрес `17.13.15`.
+ *
+ * Прежний адрес метки — её номер, если он у неё был, и хэш прежней сборки,
+ * если id был uuid. Новый — всегда номер: не номер (такого в итоге
+ * перенумерации не бывает) — адреса у метки нет, и переселять нечего.
+ */
+function idsAidMoves(project, markMoves) {
+  const moves = new Map();
+  if (!markMoves || markMoves.size === 0) return moves;
+  let legacy = null;
+  for (const mark of Array.isArray(project.marks) ? project.marks : []) {
+    const was = mark && mark.id;
+    const now = markMoves.get(was);
+    if (now === undefined || idNumberOf(now) === null) continue;
+    const from = idNumberOf(was);
+    if (from !== null) {
+      moves.set(String(from), String(idNumberOf(now)));
+      continue;
+    }
+    if (legacy === null) legacy = idsLegacyAids(project);
+    const old = legacy.get(was);
+    if (old !== undefined) moves.set(String(old), String(idNumberOf(now)));
+  }
+  return moves;
+}
+
+// Один адрес: переезжает **аксессуарная** часть, сервис и характеристика
+// остаются своими номерами (они считаются из профиля и перенумерации не
+// касаются). Значение не похоже на адрес или аксессуар не переезжал — то же
+// значение.
+function idsMovedAddress(value, aids) {
+  if (typeof value !== "string") return value;
+  const match = ID_ADDRESS_RE.exec(value);
+  if (!match) return value;
+  const moved = aids.get(match[1]);
+  return moved === undefined ? value : moved + match[2];
 }
 
 /**
@@ -10997,13 +11127,15 @@ export function idsMigrate(project) {
  * дописывается, G68).
  *
  * `maps` — `Map<коллекция, Map<было, стало>>` из таблицы `ID_OWNERS`; `all` —
- * та же замена без разбора по коллекциям, для ключей принятых предупреждений.
+ * та же замена без разбора по коллекциям, для ключей принятых предупреждений;
+ * `aids` — переезд адресов аксессуаров для опций привязок логики
+ * (`idsAidMoves`).
  *
  * Двух таких проходов в сборке быть не должно: `idsMigrate` зовёт его на весь
  * объект, `idsReplace` — на поимённо названные номера, и переписывают они
  * одно и то же место.
  */
-function idsRewrite(project, maps, all) {
+function idsRewrite(project, maps, all, aids) {
   const moveBy = (collection, value) => {
     const map = maps.get(collection);
     const moved = map ? map.get(value) : undefined;
@@ -11065,6 +11197,23 @@ function idsRewrite(project, maps, all) {
     );
   }
 
+  // Опции привязки логики: выбранный человеком **адрес аксессуара** строкой.
+  // Переезжает аксессуарная часть адреса; остальные опции (числа, выключатели,
+  // имена) остаются как есть.
+  if (Array.isArray(patch.logicBindings) && aids && aids.size > 0) {
+    patch.logicBindings = patch.logicBindings.map((binding) => {
+      if (!deviceObject(binding) || !deviceObject(binding.options)) return binding;
+      let options = binding.options;
+      for (const [key, value] of Object.entries(binding.options)) {
+        const moved = idsMovedAddress(value, aids);
+        if (moved === value) continue;
+        if (options === binding.options) options = { ...binding.options };
+        options[key] = moved;
+      }
+      return options === binding.options ? binding : { ...binding, options };
+    });
+  }
+
   // Принятые предупреждения: ответ «так и задумано» привязан к ключу, а в ключе
   // стоят идентификаторы. Не перепиши их — и человек получил бы заново весь
   // список вопросов, на которые уже ответил.
@@ -11101,9 +11250,14 @@ export function idsReplace(project, replacements) {
   for (const [was, now] of all) if (was === now || now == null) all.delete(was);
   if (all.size === 0) return { project, changed: false };
   // Номер уникален по всем видам сразу, поэтому разбор по коллекциям здесь не
-  // нужен: одна и та же таблица отвечает каждой.
+  // нужен: одна и та же таблица отвечает каждой. Адреса аксессуаров — разбор
+  // нужен: `aid` — номер метки, и переезд стены с того же номера адресов не
+  // касается.
   const maps = new Map(ID_OWNERS.map((owner) => [owner.key, all]));
-  return { project: { ...project, ...idsRewrite(project, maps, all) }, changed: true };
+  return {
+    project: { ...project, ...idsRewrite(project, maps, all, idsAidMoves(project, all)) },
+    changed: true,
+  };
 }
 
 /**
@@ -11919,16 +12073,24 @@ function dropLogicBindings(project, removed) {
 }
 
 /**
- * Версия формата файла по содержимому: `FORMAT_VERSION_MAX` (7) — у объекта,
- * где хотя бы один сценарий стоит на ссылке в библиотеку (`scenario.lib`);
+ * Версия формата файла по содержимому: `FORMAT_VERSION_IDS` (8) — у объекта,
+ * где сущности пронумерованы (`idsMigrate`, ADR 030); `FORMAT_VERSION_LIB` (7)
+ * — где хотя бы один сценарий стоит на ссылке в библиотеку (`scenario.lib`);
  * `FORMAT_VERSION_SCENARIOS` (6) — где есть сценарий или привязка логики;
- * иначе `FORMAT_VERSION` (5). Объект без сценариев читается прежней сборкой
- * как раньше, со сценариями и со ссылками — честно не читается (см. историю
- * версий выше).
+ * иначе `FORMAT_VERSION` (5).
+ *
+ * Лестница ниже восьмёрки осталась не для красоты: объект **до** перенумерации
+ * (файл прежней сборки, объект, собранный руками в тесте) читается прежней
+ * сборкой ровно так, как читался, и врать ему восьмёркой нельзя. Но всякий
+ * объект, прошедший открытие, пронумерован целиком — и поэтому эта сборка
+ * пишет восьмёрку всегда.
  */
 export function projectFormatVersion(project) {
+  // Номер хоть у одной сущности — значит объект прошёл перенумерацию: она
+  // нумерует **всё или ничего**, и половинчатого объекта не бывает.
+  if (idFloor(project) > 0) return FORMAT_VERSION_IDS;
   const list = scenariosList(project);
-  if (list.some((item) => scenarioLibOf(item))) return FORMAT_VERSION_MAX;
+  if (list.some((item) => scenarioLibOf(item))) return FORMAT_VERSION_LIB;
   return list.length > 0 || logicBindingsList(project).length > 0 ? FORMAT_VERSION_SCENARIOS : FORMAT_VERSION;
 }
 

@@ -31,6 +31,7 @@ import {
 } from "../src/model.js";
 import { packProject, unpackProject } from "../src/projectFile.js";
 
+import { legacyIdsForward, legacyIdsRestored } from "./fixtures/legacyIds.js";
 const WIDTH = 1200;
 const HEIGHT = 800;
 const MARK_SIZE = 10;
@@ -186,21 +187,25 @@ test("G68: группа из объекта прежнего формата от
     view: { markSize: 10, labelSize: 12 },
   };
   const opened = (await unpackProject(await packProject(old, new Map()))).project;
-  // Открылся как закрывался: ни одна метка не изменилась ни на поле, ни на долю.
-  assert.deepEqual(opened.marks, old.marks.map((mark) => ({ ...mark })), "метка старого объекта изменилась");
-  assert.deepEqual(opened.groups, old.groups.map((group) => ({ ...group })), "группа старого объекта изменилась");
+  // Открылся как закрывался: ни одна метка не изменилась ни на поле, ни на
+  // долю. Имена сущностей в сверке — прежние: открытие нумерует объект
+  // (ADR 030), и перенумерация обязана быть чистым переименованием.
+  const same = legacyIdsRestored(old, opened);
+  const id = (was) => legacyIdsForward(old, opened).get(was) || was;
+  assert.deepEqual(same.marks, old.marks.map((mark) => ({ ...mark })), "метка старого объекта изменилась");
+  assert.deepEqual(same.groups, old.groups.map((group) => ({ ...group })), "группа старого объекта изменилась");
 
   // А новое правило на неё распространяется — это исправление, а не поломка:
   // взяли вторую метку, поехали обе.
-  const ids = canvasMoveIds(opened, "mark-2", "group-1", false);
-  assert.deepEqual(ids, ["mark-1", "mark-2"]);
+  const ids = canvasMoveIds(opened, id("mark-2"), id("group-1"), false);
+  assert.deepEqual(ids, [id("mark-1"), id("mark-2")]);
   const after = canvasMoveMarks(opened, ids, { x: 0.1, y: 0 });
   assert.deepEqual(
     after.marks.map((mark) => mark.points[0].x.toFixed(6)),
     ["0.500000", "0.520000"],
   );
   // Перенос — обычная правка координат: ничего, кроме точек, не тронуто.
-  for (const mark of after.marks) {
+  for (const mark of legacyIdsRestored(old, after).marks) {
     const was = old.marks.find((item) => item.id === mark.id);
     assert.deepEqual({ ...mark, points: was.points }, was, "перенос блока тронул не только координаты");
   }

@@ -2,11 +2,13 @@
 // Zip пишется и читается здесь же, без библиотек: CompressionStream("deflate-raw")
 // там, где он есть, и «stored» (без сжатия) там, где его нет. Читаются оба варианта.
 import { strings, text } from "./strings.js";
-import { migrateDevices } from "./deviceMigrate.js";
+import { migrateDevices, migrateThingMarks } from "./deviceMigrate.js";
 import {
   FORMAT_VERSION,
+  FORMAT_VERSION_IDS,
   FORMAT_VERSION_MAX,
   fillTypeSizes,
+  idsMigrate,
   migrateCommentType,
   migrateScenarioLib,
   migrateScenarios,
@@ -14,7 +16,9 @@ import {
   projectFormatVersion,
 } from "./model.js";
 
-export { FORMAT_VERSION };
+// `FORMAT_VERSION` — историческая пятёрка (объект без сценариев прежней
+// сборки); `FORMAT_VERSION_IDS` — версия, которой пишет эта сборка (ADR 030).
+export { FORMAT_VERSION, FORMAT_VERSION_IDS };
 
 export const PROJECT_ENTRY = "project.json";
 export const SCHEMES_DIR = "schemes/";
@@ -402,12 +406,21 @@ function migrateProject(loaded, options = {}) {
   // библиотечным побайтово, уезжает в `scenario.lib`; без реестра — ничего.
   // Аксессуары (правка после сборки сценариев): выключатель без реле — с
   // реле, кондиционер — термостат; ссылки сценариев переезжают вслед.
-  const migrated = migrateDevices(
-    migrateScenarioLib(
-      migrateScenarios(fillTypeSizes(migrateCommentType(migrateTypeKinds(filled).project).project).project).project,
-      options.library,
+  // Номера вместо uuid (G08–G11, ADR 030) — **после** миграций, которые
+  // удаляют сущности (комментарий-тип, нечитаемый сценарий), чтобы ушедшее не
+  // съедало номера, и **до** перевода аксессуаров: тот переселяет адреса в
+  // опциях привязок, а адрес — это номер метки, и считать его он умеет только
+  // у пронумерованного объекта. Следом метки приборов получают вещи: их номера
+  // идут за номерами всего прежнего.
+  const numbered = migrateThingMarks(
+    idsMigrate(
+      migrateScenarioLib(
+        migrateScenarios(fillTypeSizes(migrateCommentType(migrateTypeKinds(filled).project).project).project).project,
+        options.library,
+      ).project,
     ).project,
   ).project;
+  const migrated = migrateDevices(numbered).project;
   // Миграция могла убрать нечитаемые записи — версия считается по итогу.
   const current = projectFormatVersion(migrated);
   return migrated.formatVersion === current ? migrated : { ...migrated, formatVersion: current };

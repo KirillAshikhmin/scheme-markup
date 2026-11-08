@@ -39,7 +39,7 @@ import {
   updateType,
   validate,
 } from "../src/model.js";
-import { packProject, unpackProject, FORMAT_VERSION } from "../src/projectFile.js";
+import { packProject, unpackProject, FORMAT_VERSION_IDS } from "../src/projectFile.js";
 import {
   objectViewByName,
   objectViewFamily,
@@ -52,6 +52,7 @@ import { strings, text } from "../src/strings.js";
 import { typeViewGroups, typesViewsInUse, typesTemplateFrom } from "../src/panels/types.js";
 import { warningsModel } from "../src/panels/warnings.js";
 
+import { legacyIdsRestored } from "./fixtures/legacyIds.js";
 const HERE = dirname(fileURLToPath(import.meta.url));
 // Байты `project.json` объекта, **созданного до таска 135**: полный стартовый
 // справочник, шесть меток, нумерация — и ни одного имени изображения. Ровно так
@@ -244,10 +245,12 @@ test("G68: старый объект доезжает через файл без
   const file = await packProject(project, new Map());
   const { project: loaded } = await unpackProject(file);
   // Сверка та же, что у таска 123: версия формата не в счёте (файл всегда
-  // сохраняется нынешней), всё остальное — байт в байт.
+  // сохраняется нынешней), всё остальное — байт в байт. Имена сущностей
+  // возвращаются прежними (`legacyIdsRestored`): открытие нумерует объект
+  // (ADR 030), и перенумерация обязана быть **чистым** переименованием.
   const strip = (value) => JSON.stringify({ ...value, formatVersion: null }, null, 2);
-  assert.equal(strip(loaded), strip(legacy()), "открытие старого объекта что-то в нём поправило");
-  assert.equal(loaded.formatVersion, FORMAT_VERSION);
+  assert.equal(strip(legacyIdsRestored(legacy(), loaded)), strip(legacy()), "открытие старого объекта что-то в нём поправило");
+  assert.equal(loaded.formatVersion, FORMAT_VERSION_IDS);
   // Ни у одного типа не появилось ни `view`, ни `icon` — в отличие от размеров
   // (D28), которые миграция и правда проставляет. Разница названа вслух:
   // размер у типа без размеров — это ноль сведений, а изображение решает
@@ -257,9 +260,10 @@ test("G68: старый объект доезжает через файл без
     assert.ok(!Object.prototype.hasOwnProperty.call(type, "view"), type.code + ": миграция задала изображение");
     assert.ok(!Object.prototype.hasOwnProperty.call(type, "icon"), type.code + ": миграция задала изображение");
   }
-  // Метки, номера и подписи — те же.
-  assert.deepEqual(loaded.marks, legacy().marks);
-  assert.deepEqual(loaded.counters, legacy().counters);
+  // Метки, номера и подписи — те же (имена — на прежних, см. выше).
+  const same = legacyIdsRestored(legacy(), loaded);
+  assert.deepEqual(same.marks, legacy().marks);
+  assert.deepEqual(same.counters, legacy().counters);
   assert.deepEqual(
     loaded.marks.map((mark) => labelOf(loaded, mark.id)),
     legacy().marks.map((mark) => labelOf(legacy(), mark.id)),
