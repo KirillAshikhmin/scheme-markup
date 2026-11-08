@@ -594,7 +594,9 @@ export function openDeviceWindow({
       body.replaceChildren(
         ...[
           hint ? uiEl("p", { class: "modal__hint", text: hint }) : null,
-          readOnly ? uiEl("p", { class: "device__viewOnly", text: readOnlyNote || strings.deviceWindow.viewOnly }) : null,
+          readOnly && (readOnlyNote === null || readOnlyNote !== "")
+            ? uiEl("p", { class: "device__viewOnly", text: readOnlyNote || strings.deviceWindow.viewOnly })
+            : null,
           aidLine(model),
           kindSection(model),
           uiEl("div", { class: "device__group" }, [

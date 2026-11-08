@@ -416,7 +416,8 @@ function mountViewStart(host, api) {
       const agreed = await uiConfirm({
         title: strings.view.replaceTitle,
         message: text("view.replaceMessage", { name: saved.name, next: loaded.project.name }),
-        confirmLabel: strings.view.open,
+        // Кнопка называет то, откуда объект пришёл: файл или ссылка.
+        confirmLabel: options.linkKey ? strings.view.replaceConfirmLink : strings.view.open,
         confirmClass: "ui-btn ui-btn--accent",
       });
       if (!agreed) return false;

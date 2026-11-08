@@ -3669,7 +3669,7 @@ const SEARCH_FIELDS = [
   { field: "room", rank: 9 },
 ];
 
-export function searchProject(project, query) {
+export function searchProject(project, query, { comments = true } = {}) {
   const needle = String(query == null ? "" : query).trim().toLowerCase();
   if (!project || needle === "") return [];
   const order = new Map(schemesInOrder(project).map((scheme, index) => [scheme.id, index]));
@@ -3680,7 +3680,7 @@ export function searchProject(project, query) {
     const values = {
       label: labelOf(project, mark.id) || "",
       location: mark.location || "",
-      original: mark.original || "",
+      original: comments ? mark.original || "" : "",
       room: room ? room.name : "",
     };
     let best = null;

@@ -3002,7 +3002,7 @@ function createVolume({ api, hosts }) {
     // поля: выделение остаётся — рамкой на самой вещи и строкой в списке.
     if (cardForced && !(selected.length === 1 && selected[0] === cardForced)) cardForced = null;
     const shown = selected.length === 1 && (volumeParamsRead().hideCard !== true || cardForced === selected[0]);
-    const model = shown ? markCardModel(state.project, selected[0], { viewer: appKind() === "view" }) : null;
+    const model = shown ? markCardModel(state.project, selected[0], { viewer: !appAllows("integratorComment", state) }) : null;
     if (homeCard) homeCard.dispose();
     homeCard = null;
     card.hidden = !model;

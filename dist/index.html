@@ -1111,6 +1111,36 @@ color: var(--ok);
 .file__picker {
 display: none;
 }
+.file__save {
+position: relative;
+display: flex;
+}
+.file__drop {
+position: absolute;
+top: calc(100% + 4px);
+right: 0;
+min-width: 160px;
+z-index: 40;
+display: flex;
+flex-direction: column;
+gap: 2px;
+padding: 6px;
+border: 1px solid var(--panel-line);
+border-radius: 8px;
+background: var(--panel-bg);
+box-shadow: 0 18px 44px rgba(1, 4, 9, 0.6);
+}
+.file__dropItem {
+width: 100%;
+justify-content: flex-start;
+border-color: transparent;
+background: none;
+text-align: left;
+}
+.file__dropItem:hover:not(:disabled) {
+background: #21262d;
+border-color: var(--panel-line);
+}
 .filters {
 display: flex;
 flex-direction: column;
@@ -6865,6 +6895,7 @@ forgetMessage:
 forgetDone: "Объект стёрт из браузера",
 replaceTitle: "Открыть другой объект?",
 replaceMessage: "В браузере лежит объект «{name}». Открыть вместо него «{next}»?",
+replaceConfirmLink: "Открыть объект",
 madeAt: "Выгружено {date}",
 madeAtHint: "Когда интегратор собрал этот объект",
 linkBroken: "Ссылка повреждена или обрезана — попросите интегратора прислать новую",
@@ -7795,7 +7826,11 @@ readme: `Разметка схем — файл проекта
   project.json читается любым текстовым редактором, а схемы открываются как
   обычные картинки: данные не пропадут, даже если программы не окажется.`,
 save: "Экспорт",
-saveHint: "Скачать объект одним zip-архивом (Ctrl+S)",
+saveHint: "Сохранить объект: в файл или ссылкой (Ctrl+S — сразу в файл)",
+saveToFile: "В файл",
+saveToFileHint: "Скачать объект одним zip-архивом (Ctrl+S)",
+saveLink: "Ссылкой",
+saveLinkHint: "Собрать ссылку, по которой заказчик откроет объект в просмотре",
 exportStateFresh: "выгружено {ago}, невыгруженных правок нет",
 exportStateStale: "выгружено {ago}, после этого объект правили",
 exportStateOld: "выгружено {ago} — давно",
@@ -15397,7 +15432,7 @@ const SEARCH_FIELDS = [
 { field: "original", rank: 6 },
 { field: "room", rank: 9 },
 ];
-function searchProject(project, query) {
+function searchProject(project, query, { comments = true } = {}) {
 const needle = String(query == null ? "" : query).trim().toLowerCase();
 if (!project || needle === "") return [];
 const order = new Map(schemesInOrder(project).map((scheme, index) => [scheme.id, index]));
@@ -15408,7 +15443,7 @@ const room = mark.roomId ? findRoom(project, mark.roomId) : null;
 const values = {
 label: labelOf(project, mark.id) || "",
 location: mark.location || "",
-original: mark.original || "",
+original: comments ? mark.original || "" : "",
 room: room ? room.name : "",
 };
 let best = null;
@@ -44848,6 +44883,7 @@ editRooms: ["desktop"],
 editProject: ["desktop"],
 dictionary: ["desktop"],
 editHints: ["desktop", "mobile"],
+integratorComment: ["desktop", "mobile"],
 viewSizes: ["desktop", "mobile"],
 };
 function layoutModeFor(view, override) {
@@ -50511,7 +50547,9 @@ const model = deviceWindowModel(draft, channels, { aid });
 body.replaceChildren(
 ...[
 hint ? uiEl("p", { class: "modal__hint", text: hint }) : null,
-readOnly ? uiEl("p", { class: "device__viewOnly", text: readOnlyNote || strings.deviceWindow.viewOnly }) : null,
+readOnly && (readOnlyNote === null || readOnlyNote !== "")
+? uiEl("p", { class: "device__viewOnly", text: readOnlyNote || strings.deviceWindow.viewOnly })
+: null,
 aidLine(model),
 kindSection(model),
 uiEl("div", { class: "device__group" }, [
@@ -58570,6 +58608,10 @@ primary: actions[actions.length - 1],
 });
 refreshHint();
 }
+function exportLinkAvailability(state) {
+const project = state && state.project ? state.project : null;
+return !project ? strings.exportPanel.linkNoProject : !brotliReachable() ? strings.exportPanel.linkNoCodec : null;
+}
 function exportMenuItems(state) {
 const project = state && state.project ? state.project : null;
 const marks = project ? project.marks.length : 0;
@@ -58598,7 +58640,7 @@ reason: walls === 0 ? strings.elevationSheet.noWalls : null,
 id: "link",
 label: strings.exportPanel.link,
 hint: strings.exportPanel.linkHint,
-reason: !project ? strings.exportPanel.linkNoProject : !brotliReachable() ? strings.exportPanel.linkNoCodec : null,
+reason: exportLinkAvailability(state),
 },
 ];
 }
@@ -58831,7 +58873,55 @@ let fileAdoptedKey = null;
 const saveButton = uiIconLabelButton("fileSave", strings.file.save, {
 class: "ui-btn ui-btn--accent",
 title: strings.file.saveHint,
-on: { click: () => saveToFile() },
+on: { click: () => setSaveMenu(!saveMenuOpen) },
+});
+saveButton.setAttribute("aria-haspopup", "menu");
+saveButton.setAttribute("aria-expanded", "false");
+let saveMenuOpen = false;
+const saveMenu = uiEl("div", { class: "file__drop", attrs: { role: "menu" } });
+saveMenu.hidden = true;
+const saveToFileItem = uiButton(strings.file.saveToFile, {
+class: "ui-btn file__dropItem",
+title: strings.file.saveToFileHint,
+attrs: { role: "menuitem" },
+on: {
+click: () => {
+setSaveMenu(false);
+saveToFile();
+},
+},
+});
+const saveLinkItem = uiButton(strings.file.saveLink, {
+class: "ui-btn file__dropItem",
+title: strings.file.saveLinkHint,
+attrs: { role: "menuitem" },
+on: {
+click: () => {
+if (saveLinkItem.disabled) return;
+setSaveMenu(false);
+exportLinkDialog(api);
+},
+},
+});
+saveMenu.append(saveToFileItem, saveLinkItem);
+const saveBox = uiEl("div", { class: "file__save" }, [saveButton, saveMenu]);
+function setSaveMenu(value) {
+saveMenuOpen = Boolean(value);
+saveButton.setAttribute("aria-expanded", saveMenuOpen ? "true" : "false");
+saveMenu.hidden = !saveMenuOpen;
+if (!saveMenuOpen) return;
+const reason = exportLinkAvailability(getState());
+saveLinkItem.disabled = Boolean(reason);
+saveLinkItem.title = reason || strings.file.saveLinkHint;
+}
+document.addEventListener("pointerdown", (event) => {
+if (saveMenuOpen && !saveBox.contains(event.target)) setSaveMenu(false);
+});
+document.addEventListener("keydown", (event) => {
+if (!saveMenuOpen || event.key !== "Escape" || uiDialogDepth() > 0) return;
+event.preventDefault();
+setSaveMenu(false);
+saveButton.focus();
 });
 const exportDot = uiEl("span", { class: "file__dot", attrs: { "aria-hidden": "true" } });
 saveButton.prepend(exportDot);
@@ -58855,7 +58945,7 @@ if (chosen) await openFromFile(chosen);
 },
 },
 });
-const row = uiEl("div", { class: "file" }, [folderButton, openButton, saveButton, picker]);
+const row = uiEl("div", { class: "file" }, [folderButton, openButton, saveBox, picker]);
 host.replaceChildren(row);
 fileOpenDialog = () => picker.click();
 async function saveToFile() {
@@ -59213,7 +59303,8 @@ const state = getState();
 const status = autosaveStatus();
 const projectId = state.project ? state.project.id : null;
 const saving = appAllows("saveFile", state);
-saveButton.hidden = !saving;
+saveBox.hidden = !saving;
+if (!saving && saveMenuOpen) setSaveMenu(false);
 openButton.hidden = !appAllows("openFile", state);
 const exported = autosaveLastExport(projectId);
 const stamp = exported ? Date.parse(exported) : Number.NaN;
@@ -61630,7 +61721,7 @@ profile: markDeviceProfile(state.project, markId),
 channels: typeChannels(state.project, mark.typeId),
 aid: deviceMarkAid(state.project, leader || markId),
 readOnly: !editable,
-readOnlyNote: leaderSaid,
+readOnlyNote: leaderSaid !== null ? leaderSaid : appAllows("editHints", state) ? null : "",
 readOnlyAction: leader
 ? { label: text("deviceWindow.followerOpen", { label }), run: () => focusMark(leader) }
 : null,
@@ -61877,14 +61968,16 @@ placeholder: strings.marks.locationPlaceholder,
 title: strings.marks.location,
 on: { change: (event) => setField(mark.id, "location", event.target.value) },
 }),
-uiEl("input", {
+appAllows("integratorComment", state)
+? uiEl("input", {
 class: "ui-input mark-row__original",
 type: "text",
 value: view.fields.original,
 placeholder: strings.marks.comment,
 title: strings.marks.comment,
 on: { change: (event) => setField(mark.id, "original", event.target.value) },
-}),
+})
+: null,
 ])
 : null,
 view.fields && view.fields.lengthText
@@ -62219,7 +62312,7 @@ const mode = markCardState(state, collapsed);
 const model =
 mode === MARK_CARD_NONE || !canvasOnScreen(state)
 ? null
-: markCardModel(state.project, state.selectedMarkIds[0], { viewer: appKind() === "view" });
+: markCardModel(state.project, state.selectedMarkIds[0], { viewer: !appAllows("integratorComment", state) });
 card.hidden = !model;
 dropDevice();
 const viewing = !appAllows("editMarks", state);
@@ -69088,7 +69181,7 @@ const state = getState();
 const selected = selectedIds();
 if (cardForced && !(selected.length === 1 && selected[0] === cardForced)) cardForced = null;
 const shown = selected.length === 1 && (volumeParamsRead().hideCard !== true || cardForced === selected[0]);
-const model = shown ? markCardModel(state.project, selected[0], { viewer: appKind() === "view" }) : null;
+const model = shown ? markCardModel(state.project, selected[0], { viewer: !appAllows("integratorComment", state) }) : null;
 if (homeCard) homeCard.dispose();
 homeCard = null;
 card.hidden = !model;
@@ -75215,7 +75308,7 @@ if (!state.project || query.trim() === "") {
 close();
 return;
 }
-rows = searchProject(state.project, query);
+rows = searchProject(state.project, query, { comments: appAllows("integratorComment", state) });
 active = 0;
 render();
 }
@@ -76238,7 +76331,7 @@ if (verdict === "ask") {
 const agreed = await uiConfirm({
 title: strings.view.replaceTitle,
 message: text("view.replaceMessage", { name: saved.name, next: loaded.project.name }),
-confirmLabel: strings.view.open,
+confirmLabel: options.linkKey ? strings.view.replaceConfirmLink : strings.view.open,
 confirmClass: "ui-btn ui-btn--accent",
 });
 if (!agreed) return false;

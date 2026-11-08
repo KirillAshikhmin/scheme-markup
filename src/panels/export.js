@@ -1312,6 +1312,11 @@ function exportElevationDialog(api) {
  *
  * `reason` пустой означает «пункт жив»; `hint` — подсказка живого пункта.
  */
+export function exportLinkAvailability(state) {
+  const project = state && state.project ? state.project : null;
+  return !project ? strings.exportPanel.linkNoProject : !brotliReachable() ? strings.exportPanel.linkNoCodec : null;
+}
+
 export function exportMenuItems(state) {
   const project = state && state.project ? state.project : null;
   const marks = project ? project.marks.length : 0;
@@ -1343,7 +1348,7 @@ export function exportMenuItems(state) {
       label: strings.exportPanel.link,
       hint: strings.exportPanel.linkHint,
       // Ссылка собирает объект целиком: меток, схемы и стен ей не нужно.
-      reason: !project ? strings.exportPanel.linkNoProject : !brotliReachable() ? strings.exportPanel.linkNoCodec : null,
+      reason: exportLinkAvailability(state),
     },
   ];
 }
@@ -1384,7 +1389,7 @@ function exportLinkBase() {
   return location.href.replace(/[#?].*$/, "").replace(/[^/]*$/, "") + EXPORT_LINK_PAGE;
 }
 
-function exportLinkDialog(api) {
+export function exportLinkDialog(api) {
   const project = api.getState().project;
   if (!project) return;
   const body = uiEl("div", { class: "export__link" }, [uiEl("p", { class: "modal__text", text: strings.exportPanel.linkBusy })]);

@@ -142,7 +142,7 @@ function mountSearchPanel(host, api) {
       close();
       return;
     }
-    rows = searchProject(state.project, query);
+    rows = searchProject(state.project, query, { comments: appAllows("integratorComment", state) });
     active = 0;
     render();
   }

@@ -13,6 +13,7 @@ import { schemesInOrder } from "../model.js";
 import { unpackProject } from "../projectFile.js";
 import { deleteImage, putImage, saveProject, setSetting } from "../store.js";
 import { exportDownload } from "../exporter.js";
+import { exportLinkAvailability, exportLinkDialog } from "./export.js";
 import { clearHistory } from "../history.js";
 import { strings, text } from "../strings.js";
 import { uiButton, uiButtonLabel, uiConfirm, uiDialogDepth, uiEl, uiIconLabelButton, uiModal } from "./ui.js";
@@ -132,7 +133,57 @@ function mountFilePanel(host, api) {
   const saveButton = uiIconLabelButton("fileSave", strings.file.save, {
     class: "ui-btn ui-btn--accent",
     title: strings.file.saveHint,
-    on: { click: () => saveToFile() },
+    on: { click: () => setSaveMenu(!saveMenuOpen) },
+  });
+  saveButton.setAttribute("aria-haspopup", "menu");
+  saveButton.setAttribute("aria-expanded", "false");
+  // Список у кнопки: «В файл» или «Ссылкой» (слова заказчика). Ctrl+S идёт
+  // мимо списка, прямо в файл.
+  let saveMenuOpen = false;
+  const saveMenu = uiEl("div", { class: "file__drop", attrs: { role: "menu" } });
+  saveMenu.hidden = true;
+  const saveToFileItem = uiButton(strings.file.saveToFile, {
+    class: "ui-btn file__dropItem",
+    title: strings.file.saveToFileHint,
+    attrs: { role: "menuitem" },
+    on: {
+      click: () => {
+        setSaveMenu(false);
+        saveToFile();
+      },
+    },
+  });
+  const saveLinkItem = uiButton(strings.file.saveLink, {
+    class: "ui-btn file__dropItem",
+    title: strings.file.saveLinkHint,
+    attrs: { role: "menuitem" },
+    on: {
+      click: () => {
+        if (saveLinkItem.disabled) return;
+        setSaveMenu(false);
+        exportLinkDialog(api);
+      },
+    },
+  });
+  saveMenu.append(saveToFileItem, saveLinkItem);
+  const saveBox = uiEl("div", { class: "file__save" }, [saveButton, saveMenu]);
+  function setSaveMenu(value) {
+    saveMenuOpen = Boolean(value);
+    saveButton.setAttribute("aria-expanded", saveMenuOpen ? "true" : "false");
+    saveMenu.hidden = !saveMenuOpen;
+    if (!saveMenuOpen) return;
+    const reason = exportLinkAvailability(getState());
+    saveLinkItem.disabled = Boolean(reason);
+    saveLinkItem.title = reason || strings.file.saveLinkHint;
+  }
+  document.addEventListener("pointerdown", (event) => {
+    if (saveMenuOpen && !saveBox.contains(event.target)) setSaveMenu(false);
+  });
+  document.addEventListener("keydown", (event) => {
+    if (!saveMenuOpen || event.key !== "Escape" || uiDialogDepth() > 0) return;
+    event.preventDefault();
+    setSaveMenu(false);
+    saveButton.focus();
   });
   // Состояние выгрузки — не кнопка, и кричать громче кнопок ему нечего: раньше
   // жёлтая строка занимала полшапки, теперь это точка на самой кнопке
@@ -160,7 +211,7 @@ function mountFilePanel(host, api) {
     },
   });
 
-  const row = uiEl("div", { class: "file" }, [folderButton, openButton, saveButton, picker]);
+  const row = uiEl("div", { class: "file" }, [folderButton, openButton, saveBox, picker]);
   host.replaceChildren(row);
   // Тот же выбор файла, что по кнопке в шапке: стартовое окно нажимает её же.
   fileOpenDialog = () => picker.click();
@@ -611,7 +662,8 @@ function mountFilePanel(host, api) {
     // Режим просмотра: файл открывают, чтобы посмотреть. Сохранять нечего —
     // объект не менялся, — поэтому на узком экране остаётся одна кнопка.
     const saving = appAllows("saveFile", state);
-    saveButton.hidden = !saving;
+    saveBox.hidden = !saving;
+    if (!saving && saveMenuOpen) setSaveMenu(false);
     // Открыть файл — своё умение (`openFile`): страница просмотра на нём и
     // стоит, а страница, которой файл открывать нечем, кнопку не показывает.
     openButton.hidden = !appAllows("openFile", state);

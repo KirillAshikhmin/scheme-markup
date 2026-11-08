@@ -1014,7 +1014,9 @@ function mountMarksPanel(host, api) {
       channels: typeChannels(state.project, mark.typeId),
       aid: deviceMarkAid(state.project, leader || markId),
       readOnly: !editable,
-      readOnlyNote: leaderSaid,
+      // Заказчику строка «править на компьютере» не нужна: в просмотре правки
+      // нет нигде. Пустая строка — «молчать», `null` — слова по умолчанию.
+      readOnlyNote: leaderSaid !== null ? leaderSaid : appAllows("editHints", state) ? null : "",
       readOnlyAction: leader
         ? { label: text("deviceWindow.followerOpen", { label }), run: () => focusMark(leader) }
         : null,
@@ -1336,14 +1338,17 @@ function mountMarksPanel(host, api) {
                 title: strings.marks.location,
                 on: { change: (event) => setField(mark.id, "location", event.target.value) },
               }),
-              uiEl("input", {
-                class: "ui-input mark-row__original",
-                type: "text",
-                value: view.fields.original,
-                placeholder: strings.marks.comment,
-                title: strings.marks.comment,
-                on: { change: (event) => setField(mark.id, "original", event.target.value) },
-              }),
+              // Комментарий интегратора заказчику не показывается (G19).
+              appAllows("integratorComment", state)
+                ? uiEl("input", {
+                    class: "ui-input mark-row__original",
+                    type: "text",
+                    value: view.fields.original,
+                    placeholder: strings.marks.comment,
+                    title: strings.marks.comment,
+                    on: { change: (event) => setField(mark.id, "original", event.target.value) },
+                  })
+                : null,
             ])
           : null,
         // Длина по плану — строкой и только для чтения: это вывод из точек

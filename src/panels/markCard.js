@@ -431,7 +431,7 @@ function mountMarkCard(host, api) {
     const model =
       mode === MARK_CARD_NONE || !canvasOnScreen(state)
         ? null
-        : markCardModel(state.project, state.selectedMarkIds[0], { viewer: appKind() === "view" });
+        : markCardModel(state.project, state.selectedMarkIds[0], { viewer: !appAllows("integratorComment", state) });
     card.hidden = !model;
     dropDevice();
     // В просмотре карточка показывает метку целиком и стоит колонкой; на
