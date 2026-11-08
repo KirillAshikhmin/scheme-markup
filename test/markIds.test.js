@@ -37,6 +37,8 @@ import {
   addSchemeObjectKind,
   createProject,
   deleteMark,
+  acceptProblem,
+  acceptedProblems,
   deleteOpening,
   deleteSchemeObjectKind,
   deleteWall,
@@ -48,8 +50,11 @@ import {
   idsReplace,
   nextId,
   nextIds,
+  problemAccepted,
   setMarkControls,
   setMarkDevice,
+  setMarkNumber,
+  validate,
 } from "../src/model.js";
 
 const isNumbered = (id) => idNumberOf(id) !== null;
@@ -473,4 +478,34 @@ test("поимённый переезд номера переписывает с
   // Переселять нечего — тот же объект по ссылке.
   assert.equal(idsReplace(linked, {}).project, linked);
   assert.equal(idsReplace(linked, { [lamp.mark.id]: lamp.mark.id }).project, linked);
+});
+
+// Ключ принятого повтора — `repeatedNumber:<typeId>#<номер>`, и второй сегмент
+// там **видимый номер метки**, а не идентификатор сущности: его переносит своя
+// дверь (`renumberAccepted`, `renumberAcceptedRepeats`). Пройди он через
+// таблицу переездов — и на объекте заказчика в 592 метки переезд сущности 16
+// превратил бы `repeatedNumber:741#16` в `…#5000`: ответ повис бы на номере,
+// которого нет, а на настоящем номере вопрос задался бы заново.
+test("номер метки в ключе принятого повтора по таблице переездов не едет", () => {
+  const scene = house();
+  const first = markAt(scene.project, scene.schemeId, "Т", { x: 0.3, y: 0.3 });
+  const second = markAt(first.project, scene.schemeId, "Т", { x: 0.4, y: 0.4 });
+  const number = findMark(first.project, first.mark.id).number;
+  let project = setMarkNumber(second.project, second.mark.id, number).project;
+  const repeat = validate(project).find((item) => item.code === "repeatedNumber");
+  assert.ok(repeat, "пример не тот: повтора номера нет");
+  project = acceptProblem(project, repeat).project;
+  assert.equal(problemAccepted(project, repeat.key), true, "ответ не записался");
+
+  // Переезжает сущность, чей **номер** совпал с номером метки: именно так и
+  // было у заказчика.
+  const typeId = findMark(project, first.mark.id).typeId;
+  assert.notEqual(typeId, String(number), "пример не тот: переезжает сам тип");
+  const moved = idsReplace(project, { [String(number)]: "9001" });
+  assert.equal(problemAccepted(moved.project, repeat.key), true, "ответ «так и задумано» уехал с чужим номером");
+  // И ни одной записи-сироты: объект задаёт тот же вопрос, на который ответ дан.
+  const asked = validate(moved.project).find((item) => item.code === "repeatedNumber");
+  assert.ok(asked, "повтор пропал из вопросов");
+  assert.equal(problemAccepted(moved.project, asked.key), true, "на повтор вопрос задался заново");
+  assert.equal(acceptedProblems(moved.project).length, acceptedProblems(project).length, "список принятых поехал");
 });

@@ -4,7 +4,7 @@
 // рисует холст, по нему же строится список сбоку и легенда в выгрузке.
 // Поэтому здесь только чистые функции над ним — что видно, что отмечено и во
 // что превращается щелчок по галочке; сама панель собирается из них ниже.
-import { findScheme, findType, labelOf, listedMarks, roomsInOrder, styleOf, typesInOrder } from "../model.js";
+import { findScheme, findType, listedMarks, markPairLabel, roomsInOrder, styleOf, typesInOrder } from "../model.js";
 import { strings, text } from "../strings.js";
 import { uiButton, uiEl } from "./ui.js";
 import { visibleMarks } from "../render.js";
@@ -44,7 +44,9 @@ export function filtersMarkRows(project, schemeId, filter) {
       type: findType(project, mark.typeId),
       category: categoryOf.get(mark.typeId) || null,
       style: styleOf(project, mark.typeId),
-      label: labelOf(project, mark.id),
+      // Имя прибора — одно на все списки: у связанной метки это пара
+      // «ТВ1 · Телевизор», у прочих — прежнее обозначение.
+      label: markPairLabel(project, mark),
     }))
     .sort((a, b) => {
       const orderA = order.has(a.mark.typeId) ? order.get(a.mark.typeId) : last;

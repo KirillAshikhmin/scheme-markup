@@ -21,7 +21,6 @@ import {
   listedMarks,
   listedTypes,
   findType,
-  labelOf,
   markControlChannel,
   markPairLabel,
   markControlLinks,
@@ -180,11 +179,16 @@ function tableJoin(values, separator) {
 
 // Обозначение строки — обозначение метки. У сведённых меток оно одно на всех
 // (на том и сведены), поэтому берётся у ведущей.
+//
+// Связанный прибор называется парой «ТВ1 · Телевизор»; без связи — прежнее
+// обозначение (`markPairLabel` отдаёт `labelOf` как есть). **Сведённая строка
+// — тоже прибор**, и имя у неё по той же ведущей, по которой взято и
+// обозначение: метки одного типа с одним номером — одно устройство
+// (`deviceFollowers`), и спрашивать «чья вещь» тут не о чем. Имя, применённое
+// к одной строке и не применённое к соседней, и есть тот дефект: на одном
+// листе прибор звался то «ТВ1», то «ТВ1 · Телевизор».
 function tableEntryLabel(project, entry) {
-  // Связанный прибор называется парой «ТВ1 · Телевизор»; без связи — прежнее
-  // обозначение (`markPairLabel` отдаёт `labelOf` как есть). Сведённая
-  // строка из нескольких меток остаётся обозначением: имя вещи у неё чьё?
-  return entry.marks.length === 1 ? markPairLabel(project, entry.head) : labelOf(project, entry.head.id);
+  return markPairLabel(project, entry.head);
 }
 
 // Тип у строки один: обозначение назвало его однозначно. Склейка осталась
@@ -510,7 +514,8 @@ function tableLinkRow(project, mark, group, side) {
   return {
     id: mark.id,
     cells: [
-      labelOf(project, mark.id),
+      // Имя прибора — одно на все листы: `markPairLabel`, а не `labelOf`.
+      markPairLabel(project, mark),
       type ? type.name : "",
       room ? room.name : "",
       mark.location || "",
@@ -728,7 +733,7 @@ export function equipmentTable(project, filter, options = {}) {
     const row = {
       id: placement.id,
       cells: [
-        mark ? labelOf(project, mark.id) : strings.tables.brokenLink,
+        mark ? markPairLabel(project, mark) : strings.tables.brokenLink,
         // Модель потеряна — так и написано в строке: пустая ячейка читалась бы
         // как «оборудования тут нет», а оно есть, просто его запись пропала.
         item ? item.name : strings.tables.equipmentLost,

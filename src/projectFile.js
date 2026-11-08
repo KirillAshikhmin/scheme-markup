@@ -2,7 +2,7 @@
 // Zip пишется и читается здесь же, без библиотек: CompressionStream("deflate-raw")
 // там, где он есть, и «stored» (без сжатия) там, где его нет. Читаются оба варианта.
 import { strings, text } from "./strings.js";
-import { migrateDevices, migrateThingMarks } from "./deviceMigrate.js";
+import { migrateDevices, migrateThingMarks, thingMarksMigrated } from "./deviceMigrate.js";
 import {
   FORMAT_VERSION,
   FORMAT_VERSION_IDS,
@@ -411,15 +411,16 @@ function migrateProject(loaded, options = {}) {
   // съедало номера, и **до** перевода аксессуаров: тот переселяет адреса в
   // опциях привязок, а адрес — это номер метки, и считать его он умеет только
   // у пронумерованного объекта. Следом метки приборов получают вещи: их номера
-  // идут за номерами всего прежнего.
-  const numbered = migrateThingMarks(
-    idsMigrate(
-      migrateScenarioLib(
-        migrateScenarios(fillTypeSizes(migrateCommentType(migrateTypeKinds(filled).project).project).project).project,
-        options.library,
-      ).project,
+  // идут за номерами всего прежнего. Вещи достраиваются **один раз на объект**
+  // (`thingMarksMigrated`): файл, уже прошедший эту сборку, приходит версией 8,
+  // и снятую рукой связь второе открытие не возвращает.
+  const renumbered = idsMigrate(
+    migrateScenarioLib(
+      migrateScenarios(fillTypeSizes(migrateCommentType(migrateTypeKinds(filled).project).project).project).project,
+      options.library,
     ).project,
   ).project;
+  const numbered = thingMarksMigrated(loaded) ? renumbered : migrateThingMarks(renumbered).project;
   const migrated = migrateDevices(numbered).project;
   // Миграция могла убрать нечитаемые записи — версия считается по итогу.
   const current = projectFormatVersion(migrated);

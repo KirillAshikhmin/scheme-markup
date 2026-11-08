@@ -52,7 +52,7 @@ import {
   canvasStopBlockJoin,
   canvasUnlinkMarkObject,
 } from "../canvas.js";
-import { planToScreen, typeIconPlan, typeSignIcon } from "../render.js";
+import { planToScreen, typeIconPlan, typeSignIcon, visibleMark } from "../render.js";
 import { getSetting, setSetting } from "../store.js";
 import { strings, text } from "../strings.js";
 import { UI_SIGN, UI_SIGN_SMALL, uiButton, uiEl, uiIcon, uiIconButton, uiSignCell } from "./ui.js";
@@ -609,7 +609,9 @@ function mountMarkCard(host, api) {
   const liftMark = (state, markId) => {
     const plan = document.getElementById(PANEL_IDS.canvas);
     const scheme = state.project ? findScheme(state.project, state.schemeId) : null;
-    const mark = state.project ? findMark(state.project, markId) : null;
+    // Место — через `visibleMark`: у связанного прибора знак лежит на вещи, и
+    // поднимать план надо из-под знака, а не из-под записанной точки.
+    const mark = state.project ? visibleMark(state.project, findMark(state.project, markId)) : null;
     if (!plan || !scheme || !mark || !mark.points || mark.points.length === 0) return;
     const at = planToScreen(mark.points[0], scheme, state.view);
     const box = card.getBoundingClientRect();

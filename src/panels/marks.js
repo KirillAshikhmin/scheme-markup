@@ -62,7 +62,7 @@ import {
   wallNames,
   wallsOnScheme,
 } from "../model.js";
-import { planToScreen, typeIcon } from "../render.js";
+import { planToScreen, typeIcon, visibleMark } from "../render.js";
 import { canvasCommit } from "../canvas.js";
 import { UI_SIGN, uiButton, uiEl, uiIconButton, uiModal, uiPrompt, uiSignCell } from "./ui.js";
 // Прокрутка колонки одна на всю колонку (таск 194), и низ кадра закрывает не
@@ -100,10 +100,17 @@ const MARKS_AUTO_WALL = "--auto-wall--";
 // пиксели экрана здесь руками не пересчитываются.
 // Подводит холст к метке. Наружу — потому что тем же занят поиск в шапке:
 // найденная метка должна оказаться на виду, а не просто выделиться.
-export function marksCenteredView(scheme, mark, view) {
+//
+// Место берётся через `visibleMark`: у связанного прибора знак лежит на месте
+// вещи, и подводить холст к записанной точке значило бы увести его мимо знака
+// — после сдвига вещи (R04) на любое расстояние. Объект сюда и передаётся
+// только для этого; `warnings.js` подводит холст к точке, у которой метки нет
+// вовсе, и такая «метка» проходит дверь собой.
+export function marksCenteredView(project, scheme, mark, view) {
   const host = document.getElementById(PANEL_IDS.canvas);
   if (!host || !host.clientWidth || !host.clientHeight) return view;
-  const local = planToScreen(mark.points[0], scheme, { ...view, offsetX: 0, offsetY: 0 });
+  const shown = visibleMark(project, mark);
+  const local = planToScreen(shown.points[0], scheme, { ...view, offsetX: 0, offsetY: 0 });
   return { ...view, offsetX: host.clientWidth / 2 - local.x, offsetY: host.clientHeight / 2 - local.y };
 }
 
@@ -772,7 +779,7 @@ function mountMarksPanel(host, api) {
     // Выделение из самого списка: строка уже под пальцем, выдёргивать её
     // наверх нельзя — уедет из-под курсора.
     clickedRow = markId;
-    setState({ selectedMarkIds: [markId], view: marksCenteredView(scheme, mark, state.view) });
+    setState({ selectedMarkIds: [markId], view: marksCenteredView(state.project, scheme, mark, state.view) });
   }
 
   // К метке, где бы она ни была: на своей схеме — как выбор в списке, на

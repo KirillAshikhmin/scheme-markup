@@ -364,11 +364,19 @@ export function scenarioScriptSetOptions(project, bindingId, patch) {
 
 /**
  * Метки за значениями списка формы (правка после сборки сценариев): сценарий
- * хаба собирает список устройств из адресов — аксессуар `aid`, сервис
- * `aid.sid`, характеристика `aid.sid.cid` (`getUUID`), — и `aid` однозначно
- * называет метку объекта. `Map<markId, [{index, label}]>` — у каких меток в
- * списке есть варианты и какие (номер строки списка и её подпись); у поля, в
- * котором устройств нет, — пустая.
+ * хаба собирает список устройств из адресов — сервис `aid.sid` и
+ * характеристика `aid.sid.cid` (`getUUID`), — и `aid` однозначно называет
+ * метку объекта. `Map<markId, [{index, label}]>` — у каких меток в списке есть
+ * варианты и какие (номер строки списка и её подпись); у поля, в котором
+ * устройств нет, — пустая.
+ *
+ * **Голое число адресом не считается** (ремонт ветки). Пока `aid` был хэшем в
+ * девять знаков, число без точек не могло значить ничего другого. Теперь
+ * `aid` — номер метки, то есть 1…N (ADR 030), и список «Выкл / Авто / 30
+ * минут / 100 %» со значениями 0, 1, 30, 100 объявлял устройствами метки №1,
+ * №30 и №100: по два-три ложных прибора на поле, и кнопка «на схеме» вела к
+ * ним. Адресом остаётся только полная форма с точкой — её ни одна константа
+ * списка не носит.
  */
 export function scenarioScriptFieldMarks(project, field) {
   const out = new Map();
@@ -376,7 +384,7 @@ export function scenarioScriptFieldMarks(project, field) {
   const byAid = new Map();
   for (const [markId, aid] of deviceAids(project)) byAid.set(String(aid), markId);
   field.values.forEach((item, index) => {
-    const match = /^(\d+)(?:\.\d+){0,2}$/.exec(String(item && item.value !== null && item.value !== undefined ? item.value : ""));
+    const match = /^(\d+)\.\d+(?:\.\d+)?$/.exec(String(item && item.value !== null && item.value !== undefined ? item.value : ""));
     const markId = match ? byAid.get(match[1]) : null;
     if (!markId) return;
     if (!out.has(markId)) out.set(markId, []);

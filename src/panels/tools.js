@@ -102,11 +102,26 @@ export function toolsKindNote(kind) {
  * Чистая и вынесена наружу ради теста: строка, разошедшаяся с тем, что делает
  * клик, — это и есть дефект, который ловят глазами последним.
  */
-export function toolsModeNote({ mode, kind, label } = {}) {
-  const named = mode && mode !== "select" && mode !== "add" ? mode : null;
+export function toolsModeNote({ mode, what, kind, label } = {}) {
+  const named = toolsModeKey({ mode, what });
   if (named) return strings.tools["modeNow_" + named] || toolsKindNote(kind);
   if (mode === "select" && kind) return text("tools.modeSelectNote", { label });
   return toolsKindNote(kind);
+}
+
+/**
+ * Имя режима для плашки и для подсказки — **один ключ**, и считается он здесь.
+ *
+ * Режим «сбор блока» (`CANVAS_MODE_BLOCK_JOIN`) ждёт щелчка по второй метке —
+ * и тем же режимом связывается метка с вещью (R01): занятие различает
+ * `state.blockJoinWhat`. Плашка, назвавшая режим по одному `mode`, обещала
+ * «Сбор блока» и подсказывала «щёлкните по второй метке» тому, кто связывает
+ * прибор с телевизором, — тогда как подсказка над планом и плашка о входе
+ * говорили правду. Считай ключ в двух местах — и они опять разойдутся.
+ */
+export function toolsModeKey({ mode, what } = {}) {
+  if (!mode || mode === "select" || mode === "add") return null;
+  return mode === "blockJoin" && what === "object" ? "objectLink" : mode;
 }
 
 /**
@@ -386,10 +401,11 @@ function mountToolsPanel(host, api) {
     // очевидно, что холст переходит в режим калибровки». Поэтому рядом встаёт
     // **имя текущего режима** — не кнопка: нажимать его некуда, он отвечает на
     // «где я», а дверь наружу — соседнее «Выделение» и Esc.
-    const named = state.mode !== "select" && state.mode !== "add" ? state.mode : null;
+    const named = toolsModeKey({ mode: state.mode, what: state.blockJoinWhat });
     const kindNote = toolsKindNote(kind);
     const modeNote = toolsModeNote({
       mode: state.mode,
+      what: state.blockJoinWhat,
       kind,
       label: type ? type.code + " — " + type.name : "",
     });

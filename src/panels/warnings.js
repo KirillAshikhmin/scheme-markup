@@ -327,7 +327,7 @@ function mountWarningsPanel(host, api) {
     if (!place || !place.point || !place.schemeId || state.schemeId !== place.schemeId) return false;
     const scheme = findScheme(state.project, place.schemeId);
     if (!scheme) return false;
-    setState({ view: marksCenteredView(scheme, { points: [place.point] }, state.view) });
+    setState({ view: marksCenteredView(state.project, scheme, { points: [place.point] }, state.view) });
     return true;
   }
 

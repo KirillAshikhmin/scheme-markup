@@ -203,3 +203,52 @@ test("предложение связать приходит и после пе�
   assert.ok(at > 0);
   assert.ok(source.slice(at, at + 1200).includes("canvasOfferLink(drag.markId)"), "перенос не предлагает связать");
 });
+
+// Полосу (`shape: "polyline"`) — столешницу с подсветкой, плинтус — модель
+// связывать разрешает (`markObjectCan`, `markPlace`, `canvasLinkCandidates`), а
+// щелчок и подсветка её пропускали: на схеме, где вещи нарисованы полосами,
+// кнопка горела, подсветки не было, и любой щелчок отвечал «здесь нет вещи
+// чертежа» — тупик без выхода, кроме Esc.
+test("полоса ловится щелчком и предлагается связи, как всякая вещь", () => {
+  const base = scene();
+  // Полоса шириной 600 мм по отрезку (1000;1000) — (4000;1000).
+  const band = addSchemeObject(base.project, {
+    schemeId: base.schemeId,
+    catalogKey: "counter",
+    shape: "polyline",
+    pointsMm: [{ x: 1000, y: 1000 }, { x: 4000, y: 1000 }],
+    depthMm: 600,
+    heightMm: 40,
+    heightAboveFloorMm: 850,
+  });
+  // Метка стоит на полосе: 2500 мм при 100 точках на метр — доля 250/1200,
+  // 1000 мм — доля 100/800.
+  const onBand = { x: 250 / 1200, y: 100 / 800 };
+  const mark = markAt(band.project, base.schemeId, "Р", onBand);
+
+  assert.ok(
+    canvasLinkCandidates(mark.project, mark.mark.id).some((item) => item.id === band.schemeObject.id),
+    "полоса не в кандидатах — пример не тот",
+  );
+  assert.equal(canvasObjectAt(mark.project, base.schemeId, onBand).id, band.schemeObject.id, "щелчок по полосе не нашёл вещи");
+  assert.equal(canvasLinkOffer(mark.project, mark.mark.id).id, band.schemeObject.id, "связь с полосой не предложена");
+  assert.equal(canvasObjectLinkCan(stateOf(mark.project, { schemeId: base.schemeId }), mark.mark.id, band.schemeObject.id).ok, true);
+
+  // Мимо полосы — по-прежнему ничего: ширина у неё 600 мм, то есть ±300 от оси.
+  const past = { x: 250 / 1200, y: 160 / 800 };
+  assert.equal(canvasObjectAt(mark.project, base.schemeId, past), null, "щелчок в 600 мм от полосы нашёл вещь");
+
+  // Из накрывших берётся меньшая: у полосы площадь считается длиной на ширину,
+  // а не `widthMm * depthMm` (у неё ширины нет вовсе, и выходил `NaN`).
+  const big = addSchemeObject(band.project, {
+    schemeId: base.schemeId,
+    catalogKey: "tv",
+    shape: "rect",
+    atMm: { x: 2500, y: 1000 },
+    widthMm: 4000,
+    depthMm: 3000,
+    heightMm: 700,
+    heightAboveFloorMm: 0,
+  });
+  assert.equal(canvasObjectAt(big.project, base.schemeId, onBand).id, band.schemeObject.id, "вещь побольше отобрала щелчок у полосы");
+});

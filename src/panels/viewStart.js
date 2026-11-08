@@ -37,7 +37,7 @@ import {
   storeMode,
 } from "../store.js";
 import { strings, text } from "../strings.js";
-import { VIEW_LINK_BROKEN, viewLinkRead } from "../viewLink.js";
+import { VIEW_LINK_BROKEN, VIEW_LINK_VERSION, viewLinkRead } from "../viewLink.js";
 import { projectsMigrateStored } from "./projects.js";
 import { uiButton, uiConfirm, uiEl, uiIconLabelButton, uiModal } from "./ui.js";
 import { viewScenariosOpen } from "./viewScenarios.js";
@@ -104,8 +104,34 @@ export async function viewStartLinkLoad(hash, options = {}) {
       warnings: result.warnings || [],
     };
   } catch (error) {
-    return { status: "broken", reason: (error && error.reason) || (error && error.code === VIEW_LINK_BROKEN ? "payload" : "unknown") };
+    return {
+      status: "broken",
+      reason: (error && error.reason) || (error && error.code === VIEW_LINK_BROKEN ? "payload" : "unknown"),
+      // Версия нагрузки — у отказа по версии она и есть всё, что надо сказать.
+      version: error && error.version !== undefined ? error.version : null,
+    };
   }
+}
+
+/**
+ * Слова отказа по ссылке — **одно место**, и версия в них названа версией.
+ *
+ * `reason: "version"` доезжал сюда и выбрасывался: заказчик на любой отказ
+ * читал «Ссылка повреждена или обрезана», то есть неправду про каждую уже
+ * разосланную ссылку прежней сборки. Готовая `errors.futureVersion` тут не
+ * годится вдвойне: она говорит про **более новую** версию и про файл.
+ *
+ * Своё у ссылки прежней сборки и у ссылки более новой: в первом случае чинить
+ * нечего и надо просить новую, во втором достаточно обновить страницу.
+ */
+export function viewStartLinkRefusal(result) {
+  const from = result || {};
+  if (from.reason !== "version") return strings.view.linkBroken;
+  const version = Number(from.version);
+  if (Number.isFinite(version) && version > VIEW_LINK_VERSION) {
+    return text("view.linkNewVersion", { version, current: VIEW_LINK_VERSION });
+  }
+  return strings.view.linkOldVersion;
 }
 
 /**
@@ -587,7 +613,7 @@ function mountViewStart(host, api) {
       // Объект не должен остаться в истории браузера — чистим при любом исходе.
       cleanAddress();
     }
-    if (result.status === "broken") notify(strings.view.linkBroken, "error");
+    if (result.status === "broken") notify(viewStartLinkRefusal(result), "error");
     else if (result.status === "empty") notify(strings.view.linkEmpty, "error");
     else if (result.status === "ok") await openLoaded(result.loaded, { madeAt: result.madeAt, linkKey: result.key });
   }

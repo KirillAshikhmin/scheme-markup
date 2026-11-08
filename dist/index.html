@@ -6914,6 +6914,8 @@ replaceConfirmLink: "Открыть объект",
 madeAt: "Выгружено {date}",
 madeAtHint: "Когда интегратор собрал этот объект",
 linkBroken: "Ссылка повреждена или обрезана — попросите интегратора прислать новую",
+linkOldVersion: "Ссылка от прежней сборки — попросите интегратора прислать новую",
+linkNewVersion: "Ссылка собрана более новой сборкой (версия {version}, здесь {current}) — обновите страницу",
 linkEmpty: "В ссылке нет объекта — попросите интегратора прислать новую",
 linkBusy: "Открываем объект из ссылки…",
 noStore: "Браузер не даёт сохранить объект: он останется открытым до закрытия вкладки",
@@ -7195,12 +7197,15 @@ mode_room: "Обводка",
 mode_roomTrace: "По чертежу",
 mode_scale: "Калибровка",
 mode_blockJoin: "Сбор блока",
+mode_objectLink: "Связь с вещью",
 modeNow_room: "Сейчас обводится контур помещения: клик — вершина, двойной клик — конец. «Выделение» или Esc — выйти.",
 modeNow_roomTrace:
 "Сейчас помещение определяется по чертежу: клик внутри комнаты найдёт контур по стенам. Определение разовое, связи со стенами у контура нет. «Выделение» или Esc — выйти.",
 modeNow_scale: "Сейчас калибровка масштаба: два клика по концам известного отрезка. «Выделение» или Esc — выйти.",
 modeNow_blockJoin:
 "Сейчас собирается блок: щёлкните по второй метке на плане. Она в блоке — блоки сольются, без блока — соберётся новый; позиции меток не меняются. «Выделение» или Esc — отменить.",
+modeNow_objectLink:
+"Сейчас метка связывается с вещью чертежа: щёлкните по подсвеченной вещи на плане. Место, габарит, угол и высоту прибор возьмёт у неё. «Выделение» или Esc — отменить.",
 selectModeLeave: "Выйти из текущего режима в выделение (то же делает Esc)",
 kindPointHint: "Тип точечный: клик по плану ставит точку",
 kindLineHint: "Тип линейный: клики рисуют ломаную, двойной клик заканчивает",
@@ -8704,6 +8709,7 @@ linkMiss: "Здесь нет вещи чертежа — щёлкните по �
 made: "Вещь «{name}» стала устройством: {label}. Ctrl+Z отменит",
 dropped: "У вещи «{name}» убрано устройство {label}. Ctrl+Z отменит",
 noDevice: "У вещи нет устройства",
+moveLinked: "Метка {label} стоит на вещи «{name}»: двигайте вещь на «Чертеже» или сперва «Отвязать»",
 pairLabel: "{label} · {name}",
 },
 markSizes: {
@@ -17671,6 +17677,12 @@ function schemeObjectTopMm(object) {
 if (!object || typeof object.heightMm !== "number") return null;
 return Number(object.heightAboveFloorMm || 0) + Number(object.heightMm);
 }
+function schemeObjectFootprintMm2(object) {
+if (!object) return 0;
+const spans = schemeObjectSpansMm(object, schemeObjectCorners(object));
+const area = Number(spans.widthMm) * Number(spans.depthMm);
+return Number.isFinite(area) ? area : 0;
+}
 function schemeObjectCorners(object) {
 if (!object) return [];
 if (object.shape === "polyline") return (object.pointsMm || []).map((point) => ({ x: Number(point.x), y: Number(point.y) }));
@@ -18899,7 +18911,7 @@ binding.toMm === null
 : sideSpan(length, binding.atMm, binding.toMm, view);
 marks.push({
 id: mark.id,
-label: labelOf(project, mark.id),
+label: markPairLabel(project, mark),
 color: style.color,
 shape: style.shape,
 lineStyle: style.lineStyle,
@@ -19444,11 +19456,13 @@ out[key] = next;
 }
 return out;
 }
+const ID_KEY_PLAIN_TAIL = Object.freeze(new Set(["repeatedNumber:"]));
 function idsMovedKey(key, all) {
 const at = String(key == null ? "" : key).indexOf(":");
 if (at < 0) return key;
 const head = key.slice(0, at + 1);
 const tail = key.slice(at + 1);
+const plainTail = ID_KEY_PLAIN_TAIL.has(head);
 let touched = false;
 const move = (piece) => {
 const next = all.get(piece);
@@ -19456,7 +19470,8 @@ if (next === undefined) return piece;
 touched = true;
 return next;
 };
-const segments = tail.split("#").map((segment) => {
+const segments = tail.split("#").map((segment, index) => {
+if (plainTail && index > 0) return segment;
 for (const mark of [",", "+"]) {
 if (!segment.includes(mark)) continue;
 const pieces = segment.split(mark);
@@ -22181,6 +22196,9 @@ bestArea = area;
 }
 return best;
 }
+function thingMarksMigrated(project) {
+return projectFormatVersion(project) >= FORMAT_VERSION_IDS;
+}
 function migrateThingMarks(project) {
 const idle = { project, changed: false, made: 0, linked: 0 };
 if (!project || !Array.isArray(project.marks) || !Array.isArray(project.markTypes)) return idle;
@@ -22517,14 +22535,13 @@ outlines: Array.isArray(loaded.outlines) ? loaded.outlines : [],
 groups: Array.isArray(loaded.groups) ? loaded.groups : [],
 counters: loaded.counters && typeof loaded.counters === "object" ? loaded.counters : {},
 };
-const numbered = migrateThingMarks(
-idsMigrate(
+const renumbered = idsMigrate(
 migrateScenarioLib(
 migrateScenarios(fillTypeSizes(migrateCommentType(migrateTypeKinds(filled).project).project).project).project,
 options.library,
 ).project,
-).project,
 ).project;
+const numbered = thingMarksMigrated(loaded) ? renumbered : migrateThingMarks(renumbered).project;
 const migrated = migrateDevices(numbered).project;
 const current = projectFormatVersion(migrated);
 return migrated.formatVersion === current ? migrated : { ...migrated, formatVersion: current };
@@ -23219,13 +23236,20 @@ return next;
 return merged;
 }
 function mergeIdClash(ours, theirs, base, winner) {
-if (!base) return { ours, theirs, reissued: [] };
+const mine = new Map();
+const known = new Set();
+for (const entity of MERGE_ENTITIES) {
+for (const item of mergeList(ours, entity)) {
+if (item && typeof item.id === "string") mine.set(item.id, item);
+}
+for (const item of mergeList(base, entity)) {
+if (item && typeof item.id === "string") known.add(item.id);
+}
+}
 const clashed = new Set();
 for (const entity of MERGE_ENTITIES) {
-const mine = mergeIndex(mergeList(ours, entity));
-const known = mergeIndex(mergeList(base, entity));
 for (const item of mergeList(theirs, entity)) {
-if (!item || known.has(item.id)) continue;
+if (!item || typeof item.id !== "string" || known.has(item.id)) continue;
 const twin = mine.get(item.id);
 if (!twin || mergeSame(twin, item)) continue;
 clashed.add(item.id);
@@ -25894,9 +25918,9 @@ function visibleMarks(project, scheme, filter) {
 if (!project || !scheme) return [];
 return marksInDrawOrder(
 project.marks.filter((mark) => mark.schemeId === scheme.id && markVisible(project, mark, filter)),
-).map((mark) => markAtObject(project, mark));
+).map((mark) => visibleMark(project, mark));
 }
-function markAtObject(project, mark) {
+function visibleMark(project, mark) {
 if (markObjectId(mark) === null) return mark;
 const place = markPlace(project, mark);
 if (place.from !== "object" || !place.bridged || place.points === mark.points) return mark;
@@ -48065,7 +48089,7 @@ if (clean && !seen.includes(clean)) seen.push(clean);
 return seen.join(separator);
 }
 function tableEntryLabel(project, entry) {
-return entry.marks.length === 1 ? markPairLabel(project, entry.head) : labelOf(project, entry.head.id);
+return markPairLabel(project, entry.head);
 }
 function tableEntryRow(project, entry, lengths) {
 const type = findType(project, entry.head.typeId);
@@ -48312,7 +48336,7 @@ if (broken) linked.push(strings.tables.brokenLink);
 return {
 id: mark.id,
 cells: [
-labelOf(project, mark.id),
+markPairLabel(project, mark),
 type ? type.name : "",
 room ? room.name : "",
 mark.location || "",
@@ -48468,7 +48492,7 @@ const kind = item ? findEquipmentType(project, item.typeId) : null;
 const row = {
 id: placement.id,
 cells: [
-mark ? labelOf(project, mark.id) : strings.tables.brokenLink,
+mark ? markPairLabel(project, mark) : strings.tables.brokenLink,
 item ? item.name : strings.tables.equipmentLost,
 kind ? kind.name : "",
 room ? room.name : "",
@@ -50471,7 +50495,7 @@ if (!project || !field || field.formType !== "list" || !Array.isArray(field.valu
 const byAid = new Map();
 for (const [markId, aid] of deviceAids(project)) byAid.set(String(aid), markId);
 field.values.forEach((item, index) => {
-const match = /^(\d+)(?:\.\d+){0,2}$/.exec(String(item && item.value !== null && item.value !== undefined ? item.value : ""));
+const match = /^(\d+)\.\d+(?:\.\d+)?$/.exec(String(item && item.value !== null && item.value !== undefined ? item.value : ""));
 const markId = match ? byAid.get(match[1]) : null;
 if (!markId) return;
 if (!out.has(markId)) out.set(markId, []);
@@ -52590,7 +52614,7 @@ if (left <= 0) {
 canvasHighlight = null;
 return false;
 }
-const mark = findMark(project, canvasHighlight.markId);
+const mark = visibleMark(project, findMark(project, canvasHighlight.markId));
 if (!mark || mark.schemeId !== scheme.id || !mark.points || mark.points.length === 0) return true;
 const at = planToScreen(mark.points[0], scheme, view);
 canvasCtx.save();
@@ -52729,7 +52753,7 @@ labelLeaderShown(project, target, labelBox(project, scheme, target, view, state.
 }
 }
 if (editable && state.selectedMarkIds.length === 1 && !canvasDrag) {
-const mark = findMark(project, state.selectedMarkIds[0]);
+const mark = visibleMark(project, findMark(project, state.selectedMarkIds[0]));
 if (mark && mark.kind === "point" && mark.schemeId === scheme.id) {
 drawHandles(canvasCtx, scheme, mark, view, canvasHandleColor(state, mark), canvasStacks(state, scheme));
 }
@@ -53503,9 +53527,8 @@ let best = null;
 let bestArea = Infinity;
 for (const object of schemeObjectsOnScheme(project, schemeId)) {
 if (hidden.includes(object.id)) continue;
-if (object.shape === "polyline") continue;
-if (!canvasInsideCorners(at, schemeObjectCorners(object))) continue;
-const area = Number(object.widthMm) * Number(object.depthMm);
+if (!drawingHitObject(object, at, 0)) continue;
+const area = schemeObjectFootprintMm2(object);
 if (area < bestArea) {
 best = object;
 bestArea = area;
@@ -53616,15 +53639,6 @@ canvasFail(error);
 return { ok: false, why: error && error.message ? error.message : String(error) };
 }
 }
-function canvasInsideCorners(point, corners) {
-let inside = false;
-for (let i = 0, j = corners.length - 1; i < corners.length; j = i++) {
-const a = corners[i];
-const b = corners[j];
-if (a.y > point.y !== b.y > point.y && point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
-}
-return inside;
-}
 function canvasLinkOffer(project, markId) {
 const mark = project ? findMark(project, markId) : null;
 if (!mark || mark.kind !== "point" || markIsComment(mark) || markObjectId(mark) !== null) return null;
@@ -53633,9 +53647,8 @@ if (!at) return null;
 let best = null;
 let bestArea = Infinity;
 for (const object of canvasLinkCandidates(project, markId)) {
-if (object.shape === "polyline") continue;
-if (!canvasInsideCorners(at, schemeObjectCorners(object))) continue;
-const area = Number(object.widthMm) * Number(object.depthMm);
+if (!drawingHitObject(object, at, 0)) continue;
+const area = schemeObjectFootprintMm2(object);
 if (area < bestArea) {
 best = object;
 bestArea = area;
@@ -53796,21 +53809,34 @@ if (measureAim("scheme", key, canvasMeasureSnap(state, scheme, plan, free))) can
 function canvasPaintLinkable(state, project, scheme, view) {
 if (!canvasObjectJoining(state, state.selectedMarkIds[0])) return;
 const hidden = state.hiddenObjectIds || [];
+const bridge = drawingBridge(project, scheme, view);
 const ctx = canvasCtx;
 ctx.save();
 ctx.strokeStyle = "#0969da";
 ctx.fillStyle = "rgba(9, 105, 218, 0.18)";
 ctx.lineWidth = 2;
 for (const object of canvasLinkCandidates(project, state.selectedMarkIds[0])) {
-if (hidden.includes(object.id) || object.shape === "polyline") continue;
+if (hidden.includes(object.id)) continue;
 const corners = schemeObjectCorners(object).map((corner) => planMmToFraction(project, scheme.id, corner));
-if (corners.some((corner) => !corner)) continue;
+if (corners.length < 2 || corners.some((corner) => !corner)) continue;
+const band = object.shape === "polyline" && bridge && bridge.pxPerMm > 0
+? Math.max(2, Number(object.depthMm) * bridge.pxPerMm)
+: 0;
 ctx.beginPath();
 corners.forEach((corner, index) => {
 const at = planToScreen(corner, scheme, view);
 if (index === 0) ctx.moveTo(at.x, at.y);
 else ctx.lineTo(at.x, at.y);
 });
+if (band > 0) {
+ctx.lineCap = "butt";
+ctx.lineJoin = "round";
+ctx.lineWidth = band;
+ctx.stroke();
+ctx.lineWidth = 2;
+ctx.stroke();
+continue;
+}
 ctx.closePath();
 ctx.fill();
 ctx.stroke();
@@ -54144,7 +54170,7 @@ return pick;
 }
 const hit = hitTest(state.project, scheme, point, view, state.filter, slack);
 if (single) {
-const selected = findMark(state.project, single);
+const selected = visibleMark(state.project, findMark(state.project, single));
 if (selected && selected.kind === "point" && selected.schemeId === scheme.id) {
 const side = hitHandle(scheme, selected, point, view, slack, canvasStacks(state, scheme));
 const neighbour = hit && hit.part === "mark" && hit.markId !== selected.id;
@@ -54523,7 +54549,7 @@ return;
 }
 }
 if (editable && state.selectedMarkIds.length === 1) {
-const selected = findMark(state.project, state.selectedMarkIds[0]);
+const selected = visibleMark(state.project, findMark(state.project, state.selectedMarkIds[0]));
 if (selected && selected.kind === "point" && selected.schemeId === scheme.id) {
 const side = hitHandle(scheme, selected, point, view, 0, canvasStacks(state, scheme));
 const covered = side ? hitTest(state.project, scheme, point, view, state.filter) : null;
@@ -54658,10 +54684,20 @@ let next = project;
 for (const id of ids || []) {
 const mark = findMark(next, id);
 if (!mark) continue;
+if (visibleMark(next, mark) !== mark) continue;
 const points = mark.points.map((point) => ({ x: point.x + shift.x, y: point.y + shift.y }));
 next = updateMark(next, id, { points }).project;
 }
 return next;
+}
+function canvasSayLinkedMove(project, markId) {
+const mark = findMark(project, markId);
+const object = mark ? findSchemeObject(project, markObjectId(mark)) : null;
+if (!object || !canvasApi) return;
+canvasApi.notify(
+text("markObject.moveLinked", { label: labelOf(project, markId), name: schemeObjectNameOf(project, object) }),
+"info",
+);
 }
 function canvasDragsCommentPoint(project, markId, part) {
 if (!markId || part === "label") return false;
@@ -54853,7 +54889,8 @@ if ((drag.kind === "mark" || drag.kind === "label") && canvasPreview) {
 const label = canvasMoveStepLabel(drag.before, drag);
 const after = canvasPreview;
 canvasPreview = null;
-canvasCommit(drag.before, after, label, { selection: [drag.markId] });
+if (after === drag.before) canvasSayLinkedMove(drag.before, drag.markId);
+else canvasCommit(drag.before, after, label, { selection: [drag.markId] });
 if (drag.kind === "mark") canvasOfferLink(drag.markId);
 }
 if (drag.kind === "pathVertex" && canvasPreview) {
@@ -55167,7 +55204,7 @@ const handle = hitPathHandle(pathEditHandles(scheme, editedPath, view), point);
 if (handle) return handle.kind === "vertex" ? { pull: true } : { press: true };
 }
 if (editable && state.selectedMarkIds.length === 1) {
-const selected = findMark(state.project, state.selectedMarkIds[0]);
+const selected = visibleMark(state.project, findMark(state.project, state.selectedMarkIds[0]));
 if (selected && selected.kind === "point" && selected.schemeId === scheme.id) {
 if (hitHandle(scheme, selected, point, view, 0, canvasStacks(state, scheme))) return { press: true };
 }
@@ -57107,7 +57144,7 @@ mark,
 type: findType(project, mark.typeId),
 category: categoryOf.get(mark.typeId) || null,
 style: styleOf(project, mark.typeId),
-label: labelOf(project, mark.id),
+label: markPairLabel(project, mark),
 }))
 .sort((a, b) => {
 const orderA = order.has(a.mark.typeId) ? order.get(a.mark.typeId) : last;
@@ -62251,10 +62288,11 @@ registerPanel(PANEL_IDS.properties, mountTypesPanel);
 const MARKS_NEW_ROOM = "--new-room--";
 const MARKS_AUTO_ROOM = "--auto-room--";
 const MARKS_AUTO_WALL = "--auto-wall--";
-function marksCenteredView(scheme, mark, view) {
+function marksCenteredView(project, scheme, mark, view) {
 const host = document.getElementById(PANEL_IDS.canvas);
 if (!host || !host.clientWidth || !host.clientHeight) return view;
-const local = planToScreen(mark.points[0], scheme, { ...view, offsetX: 0, offsetY: 0 });
+const shown = visibleMark(project, mark);
+const local = planToScreen(shown.points[0], scheme, { ...view, offsetX: 0, offsetY: 0 });
 return { ...view, offsetX: host.clientWidth / 2 - local.x, offsetY: host.clientHeight / 2 - local.y };
 }
 function marksLabelList(labels) {
@@ -62567,7 +62605,7 @@ const scheme = state.project ? findScheme(state.project, state.schemeId) : null;
 const mark = state.project ? findMark(state.project, markId) : null;
 if (!scheme || !mark) return;
 clickedRow = markId;
-setState({ selectedMarkIds: [markId], view: marksCenteredView(scheme, mark, state.view) });
+setState({ selectedMarkIds: [markId], view: marksCenteredView(state.project, scheme, mark, state.view) });
 }
 function focusMark(markId) {
 const state = getState();
@@ -63468,7 +63506,7 @@ liftMark(state, model.id);
 const liftMark = (state, markId) => {
 const plan = document.getElementById(PANEL_IDS.canvas);
 const scheme = state.project ? findScheme(state.project, state.schemeId) : null;
-const mark = state.project ? findMark(state.project, markId) : null;
+const mark = state.project ? visibleMark(state.project, findMark(state.project, markId)) : null;
 if (!plan || !scheme || !mark || !mark.points || mark.points.length === 0) return;
 const at = planToScreen(mark.points[0], scheme, state.view);
 const box = card.getBoundingClientRect();
@@ -64024,8 +64062,11 @@ const SAVE_DELAY_MS = 400;
 function projectsMigrateStored(stored, library = null) {
 const migrated = fillTypeSizes(migrateCommentType(migrateTypeKinds(stored).project).project).project;
 const pinned = migrateScenarioLib(migrateScenarios(migrated).project, library).project;
-const numbered = migrateThingMarks(idsMigrate(pinned).project).project;
-return migrateDevices(numbered).project;
+const renumbered = idsMigrate(pinned).project;
+const numbered = thingMarksMigrated(stored) ? renumbered : migrateThingMarks(renumbered).project;
+const devices = migrateDevices(numbered).project;
+const version = projectFormatVersion(devices);
+return devices.formatVersion === version ? devices : { ...devices, formatVersion: version };
 }
 async function projectsLibraryDoor() {
 try {
@@ -76411,7 +76452,7 @@ if (!state.project || state.schemeId !== row.schemeId) return false;
 const scheme = findScheme(state.project, row.schemeId);
 const mark = findMark(state.project, row.markId);
 if (!scheme || !mark) return false;
-setState({ view: marksCenteredView(scheme, mark, state.view) });
+setState({ view: marksCenteredView(state.project, scheme, mark, state.view) });
 return true;
 }
 function pick(index) {
@@ -76494,11 +76535,15 @@ if (kind === "line") return strings.tools.kindLineHint;
 if (kind === MARK_KIND_COMMENT) return strings.tools.kindCommentHint;
 return strings.tools.kindPointHint;
 }
-function toolsModeNote({ mode, kind, label } = {}) {
-const named = mode && mode !== "select" && mode !== "add" ? mode : null;
+function toolsModeNote({ mode, what, kind, label } = {}) {
+const named = toolsModeKey({ mode, what });
 if (named) return strings.tools["modeNow_" + named] || toolsKindNote(kind);
 if (mode === "select" && kind) return text("tools.modeSelectNote", { label });
 return toolsKindNote(kind);
+}
+function toolsModeKey({ mode, what } = {}) {
+if (!mode || mode === "select" || mode === "add") return null;
+return mode === "blockJoin" && what === "object" ? "objectLink" : mode;
 }
 function toolsZoomRow(state) {
 const screen = state.screen;
@@ -76682,10 +76727,11 @@ uiEl("span", { class: "tools__typeName", text: strings.tools.noType }),
 uiEl("span", { class: "tools__pick", text: strings.tools.pick }),
 ],
 );
-const named = state.mode !== "select" && state.mode !== "add" ? state.mode : null;
+const named = toolsModeKey({ mode: state.mode, what: state.blockJoinWhat });
 const kindNote = toolsKindNote(kind);
 const modeNote = toolsModeNote({
 mode: state.mode,
+what: state.blockJoinWhat,
 kind,
 label: type ? type.code + " — " + type.name : "",
 });
@@ -77186,8 +77232,21 @@ key,
 warnings: result.warnings || [],
 };
 } catch (error) {
-return { status: "broken", reason: (error && error.reason) || (error && error.code === VIEW_LINK_BROKEN ? "payload" : "unknown") };
+return {
+status: "broken",
+reason: (error && error.reason) || (error && error.code === VIEW_LINK_BROKEN ? "payload" : "unknown"),
+version: error && error.version !== undefined ? error.version : null,
+};
 }
+}
+function viewStartLinkRefusal(result) {
+const from = result || {};
+if (from.reason !== "version") return strings.view.linkBroken;
+const version = Number(from.version);
+if (Number.isFinite(version) && version > VIEW_LINK_VERSION) {
+return text("view.linkNewVersion", { version, current: VIEW_LINK_VERSION });
+}
+return strings.view.linkOldVersion;
 }
 function viewStartReplace(saved, next) {
 if (!saved) return "fresh";
@@ -77568,7 +77627,7 @@ savedKey: slot && typeof slot === "object" ? slot.link : null,
 modal.close();
 cleanAddress();
 }
-if (result.status === "broken") notify(strings.view.linkBroken, "error");
+if (result.status === "broken") notify(viewStartLinkRefusal(result), "error");
 else if (result.status === "empty") notify(strings.view.linkEmpty, "error");
 else if (result.status === "ok") await openLoaded(result.loaded, { madeAt: result.madeAt, linkKey: result.key });
 }
@@ -77772,7 +77831,7 @@ const state = getState();
 if (!place || !place.point || !place.schemeId || state.schemeId !== place.schemeId) return false;
 const scheme = findScheme(state.project, place.schemeId);
 if (!scheme) return false;
-setState({ view: marksCenteredView(scheme, { points: [place.point] }, state.view) });
+setState({ view: marksCenteredView(state.project, scheme, { points: [place.point] }, state.view) });
 return true;
 }
 function jump(place) {

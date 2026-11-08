@@ -12,7 +12,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { addLogicBinding, addScenario, findLogicBinding, findScheme } from "../src/model.js";
+import { addLogicBinding, addMark, addScenario, addScheme, createProject, findLogicBinding, findScheme, idsMigrate } from "../src/model.js";
 import { fitView, planToScreen, visibleMarks } from "../src/render.js";
 import { deviceAids } from "../src/sim/home.js";
 import {
@@ -30,6 +30,7 @@ import { planPickerSchemes } from "../src/panels/planPicker.js";
 import { scenarioScriptFieldMarks, scenarioScriptSetOptions } from "../src/panels/scenarioScript.js";
 import { SCENARIOS_LOGIC_GROUP, scenariosDeviceGroups } from "../src/panels/scenarios.js";
 import { simHouse } from "./fixtures/simHome.js";
+import { legacyIdsBefore } from "./fixtures/legacyIds.js";
 
 // Поле с видом в памяти — так ход видит любая поверхность.
 function field(start = { zoom: 1, offsetX: 0, offsetY: 0 }) {
@@ -111,7 +112,7 @@ test("выбор на поле: ближайшая к руке метка из �
   assert.deepEqual(planPickerSchemes(box.project, new Set(["нет такой"])), []);
 });
 
-test("поле опций со списком устройств узнаётся по адресам хаба: aid, aid.sid, aid.sid.cid → метка", () => {
+test("поле опций со списком устройств узнаётся по адресам хаба: aid.sid и aid.sid.cid → метка", () => {
   const box = simHouse();
   const aids = deviceAids(box.project);
   const sensor = box.marks["ДТВ1"];
@@ -123,7 +124,7 @@ test("поле опций со списком устройств узнаётс�
       { value: "", label: "Не выбрано" },
       { value: aids.get(sensor) + ".13", label: "Температура" },
       { value: aids.get(sensor) + ".15", label: "Влажность" },
-      { value: String(aids.get(lamp)), label: "Лампа" },
+      { value: aids.get(lamp) + ".13.15", label: "Лампа" },
       { value: 30, label: "30 минут" },
     ],
   };
@@ -133,6 +134,58 @@ test("поле опций со списком устройств узнаётс�
   // Список без устройств — кнопки «на схеме» у него нет.
   assert.equal(scenarioScriptFieldMarks(box.project, { formType: "list", values: [{ value: 0, label: "Выкл" }, { value: 30, label: "30" }] }).size, 0);
   assert.equal(scenarioScriptFieldMarks(box.project, { formType: null, type: "Integer" }).size, 0);
+  // Голый `aid` адресом **не** считается: номера меток теперь 1…N, и число без
+  // точки — это константа списка, а не прибор.
+  const bare = scenarioScriptFieldMarks(box.project, {
+    formType: "list",
+    values: [{ value: String(aids.get(lamp)), label: "Лампа" }],
+  });
+  assert.equal(bare.size, 0, "голое число снова названо устройством");
+});
+
+// Объект с метками №1…№100 — ровно такой, какой выходит из перенумерации
+// (метки нумеруются первыми, ADR 030). На фикстуре `simHouse` метки идут от
+// 118, и только поэтому список «Выкл / Авто / 30 минут / 100 %» там ничего не
+// находил; у заказчика на всех четырёх объектах он объявлял устройствами метки
+// №1, №30 и №100 — по два-три ложных прибора на поле.
+test("на объекте с метками №1…№100 список констант ни одного прибора не находит", () => {
+  let project = createProject({ name: "Сто меток" });
+  const added = addScheme(project, { name: "1 этаж", imageId: "plan", width: 1000, height: 800 });
+  project = added.project;
+  const typeId = project.markTypes.find((type) => type.code === "Т").id;
+  for (let index = 0; index < 100; index += 1) {
+    project = addMark(project, {
+      schemeId: added.scheme.id,
+      typeId,
+      kind: "point",
+      points: [{ x: 0.1 + (index % 10) / 20, y: 0.1 + Math.floor(index / 10) / 20 }],
+    }).project;
+  }
+  const numbered = idsMigrate(legacyIdsBefore(project)).project;
+  assert.deepEqual(
+    numbered.marks.map((mark) => mark.id),
+    numbered.marks.map((mark, index) => String(index + 1)),
+    "пример не тот: метки получили не 1…100",
+  );
+  assert.equal(deviceAids(numbered).size, 100, "пример не тот: у меток нет адресов");
+
+  const constants = {
+    formType: "list",
+    values: [
+      { value: 0, label: "Выкл" },
+      { value: 1, label: "Авто" },
+      { value: 30, label: "30 минут" },
+      { value: 100, label: "100 %" },
+    ],
+  };
+  assert.equal(scenarioScriptFieldMarks(numbered, constants).size, 0, "константы списка названы приборами");
+
+  // А настоящий адрес той же метки по-прежнему находится.
+  const real = scenarioScriptFieldMarks(numbered, {
+    formType: "list",
+    values: [{ value: "30.13", label: "Светильник" }],
+  });
+  assert.deepEqual([...real.keys()], ["30"]);
 });
 
 test("опции привязки — окном и одним шагом; устройства с включённой логикой — первой группой списка", () => {

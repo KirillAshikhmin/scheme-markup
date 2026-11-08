@@ -156,7 +156,7 @@ function mountSearchPanel(host, api) {
     const scheme = findScheme(state.project, row.schemeId);
     const mark = findMark(state.project, row.markId);
     if (!scheme || !mark) return false;
-    setState({ view: marksCenteredView(scheme, mark, state.view) });
+    setState({ view: marksCenteredView(state.project, scheme, mark, state.view) });
     return true;
   }
 

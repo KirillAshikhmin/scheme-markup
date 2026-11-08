@@ -62,6 +62,7 @@ import {
   objectDeviceDrop,
   objectDeviceMake,
   schemeObjectCorners,
+  schemeObjectFootprintMm2,
   schemeObjectNameOf,
   schemeObjectsOnScheme,
   setMarkObject,
@@ -127,6 +128,7 @@ import {
   cursorFor,
   drawScheme,
   drawingBridge,
+  drawingHitObject,
   fitView,
   drawLabelTurn,
   drawLabelLeaderSwitch,
@@ -170,6 +172,7 @@ import {
   simLiveFrame,
   simLiveMemo,
   draftSnap,
+  visibleMark,
   visibleMarks,
   visibleOutlines,
   drawFontReady,
@@ -1097,7 +1100,9 @@ function canvasHighlightPaint(project, scheme, view, now) {
     canvasHighlight = null;
     return false;
   }
-  const mark = findMark(project, canvasHighlight.markId);
+  // Место — через `visibleMark`: у связанного прибора знак лежит на вещи, и
+  // кольцо обязано встать на знак, а не на записанную точку.
+  const mark = visibleMark(project, findMark(project, canvasHighlight.markId));
   if (!mark || mark.schemeId !== scheme.id || !mark.points || mark.points.length === 0) return true;
   const at = planToScreen(mark.points[0], scheme, view);
   canvasCtx.save();
@@ -1320,7 +1325,7 @@ function canvasPaint() {
     }
   }
   if (editable && state.selectedMarkIds.length === 1 && !canvasDrag) {
-    const mark = findMark(project, state.selectedMarkIds[0]);
+    const mark = visibleMark(project, findMark(project, state.selectedMarkIds[0]));
     if (mark && mark.kind === "point" && mark.schemeId === scheme.id) {
       drawHandles(canvasCtx, scheme, mark, view, canvasHandleColor(state, mark), canvasStacks(state, scheme));
     }
@@ -2694,9 +2699,13 @@ export function canvasObjectAt(project, schemeId, plan, hidden = []) {
   let bestArea = Infinity;
   for (const object of schemeObjectsOnScheme(project, schemeId)) {
     if (hidden.includes(object.id)) continue;
-    if (object.shape === "polyline") continue;
-    if (!canvasInsideCorners(at, schemeObjectCorners(object))) continue;
-    const area = Number(object.widthMm) * Number(object.depthMm);
+    // Попадание — одной дверью чертежа (`drawingHitObject`): она знает и
+    // прямоугольник, и полосу шириной `depthMm`. Своего правила здесь было
+    // ровно на то, чтобы полосу отвергать: на схеме, где вещи нарисованы
+    // полосами, кнопка связи горела, подсветки не было, и любой щелчок
+    // отвечал «здесь нет вещи чертежа» — тупик без выхода, кроме Esc.
+    if (!drawingHitObject(object, at, 0)) continue;
+    const area = schemeObjectFootprintMm2(object);
     if (area < bestArea) {
       best = object;
       bestArea = area;
@@ -2847,16 +2856,6 @@ export function canvasUnlinkMarkObject(markId) {
 }
 
 // Точка в многоугольнике (чёт-нечет): габарит вещи — четыре угла.
-function canvasInsideCorners(point, corners) {
-  let inside = false;
-  for (let i = 0, j = corners.length - 1; i < corners.length; j = i++) {
-    const a = corners[i];
-    const b = corners[j];
-    if (a.y > point.y !== b.y > point.y && point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
-  }
-  return inside;
-}
-
 /**
  * Вещь, на которую поставили метку, — **предложение**, а не решение: `null`,
  * если предлагать нечего. Подходит свободная вещь той же схемы, в габарит
@@ -2872,9 +2871,10 @@ export function canvasLinkOffer(project, markId) {
   let best = null;
   let bestArea = Infinity;
   for (const object of canvasLinkCandidates(project, markId)) {
-    if (object.shape === "polyline") continue;
-    if (!canvasInsideCorners(at, schemeObjectCorners(object))) continue;
-    const area = Number(object.widthMm) * Number(object.depthMm);
+    // Полоса — такая же вещь (столешница с подсветкой): попадание считает та
+    // же дверь чертежа, что и щелчок в режиме связи.
+    if (!drawingHitObject(object, at, 0)) continue;
+    const area = schemeObjectFootprintMm2(object);
     if (area < bestArea) {
       best = object;
       bestArea = area;
@@ -3112,21 +3112,38 @@ function canvasMeasureHover(state, point, free) {
 function canvasPaintLinkable(state, project, scheme, view) {
   if (!canvasObjectJoining(state, state.selectedMarkIds[0])) return;
   const hidden = state.hiddenObjectIds || [];
+  // Полоса подсвечивается **полосой**, как её и рисует чертёж: ширина берётся
+  // у той же мерки `pxPerMm`, которой чертёж переводит миллиметры в точки
+  // экрана (`drawDrawingObject`). Замкнутым многоугольником её не нарисовать —
+  // у неё не углы, а путь.
+  const bridge = drawingBridge(project, scheme, view);
   const ctx = canvasCtx;
   ctx.save();
   ctx.strokeStyle = "#0969da";
   ctx.fillStyle = "rgba(9, 105, 218, 0.18)";
   ctx.lineWidth = 2;
   for (const object of canvasLinkCandidates(project, state.selectedMarkIds[0])) {
-    if (hidden.includes(object.id) || object.shape === "polyline") continue;
+    if (hidden.includes(object.id)) continue;
     const corners = schemeObjectCorners(object).map((corner) => planMmToFraction(project, scheme.id, corner));
-    if (corners.some((corner) => !corner)) continue;
+    if (corners.length < 2 || corners.some((corner) => !corner)) continue;
+    const band = object.shape === "polyline" && bridge && bridge.pxPerMm > 0
+      ? Math.max(2, Number(object.depthMm) * bridge.pxPerMm)
+      : 0;
     ctx.beginPath();
     corners.forEach((corner, index) => {
       const at = planToScreen(corner, scheme, view);
       if (index === 0) ctx.moveTo(at.x, at.y);
       else ctx.lineTo(at.x, at.y);
     });
+    if (band > 0) {
+      ctx.lineCap = "butt";
+      ctx.lineJoin = "round";
+      ctx.lineWidth = band;
+      ctx.stroke();
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      continue;
+    }
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
@@ -3560,7 +3577,7 @@ function canvasTouchPick(state, point) {
   // Ручка «+» важнее всего, кроме уже стоящей под ней метки, — та же оговорка,
   // что у мыши: ручка висит ровно на шаге блока и накрывает соседа по блоку.
   if (single) {
-    const selected = findMark(state.project, single);
+    const selected = visibleMark(state.project, findMark(state.project, single));
     if (selected && selected.kind === "point" && selected.schemeId === scheme.id) {
       const side = hitHandle(scheme, selected, point, view, slack, canvasStacks(state, scheme));
       const neighbour = hit && hit.part === "mark" && hit.markId !== selected.id;
@@ -4192,7 +4209,7 @@ function canvasPointerDown(event) {
   // третью метку поверх него вместо того, чтобы его выделить. Своя метка не в
   // счёт — её ручки на то и ручки.
   if (editable && state.selectedMarkIds.length === 1) {
-    const selected = findMark(state.project, state.selectedMarkIds[0]);
+    const selected = visibleMark(state.project, findMark(state.project, state.selectedMarkIds[0]));
     if (selected && selected.kind === "point" && selected.schemeId === scheme.id) {
       const side = hitHandle(scheme, selected, point, view, 0, canvasStacks(state, scheme));
       const covered = side ? hitTest(state.project, scheme, point, view, state.filter) : null;
@@ -4418,10 +4435,29 @@ export function canvasMoveMarks(project, ids, shift) {
   for (const id of ids || []) {
     const mark = findMark(next, id);
     if (!mark) continue;
+    // Связанный прибор не везётся: его знак стоит на вещи (`visibleMark`), и
+    // сдвиг записанной точки не двигает картинку ни на пиксель. Записать его
+    // значило бы увезти точку молча — и после «Отвязать» метка прыгнула бы
+    // туда, куда её тащили. Такая метка пропускается, а раз от этого объект
+    // не меняется ни в одном поле, отпускание не пишет шага истории и
+    // говорит, что делать (`canvasSayLinkedMove`).
+    if (visibleMark(next, mark) !== mark) continue;
     const points = mark.points.map((point) => ({ x: point.x + shift.x, y: point.y + shift.y }));
     next = updateMark(next, id, { points }).project;
   }
   return next;
+}
+
+// Отказ словом: взятую метку везёт её вещь, а не рука. Называется и метка, и
+// вещь — иначе человек ищет, что мешает.
+function canvasSayLinkedMove(project, markId) {
+  const mark = findMark(project, markId);
+  const object = mark ? findSchemeObject(project, markObjectId(mark)) : null;
+  if (!object || !canvasApi) return;
+  canvasApi.notify(
+    text("markObject.moveLinked", { label: labelOf(project, markId), name: schemeObjectNameOf(project, object) }),
+    "info",
+  );
 }
 
 // ——— комментарий: плашка и точка едут врозь ———————————————————————————
@@ -4739,10 +4775,15 @@ function canvasPointerUp(event) {
       const label = canvasMoveStepLabel(drag.before, drag);
       const after = canvasPreview;
       canvasPreview = null;
+      // Правка, не меняющая картинку, в историю не идёт. Так кончается перенос
+      // связанной метки: везти её некуда — знак стоит на вещи, — и вместо
+      // шага «перемещение метки», который ничего не вернёт, человеку
+      // говорится, что двигать.
       // Выделение остаётся на взятой метке: панель свойств и карточка говорят
       // об одной метке, и после переноса блока человек правит ту, за которую
       // взялся, а не получает пустую панель «выделено три».
-      canvasCommit(drag.before, after, label, { selection: [drag.markId] });
+      if (after === drag.before) canvasSayLinkedMove(drag.before, drag.markId);
+      else canvasCommit(drag.before, after, label, { selection: [drag.markId] });
       // Метку перенесли на вещь — то же предложение связать, что и при
       // постановке (R04.1): решает человек, отказ ничего не меняет.
       if (drag.kind === "mark") canvasOfferLink(drag.markId);
@@ -5249,7 +5290,7 @@ function canvasCursorAt(state, point) {
   }
   // Ручка «+» вокруг выделенной точки — быстрый путь к соседу по блоку.
   if (editable && state.selectedMarkIds.length === 1) {
-    const selected = findMark(state.project, state.selectedMarkIds[0]);
+    const selected = visibleMark(state.project, findMark(state.project, state.selectedMarkIds[0]));
     if (selected && selected.kind === "point" && selected.schemeId === scheme.id) {
       if (hitHandle(scheme, selected, point, view, 0, canvasStacks(state, scheme))) return { press: true };
     }

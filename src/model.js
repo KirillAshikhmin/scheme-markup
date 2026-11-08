@@ -7550,6 +7550,23 @@ export function schemeObjectTopMm(object) {
   return Number(object.heightAboveFloorMm || 0) + Number(object.heightMm);
 }
 
+/**
+ * Площадь вещи на плане, мм². Нужна там, где из накрывших одну точку вещей
+ * берут **меньшую** (телевизор на тумбе, а не тумбу): предложение связи и
+ * щелчок по вещи в режиме связи.
+ *
+ * Отдельной дверью — потому что у полосы записанной ширины нет вовсе, и
+ * `widthMm * depthMm` даёт у неё `NaN`: такая вещь молча проигрывала любой
+ * другой, а там, где кроме полос ничего не нарисовано, не находилась никогда.
+ * Длину и ширину в её осях считает то же место, что и для `markPlace`.
+ */
+export function schemeObjectFootprintMm2(object) {
+  if (!object) return 0;
+  const spans = schemeObjectSpansMm(object, schemeObjectCorners(object));
+  const area = Number(spans.widthMm) * Number(spans.depthMm);
+  return Number.isFinite(area) ? area : 0;
+}
+
 // Углы габарита в миллиметрах: ими считается размер чертежа и по ним он
 // рисуется. У прямоугольника это четыре повёрнутых угла, у ломаной — её
 // вершины (полоса шириной `depthMm` ложится по ним).
@@ -9929,7 +9946,10 @@ export function wallElevation(project, wallId, side = "left", cut = null) {
         : sideSpan(length, binding.atMm, binding.toMm, view);
     marks.push({
       id: mark.id,
-      label: labelOf(project, mark.id),
+      // Имя прибора — одно на все листы (`markPairLabel`): у связанной метки
+      // это пара «ТВ1 · Телевизор», у несвязанной — прежнее обозначение, и
+      // лист объекта без связей не меняется ни на штрих (G68).
+      label: markPairLabel(project, mark),
       color: style.color,
       shape: style.shape,
       lineStyle: style.lineStyle,
@@ -10909,11 +10929,25 @@ function idsMovedTree(value, moves) {
 // которые уже ответил (на объектах заказчика — 23 из 91), а в списке принятых
 // останется столько же записей-сирот. Сортировка здесь та же, что там:
 // `sort()` по строкам.
+// **Ключи, у которых кусок после `#` — не идентификатор.** У повтора номера там
+// стоит **видимый номер метки** (`repeatedNumber:<typeId>#<номер>`), и переносит
+// его своя дверь: `renumberAccepted` при смыкании и `renumberAcceptedRepeats`
+// при слиянии. Подставь его наравне с идентификатором — и переезд сущности с
+// тем же номером увезёт ответ на чужое обозначение: на объекте заказчика в 592
+// метки переезд сущности 16 превратил `repeatedNumber:741#16` в `…#5000`, ответ
+// повис сиротой, а на настоящем номере жёлтая строка задалась заново.
+//
+// Остальные составные ключи здесь не названы потому, что у них после `#` стоит
+// либо список идентификаторов (`sharedShape:круг#тип,тип`), либо имя
+// изображения (`typeViewOffer:<typeId>#<вид>`) — с номером оно не совпадает.
+const ID_KEY_PLAIN_TAIL = Object.freeze(new Set(["repeatedNumber:"]));
+
 function idsMovedKey(key, all) {
   const at = String(key == null ? "" : key).indexOf(":");
   if (at < 0) return key;
   const head = key.slice(0, at + 1);
   const tail = key.slice(at + 1);
+  const plainTail = ID_KEY_PLAIN_TAIL.has(head);
   let touched = false;
   const move = (piece) => {
     const next = all.get(piece);
@@ -10925,7 +10959,8 @@ function idsMovedKey(key, all) {
   // а внутри куска через `,` или `+` лежит список идентификаторов — он и
   // сортируется, и только если он **целиком** из них: в чужой строке порядок
   // может значить своё.
-  const segments = tail.split("#").map((segment) => {
+  const segments = tail.split("#").map((segment, index) => {
+    if (plainTail && index > 0) return segment;
     for (const mark of [",", "+"]) {
       if (!segment.includes(mark)) continue;
       const pieces = segment.split(mark);

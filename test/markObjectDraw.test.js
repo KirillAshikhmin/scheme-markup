@@ -19,8 +19,9 @@ import {
   setPlanScale,
   updateSchemeObject,
 } from "../src/model.js";
-import { drawScheme, hitTest, planToScreen, visibleMarks } from "../src/render.js";
+import { drawScheme, hitHandle, hitTest, planToScreen, visibleMark, visibleMarks } from "../src/render.js";
 import { volumeMarks } from "../src/volume.js";
+import { canvasMoveMarks } from "../src/canvas.js";
 
 function scene() {
   const added = addScheme(createProject({ name: "Связь" }), { name: "1 этаж", imageId: "plan-1", width: 1200, height: 800 });
@@ -143,4 +144,49 @@ test("на развёртке изображение связанной метк
   const free = draw(bound).filter((call) => call[0] === "rotate");
   assert.equal(free.length, 0, "без связи появился поворот");
   assert.equal(turned.length, 1, "не повёрнуто " + JSON.stringify(wallElevation(linked, wallId, "right").marks.map((m) => [m.turnDeg, m.heightMm, m.view, m.fromMm])));
+});
+
+// Место связанной метки читается **только** через резолвер. До этой правки
+// ручки «+», их попадание, кольцо подсветки, подводка холста из списка и
+// поиска и подъём плана из-под карточки брали сырую `mark.points`: знак стоял
+// на вещи, а ручки висели у записанной точки — после миграции в 0…300 мм, а
+// после сдвига вещи (R04) на любом расстоянии.
+test("ручки «+» связанной метки стоят у знака, а не у записанной точки", () => {
+  const base = scene();
+  const linked = setMarkObject(base.project, base.mark.id, base.object.id).project;
+  const scheme = linked.schemes[0];
+  const raw = findMark(linked, base.mark.id);
+  const shown = visibleMark(linked, raw);
+  assert.notDeepEqual(shown.points, raw.points, "пример не тот: знак не уехал на вещь");
+
+  // Ручка «слева» считается от знака: по этой точке и щёлкают.
+  const atSign = planToScreen(shown.points[0], scheme, VIEW);
+  const atOwn = planToScreen(raw.points[0], scheme, VIEW);
+  const gap = Math.hypot(atSign.x - atOwn.x, atSign.y - atOwn.y);
+  assert.ok(gap > 40, "пример не тот: точки слишком близко — " + gap);
+  const handle = { x: atSign.x - 18, y: atSign.y };
+  assert.equal(hitHandle(scheme, shown, handle, VIEW), "left", "ручка не нашлась у знака");
+  assert.equal(hitHandle(scheme, raw, handle, VIEW), null, "у сырой метки ручка оказалась там же — пример не тот");
+
+  // И метка без связи проходит дверь **собой**: кадр объекта без связей не
+  // меняется ни на вызов (G68).
+  const free = findMark(base.project, base.mark.id);
+  assert.equal(visibleMark(base.project, free), free, "метка без связи вернулась копией");
+});
+
+// Перенос связанной метки был шагом истории, который ничего не менял: знак
+// стоит на вещи и не двигается ни на пиксель, а записанная точка молча уезжала
+// — и после «Отвязать» метка прыгала туда, куда её тащили.
+test("перенос связанной метки её точку не увозит, и менять в объекте нечего", () => {
+  const base = scene();
+  const linked = setMarkObject(base.project, base.mark.id, base.object.id).project;
+  const after = canvasMoveMarks(linked, [base.mark.id], { x: 0.1, y: 0.1 });
+  assert.equal(after, linked, "записанная точка связанной метки уехала молча");
+  assert.deepEqual(findMark(after, base.mark.id).points, [{ x: 0.1, y: 0.1 }]);
+
+  // Без связи перенос работает как работал.
+  const free = canvasMoveMarks(base.project, [base.mark.id], { x: 0.1, y: 0.1 });
+  assert.notEqual(free, base.project, "метка без связи перестала ездить");
+  const moved = findMark(free, base.mark.id).points[0];
+  assert.ok(Math.abs(moved.x - 0.2) < 1e-12 && Math.abs(moved.y - 0.2) < 1e-12, JSON.stringify(moved));
 });

@@ -10,6 +10,7 @@ import {
   migrateScenarioLib,
   migrateScenarios,
   migrateTypeKinds,
+  projectFormatVersion,
 } from "../model.js";
 import { scenarioLibIndex, scenarioLibRefOf } from "../scenarioLib.js";
 import {
@@ -26,7 +27,7 @@ import {
   storeMode,
 } from "../store.js";
 import { strings, text } from "../strings.js";
-import { migrateDevices, migrateThingMarks } from "../deviceMigrate.js";
+import { migrateDevices, migrateThingMarks, thingMarksMigrated } from "../deviceMigrate.js";
 import { formatMegabytes, uiButton, uiConfirm, uiEl, uiIconButton, uiModal } from "./ui.js";
 import { projectPropsDialog } from "./projectProps.js";
 import { TYPE_TEMPLATE_KEY, typesTemplateFrom } from "./types.js";
@@ -54,8 +55,19 @@ export function projectsMigrateStored(stored, library = null) {
   // что у файла: перенумерация после миграций, которые удаляют сущности, и до
   // перевода аксессуаров (он переселяет адреса в опциях привязок, а адрес — это
   // номер метки).
-  const numbered = migrateThingMarks(idsMigrate(pinned).project).project;
-  return migrateDevices(numbered).project;
+  // Вещи достраиваются **один раз на объект**: признак — версия формата, с
+  // которой объект лёг в базу (`thingMarksMigrated`). Иначе каждое открытие
+  // возвращало бы снятую рукой связь и достраивало заново удалённую вещь.
+  const renumbered = idsMigrate(pinned).project;
+  const numbered = thingMarksMigrated(stored) ? renumbered : migrateThingMarks(renumbered).project;
+  const devices = migrateDevices(numbered).project;
+  // Версия формата дописывается **итогу**: объект, прошедший эту трубу,
+  // пронумерован целиком и потому всегда версии 8 (ADR 030), а в базе он до
+  // сих пор лежал версией 5/6 — то есть на следующем открытии выглядел
+  // непереведённым. Совпала — тот же объект по ссылке, как и у всех миграций
+  // здесь (G68).
+  const version = projectFormatVersion(devices);
+  return devices.formatVersion === version ? devices : { ...devices, formatVersion: version };
 }
 
 /**

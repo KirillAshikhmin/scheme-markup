@@ -8,11 +8,13 @@ import { brotliCompress, brotliDecompress, constants } from "node:zlib";
 import { promisify } from "node:util";
 
 import { exportLinkBuild, exportLinkLong } from "../src/panels/export.js";
-import { viewStartLinkKey, viewStartLinkLoad, viewStartLinkOf } from "../src/panels/viewStart.js";
+import { viewStartLinkKey, viewStartLinkLoad, viewStartLinkOf, viewStartLinkRefusal } from "../src/panels/viewStart.js";
 import { addLogicBinding, addScenario } from "../src/model.js";
 import { buildHomeSpec } from "../src/sim/home.js";
 import { scenarioLibHash, scenarioLibIndexRead } from "../src/scenarioLib.js";
 import { simHouse } from "./fixtures/simHome.js";
+import { strings } from "../src/strings.js";
+import { VIEW_LINK_VERSION } from "../src/viewLink.js";
 
 const squeeze = promisify(brotliCompress);
 const loosen = promisify(brotliDecompress);
@@ -100,10 +102,37 @@ test("порченая и обрезанная ссылка — отказ, а �
   const payload = built.url.slice(BASE.length + 3);
   const cut = await viewStartLinkLoad("#o=" + payload.slice(0, payload.length >> 1), { decompress });
   assert.equal(cut.status, "broken");
-  const junk = await viewStartLinkLoad("#o=1.%%%не-base64", { decompress });
+  // Версия своя, нагрузка мусор — это и есть порча.
+  const junk = await viewStartLinkLoad("#o=" + VIEW_LINK_VERSION + ".%%%не-base64", { decompress });
   assert.equal(junk.status, "broken");
+  assert.notEqual(junk.reason, "version");
   const noCodec = await viewStartLinkLoad("#o=" + payload, { decompress: null });
   assert.equal(noCodec.status, "broken");
+  // И слова у порчи прежние.
+  for (const result of [cut, junk, noCodec]) assert.equal(viewStartLinkRefusal(result), strings.view.linkBroken);
+});
+
+// Ссылка **другой версии** — не порча. Версия нагрузки поднялась вместе с
+// форматом объекта, и каждая уже разосланная ссылка прежней сборки встречала
+// заказчика словами «Ссылка повреждена или обрезана»: неправда, и чинить он
+// будет не то.
+test("ссылка прежней сборки называется версией, а не порчей", async () => {
+  const old = await viewStartLinkLoad("#o=1.AAAA", { decompress });
+  assert.equal(old.status, "broken");
+  assert.equal(old.reason, "version", "отказ по версии больше не доезжает");
+  assert.equal(old.version, 1);
+  const said = viewStartLinkRefusal(old);
+  assert.equal(said, strings.view.linkOldVersion);
+  assert.notEqual(said, strings.view.linkBroken, "ссылка прежней сборки снова названа повреждённой");
+  assert.doesNotMatch(said, /повреждена|обрезана/, said);
+  assert.doesNotMatch(said, /более новой/, "про старую ссылку сказано, что она новее");
+
+  // Ссылка более новой сборки — обратный случай: обновить страницу.
+  const future = await viewStartLinkLoad("#o=" + (VIEW_LINK_VERSION + 1) + ".AAAA", { decompress });
+  assert.equal(future.reason, "version");
+  const ahead = viewStartLinkRefusal(future);
+  assert.match(ahead, /более новой/);
+  assert.match(ahead, new RegExp(String(VIEW_LINK_VERSION + 1)));
 });
 
 test("та же ссылка второй раз — «same», копии не будет; другая — открывается", async () => {

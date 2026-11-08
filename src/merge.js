@@ -854,9 +854,20 @@ function mergeReferences(merged, report, sources, winner) {
  * обе сущности заведены после расхождения. Есть у предка — это одна сущность,
  * правленная с двух сторон, и о ней говорит обычное правило спора.
  *
- * **Предка нет — ничего не делаем.** Без него «оба завели» и «оба правили»
- * выглядят одинаково, и переезд превратил бы одну правленную метку в две. Это
- * тот же объявленный предел слияния без предка, что и «удаления не видны».
+ * **Номер ищется сразу по всем коллекциям, а не внутри своей.** Номера
+ * уникальны по всем видам сущностей сразу (так заведён счётчик объекта), и
+ * `idsReplace` — одна таблица переездов на все коллекции. Ищи столкновение
+ * внутри коллекции — и наша метка 110 доживёт до итога рядом с их стеной 110,
+ * а следующий переезд номера 110 увёз бы на один номер обеих.
+ *
+ * **Предка нет — номер всё равно разводится.** Без предка «оба завели» и «оба
+ * правили» выглядят одинаково, и переезд превратит одну правленную сущность в
+ * две. Это дешевле склейки: сложенные по одному номеру метка в (0,1; 0,1) и
+ * метка в (0,9; 0,9) становятся одной, и одна из них пропадает молча. Правило
+ * здесь то же, что у всего слияния, — «вернуть лишнюю метку минута работы,
+ * восстановить потерянную некому», — поэтому без предка проигравший переезжает,
+ * а не склеивается. Снимок-предок (`autosaveBase`) пишется на каждую нашу
+ * запись ровно для того, чтобы этот случай и не наступал.
  *
  * ——— где это правило всё-таки слепо ———
  *
@@ -889,13 +900,22 @@ function mergeReferences(merged, report, sources, winner) {
  * о нём слияние говорит вслух.
  */
 function mergeIdClash(ours, theirs, base, winner) {
-  if (!base) return { ours, theirs, reissued: [] };
+  // Одна таблица на все коллекции — такая же, как у `idsReplace`: номер
+  // уникален по всем видам сразу, и метка 110 спорит со стеной 110.
+  const mine = new Map();
+  const known = new Set();
+  for (const entity of MERGE_ENTITIES) {
+    for (const item of mergeList(ours, entity)) {
+      if (item && typeof item.id === "string") mine.set(item.id, item);
+    }
+    for (const item of mergeList(base, entity)) {
+      if (item && typeof item.id === "string") known.add(item.id);
+    }
+  }
   const clashed = new Set();
   for (const entity of MERGE_ENTITIES) {
-    const mine = mergeIndex(mergeList(ours, entity));
-    const known = mergeIndex(mergeList(base, entity));
     for (const item of mergeList(theirs, entity)) {
-      if (!item || known.has(item.id)) continue;
+      if (!item || typeof item.id !== "string" || known.has(item.id)) continue;
       const twin = mine.get(item.id);
       if (!twin || mergeSame(twin, item)) continue;
       clashed.add(item.id);

@@ -25,7 +25,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { canvasSilentPlaceNote } from "../src/canvas.js";
-import { toolsKindNote, toolsModeNote } from "../src/panels/tools.js";
+import { toolsKindNote, toolsModeKey, toolsModeNote } from "../src/panels/tools.js";
 import { MARK_KIND_COMMENT } from "../src/model.js";
 import { strings } from "../src/strings.js";
 
@@ -79,6 +79,27 @@ test("без типа правду говорит прежняя строка �
 test("у занятий без своей кнопки строка прежняя: они говорят о себе сами", () => {
   assert.equal(toolsModeNote({ mode: "room", kind: "point", label: "Р — Розетка" }), strings.tools.modeNow_room);
   assert.equal(toolsModeNote({ mode: "scale", kind: "point", label: "Р — Розетка" }), strings.tools.modeNow_scale);
+});
+
+// Режим у сбора блока и у связи с вещью один, а занятия два: плашка в левой
+// колонке и её подсказка обязаны называть то, которое идёт (`blockJoinWhat`).
+// Рассказывать про блок тому, кто связывает прибор с телевизором, — то же
+// самое, чем был латинский ключ режима в плашке.
+test("плашка режима называет связь с вещью, а не сбор блока", () => {
+  assert.equal(toolsModeKey({ mode: "blockJoin", what: null }), "blockJoin");
+  assert.equal(toolsModeKey({ mode: "blockJoin", what: "object" }), "objectLink");
+  assert.equal(toolsModeKey({ mode: "select", what: "object" }), null);
+  assert.equal(toolsModeKey({ mode: "add" }), null);
+
+  const block = toolsModeNote({ mode: "blockJoin", kind: "point", label: "Р — Розетка" });
+  const link = toolsModeNote({ mode: "blockJoin", what: "object", kind: "point", label: "Р — Розетка" });
+  assert.equal(block, strings.tools.modeNow_blockJoin);
+  assert.equal(link, strings.tools.modeNow_objectLink);
+  assert.notEqual(link, block, "в режиме связи подсказка по-прежнему про блок");
+  assert.match(strings.tools.mode_objectLink, /вещь/i);
+  assert.match(link, /вещи/);
+  // И имя у плашки есть: без строки она показала бы ключ латиницей.
+  for (const key of ["blockJoin", "objectLink"]) assert.ok(strings.tools["mode_" + key], key);
 });
 
 test("пустой клик в «Выделении» с выбранным типом объясняется словом", () => {

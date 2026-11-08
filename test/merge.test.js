@@ -12,6 +12,7 @@ import {
   addMark,
   addRoom,
   addOutline,
+  addWall,
   updateMark,
   deleteMark,
   addEquipment,
@@ -234,6 +235,56 @@ test("без общего предка стороны объединяются, 
   const merged = mergeProjects(ours, theirs, null);
   assert.equal(merged.project.marks.length, 3, "без предка удаление не видно — метка остаётся");
   assert.equal(merged.counts.removed, 0);
+});
+
+// Имя теста выше обещает «ничего не пропадает», а проверяет только удаление.
+// Пропасть без предка может и метка: счётчик у разошедшихся копий один, и двое
+// выдают своей новой метке один номер. Сложи такие копии по номеру — и одна из
+// двух станет другой.
+test("без общего предка два разных прибора под одним номером не склеиваются", () => {
+  const { project: base, schemeId } = ancestor();
+  const typeId = base.markTypes[0].id;
+  const mine = addMark(base, { schemeId, typeId, points: [{ x: 0.1, y: 0.1 }] });
+  const alien = addMark(copyOf(base), { schemeId, typeId, points: [{ x: 0.9, y: 0.9 }] });
+  assert.equal(mine.mark.id, alien.mark.id, "пример не тот: номера разошлись сами");
+  const ours = stamp(mine.project, "2026-09-17T10:00:00.000Z");
+  const theirs = stamp(alien.project, "2026-09-17T10:05:00.000Z");
+
+  const merged = mergeProjects(ours, theirs, null);
+  assert.equal(merged.project.marks.length, 4, "одна из двух меток пропала, слившись с чужой");
+  const places = merged.project.marks.map((mark) => mark.points[0].x + ":" + mark.points[0].y);
+  assert.ok(places.includes("0.1:0.1"), "наша метка пропала");
+  assert.ok(places.includes("0.9:0.9"), "их метка пропала");
+  assert.equal(merged.reissued.length, 1, "о переезде номера не сказано");
+  // Номера в итоге уникальны — иначе следующий переезд увёз бы две сущности
+  // на один номер.
+  const ids = merged.project.marks.map((mark) => mark.id);
+  assert.equal(new Set(ids).size, ids.length, "в итоге два прибора с одним номером");
+});
+
+// Номера уникальны **по всем видам сразу**, и `idsReplace` — одна таблица
+// переездов на все коллекции. Столкновение, найденное только внутри своей
+// коллекции, оставляет номер занятым дважды.
+test("номер столкнулся у метки и у стены — столкновение всё равно разведено", () => {
+  const { project: base, schemeId } = ancestor();
+  const typeId = base.markTypes[0].id;
+  const mine = addMark(base, { schemeId, typeId, points: [{ x: 0.1, y: 0.1 }] });
+  const alien = addWall(copyOf(base), {
+    schemeId,
+    aMm: { x: 0, y: 0 },
+    bMm: { x: 3000, y: 0 },
+    thicknessMm: 100,
+  });
+  assert.equal(mine.mark.id, alien.wall.id, "пример не тот: номера разошлись сами");
+  const ours = stamp(mine.project, "2026-09-17T10:00:00.000Z");
+  const theirs = stamp(alien.project, "2026-09-17T10:05:00.000Z");
+
+  const merged = mergeProjects(ours, theirs, base);
+  assert.equal(merged.project.marks.length, 3, "наша метка пропала");
+  assert.equal((merged.project.walls || []).length, 1, "их стена пропала");
+  assert.equal(merged.reissued.length, 1, "столкновение между коллекциями не найдено");
+  const ids = [...merged.project.marks, ...(merged.project.walls || [])].map((item) => item.id);
+  assert.equal(new Set(ids).size, ids.length, "метка и стена остались под одним номером");
 });
 
 test("чужой файл не сливается, а свой узнаётся", () => {

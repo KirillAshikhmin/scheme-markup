@@ -23,11 +23,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  FORMAT_VERSION,
   addMark,
   addSchemeObject,
   addScheme,
   addWall,
   createProject,
+  deleteSchemeObject,
   findMark,
   findSchemeObject,
   markObjectId,
@@ -35,6 +37,7 @@ import {
   schemeObjectNameOf,
   setMarkControls,
   setMarkDevice,
+  setMarkObject,
   setMarkWall,
   setPlanOrigin,
   setPlanScale,
@@ -45,6 +48,7 @@ import { buildHomeSpec, homeAccessories } from "../src/sim/home.js";
 import { simClimateOf } from "../src/simulation.js";
 import { packProject, unpackProject } from "../src/projectFile.js";
 import { projectsMigrateStored } from "../src/panels/projects.js";
+import { legacyIdsBefore } from "./fixtures/legacyIds.js";
 
 // План 1200 × 800 точек, в метре сто точек (отрезок 0,1…0,6 по ширине — шесть
 // метров), нуль чертежа — в точке (0,2; 0,8) плана, оси не повёрнуты. Стена
@@ -252,12 +256,20 @@ test("G01: без моста мм ↔ доли вещь не выдумывае�
   assert.equal(markObjectId(findMark(after.project, box.markId)), null);
 });
 
+// Переводится **объект прежней сборки**, и фикстура здесь именно такая
+// (`legacyIdsBefore`): объект, собранный нынешней моделью, пронумерован от
+// рождения, то есть версии 8 — а значит эту сборку он уже прошёл, и
+// достраивать ему нечего (`thingMarksMigrated`).
 test("G01: обе трубы открытия достраивают вещь одинаково", async () => {
   const box = scene("ТВ");
-  const fromFile = (await unpackProject(await packProject(box.project, new Map()))).project;
-  const stored = projectsMigrateStored(box.project);
+  // Версия прежней сборки стоит и полем: таким объект и лежит в базе браузера.
+  const legacy = { ...legacyIdsBefore(box.project), formatVersion: FORMAT_VERSION };
+  const typeCode = box.project.markTypes.find((type) => type.id === findMark(box.project, box.markId).typeId).code;
+  const fromFile = (await unpackProject(await packProject(legacy, new Map()))).project;
+  const stored = projectsMigrateStored(legacy);
   for (const project of [fromFile, stored]) {
-    const mark = project.marks.find((item) => item.typeId === findMark(project, box.markId).typeId);
+    const code = (mark) => project.markTypes.find((type) => type.id === mark.typeId).code;
+    const mark = project.marks.find((item) => code(item) === typeCode);
     const object = findSchemeObject(project, markObjectId(mark));
     assert.ok(object, "труба открытия вещь не достроила");
     assert.equal(object.catalogKey, "tv");
@@ -269,4 +281,40 @@ test("G01: обе трубы открытия достраивают вещь о
     JSON.stringify({ ...stored, formatVersion: null }),
     "трубы достроили по-разному",
   );
+  // И версию формата дописывают обе: объект, прошедший трубу, пронумерован
+  // целиком и потому всегда версии 8 (ADR 030). Базе это не формальность —
+  // по версии объект и называет себя переведённым.
+  assert.equal(fromFile.formatVersion, 8, "файл открылся без версии 8");
+  assert.equal(stored.formatVersion, 8, "база открыла объект прежней версией");
+});
+
+// Перевод случается **один раз на объект**. Признак «связи нет» это не ловил, и
+// заказчик терял работу: отвязал метку рукой — открытие связало её снова;
+// удалил достроенную вещь — открытие достроило новую; отвязал и увёл метку —
+// на плане появилась вторая вещь.
+test("G01 (история 2): снятая рукой связь и удалённая вещь переживают любое число открытий", async () => {
+  const box = scene("ТВ");
+  const legacy = { ...legacyIdsBefore(box.project), formatVersion: FORMAT_VERSION };
+  for (const open of [
+    async (project) => (await unpackProject(await packProject(project, new Map()))).project,
+    async (project) => projectsMigrateStored(project),
+  ]) {
+    // Первое открытие: вещь достроена и связана.
+    const first = await open(legacy);
+    const markId = first.marks[0].id;
+    assert.ok(markObjectId(findMark(first, markId)), "первое открытие вещь не достроило");
+    assert.equal(first.schemeObjects.length, 1);
+
+    // Человек снял связь руками — и открыл объект снова.
+    const unlinked = setMarkObject(first, markId, null).project;
+    const again = await open(unlinked);
+    assert.equal(markObjectId(findMark(again, markId)), null, "открытие вернуло снятую рукой связь");
+    assert.equal(again.schemeObjects.length, 1, "открытие достроило вторую вещь");
+
+    // Человек удалил достроенную вещь — и открыл объект снова.
+    const dropped = deleteSchemeObject(unlinked, first.schemeObjects[0].id).project;
+    const third = await open(dropped);
+    assert.equal((third.schemeObjects || []).length, 0, "открытие достроило удалённую вещь заново");
+    assert.equal(markObjectId(findMark(third, markId)), null, "открытие связало метку заново");
+  }
 });
