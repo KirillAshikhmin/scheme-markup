@@ -16,16 +16,21 @@
 //   4. **Подгонка схемы без подложки** идёт по нарисованному, а не по листу:
 //      лист вчетверо больше квартиры, и вписанный целиком он показал бы её
 //      маркой на поле.
+//   5. **Подписей вещей на листе нет** (таск 258, G399), а буквы углов на нём
+//      есть: через `drawScheme` чертёж уходит на все выходы разом, и второго
+//      пути у подписи быть не должно.
 import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
   addMark,
   addScheme,
+  addSchemeObject,
   addWall,
   createProject,
   findScheme,
   planMmToFraction,
+  schemeObjectNameOf,
   setPlanOrigin,
   setPlanScale,
   validate,
@@ -193,6 +198,42 @@ test("чертёж без привязки не рисуется и кадр н�
   const project = withWalls(base, 3);
   const scheme = findScheme(project, base.schemeId);
   assert.deepEqual(paint(project, scheme, {}), paint(project, scheme, { drawing: false }));
+});
+
+// ——— таск 258: вещь на листе не подписана ———————————————————————————————
+//
+// Слова заказчика: «У объектов на чертеже сейчас подписи, которые не скрыть и
+// не перенести, их надо бы вообще убрать».
+//
+// Проверяется здесь не мастерская, а **`drawScheme`** — через него чертёж
+// уходит на все выходы разом: холст «Схемы», мини-план, PNG, печать, лист по
+// ГОСТ, архив всех схем и командная строка. Был бы у подписи второй путь, он
+// пролез бы мимо: «на экране убрал, в печати осталось».
+
+test("таск 258: имени вещи нет на листе, а буквы углов на нём остались", () => {
+  const base = planProject();
+  let project = setPlanOrigin(withWalls(base, 4), base.schemeId, { at: { x: 0.5, y: 0.5 }, turn: 0 }).project;
+  const put = addSchemeObject(project, {
+    schemeId: base.schemeId,
+    catalogKey: "fridge",
+    atMm: { x: 400, y: 1500 },
+    widthMm: 600,
+    depthMm: 600,
+  });
+  project = put.project;
+  const name = schemeObjectNameOf(project, put.schemeObject);
+  assert.ok(name, "вещь безымянна — пример не тот");
+  const log = paint(project, findScheme(project, base.schemeId), {});
+  const words = log.filter((line) => line.startsWith("fillText(") || line.startsWith("strokeText("));
+  assert.deepEqual(
+    words.filter((line) => line.includes(name)),
+    [],
+    "вещь на листе снова подписана: " + words.join(" | "),
+  );
+  // Вещь при этом нарисована, и буквы углов на листе целы: убраны подписи
+  // вещей, а не чертёж и не слова чертежа.
+  assert.ok(log.some((line) => line === "fillStyle=rgba(102, 57, 186, 0.12)"), "вещь не нарисовалась вовсе");
+  assert.ok(words.some((line) => /^fillText\("[А-Я]"/.test(line)), "вместе с подписью вещи пропали буквы углов");
 });
 
 // ——— чёрно-белый лист ——————————————————————————————————————————————————

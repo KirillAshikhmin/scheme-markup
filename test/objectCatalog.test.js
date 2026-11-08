@@ -52,7 +52,7 @@ import {
   wallObjectsOn,
   addWall,
 } from "../src/model.js";
-import { drawDrawing, drawingUnitBridge } from "../src/render.js";
+import { DRAWING_OBJECT_FILL, drawDrawing, drawingUnitBridge } from "../src/render.js";
 import { workshopObjectDefaultsByKey, workshopObjectDefaultsByName, workshopPick } from "../src/panels/workshop.js";
 import {
   VOLUME_BODY_MM,
@@ -658,8 +658,9 @@ test("вещь каталога ставится ключом и справоч�
   assert.equal(schemeObjectKeyOf(scene.project, scene.object), "fridge");
   assert.equal(schemeObjectNameOf(scene.project, scene.object), "Холодильник");
   assert.equal(schemeObjectMountOf(scene.project, scene.object), "floor");
-  // Имя едет и на развёртку: вещь у стены подписана тем же словом, что на
-  // чертеже.
+  // Имя едет на развёртку: там вещь — безымянный прямоугольник на высоте, и
+  // назвать его больше нечем (на плане вещь узнают по месту и форме, и подписи
+  // там нет — таск 258, G399).
   const wall = scene.project.walls[0];
   const standing = place(scene, "radiator", { atMm: { x: 2000, y: 120 } });
   const names = wallObjectsOn(standing.project, wall.id, "right").map((item) => item.name);
@@ -821,14 +822,21 @@ test("G68: чертёж с телевизором и полотенцесуши�
   assert.deepEqual([dryer.widthMm, dryer.heightAboveFloorMm, dryer.turnDeg], [600, 950, 90]);
   assert.equal(JSON.stringify(project), JSON.stringify(retiredProject()), "чтение изменило объект");
 
-  // Вещь на чертеже нарисована и подписана своим именем — она не пропала с
-  // поля вместе с записью каталога.
+  // Вещь на чертеже нарисована — она не пропала с поля вместе с записью
+  // каталога. Имени на чертеже нет ни у одной вещи (таск 258, G399), поэтому
+  // считаются залитые габариты, а не слова: имя у этих вещей уже спрошено выше
+  // — там, где его читает человек.
   const bridge = drawingUnitBridge({ zoom: 0.5, offsetX: 0, offsetY: 0 });
   const log = [];
   drawDrawing(scribe(log), { project, schemeId, bridge });
-  const painted = log.join("\n");
-  assert.ok(painted.includes("Телевизор"), "телевизор пропал с чертежа");
-  assert.ok(painted.includes("Полотенцесушитель"), "полотенцесушитель пропал с чертежа");
+  const bodies = log.filter((line) => line === "fillStyle=" + DRAWING_OBJECT_FILL).length;
+  assert.equal(bodies, project.schemeObjects.length, "вещи ушедшего каталога пропали с чертежа");
+  const words = log.filter((line) => line.startsWith("fillText(") || line.startsWith("strokeText("));
+  const names = project.schemeObjects.map((object) => schemeObjectNameOf(project, object));
+  const named = words.filter((line) => names.some((name) => name && line.includes(name)));
+  assert.deepEqual(named, [], "вещь на чертеже снова подписана: " + named.join(" | "));
+  // А буквы углов на месте: убраны подписи вещей, а не слова чертежа вообще.
+  assert.ok(words.some((line) => /^fillText\([А-Я],/.test(line)), "вместе с подписями вещей пропали буквы углов");
 });
 
 test("G68: файл с ушедшими вещами переживает круг «упаковали — распаковали» без новых полей", async () => {
@@ -904,8 +912,6 @@ test("G68: файл прежней сборки переживает круг «
 
 test("спрятанная вещь не рисуется, а выгрузка о ней не знает", () => {
   const scene = place(room(), "fridge");
-  // Масштаб покрупнее: имя вещи ставится только когда оно читается на экране
-  // (`DRAWING_CAPTION_MIN_PX`), и на общем виде квартиры его нет вовсе.
   const bridge = drawingUnitBridge({ zoom: 0.5, offsetX: 0, offsetY: 0 });
   const shown = [];
   drawDrawing(scribe(shown), { project: scene.project, schemeId: scene.schemeId, bridge });
@@ -916,19 +922,22 @@ test("спрятанная вещь не рисуется, а выгрузка �
     bridge,
     hiddenObjectIds: [scene.object.id],
   });
-  const name = (log) => log.filter((line) => line.includes("Холодильник"));
-  assert.ok(name(shown).length > 0, "вещь не нарисовалась вовсе — пример не тот");
-  assert.deepEqual(name(hidden), [], "спрятанная вещь всё равно на чертеже");
+  // По чему узнаётся нарисованная вещь: по залитому габариту. Имени у неё на
+  // чертеже нет вовсе (таск 258, G399) — прежде примета была словом
+  // «Холодильник», и сама эта строка стала ответом, которого быть не должно.
+  const body = (log) => log.filter((line) => line === "fillStyle=" + DRAWING_OBJECT_FILL);
+  assert.equal(body(shown).length, 1, "вещь не нарисовалась вовсе — пример не тот");
+  assert.deepEqual(body(hidden), [], "спрятанная вещь всё равно на чертеже");
   assert.ok(hidden.length > 10, "вместе с вещью пропал и весь чертёж");
   // Выгрузка зовёт тот же `drawDrawing` без списка — и получает вещь обратно:
   // «на экране, а для выгрузок у нас же свои параметры видимости».
   const sheet = [];
   drawDrawing(scribe(sheet), { project: scene.project, schemeId: scene.schemeId, bridge });
-  assert.ok(name(sheet).length > 0, "скрытие уехало в выгрузку");
+  assert.equal(body(sheet).length, 1, "скрытие уехало в выгрузку");
   // «Скрыть все» — тот же путь, только разом.
   const none = [];
   drawDrawing(scribe(none), { project: scene.project, schemeId: scene.schemeId, bridge, objects: false });
-  assert.deepEqual(name(none), []);
+  assert.deepEqual(body(none), []);
 });
 
 test("спрятанную вещь не взять кликом в поле", () => {

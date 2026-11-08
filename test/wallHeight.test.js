@@ -380,7 +380,7 @@ test("чертёж: стена высотой ноль — пунктир по �
   );
   const bridge = { toScreen: (point) => ({ x: point.x / 10, y: point.y / 10 }), pxPerMm: 0.1 };
   const only = { ...scene.project, walls: scene.project.walls.filter((wall) => wall.id === scene.balcony[1]), openings: [] };
-  drawDrawing(ctx, { project: only, schemeId: scene.schemeId, bridge, labels: false });
+  drawDrawing(ctx, { project: only, schemeId: scene.schemeId, bridge, letters: false });
   const dashed = calls.filter((item) => item.call === "setLineDash" && item.args[0].length > 0);
   assert.ok(dashed.length > 0, "стена в ноль нарисована сплошной");
   const strokes = calls.filter((item) => item.call === "stroke");

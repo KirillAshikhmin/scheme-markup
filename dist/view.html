@@ -27634,7 +27634,6 @@ const DRAWING_GHOST_DASH = [5, 4];
 const DRAWING_ACTIVE = "#1f6feb";
 const DRAWING_BAD = "#d1242f";
 const DRAWING_CAPTION = "#57606a";
-const DRAWING_CAPTION_MIN_PX = 70;
 function drawingOpeningSpan(wall, opening) {
 const vectors = wallVectors(wall);
 if (!vectors || !opening) return null;
@@ -27887,11 +27886,10 @@ options.objects === false
 : schemeObjectsOnScheme(project, schemeId).filter((object) => !hidden.has(object.id));
 if (walls.length === 0 && objects.length === 0) return;
 const active = options.active || null;
-const labels = options.labels !== false;
+const letters = options.letters !== false;
 for (const object of objects) {
 drawDrawingObject(ctx, bridge, options.objectAt ? options.objectAt(object) : object, {
 active: active && active.kind === "object" && active.id === object.id,
-name: labels ? schemeObjectNameOf(project, object) : "",
 stair: drawingStairParts(project, schemeId, object),
 });
 }
@@ -27911,7 +27909,7 @@ if (live) activeOpening = { wall: ends, opening: shown };
 drawDrawingOpening(ctx, bridge, ends, shown, { active: live });
 }
 }
-if (labels) drawDrawingLetters(ctx, bridge, wallNames(project, schemeId), walls, options.wallAt);
+if (letters) drawDrawingLetters(ctx, bridge, wallNames(project, schemeId), walls, options.wallAt);
 }
 drawDrawingHandles(ctx, bridge, {
 walls,
@@ -28386,7 +28384,6 @@ ctx.stroke();
 }
 ctx.setLineDash([]);
 if (options.stair && object.shape !== "polyline") drawDrawingStair(ctx, bridge, object, options.stair, colour);
-drawDrawingCaption(ctx, object, corners, options.name, bridge);
 ctx.restore();
 }
 function drawingStairParts(project, schemeId, object) {
@@ -28451,28 +28448,6 @@ function drawDrawingPath(ctx, points) {
 ctx.beginPath();
 points.forEach((point, index) => (index === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y)));
 ctx.stroke();
-}
-function drawDrawingCaption(ctx, object, corners, name, bridge) {
-if (!name) return;
-const xs = corners.map((point) => point.x);
-const ys = corners.map((point) => point.y);
-const spread = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
-const band = object.shape === "polyline" ? Number(object.depthMm) * bridge.pxPerMm : 0;
-if (spread < DRAWING_CAPTION_MIN_PX) return;
-const top = object.shape === "polyline" ? Math.min(...ys) - band / 2 : Math.min(...ys);
-const middle = xs.reduce((sum, value) => sum + value, 0) / xs.length;
-const topMm = schemeObjectTopMm(object);
-const line = topMm === null ? name : name + " · " + text("workshop.objectTop", { top: topMm });
-const at = { x: middle, y: top - 8 };
-ctx.font = drawFont(11, 600);
-ctx.textBaseline = "bottom";
-ctx.textAlign = "center";
-ctx.lineWidth = 3;
-ctx.strokeStyle = DRAWING_PAPER;
-ctx.strokeText(line, at.x, at.y);
-ctx.fillStyle = DRAWING_CAPTION;
-ctx.fillText(line, at.x, at.y);
-ctx.textAlign = "start";
 }
 const ELEVATION_PAD = { left: 56, right: 18, top: 20, bottom: 42 };
 const ELEVATION_UNKNOWN_BAND = 22;
@@ -70251,7 +70226,7 @@ drawDrawing(ctx, {
 project: state.project,
 schemeId,
 bridge: drawingUnitBridge(view),
-labels: false,
+letters: false,
 objects: state.objectsShown !== false,
 hiddenObjectIds: state.hiddenObjectIds,
 });
@@ -74675,7 +74650,7 @@ ctx.restore();
 function paintObjectGhost(object) {
 const corners = schemeObjectCorners(object).map(screenOf);
 if (corners.length < 4) return;
-drawDrawingObject(ctx, bridge(), object, { ghost: true, name: objectCatalogName(workshopObjectKey) });
+drawDrawingObject(ctx, bridge(), object, { ghost: true });
 ctx.save();
 paintObjectFront(object, corners);
 const line = text("workshop.ghostSize", {

@@ -59,8 +59,6 @@ import {
   schemeHeightPx,
   schemeObjectCorners,
   schemeObjectKeyOf,
-  schemeObjectNameOf,
-  schemeObjectTopMm,
   schemeObjectsOnScheme,
   schemeWidthPx,
   segmentDistanceMm,
@@ -5418,11 +5416,9 @@ export const DRAWING_GHOST_ALPHA = 0.7;
 export const DRAWING_GHOST_DASH = [5, 4];
 export const DRAWING_ACTIVE = "#1f6feb";
 export const DRAWING_BAD = "#d1242f";
+// Цвет надписей чертежа: буквы углов, размеры и подписи развёртки. Подписи
+// вещей им больше не пишутся — их нет вовсе (таск 258, G399).
 export const DRAWING_CAPTION = "#57606a";
-
-// Подпись объекта показывается, только когда объекту есть куда её принять:
-// на общем виде квартиры десяток подписей превратился бы в кашу поверх меток.
-const DRAWING_CAPTION_MIN_PX = 70;
 
 
 /** Концы проёма на оси стены плюс её векторы — всё, чем он рисуется и ловится. */
@@ -5794,8 +5790,10 @@ function drawingOpeningsByWall(project, schemeId) {
  * `options.openingAt` — подмена отступа проёма на то же время.
  * `options.handle` — чем рисовать ручку; без неё ручек нет. Ручки идут
  *   **последним слоем**, поверх всего начерченного (`drawDrawingHandles`).
- * `options.labels` — `false` рисует чертёж без слов (буквы углов, имена
- *   объектов): так его просит миникарта объёма.
+ * `options.letters` — `false` рисует чертёж без букв углов: так его просит
+ *   миникарта объёма. Прежде этот довод звался `labels` и гасил ещё и подписи
+ *   вещей; подписей вещей на чертеже больше нет ни у кого (таск 258, G399), и
+ *   довод переименован честно — гасить ему осталось только буквы.
  * `options.hiddenObjectIds` — вещи, спрятанные с экрана поштучно (таск 154,
  *   G223). Список приходит **доводом, а не из объекта**: прятать их — выбор
  *   глаз, и в выгрузках его нет вовсе. Кто не передал — у того на листе все
@@ -5812,17 +5810,17 @@ export function drawDrawing(ctx, options = {}) {
       : schemeObjectsOnScheme(project, schemeId).filter((object) => !hidden.has(object.id));
   if (walls.length === 0 && objects.length === 0) return;
   const active = options.active || null;
-  // `labels: false` — чертёж без слов: ни букв углов, ни подписей объектов.
-  // Заведено для миникарты объёма (G212, таск 150), где заказчик попросил
-  // «только схема и местоположение»: на накладке в двести точек подписи
-  // превращаются в кашу, а читают по ней не имена, а своё место.
-  const labels = options.labels !== false;
+  // `letters: false` — чертёж без букв углов. Заведено для миникарты объёма
+  // (G212, таск 150), где заказчик попросил «только схема и местоположение»:
+  // на накладке в двести точек буквы превращаются в кашу, а читают по ней не
+  // обозначения, а своё место.
+  //
+  // Подписей вещей этот довод больше не касается: их нет ни на одном выходе
+  // (таск 258, G399) — ни на экране, ни в печати, ни на листе ГОСТ.
+  const letters = options.letters !== false;
   for (const object of objects) {
     drawDrawingObject(ctx, bridge, options.objectAt ? options.objectAt(object) : object, {
       active: active && active.kind === "object" && active.id === object.id,
-      // Имя вещи спрашивается у модели: у вещи каталога оно каталожное, у
-      // прежней — её собственное из справочника объекта (таск 154).
-      name: labels ? schemeObjectNameOf(project, object) : "",
       stair: drawingStairParts(project, schemeId, object),
     });
   }
@@ -5847,7 +5845,7 @@ export function drawDrawing(ctx, options = {}) {
     // Буквы углов — поверх стен и проёмов, но под разметкой: метка главнее
     // обозначения стены, как и везде (G200). Вместе со слоем стен они и гаснут:
     // буква без стены не значит ничего.
-    if (labels) drawDrawingLetters(ctx, bridge, wallNames(project, schemeId), walls, options.wallAt);
+    if (letters) drawDrawingLetters(ctx, bridge, wallNames(project, schemeId), walls, options.wallAt);
   }
   drawDrawingHandles(ctx, bridge, {
     walls,
@@ -5906,9 +5904,9 @@ function drawDrawingHandles(ctx, bridge, { walls, objects, active, activeOpening
 
 // Мельче этого буква угла на плане не ставится. Порог — экранная длина самой
 // стены: на общем виде квартиры буквы всех углов слиплись бы в кашу поверх
-// чертежа, а у стены короче сорока точек их всё равно негде развести. Правило
-// то же, что у подписи объекта (`DRAWING_CAPTION_MIN_PX`): порог в экранных
-// пикселях, а не отметка «тут показывать, а тут нет».
+// чертежа, а у стены короче сорока точек их всё равно негде развести. Порог в
+// экранных пикселях, а не отметка «тут показывать, а тут нет»: буква — часть
+// чертежа, и прятать её вручную нечем.
 const DRAWING_LETTER_MIN_PX = 44;
 
 /**
@@ -6507,16 +6505,25 @@ function drawOpeningFaceMotion(ctx, box, face, ink, unit) {
 }
 
 /**
- * Вещь чертежа: габарит заливкой, контур и подпись с именем над ним.
+ * Вещь чертежа: габарит заливкой и контур. **Без подписи** — имени над
+ * габаритом у вещи нет (таск 258, G399).
  *
- * `options.ghost` — та же вещь **до** постановки (таск 168): заливка, контур и
- * подпись те же самые, контур пунктирный, и всё это вполсилы. Вынесено
- * наружу и зовётся из мастерской потому, что призрак обязан быть нарисован
- * **этим же кодом**: до таска 168 он рисовался своим — голый пунктир без
- * заливки и без имени, зато с числами поперёк самого габарита, — и вещь,
- * вставшая по клику, выглядела иначе, чем обещанная. У радиатора 1200 × 100
- * коробка габарита выходит 90 × 7 точек, а строка чисел поверх неё — 75 × 12:
- * подпись крупнее того, что подписывает, и закрывает его целиком.
+ * Слова заказчика: «У объектов на чертеже сейчас подписи, которые не скрыть и
+ * не перенести, их надо бы вообще убрать». Имя стояло строкой над габаритом и
+ * ехало со всеми выходами разом — экран, печать, PNG, лист ГОСТ, zip, — а
+ * двигать его было некуда: места подписи вещь не хранит. На квартире в полсотни
+ * вещей это полсотни строк поверх чертежа и меток. Убрано **совсем**, а не
+ * отметкой: имя вещи человек читает там, где его ищет, — в строке списка
+ * мастерской, в плашке выделенной вещи (там же посадка и верх над полом), в
+ * карточке связанной метки, в таблицах и выгрузках данных.
+ *
+ * `options.ghost` — та же вещь **до** постановки (таск 168): заливка и контур
+ * те же самые, контур пунктирный, и всё это вполсилы. Вынесено наружу и
+ * зовётся из мастерской потому, что призрак обязан быть нарисован **этим же
+ * кодом**: до таска 168 он рисовался своим — голый пунктир без заливки, зато с
+ * числами поперёк самого габарита, — и вещь, вставшая по клику, выглядела
+ * иначе, чем обещанная. Этим же правилом призрак остался без имени: подписи у
+ * вставшей вещи больше нет, а призрак обещает ровно то, что встанет.
  */
 export function drawDrawingObject(ctx, bridge, object, options = {}) {
   const colour = options.active ? DRAWING_ACTIVE : DRAWING_OBJECT;
@@ -6545,10 +6552,9 @@ export function drawDrawingObject(ctx, bridge, object, options = {}) {
     if (options.ghost) ctx.setLineDash(DRAWING_GHOST_DASH);
     ctx.stroke();
   }
-  // Подпись пунктиром не пишется: штрихом держится только контур.
+  // Ступени пунктиром не рисуются: штрихом держится только контур вещи.
   ctx.setLineDash([]);
   if (options.stair && object.shape !== "polyline") drawDrawingStair(ctx, bridge, object, options.stair, colour);
-  drawDrawingCaption(ctx, object, corners, options.name, bridge);
   ctx.restore();
   // Ручек здесь нет: углы выделенной вещи рисует последний слой чертежа
   // (`drawDrawingHandles`, дефект D45) — вещи лежат под стенами, и ручка вместе
@@ -6636,40 +6642,13 @@ function drawDrawingPath(ctx, points) {
   ctx.stroke();
 }
 
-/**
- * Подпись объекта: имя вида и верх над полом.
- *
- * Верх здесь не для красоты. Ради двух видов объекты и заведены (таск 122): от
- * верха **столешницы** отмеряют розетки над кухонным фронтом, а **радиатор**
- * своей высотой говорит, куда розетку ставить нельзя.
- *
- * Показывается она, только когда объекту есть куда её принять: на общем виде
- * квартиры десяток подписей лёг бы поверх меток кашей, а в мастерской, где
- * смотрят на один угол, место есть. Правило одно на обе поверхности — порог в
- * экранных пикселях, а не отметка «тут показывать, а тут нет».
- */
-function drawDrawingCaption(ctx, object, corners, name, bridge) {
-  if (!name) return;
-  const xs = corners.map((point) => point.x);
-  const ys = corners.map((point) => point.y);
-  const spread = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
-  const band = object.shape === "polyline" ? Number(object.depthMm) * bridge.pxPerMm : 0;
-  if (spread < DRAWING_CAPTION_MIN_PX) return;
-  const top = object.shape === "polyline" ? Math.min(...ys) - band / 2 : Math.min(...ys);
-  const middle = xs.reduce((sum, value) => sum + value, 0) / xs.length;
-  const topMm = schemeObjectTopMm(object);
-  const line = topMm === null ? name : name + " · " + text("workshop.objectTop", { top: topMm });
-  const at = { x: middle, y: top - 8 };
-  ctx.font = drawFont(11, 600);
-  ctx.textBaseline = "bottom";
-  ctx.textAlign = "center";
-  ctx.lineWidth = 3;
-  ctx.strokeStyle = DRAWING_PAPER;
-  ctx.strokeText(line, at.x, at.y);
-  ctx.fillStyle = DRAWING_CAPTION;
-  ctx.fillText(line, at.x, at.y);
-  ctx.textAlign = "start";
-}
+// Подписи у вещи чертежа нет (таск 258, G399). Прежде здесь стояла
+// `drawDrawingCaption`: имя вида и верх над полом строкой над габаритом, с
+// порогом в экранных точках, чтобы на общем виде квартиры не выходила каша.
+// Порог кашу и не спасал — заказчик попросил убрать подписи совсем, а не
+// прятать их отметкой. Верх над полом никуда не делся: его называет плашка
+// выделенной вещи в мастерской (`workshop.objectTop`), а на развёртке он стоит
+// числом у самой вещи — там, где им и меряют розетку над столешницей (таск 122).
 
 // ——— развёртка стены: отрисовка ———————————————————————————————————————
 //

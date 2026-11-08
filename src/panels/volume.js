@@ -2866,13 +2866,14 @@ function createVolume({ api, hosts }) {
     ctx.clip();
     const zoom = spot.zoom;
     const view = { zoom, offsetX: spot.offsetX, offsetY: spot.offsetY };
-    // Без подписей: буквы углов и имена объектов на накладке в двести точек
-    // слипаются в кашу, а заказчик просил «только схема и местоположение».
+    // Без букв углов: на накладке в двести точек они слипаются в кашу, а
+    // заказчик просил «только схема и местоположение». Имён вещей здесь нет не
+    // по этому доводу — их нет на чертеже вовсе (таск 258, G399).
     drawDrawing(ctx, {
       project: state.project,
       schemeId,
       bridge: drawingUnitBridge(view),
-      labels: false,
+      letters: false,
       // Спрятанное не всплывает и на миникарте: она показывает то же поле,
       // только сверху (таск 154, G223).
       objects: state.objectsShown !== false,
