@@ -6216,7 +6216,10 @@ export function addWall(project, { schemeId, aMm, bMm, thicknessMm } = {}) {
   if (a.x === b.x && a.y === b.y) throw modelError("wallPointsSame");
   const mint = idMint(project);
   const wall = { id: mint.next(), schemeId, aMm: a, bMm: b, thicknessMm: wallThicknessMm(thicknessMm) };
-  return { project: withProject(project, { walls: [...wallsOf(project), wall] }), wall };
+  return {
+    project: withProject(project, { walls: [...wallsOf(project), wall], counters: mint.counters }),
+    wall,
+  };
 }
 
 /**
@@ -7227,7 +7230,10 @@ export function addOpening(
   checkOpeningFits(opening, wallLengthMm(wall));
   checkOpeningFree(project, opening);
   checkOpeningHeight(project, wall, opening);
-  return { project: withProject(project, { openings: [...openingsOf(project), opening] }), opening };
+  return {
+    project: withProject(project, { openings: [...openingsOf(project), opening], counters: mint.counters }),
+    opening,
+  };
 }
 
 export function updateOpening(project, openingId, patch = {}) {
@@ -7451,7 +7457,10 @@ export function addSchemeObjectKind(project, { name } = {}) {
   const mint = idMint(project);
   const item = { id: mint.next(), name: normalizeName(name), order: schemeObjectKindsOf(project).length };
   return {
-    project: withProject(project, { schemeObjectKinds: [...schemeObjectKindsOf(project), item] }),
+    project: withProject(project, {
+      schemeObjectKinds: [...schemeObjectKindsOf(project), item],
+      counters: mint.counters,
+    }),
     schemeObjectKind: item,
   };
 }
@@ -8815,7 +8824,11 @@ export function splitWall(project, wallId, atMm) {
     walls.push(first, second);
   }
   const allOpenings = openingsOf(project).map((opening) => moved.get(opening.id) || opening);
-  return { project: withProject(project, { walls, openings: allOpenings, marks }), first, second };
+  return {
+    project: withProject(project, { walls, openings: allOpenings, marks, counters: mint.counters }),
+    first,
+    second,
+  };
 }
 
 // ——— чертёж: метка на стене ————————————————————————————————————————————

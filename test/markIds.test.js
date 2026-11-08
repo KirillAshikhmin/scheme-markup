@@ -34,9 +34,15 @@ import {
   addSchemeObject,
   addType,
   addWall,
+  addSchemeObjectKind,
   createProject,
   deleteMark,
+  deleteOpening,
+  deleteSchemeObjectKind,
+  deleteWall,
   findMark,
+  findOpening,
+  splitWall,
   idNumberOf,
   idsMigrate,
   idsReplace,
@@ -117,13 +123,135 @@ test("номер выдаётся из счётчика объекта и вто
   assert.deepEqual(nextIds(project, 0).ids, []);
 });
 
-test("удаление не возвращает номер в оборот (G09)", () => {
+// **Правило проверяется у каждой двери, а не у одной.** Стоял этот тест только
+// на `addMark` — единственном создателе, который счётчик и так закрепляет, —
+// и был зелёным при нарушенном правиле: стена, проём, деление стены и вид вещи
+// номер брали, а счётчик в патч не кладли, и после удаления он доставался
+// второй сущности. Поэтому дверь здесь называется каждая поимённо: новая
+// обязана попасть в список, а не проскочить мимо.
+//
+// `make` ставит сущность, `drop` её убирает — больше про дверь знать нечего.
+const ID_DOORS = [
+  {
+    what: "метка",
+    make: (project, scene) => {
+      const added = markAt(project, scene.schemeId, "Р", { x: 0.2 + Math.random() / 4, y: 0.2 });
+      return { project: added.project, id: added.mark.id };
+    },
+    drop: (project, id) => deleteMark(project, id).project,
+  },
+  {
+    what: "стена",
+    make: (project, scene) => {
+      const added = addWall(project, {
+        schemeId: scene.schemeId,
+        aMm: { x: 0, y: 1000 },
+        bMm: { x: 3000, y: 1000 },
+        thicknessMm: 100,
+      });
+      return { project: added.project, id: added.wall.id };
+    },
+    drop: (project, id) => deleteWall(project, id).project,
+  },
+  {
+    what: "проём",
+    make: (project, scene) => {
+      const added = addOpening(project, {
+        wallId: scene.wallId,
+        kind: "door",
+        atMm: 1800,
+        widthMm: 900,
+        heightMm: 2100,
+      });
+      return { project: added.project, id: added.opening.id };
+    },
+    drop: (project, id) => deleteOpening(project, id).project,
+  },
+  {
+    // Делится **своя** стена, а не стена сцены: у той проём на 500…1400, и
+    // второй отрез пришёлся бы по нему. Номеров такая правка тратит два —
+    // стену и её половину, — и об этом сказано `cost`.
+    what: "деление стены",
+    cost: 2,
+    make: (project, scene, attempt) => {
+      const fresh = addWall(project, {
+        schemeId: scene.schemeId,
+        aMm: { x: 0, y: 2000 + attempt * 500 },
+        bMm: { x: 3000, y: 2000 + attempt * 500 },
+        thicknessMm: 100,
+      });
+      const split = splitWall(fresh.project, fresh.wall.id, 1500);
+      return { project: split.project, id: split.second.id };
+    },
+    drop: (project, id) => deleteWall(project, id).project,
+  },
+  {
+    what: "вид вещи",
+    make: (project) => {
+      const added = addSchemeObjectKind(project, { name: "Вид " + Math.random() });
+      return { project: added.project, id: added.schemeObjectKind.id };
+    },
+    drop: (project, id) => deleteSchemeObjectKind(project, id).project,
+  },
+];
+
+test("удаление не возвращает номер в оборот — ни у одной двери (G09)", () => {
+  for (const door of ID_DOORS) {
+    const scene = house();
+    const first = door.make(scene.project, scene, 0);
+    // Счётчик закреплён **в объекте**, а не только в кассе правки: иначе
+    // `idFloor` прикрывал бы выдачу лишь до тех пор, пока сущность жива.
+    assert.equal(
+      first.project.counters[ID_COUNTER_KEY],
+      idNumberOf(first.id),
+      door.what + ": счётчик объекта отстал от выданного номера",
+    );
+    const gone = door.drop(first.project, first.id);
+    const second = door.make(gone, scene, 1);
+    assert.notEqual(second.id, first.id, door.what + ": номер удалённой сущности достался новой");
+    assert.equal(
+      idNumberOf(second.id),
+      idNumberOf(first.id) + (door.cost || 1),
+      door.what + ": номер выдан не следующим",
+    );
+  }
+});
+
+test("датчик открытия не пересаживается на другую дверь: номер удалённого проёма свободным не становится", () => {
   const scene = house();
-  const first = markAt(scene.project, scene.schemeId, "Р", { x: 0.2, y: 0.2 });
-  const deleted = deleteMark(first.project, first.mark.id);
-  const second = markAt(deleted.project, scene.schemeId, "Р", { x: 0.3, y: 0.3 });
-  assert.notEqual(second.mark.id, first.mark.id, "номер удалённой метки достался новой");
-  assert.equal(idNumberOf(second.mark.id), idNumberOf(first.mark.id) + 1);
+  const first = addOpening(scene.project, {
+    wallId: scene.wallId,
+    kind: "door",
+    atMm: 1800,
+    widthMm: 900,
+    heightMm: 2100,
+  });
+  // Метка «Датчик открытия» смотрит на этот проём своей настройкой аксессуара.
+  const sensor = markAt(first.project, scene.schemeId, "ДО", { x: 0.45, y: 0.05 });
+  const bound = setMarkDevice(sensor.project, sensor.mark.id, { doorId: first.opening.id });
+  // Дверь датчика — **место метки, а не аксессуар**, и в профиле её нет: она
+  // лежит в записи метки, и оттуда её читает дом (`sim/home.js: markDoorOf`).
+  const doorOf = (project) => findMark(project, sensor.mark.id).device.doorId;
+  assert.equal(doorOf(bound.project), first.opening.id);
+
+  // Проём удалили. Ссылку `deleteOpening` не чистит нарочно — она у метки, и
+  // метка остаётся на месте; дверь при этом **не находится**.
+  const gone = deleteOpening(bound.project, first.opening.id);
+  assert.equal(findOpening(gone.project, first.opening.id), null);
+
+  // Поставили другую дверь. Её номер обязан быть новым: достанься ей номер
+  // удалённой, и датчик молча стал бы датчиком **этой** двери — дом поехал бы
+  // на другой проём, и никто бы об этом не узнал.
+  const second = addOpening(gone.project, {
+    wallId: scene.wallId,
+    kind: "door",
+    atMm: 2800,
+    widthMm: 900,
+    heightMm: 2100,
+  });
+  assert.notEqual(second.opening.id, first.opening.id, "новый проём занял номер удалённого");
+  assert.equal(doorOf(second.project), first.opening.id, "ссылка метки поехала сама");
+  assert.equal(findOpening(second.project, doorOf(second.project)), null, "датчик пересел на другую дверь");
 });
 
 test("номер — это номер, и `idNumberOf` не принимает похожее", () => {
