@@ -194,10 +194,19 @@ export function volumeClockFixed(minutes, speed = VOLUME_CLOCK_SPEED_DEFAULT, da
   };
 }
 
-/** Своё ускорение: чужое число не берётся — у списка ровно шесть пунктов. */
-export function volumeClockSpeedOf(speed) {
+/**
+ * Своё ускорение: чужое число не берётся — у списка ровно шесть пунктов.
+ *
+ * `fallback` — чем отвечать на чужое число (таск 07 просмотра, G28). Умолчание
+ * прежнее, поэтому все прежние вызовы не изменились; второй довод нужен
+ * **хозяину часов**: у страницы просмотра своё умолчание, и пустое хранилище не
+ * должно подменять его умолчанием «Разметки».
+ */
+export function volumeClockSpeedOf(speed, fallback = VOLUME_CLOCK_SPEED_DEFAULT) {
   const value = Number(speed);
-  return VOLUME_CLOCK_SPEEDS.includes(value) ? value : VOLUME_CLOCK_SPEED_DEFAULT;
+  if (VOLUME_CLOCK_SPEEDS.includes(value)) return value;
+  const spare = Number(fallback);
+  return VOLUME_CLOCK_SPEEDS.includes(spare) ? spare : VOLUME_CLOCK_SPEED_DEFAULT;
 }
 
 /** Сколько минут занимают сутки при этом ускорении: 1440, 24, 12, 6, 3 и 1,5. */

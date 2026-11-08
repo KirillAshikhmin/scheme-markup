@@ -57,6 +57,45 @@ function appClockTell() {
   for (const watcher of [...appClockWatchers]) watcher(read);
 }
 
+/**
+ * Умолчание ускорения для рода страницы (G28, таск 07 просмотра).
+ *
+ * Слова заказчика: «В просмотре по умолчанию, без ускорения время должно
+ * идти». У «Разметки» умолчание прежнее (×60: сутки за 24 минуты — им смотрят,
+ * как дом живёт день), а у заказчика объект показывают, а не разбирают: солнце
+ * обязано стоять там, где оно стоит на самом деле.
+ *
+ * «Без ускорения» — это **идущее** время, а не стоячее (`VOLUME_CLOCK_SPEEDS`,
+ * первый пункт): сутки проходят сутки. Стоячие часы — `appClockFix`, и они
+ * устроены иначе.
+ *
+ * Чужое слово — «Разметка»: опечатка в разметке страницы не отнимает у
+ * инженера его умолчание.
+ */
+export function appClockSpeedStart(kind) {
+  return kind === "view" ? VOLUME_CLOCK_SPEED_REAL : VOLUME_CLOCK_SPEED_DEFAULT;
+}
+
+/**
+ * Назвать род страницы. Зовётся один раз при старте (`app.appUseKind`), до
+ * первого спроса часов: умолчание решает, с каким ускорением часы заведутся.
+ *
+ * Выбор человека это не трогает ни в одном случае: уже выбранное ускорение
+ * старше умолчания, а сохранённое приедет из настроек своим чередом
+ * (`appClockLoad`) и умолчание перекроет.
+ */
+export function appClockUseKind(kind) {
+  if (appClockSpeedChosen) return appClockState.speed;
+  const speed = appClockSpeedStart(kind);
+  if (speed === appClockState.speed) return appClockState.speed;
+  appClockState.speed = speed;
+  // Часы уже спросили (страница успела нарисовать кадр) — перецепляем их за ту
+  // же минуту: смена умолчания не перевод времени.
+  if (appClockState.clock) appClockState.clock = volumeClockAt(appClockState.clock, Date.now(), speed);
+  appClockTell();
+  return speed;
+}
+
 /** Снимок: ускорение и часы (`null`, пока их не спрашивали). */
 export function appClockRead() {
   return { speed: appClockState.speed, clock: appClockState.clock };
@@ -79,7 +118,11 @@ export function appClockLoad() {
   Promise.resolve(getSetting(APP_CLOCK_SPEED_SETTING))
     .then((saved) => {
       if (appClockSpeedChosen) return;
-      const speed = volumeClockSpeedOf(saved);
+      // Пустое хранилище (ничего не выбирали) и мусор в нём — это **умолчание
+      // страницы**, а не умолчание «Разметки»: в просмотре часы обязаны
+      // остаться без ускорения (G28). До второго довода `volumeClockSpeedOf`
+      // всякое неизвестное слово становилось здесь ×60 и перетирало его.
+      const speed = volumeClockSpeedOf(saved, appClockState.speed);
       if (speed === appClockState.speed) return;
       appClockState.speed = speed;
       // Часы перецепляются за ту же минуту: приезд настройки — не перевод.

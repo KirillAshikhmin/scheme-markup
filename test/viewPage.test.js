@@ -218,7 +218,6 @@ test("на второй странице нет точек монтирован�
     "header-actions",
     "header-history",
     "header-warnings",
-    "header-links",
     "header-sizes",
     "header-measure",
     "project-actions",
@@ -247,6 +246,10 @@ test("на второй странице нет точек монтирован�
     "panel-schemes",
     "panel-marks",
     "header-search",
+    // Переключатель связей (таск 07 просмотра, G30): связи ничего не правят, и
+    // кнопка стоит здесь на всех трёх раскладках — право даёт род страницы
+    // (`VIEW_GRANTS`), подробности в `test/viewPageDefaults.test.js`.
+    "header-links",
     "sim-bar",
     "sim-journal",
     "view-start",

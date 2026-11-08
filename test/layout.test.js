@@ -195,7 +195,6 @@ test("в просмотре правка запрещена и на широко
     "switchProject",
     "viewSizes",
     "viewScenarios",
-    "markLinks",
   ];
   for (const ability of forbidden) {
     for (const layout of LAYOUT_MODES) {
@@ -210,15 +209,23 @@ test("в просмотре правка запрещена и на широко
   }
 });
 
-test("в просмотре можно смотреть: план, объём, схемы, список меток, поиск, открыть файл", () => {
-  assert.deepEqual([...VIEW_ABILITIES].sort(), ["markList", "openFile", "search", "switchScheme", "viewPlan", "viewVolume"]);
+test("в просмотре можно смотреть: план, объём, схемы, список меток, поиск, открыть файл, связи", () => {
+  // Седьмым умением пришёл показ связей (таск 07 просмотра, G30): он один
+  // стоит и в даре `VIEW_GRANTS` — в «Разметке» кнопка осталась только на
+  // компьютере (G242), а у заказчика шапка короче и место для неё есть на всех
+  // трёх раскладках. Таблица «умение × род × раскладка» — в
+  // `test/viewPageDefaults.test.js`.
+  assert.deepEqual(
+    [...VIEW_ABILITIES].sort(),
+    ["markLinks", "markList", "openFile", "search", "switchScheme", "viewPlan", "viewVolume"],
+  );
   for (const ability of VIEW_ABILITIES) {
     for (const layout of LAYOUT_MODES) {
       assert.equal(appAllows(ability, { app: "view", layout }), true, ability + " в раскладке " + layout);
     }
   }
-  // Белый список не расширяет раскладку: умения, которого нет в таблице, в
-  // просмотре тоже нет.
+  // Белый список раскладку не расширяет: расширяет только дар, и только то, что
+  // в нём названо. Умения, которого нет в таблице, в просмотре нет и с даром.
   assert.equal(appAllows("editEverything", { app: "view", layout: "desktop" }), false);
   // Чужой род страницы считается «Разметкой», а не «можно всё»: опечатка в
   // разметке не должна открывать правку там, где её не ждут.
