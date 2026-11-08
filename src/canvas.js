@@ -55,6 +55,16 @@ import {
   deleteMark,
   joinToBlock,
   leaveBlock,
+  findSchemeObject,
+  markObjectCan,
+  markObjectId,
+  markOfObject,
+  objectDeviceDrop,
+  objectDeviceMake,
+  schemeObjectCorners,
+  schemeObjectNameOf,
+  schemeObjectsOnScheme,
+  setMarkObject,
   deleteOutline,
   findScheme,
   findType,
@@ -1558,6 +1568,7 @@ function canvasPlacePoint(plan) {
     });
     canvasCommit(state.project, result.project, strings.history.addMark, { selection: [result.mark.id] });
     canvasSayPinned(result);
+    canvasOfferLink(result.mark.id);
   } catch (error) {
     canvasFail(error);
   }
@@ -2712,6 +2723,177 @@ export function canvasBlockLeave(markId) {
     );
   } catch (error) {
     canvasFail(error);
+  }
+}
+
+// ——— связь метки и вещи чертежа (R01, R02.3, R04.1) ——————————————————————
+//
+// Команды связи — дверь холста, потому что отменяемое пишет только
+// `canvasCommit`. Правила — у модели (`markObjectCan`, `setMarkObject`,
+// `objectDeviceMake`, `objectDeviceDrop`); здесь только право (то же
+// `canvasEditAllowed`, что у прочих правок — второго условия нет) и шаг истории.
+
+/**
+ * Можно ли связать метку с вещью сейчас: `{ok}` или `{ok:false, why}`. Просмотр
+ * и запущенный дом закрывают команду той же дверью, что остальные правки.
+ */
+export function canvasObjectLinkCan(state, markId, objectId) {
+  if (!state || !state.project) return { ok: false, why: strings.markObject.whyNoMark };
+  if (!canvasEditAllowed(state)) return { ok: false, why: strings.markObject.whyLocked };
+  return markObjectCan(state.project, markId, objectId);
+}
+
+/** Вещи схемы метки, с которыми её можно связать, — в порядке чертежа. */
+export function canvasLinkCandidates(project, markId) {
+  const mark = project ? findMark(project, markId) : null;
+  if (!mark) return [];
+  return schemeObjectsOnScheme(project, mark.schemeId).filter((object) => markObjectCan(project, markId, object.id).ok);
+}
+
+/** Связать метку с вещью одним шагом истории: `{ok}` или `{ok:false, why}`. */
+export function canvasLinkMarkObject(markId, objectId) {
+  const state = canvasState();
+  const can = canvasObjectLinkCan(state, markId, objectId);
+  if (!can.ok) return can;
+  try {
+    const result = setMarkObject(state.project, markId, objectId);
+    if (result.project === state.project) return { ok: true };
+    canvasCommit(state.project, result.project, strings.history.markObjectLink, { selection: [markId] });
+    const object = findSchemeObject(result.project, objectId);
+    canvasApi.notify(
+      text("markObject.linked", { label: labelOf(result.project, markId), name: schemeObjectNameOf(result.project, object) }),
+      "success",
+    );
+    return { ok: true };
+  } catch (error) {
+    canvasFail(error);
+    return { ok: false, why: error && error.message ? error.message : String(error) };
+  }
+}
+
+/** Снять связь метки с вещью одним шагом истории. Связи нет — ничего не пишется. */
+export function canvasUnlinkMarkObject(markId) {
+  const state = canvasState();
+  if (!state || !state.project) return { ok: false, why: strings.markObject.whyNoMark };
+  if (!canvasEditAllowed(state)) return { ok: false, why: strings.markObject.whyLocked };
+  const mark = findMark(state.project, markId);
+  if (!mark || markObjectId(mark) === null) return { ok: true };
+  try {
+    const result = setMarkObject(state.project, markId, null);
+    canvasCommit(state.project, result.project, strings.history.markObjectUnlink, { selection: [markId] });
+    canvasApi.notify(text("markObject.unlinked", { label: labelOf(result.project, markId) }), "success");
+    return { ok: true };
+  } catch (error) {
+    canvasFail(error);
+    return { ok: false, why: error && error.message ? error.message : String(error) };
+  }
+}
+
+// Точка в многоугольнике (чёт-нечет): габарит вещи — четыре угла.
+function canvasInsideCorners(point, corners) {
+  let inside = false;
+  for (let i = 0, j = corners.length - 1; i < corners.length; j = i++) {
+    const a = corners[i];
+    const b = corners[j];
+    if (a.y > point.y !== b.y > point.y && point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * Вещь, на которую поставили метку, — **предложение**, а не решение: `null`,
+ * если предлагать нечего. Подходит свободная вещь той же схемы, в габарит
+ * которой попала первая точка метки; из нескольких — самая малая по площади
+ * (телевизор на тумбе, а не тумба). Без моста мм ↔ доли (нет калибровки)
+ * предложить нечего: догадку показывают, а не применяют.
+ */
+export function canvasLinkOffer(project, markId) {
+  const mark = project ? findMark(project, markId) : null;
+  if (!mark || mark.kind !== "point" || markIsComment(mark) || markObjectId(mark) !== null) return null;
+  const at = planFractionToMm(project, mark.schemeId, mark.points[0]);
+  if (!at) return null;
+  let best = null;
+  let bestArea = Infinity;
+  for (const object of canvasLinkCandidates(project, markId)) {
+    if (object.shape === "polyline") continue;
+    if (!canvasInsideCorners(at, schemeObjectCorners(object))) continue;
+    const area = Number(object.widthMm) * Number(object.depthMm);
+    if (area < bestArea) {
+      best = object;
+      bestArea = area;
+    }
+  }
+  return best;
+}
+
+// Тост с кнопкой «Связать»: отказ ничего не меняет, он просто гаснет.
+function canvasOfferLink(markId) {
+  const state = canvasState();
+  const object = canvasLinkOffer(state.project, markId);
+  if (!object || !canvasApi || typeof document === "undefined") return;
+  const toast = canvasApi.notify(
+    text("markObject.offer", { label: labelOf(state.project, markId), name: schemeObjectNameOf(state.project, object) }),
+    "info",
+  );
+  if (!toast || !toast.append) return;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "ui-btn";
+  button.textContent = strings.markObject.offerYes;
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toast.remove();
+    canvasLinkMarkObject(markId, object.id);
+  });
+  toast.append(" ", button);
+}
+
+/**
+ * «Сделать устройством»: метка выбранного типа на месте вещи, связанная с ней,
+ * одним шагом истории. `base` — объект с только что заведённым типом (окно
+ * выбора типа возвращает его), иначе берётся текущий.
+ */
+export function canvasObjectDeviceMake(objectId, typeId, base) {
+  const state = canvasState();
+  if (!state || !state.project) return { ok: false, why: strings.markObject.whyNoObject };
+  if (!canvasEditAllowed(state)) return { ok: false, why: strings.markObject.whyLocked };
+  try {
+    const result = objectDeviceMake(base || state.project, objectId, typeId);
+    canvasCommit(state.project, result.project, strings.history.objectDeviceMake, { selection: [result.mark.id] });
+    canvasApi.notify(
+      text("markObject.made", {
+        name: schemeObjectNameOf(result.project, result.schemeObject),
+        label: labelOf(result.project, result.mark.id),
+      }),
+      "success",
+    );
+    return { ok: true, markId: result.mark.id };
+  } catch (error) {
+    canvasFail(error);
+    return { ok: false, why: error && error.message ? error.message : String(error) };
+  }
+}
+
+/** «Убрать устройство»: связь и метка уходят одним шагом, вещь остаётся. */
+export function canvasObjectDeviceDrop(objectId) {
+  const state = canvasState();
+  if (!state || !state.project) return { ok: false, why: strings.markObject.whyNoObject };
+  if (!canvasEditAllowed(state)) return { ok: false, why: strings.markObject.whyLocked };
+  const mark = markOfObject(state.project, objectId);
+  if (!mark) return { ok: true, dropped: false };
+  try {
+    const object = findSchemeObject(state.project, objectId);
+    const result = objectDeviceDrop(state.project, objectId);
+    const left = state.selectedMarkIds.filter((id) => id !== mark.id);
+    canvasCommit(state.project, result.project, strings.history.objectDeviceDrop, { selection: left });
+    canvasApi.notify(
+      text("markObject.dropped", { name: schemeObjectNameOf(state.project, object), label: labelOf(state.project, mark.id) }),
+      "success",
+    );
+    return { ok: true, dropped: true };
+  } catch (error) {
+    canvasFail(error);
+    return { ok: false, why: error && error.message ? error.message : String(error) };
   }
 }
 

@@ -485,19 +485,24 @@ export function typesViewsInUse(project) {
  */
 export function typeViewGroups(query, { key, offer, used } = {}) {
   const groups = [];
+  const seen = new Set();
   for (const family of OBJECT_VIEW_FAMILIES) {
     if (family === OBJECT_VIEW_FAMILY_OBJECTS) continue;
     const name = strings.dictionary.viewFamilies[family] || family;
     const entries = objectViewFamily(family).map((item) =>
       typesViewEntry(item, strings.markViews[item] || item, { offer, used }),
     );
+    for (const entry of entries) seen.add(entry.key);
     if (entries.length > 0) groups.push({ category: family, name, entries });
   }
+  // Телевизор, полотенцесушитель и вытяжка стоят и в семье меток, и в каталоге
+  // вещей (после возврата в каталог): плитка по одному ключу — одна, в семье,
+  // которая идёт первой.
   for (const group of objectPickerAllGroups({ key })) {
-    groups.push({
-      ...group,
-      entries: group.entries.map((entry) => typesViewEntry(entry.key, entry.name, { offer, used })),
-    });
+    const entries = group.entries
+      .filter((entry) => !seen.has(entry.key))
+      .map((entry) => typesViewEntry(entry.key, entry.name, { offer, used }));
+    if (entries.length > 0) groups.push({ ...group, entries });
   }
   // Запрос сужает **всё окно разом** (таск 230): семьи реестра и разделы
   // каталога стоят в одной сетке, и решать «нашлись имена или отвечает
@@ -1528,7 +1533,22 @@ export function openTypesDictionary(api) {
     // в сетке выбора видно, что изображение общее. Считается здесь, а не в
     // строке, чтобы на пятидесяти типах не считаться пятьдесят раз.
     const used = typesViewsInUse(current);
-    const typeRows = [];
+    // Заголовок колонки «Аксессуар»: в строке на кнопке стоит сводка, а слово
+    // раньше жило только в подсказке. Остальные колонки опознаются по виду
+    // (знак, код, название), а эта — нет. Мера — те же переменные, что у
+    // кнопки и хвоста строки, поэтому заголовок стоит над своей колонкой.
+    const typeRows = [
+      uiEl("div", { class: "dict__row dict__row--head", attrs: { style: "justify-content:flex-end" } }, [
+        uiEl("span", {
+          class: "dict__device dict__deviceHead",
+          text: strings.dictionary.deviceHead,
+          attrs: { style: "color:var(--panel-muted);font-size:12px" },
+        }),
+        uiEl("span", {
+          attrs: { style: "flex:none;width:calc(var(--dict-count) + var(--dict-act) * 2 + var(--dict-gap) * 2)" },
+        }),
+      ]),
+    ];
     const shown = new Set();
     for (const { category, types } of typesInOrder(current)) {
       typeRows.push(uiEl("p", { class: "dict__group", text: category.name }));
@@ -1540,7 +1560,7 @@ export function openTypesDictionary(api) {
     for (const type of current.markTypes) {
       if (!shown.has(type.id)) typeRows.push(typeRow(type, counts.get(type.id) || 0, used));
     }
-    if (typeRows.length === 0) typeRows.push(uiEl("p", { class: "panel__empty", text: strings.dictionary.noTypes }));
+    if (typeRows.length === 1) typeRows.push(uiEl("p", { class: "panel__empty", text: strings.dictionary.noTypes }));
 
     // Сперва весь перечень — категории, потом типы, — и только после него
     // раздел «Добавить»: пользователь просил «в справочнике после перечня

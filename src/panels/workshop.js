@@ -167,6 +167,9 @@ import {
   wallSplitStops,
   wallVectors,
   wallsOnScheme,
+  COMMENT_TYPE_ID,
+  labelOf,
+  markOfObject,
 } from "../model.js";
 import {
   CANVAS_FRESH_VERTEX_MS,
@@ -176,6 +179,8 @@ import {
   canvasStartScale,
   canvasUndoStep,
   canvasCommit,
+  canvasObjectDeviceDrop,
+  canvasObjectDeviceMake,
 } from "../canvas.js";
 import {
   MEASURE_COLOR,
@@ -251,6 +256,7 @@ import {
 import { OBJECT_STAIR_MIRRORED } from "../objectModels/stairs.js";
 import { openingCatalogDefaults } from "../openingCatalog.js";
 import { objectTileIcon, openObjectPicker } from "./objectPicker.js";
+import { openTypePicker } from "./typePicker.js";
 import { openOpeningPicker, openingTileIcon } from "./openingPicker.js";
 import { drawPickerHint, drawPickerName, drawPickerNote, openDrawPicker } from "./drawPicker.js";
 import { createElevationStrip, elevationPlace } from "./elevation.js";
@@ -2473,6 +2479,13 @@ function createWorkshop({ api, hosts }) {
   // Где вещь стоит и где её верх — одной строкой: «На полу · верх 650 мм».
   // Двумя строками это занимало в колонке вдвое больше, отвечая на один вопрос.
   const objectNote = uiEl("p", { class: "workshop__note" });
+  // «Сделать устройством» / «Убрать устройство» (R02.3): у любой вещи каталога
+  // электрика заводится меткой выбранного типа на её месте. Подпись зависит от
+  // того, есть ли уже связанная метка, — `syncObject` её ставит.
+  const deviceButton = uiButton("", {
+    class: "ui-btn ui-btn--wide",
+    on: { click: () => toggleDevice() },
+  });
   const objectBad = uiBadLine();
   const objectDetail = uiEl("div", { class: "workshop__detail ui-fields" }, [
     thingButton,
@@ -2483,6 +2496,7 @@ function createWorkshop({ api, hosts }) {
     mirrorRow,
     uiField(strings.workshop.objectHeight, objectHeight, { title: strings.workshop.objectHeightHint }),
     uiField(strings.workshop.objectFloor, objectFloor),
+    deviceButton,
     objectBad,
     objectNote,
     removeButton(),
@@ -3139,6 +3153,25 @@ function createWorkshop({ api, hosts }) {
     }
     const object = selectedObject();
     if (object) runRemove(() => deleteSchemeObject(project(), object.id).project, strings.history.objectRemove);
+  }
+
+  /**
+   * «Сделать устройством» / «Убрать устройство» у выделенной вещи. Тип берётся
+   * из справочника (окно выбора типа, там же можно завести новый); всё остальное
+   * — шаг истории `canvasObjectDeviceMake` / `canvasObjectDeviceDrop`.
+   */
+  async function toggleDevice() {
+    const object = selectedObject();
+    if (!object) return;
+    if (markOfObject(project(), object.id)) {
+      canvasObjectDeviceDrop(object.id);
+      return;
+    }
+    const picked = await openTypePicker(project(), { title: strings.workshop.deviceMakeTitle });
+    if (!picked || picked.typeId === COMMENT_TYPE_ID) return;
+    // Вещь могли убрать, пока окно было открыто.
+    if (!findSchemeObject(project(), object.id)) return;
+    canvasObjectDeviceMake(object.id, picked.typeId, picked.created ? picked.project : undefined);
   }
 
   function runRemove(make, label) {
@@ -5596,6 +5629,11 @@ function createWorkshop({ api, hosts }) {
     // картинку.
     const key = objectKey(object);
     syncThing(key, schemeObjectNameOf(current, object));
+    const device = markOfObject(current, object.id);
+    deviceButton.textContent = device
+      ? text("workshop.deviceDrop", { label: labelOf(current, device.id) })
+      : strings.workshop.deviceMake;
+    deviceButton.title = device ? strings.workshop.deviceDropHint : strings.workshop.deviceMakeHint;
     const band = object.shape === "polyline";
     // У полосы нет ни ширины, ни угла — её форма задана точками, — и строка не
     // показывает ни пустого поля, ни прочерка: прочерк обещал бы, что угол

@@ -30,9 +30,12 @@ import {
   findScheme,
   findType,
   labelOf,
+  findSchemeObject,
   markCommentText,
   markIsComment,
+  markObjectId,
   markPointer,
+  schemeObjectNameOf,
   styleOf,
 } from "../model.js";
 import {
@@ -40,16 +43,19 @@ import {
   canvasBlockLeave,
   canvasEditAllowed,
   canvasEditCommentText,
+  canvasLinkCandidates,
+  canvasLinkMarkObject,
   canvasMarkOrder,
   canvasMarkOrderCan,
   canvasOnScreen,
   canvasStartBlockJoin,
   canvasStopBlockJoin,
+  canvasUnlinkMarkObject,
 } from "../canvas.js";
 import { planToScreen, typeIconPlan, typeSignIcon } from "../render.js";
 import { getSetting, setSetting } from "../store.js";
 import { strings, text } from "../strings.js";
-import { UI_SIGN, UI_SIGN_SMALL, uiButton, uiEl, uiIcon, uiIconButton, uiSignCell } from "./ui.js";
+import { UI_SIGN, UI_SIGN_SMALL, uiButton, uiEl, uiIcon, uiIconButton, uiModal, uiSignCell } from "./ui.js";
 import { deviceCardPart, deviceCardView, deviceLogicEntry, deviceLogicSection } from "./deviceCard.js";
 import { marksControllerIndex, marksLinkedText, marksLinkedTitle, marksRowModel } from "./marks.js";
 
@@ -159,6 +165,9 @@ export function markCardModel(project, markId, { viewer = false } = {}) {
       rows,
     };
   }
+  // Связанная вещь чертежа — именем (R01.2): пара читается одним прибором.
+  const linkedObject = findSchemeObject(project, markObjectId(mark));
+  add(strings.markCard.objectRow.label, linkedObject ? schemeObjectNameOf(project, linkedObject) : "");
   add(strings.marks.room, room ? room.name : "");
   add(strings.marks.location, fields.location);
   // Комментарий метки — рабочая запись интегратора; заказчику, смотрящему
@@ -193,6 +202,9 @@ export function markCardModel(project, markId, { viewer = false } = {}) {
     typeName: view.typeName,
     style: view.style,
     sign: typeIconPlan(project, mark.typeId),
+    // Номер метки — тот, которым она зовётся в имитации (G10.1). Только в
+    // карточке: в таблицы и на лист ГОСТ он не идёт.
+    number: mark.id,
     kind: MARK_KINDS.includes(mark.kind) ? mark.kind : "point",
     comment: false,
     pointer: false,
@@ -242,12 +254,15 @@ export function markCardShift(markY, cardTop, gap = MARK_CARD_GAP) {
  * ряда в объёме была бы мёртвой. Разводить пару по двум местам хуже, чем
  * показать её в одном.
  */
-export function markCardParts(model, { headButton = null, extra = null, order = null, block = null } = {}) {
+export function markCardParts(model, { headButton = null, extra = null, order = null, block = null, object = null } = {}) {
   const head = uiEl("div", { class: "mark-card__head" }, [
     // Знак — общей лестницей (таск 228, находка 15): у линейной метки в
     // карточке стояла точка, хотя в справочнике у её типа штрих.
     uiSignCell(typeSignIcon(model.sign, UI_SIGN.size, UI_SIGN.length)),
     uiEl("span", { class: "mark-card__label", text: model.label }),
+    ...(model.number == null
+      ? []
+      : [uiEl("span", { class: "mark-card__number", text: "№" + model.number, title: strings.markCard.numberHint })]),
     uiEl("span", { class: "mark-card__type", text: model.code + " — " + model.typeName }),
     ...(headButton ? [headButton] : []),
   ]);
@@ -266,6 +281,7 @@ export function markCardParts(model, { headButton = null, extra = null, order = 
   if (extra) body.append(extra);
   if (order) body.append(order);
   if (block) body.append(block);
+  if (object) body.append(object);
   return [head, body];
 }
 
@@ -389,6 +405,67 @@ export function markCardBlockRow(state, markId) {
       title: words.leave + " — " + leaveHint,
       attrs: group ? {} : { disabled: "disabled" },
       on: { click: () => canvasBlockLeave(markId) },
+    }),
+  ]);
+}
+
+/**
+ * Окно выбора вещи для связи: свободные вещи схемы метки. Выбор — одно
+ * нажатие, отказ (Esc, «Отмена») не меняет ничего.
+ */
+export function markCardOpenObjectPicker(state, markId) {
+  const candidates = canvasLinkCandidates(state.project, markId);
+  let modal = null;
+  const rows = candidates.map((object) =>
+    uiButton(schemeObjectNameOf(state.project, object), {
+      class: "ui-btn ui-btn--wide",
+      on: {
+        click: () => {
+          modal.close();
+          canvasLinkMarkObject(markId, object.id);
+        },
+      },
+    }),
+  );
+  modal = uiModal({
+    title: text("markCard.objectRow.title", { label: labelOf(state.project, markId) }),
+    body: uiEl("div", { class: "ui-fields" }, rows),
+    dismissable: true,
+    actions: [uiButton(strings.dialog.cancel, { class: "ui-btn", on: { click: () => modal.close() } })],
+  });
+  return modal;
+}
+
+/**
+ * Ряд «Вещь»: «Связать с вещью» и «Отвязать» (R01, R01.1, R01.3).
+ *
+ * `null` — ряда нет: у комментария и в просмотре правок нет. Недоступная
+ * кнопка гаснет и **называет причину** в подсказке, а не молчит: на схеме нет
+ * свободных вещей, метка уже связана. Запущенный дом закрывает ряд той же
+ * дверью, что остальные (`canvasEditAllowed`).
+ */
+export function markCardObjectRow(state, markId) {
+  if (!state || !state.project || !canvasEditAllowed(state) || !canvasOnScreen(state)) return null;
+  const mark = findMark(state.project, markId);
+  if (!mark || markIsComment(mark)) return null;
+  const words = strings.markCard.objectRow;
+  const linked = markObjectId(mark) !== null;
+  const candidates = canvasLinkCandidates(state.project, markId);
+  const pickWhy = linked ? words.linkedAlready : candidates.length === 0 ? words.pickNone : "";
+  const object = linked ? findSchemeObject(state.project, markObjectId(mark)) : null;
+  return uiEl("div", { class: "mark-card__row mark-card__row--act" }, [
+    uiEl("span", { class: "mark-card__name", text: words.label }),
+    uiButton(words.pick, {
+      class: "ui-btn mark-card__order",
+      title: pickWhy || words.pickHint,
+      attrs: pickWhy ? { disabled: "disabled" } : {},
+      on: { click: () => markCardOpenObjectPicker(state, markId) },
+    }),
+    uiButton(words.unlink, {
+      class: "ui-btn mark-card__order",
+      title: linked ? words.unlinkHint + (object ? " (" + schemeObjectNameOf(state.project, object) + ")" : "") : words.unlinkNone,
+      attrs: linked ? {} : { disabled: "disabled" },
+      on: { click: () => canvasUnlinkMarkObject(markId) },
     }),
   ]);
 }
@@ -538,6 +615,7 @@ function mountMarkCard(host, api) {
         extra: deviceView ? deviceView.node : commentRow,
         order: markCardOrderRow(state, model.id),
         block: markCardBlockRow(state, model.id),
+        object: markCardObjectRow(state, model.id),
       }),
     );
     // План подвигается в просмотре и в запущенном доме (`markCardLifts`): там
