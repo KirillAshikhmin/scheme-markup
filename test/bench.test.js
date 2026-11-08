@@ -24,7 +24,9 @@ test("сцены стенда: квартира с мебелью и зал — 
 
 test("замер счёта: числа есть и кадр не пустой", () => {
   const result = benchCompute("flat", 1);
-  for (const key of ["scene", "light", "frame"]) assert.ok(Number.isFinite(result[key]) && result[key] >= 0, key);
+  // `one` и `next` — свет по частям (таск 253): первая зажжённая лампа и
+  // следующая за ней.
+  for (const key of ["scene", "light", "one", "next", "frame"]) assert.ok(Number.isFinite(result[key]) && result[key] >= 0, key);
   assert.ok(result.polys > 100, "кадр стенда почти пустой: " + result.polys);
   assert.equal(result.lamps, 5);
 });

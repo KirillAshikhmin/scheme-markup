@@ -6,7 +6,10 @@
 // постоянный и меряет одно и то же на одних и тех же сценах (`scenes.mjs`):
 //
 //   scene  — сборка сцены (`volumeScene`), мс, медиана;
-//   light  — пересборка физического света с тенями (`volumeLiveLight`), мс;
+//   light  — пересборка физического света с тенями (`volumeLiveLight`), мс:
+//            все лампы сцены зажжены разом — худший случай;
+//   one    — первая зажжённая лампа на свежей сцене, мс (таск 253);
+//   next   — следующая за ней, мс: то, что человек чувствует щелчком;
 //   frame  — JS-часть кадра (`volumeFrame`) по обходу камер, мс на кадр;
 //   polys  — многоугольников в кадре, в среднем.
 //
@@ -98,9 +101,23 @@ export function benchCompute(name, rounds = 5) {
     frames.push(run.ms / cams.length);
     polys += run.value;
   }
+  // Свет по частям (таск 253): геометрия считается у горящих ламп и по одной,
+  // поэтому у стенда два числа рядом со `light` — цена первой зажжённой лампы
+  // на свежей сцене и цена следующей за ней. Их человек и чувствует щелчком, а
+  // `light` остаётся ценой «зажгли всё разом».
+  const lit = (count) => new Map([...live].map(([id, item], at) => [id, at < count ? item : { ...item, on: false }]));
+  const ones = [];
+  const nexts = [];
+  for (let r = 0; r < rounds; r += 1) {
+    const fresh = volumeScene(box.project, box.schemeId, opts);
+    ones.push(timed(() => volumeLiveLight(fresh, lit(1), { physical: true, tint })).ms);
+    nexts.push(timed(() => volumeLiveLight(fresh, lit(2), { physical: true, tint })).ms);
+  }
   return {
     scene: median(builds),
     light: median(lights),
+    one: median(ones),
+    next: median(nexts),
     frame: median(frames),
     polys: Math.round(polys / (rounds * cams.length)),
     faces: scene.faces.length,
@@ -194,7 +211,9 @@ async function browserFill(scenes, rounds) {
 const fixed = (value, digits = 1) => (Number.isFinite(value) ? value.toFixed(digits).replace(".", ",") : "—");
 
 function report(results, fill) {
-  const lines = ["сцена   граней  ламп   сцена, мс  свет, мс  кадр JS, мс  многоугольников" + (fill ? "  заливка ×1, мс  заливка ×2, мс" : "")];
+  const lines = [
+    "сцена   граней  ламп   сцена, мс  свет, мс  1 лампа, мс  +1 лампа, мс  кадр JS, мс  многоугольников" + (fill ? "  заливка ×1, мс  заливка ×2, мс" : ""),
+  ];
   for (const [name, item] of Object.entries(results)) {
     const own = fill ? fill[name] : null;
     lines.push(
@@ -204,6 +223,8 @@ function report(results, fill) {
         String(item.lamps).padStart(5),
         fixed(item.scene).padStart(10),
         fixed(item.light).padStart(9),
+        fixed(item.one).padStart(12),
+        fixed(item.next, 2).padStart(13),
         fixed(item.frame, 2).padStart(12),
         String(item.polys).padStart(16),
         ...(own ? [fixed(own.fill1, 2).padStart(15), fixed(own.fill2, 2).padStart(15)] : []),

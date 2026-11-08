@@ -839,9 +839,9 @@ const volumeDecalMemo = new WeakMap();
  * обрезано им и рисуется сразу за ним. `seams` — рёбра кольца, лежащие на краю
  * куска (`volumeDecalSeams`), `src` — источник лампы, от которого кольцо.
  *
- * От включённости это не зависит: геометрия считается **на все лампы сцены
- * разом** и раз на сцену, а кадр берёт кольца горящих и красит их по яркости.
- * Сцена пересобирается на открытую дверь — и клин сквозь проём вместе с ней.
+ * Кольца считаются **у горящих ламп и по одной** (таск 253,
+ * `volumeLampBuilt`), а кадр красит их по яркости. Сцена пересобирается на
+ * открытую дверь — и клин сквозь проём вместе с ней.
  */
 export function volumeLampDecals(scene, live) {
   const built = volumeLampBuilt(scene, live);
@@ -860,30 +860,106 @@ export function volumeLampDecals(scene, live) {
  * дают все лампы, чьи кольца легли сюда. Одна лампа — тень снимает весь её
  * свет, три — только свет своей, и под столом от двух других светло.
  *
- * Считается с пятнами, тем же разом на сцену и набор ламп.
+ * Считается с пятнами, той же лампой за раз (`volumeLampBuilt`).
  */
 export function volumeLampShades(scene, live) {
   const built = volumeLampBuilt(scene, live);
   return built ? built.shades : null;
 }
 
-/** Пятна и тени ламп сцены — раз на сцену и набор ламп. */
+/**
+ * **Построенное к этому кадру: лампа за лампой, а не вся схема разом** (таск
+ * 253, G389). Слова заказчика о пересборке света в 0,87 с на его самой большой
+ * схеме: «а с этим можно что-то сделать?» — и ответ «только изменившаяся лампа,
+ * её помещение и соседи через открытые границы».
+ *
+ * Ответ — `{lit, decals, raw, shades}` на сцену: `decals` и `shades` — те же
+ * карты, что отдают `volumeLampDecals` и `volumeLampShades`, `raw` — тени до
+ * смеси (`volumeShadeMix` смесь дописывает в копии, а не в них), `lit` — у
+ * каких ламп геометрия уже построена.
+ *
+ * **Единица пересчёта — лампа.** Геометрия одной лампы ни от какой другой не
+ * зависит: кольца кладёт её собственный источник на куски своего помещения и
+ * клином через открытые границы (`volumeSourcePools`), то есть ровно на один
+ * шаг, — а помещение (все лампы комнаты вместе) было бы той же работой с
+ * лишним запасом. Единственная связь между лампами — смесь теней
+ * (`volumeShadeMix`), и она живёт **на куске грани**, а не на помещении:
+ * пересчитываются только куски, которых новая лампа коснулась.
+ *
+ * **Строится только то, что горит.** Кадр берёт силу лампы из `live.lamps`
+ * (`volumeFrame`), и у погашенной она ноль: её кольца дают `alpha` ноль и в
+ * кадр не идут, а её доли в `mix` и `gone` тени множатся на ноль
+ * (`volumeShadeAlpha`), то есть не меняют ничего. Поэтому кадр от построенного
+ * «только у горящих» совпадает с кадром от построенного «у всех» вызов в
+ * вызов — это и проверено отпечатком `ctx` на объектах заказчика.
+ *
+ * **Построенное не выбрасывается.** Погасшая лампа свои кольца сохраняет:
+ * второй щелчок по той же лампе не стоит ничего, а памяти это не больше
+ * прежней полной сборки. Новая лампа вставляется в карты **по номеру**
+ * (`volumeMergeByMark`), на то место, где она стояла бы при полной сборке:
+ * порядок колец на куске — это порядок рисования, и менять его нельзя.
+ */
 function volumeLampBuilt(scene, live) {
   if (!scene || !scene.order) return null;
-  const ids = [];
-  for (const [markId, item] of live || []) if (item && item.kind === "light") ids.push(markId);
-  ids.sort();
-  const sign = ids.join(" ");
-  const held = volumeDecalMemo.get(scene);
-  if (held && held.sign === sign) return held;
-  const built = { sign, ...volumeLampDecalsBuild(scene, ids, live) };
-  volumeDecalMemo.set(scene, built);
-  return built;
+  let held = volumeDecalMemo.get(scene);
+  if (!held) volumeDecalMemo.set(scene, (held = { lit: new Set(), decals: new Map(), raw: new Map(), shades: new Map() }));
+  const fresh = [];
+  for (const markId of volumeLitLamps(live)) if (!held.lit.has(markId)) fresh.push(markId);
+  if (fresh.length === 0) return held;
+  const built = volumeLampDecalsBuild(scene, fresh, live);
+  // Куски, на которых смесь теней устарела: там, где новые лампы положили
+  // кольца (меняется `mix`) или тени (меняется и `gone` соседок). Остальные
+  // куски новых ламп не видели, и их смесь прежняя.
+  const hosts = new Set();
+  for (const [host, items] of built.decals) {
+    held.decals.set(host, volumeMergeByMark(held.decals.get(host), items));
+    hosts.add(host);
+  }
+  for (const [host, items] of built.raw) {
+    held.raw.set(host, volumeMergeByMark(held.raw.get(host), items));
+    hosts.add(host);
+  }
+  for (const markId of fresh) held.lit.add(markId);
+  volumeShadeMix(held.decals, held.raw, held.shades, hosts);
+  return held;
+}
+
+/**
+ * Лампы, которым нужна геометрия: те, что **горят** — тем же отбором, которым
+ * `volumeLiveLight` набирает `lamps`. По возрастанию обозначения: при полной
+ * сборке лампы шли этим же порядком, и порядок колец на куске от правки не
+ * съехал.
+ */
+function volumeLitLamps(live) {
+  const out = [];
+  for (const [markId, item] of live || []) {
+    if (!item || item.on !== true || item.heat || item.kind !== "light") continue;
+    out.push(markId);
+  }
+  return out.sort();
+}
+
+/**
+ * Слить два списка колец (или теней) одного куска, упорядоченных по номеру
+ * лампы, в один такой же. Номера у них не пересекаются: лампа, которая уже
+ * построена, в `items` не попадает.
+ */
+function volumeMergeByMark(was, items) {
+  if (!was || was.length === 0) return items;
+  const out = [];
+  let here = 0;
+  let there = 0;
+  while (here < was.length && there < items.length) {
+    out.push(String(items[there].markId) < String(was[here].markId) ? items[there++] : was[here++]);
+  }
+  while (here < was.length) out.push(was[here++]);
+  while (there < items.length) out.push(items[there++]);
+  return out;
 }
 
 function volumeLampDecalsBuild(scene, ids, live) {
   const decals = new Map();
-  const shades = new Map();
+  const raw = new Map();
   const byRoom = volumeDecalHosts(scene);
   const ways = volumeLampOpenings(scene).filter((way) => !way.shut);
   const occluders = scene.occluders || [];
@@ -898,12 +974,11 @@ function volumeLampDecalsBuild(scene, ids, live) {
     for (const source of volumeLampSources(place, scene, item && item.roomId)) {
       if (!source.room) continue;
       const blockers = volumeShadeBlockers(occluders, source.room, source.at);
-      const shade = blockers.length > 0 ? { blockers, shades, planes: new Map() } : null;
+      const shade = blockers.length > 0 ? { blockers, shades: raw, planes: new Map() } : null;
       volumeSourcePools(decals, byRoom, ways, source.room, markId, source, shade);
     }
   }
-  volumeShadeMix(decals, shades);
-  return { decals, shades };
+  return { decals, raw };
 }
 
 const volumeHostMemo = new WeakMap();
@@ -1517,9 +1592,20 @@ function volumeCentroid2(points) {
  * на эту точку раньше. Их света здесь уже нет, и тень снимает свою долю из
  * того, что осталось: под столом в комнате с тремя лампами три тени дают
  * темноту, а не треть её.
+ *
+ * Смесь — **единственное место, где лампы знают друг о друге**, и считается
+ * она по куску грани: `hosts` — куски, которых коснулась новая лампа (таск
+ * 253), у остальных смесь прежняя. Доли пишутся в **копии** теней, а `raw`
+ * остаётся нетронутым: по нему смесь пересчитывается, когда на том же куске
+ * загорится следующая лампа.
  */
-function volumeShadeMix(decals, shades) {
-  for (const [host, list] of shades) {
+function volumeShadeMix(decals, raw, shades, hosts) {
+  for (const host of hosts) {
+    const list = raw.get(host);
+    if (!list || list.length === 0) {
+      shades.delete(host);
+      continue;
+    }
     const n = host.n;
     const ax = Math.abs(n.x);
     const ay = Math.abs(n.y);
@@ -1530,7 +1616,8 @@ function volumeShadeMix(decals, shades) {
     const v = az >= ax && az >= ay ? "y" : "z";
     const rings = (decals.get(host) || []).map((ring) => ({ ring, flat: volumeFlat2(ring.p, u, v) }));
     const kept = [];
-    for (const shade of list) {
+    for (const own of list) {
+      const shade = { ...own };
       const px = shade.at[u];
       const py = shade.at[v];
       const keeps = new Map();

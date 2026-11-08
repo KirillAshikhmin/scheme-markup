@@ -126,8 +126,8 @@ test("диван отбрасывает тень от лампы — за соб
   assert.equal(box.scene.occluders.length, 1, "габарит дивана не дошёл до теней");
   const live = liveOf(box, { east: 1 });
   const shades = volumeLampShades(box.scene, live);
-  // Геометрия считается на все лампы сразу, горящие или нет (как пятна): здесь
-  // — тени восточной.
+  // Геометрия считается у горящих ламп, по одной (таск 253): здесь горит
+  // восточная, и тени в ответе только её.
   const all = [...shades.entries()]
     .map(([host, list]) => [host, list.filter((shade) => shade.markId === box.marks.east)])
     .filter(([, list]) => list.length > 0);
@@ -313,6 +313,97 @@ test("рисование: пятна и тени — одна заливка б�
   assert.deepEqual(log.slice(second), ["beginPath", "moveTo", "lineTo", "lineTo", "closePath", "fillStyle=rgba(4,5,6,0.3)", "fill"]);
   const first = log.slice(log.indexOf("beginPath"), second);
   assert.deepEqual(first.slice(-4), ["fillStyle=rgb(1,2,3)", "strokeStyle=rgb(1,2,3)", "fill", "stroke"]);
+});
+
+// ——— свет по частям (таск 253, G389) ————————————————————————————————————
+//
+// Слова заказчика о пересборке света в 0,87 с на его самой большой схеме: «а с
+// этим можно что-то сделать?» — «Про свет - делаем». Главное здесь не время, а
+// то, что картинка от правки не поехала: кадр после сборки по частям сверяется
+// с кадром после сборки разом **журналом вызовов `ctx`**.
+
+/** Камера гостиной: смотрит на диван и стену за ним. */
+const SHADOW_CAMERA = { at: { x: -2000, y: 1200, z: 1700 }, yaw: -Math.PI / 2, pitch: -0.45 };
+
+/** Журнал вызовов `ctx` на один кадр — им кадры и сверяются. */
+function frameLog(scene, light, camera = SHADOW_CAMERA) {
+  const polygons = volumeFrame(scene, camera, { width: 800, height: 500 }, null, NIGHT, light);
+  const log = [];
+  const ctx = new Proxy(
+    {},
+    {
+      get:
+        (target, name) =>
+        (...args) =>
+          log.push(String(name) + "(" + args.map((item) => (typeof item === "number" ? item.toFixed(6) : String(item))).join(",") + ")"),
+      set: (target, name, value) => {
+        log.push(String(name) + "=" + value);
+        return true;
+      },
+    },
+  );
+  volumeDraw(ctx, polygons);
+  return log;
+}
+
+/**
+ * Тени, которые кадр **кладёт**, с их долями — по месту куска, а не по ссылке
+ * на него. Тень погашенной лампы в счёт не идёт: её доля ноль, и кадр её
+ * пропускает (`volumeShadeAlpha`, `volumeFrame`).
+ */
+function shadeShares(light) {
+  const rows = [];
+  for (const [host, list] of light.shades) {
+    const where = host.p.map((point) => point.x.toFixed(3) + "," + point.y.toFixed(3) + "," + point.z.toFixed(3)).join(" ");
+    for (const shade of list) {
+      const alpha = volumeShadeAlpha(shade, light.lamps);
+      if (alpha > 0) rows.push(where + " | " + shade.markId + " | " + alpha.toFixed(12));
+    }
+  }
+  return rows.sort();
+}
+
+test("кольца и тени строятся только у горящих ламп, а не у всех ламп схемы", () => {
+  const box = shadowStand([SOFA]);
+  const light = volumeLiveLight(box.scene, liveOf(box, { east: 1 }), { physical: true });
+  const lit = new Set();
+  for (const list of light.decals.values()) for (const ring of list) lit.add(ring.markId);
+  assert.deepEqual([...lit], [box.marks.east], "построены кольца не только горящей лампы");
+  for (const list of light.shades.values()) for (const shade of list) assert.equal(shade.markId, box.marks.east);
+});
+
+test("лампы зажигаются по одной — кадр тот же, что у сборки разом, вызов в вызов", () => {
+  const step = shadowStand([SOFA, TABLE]);
+  // Порядок нарочно обратный: кольца на куске обязаны встать по обозначению
+  // лампы, а не по порядку щелчков — порядок колец это порядок рисования.
+  let light = null;
+  for (const lit of [{ hall: 1 }, { hall: 1, west: 1 }, { hall: 1, west: 1, east: 1 }]) {
+    light = volumeLiveLight(step.scene, liveOf(step, lit), { physical: true });
+  }
+  const whole = shadowStand([SOFA, TABLE]);
+  const once = volumeLiveLight(whole.scene, liveOf(whole, { east: 1, west: 1, hall: 1 }), { physical: true });
+  const log = frameLog(step.scene, light);
+  assert.ok(log.length > 100, "кадр стенда почти пустой: " + log.length);
+  assert.deepEqual(log, frameLog(whole.scene, once));
+  // Смесь теней считается по куску грани, и доли её те же: кусок, на который
+  // легла новая лампа, пересчитан, остальные не тронуты.
+  assert.ok(shadeShares(light).length > 0, "теней в стенде нет");
+  assert.deepEqual(shadeShares(light), shadeShares(once));
+});
+
+test("погасшая лампа построенного не теряет, и кадр от этого тот же", () => {
+  const box = shadowStand([SOFA]);
+  volumeLiveLight(box.scene, liveOf(box, { east: 1 }), { physical: true });
+  const light = volumeLiveLight(box.scene, liveOf(box, { west: 1 }), { physical: true });
+  const kept = new Set();
+  for (const list of light.decals.values()) for (const ring of list) kept.add(ring.markId);
+  assert.ok(kept.has(box.marks.east), "кольца погасшей лампы выброшены — второй щелчок по ней снова заплатит");
+  // В кадр они не идут: сила погашенной лампы ноль (`live.lamps`), и кадр
+  // совпадает с кадром схемы, где восточную не зажигали вовсе.
+  const fresh = shadowStand([SOFA]);
+  const once = volumeLiveLight(fresh.scene, liveOf(fresh, { west: 1 }), { physical: true });
+  assert.deepEqual(frameLog(box.scene, light), frameLog(fresh.scene, once));
+  assert.deepEqual(shadeShares(light), shadeShares(once));
 });
 
 // ——— холст и осадки ——————————————————————————————————————————————————————

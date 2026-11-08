@@ -40,6 +40,7 @@ import {
   VOLUME_LAMP_SOFT_STEPS,
   VOLUME_NIGHT_RGB,
   VOLUME_WALL_RGB,
+  volumeDraw,
   volumeFrame,
   volumeLampDecals,
   volumeLampPower,
@@ -757,4 +758,91 @@ test("без физического света граница без стены 
   const walled = stand();
   const door = volumeLiveLight(sceneOf(walled, true), liveOf(walled, { lamp: 1 }), { physical: false });
   assert.equal(door.rooms.get(walled.rooms.hall) || 0, 0, "без физического света свет вышел в открытую дверь");
+});
+
+// ——— свет по частям (таск 253, G389) ————————————————————————————————————
+//
+// Геометрия считается у горящих ламп и по одной. Проверяется главное: кадр
+// после сборки по частям совпадает с кадром после сборки разом — на лентах
+// через два помещения, на ленте, ушедшей на улицу, и на границе без стены, то
+// есть там, где помещение лампы решает кусок, а не метка.
+
+/** Журнал вызовов `ctx` на один кадр. */
+function frameLog(scene, light, camera) {
+  const polygons = volumeFrame(scene, camera, { width: 800, height: 500 }, null, NIGHT, light);
+  const log = [];
+  const ctx = new Proxy(
+    {},
+    {
+      get:
+        (target, name) =>
+        (...args) =>
+          log.push(String(name) + "(" + args.map((item) => (typeof item === "number" ? item.toFixed(6) : String(item))).join(",") + ")"),
+      set: (target, name, value) => {
+        log.push(String(name) + "=" + value);
+        return true;
+      },
+    },
+  );
+  volumeDraw(ctx, polygons);
+  return log;
+}
+
+/** Светлота всех помещений строкой — её считают заново на каждый вызов, и сверять её надо тоже. */
+const roomsOf = (light) =>
+  [...light.rooms.entries()]
+    .map(([key, share]) => key + "=" + share.toFixed(12))
+    .sort()
+    .join(" ");
+
+for (const [name, make, lit, camera] of [
+  [
+    "ленты через два помещения и лента на улицу",
+    () => tapeStand(),
+    ["across", "inside", "outdoor", "lamp", "picture", "hallLamp"],
+    { at: { x: -2000, y: 1000, z: 1600 }, yaw: -Math.PI / 2, pitch: -0.25 },
+  ],
+  [
+    "граница без стены",
+    () => lampStand({ noWall: true }),
+    ["lamp", "picture", "hallLamp"],
+    { at: { x: -1500, y: 800, z: 1600 }, yaw: -0.9, pitch: -0.2 },
+  ],
+]) {
+  test("свет по частям: " + name + " — кадр тот же, что у сборки разом", () => {
+    const step = make();
+    const stepScene = sceneOf(step);
+    // Порядок нарочно обратный порядку обозначений: кольца на куске обязаны
+    // встать по обозначению лампы, а не по порядку щелчков.
+    const order = [...lit].reverse();
+    const on = {};
+    let light = null;
+    for (const key of order) {
+      on[key] = 1;
+      light = volumeLiveLight(stepScene, liveOf(step, { ...on }), { physical: true });
+    }
+    const whole = make();
+    const wholeScene = sceneOf(whole);
+    const once = volumeLiveLight(wholeScene, liveOf(whole, Object.fromEntries(lit.map((key) => [key, 1]))), { physical: true });
+    assert.equal(roomsOf(light), roomsOf(once), "светлота помещений разошлась");
+    const log = frameLog(stepScene, light, camera);
+    assert.ok(log.length > 100, "кадр стенда почти пустой: " + log.length);
+    assert.deepEqual(log, frameLog(wholeScene, once, camera));
+  });
+}
+
+test("свет по частям: погашенная лампа в кадр не идёт, хотя её кольца построены", () => {
+  const box = tapeStand();
+  const scene = sceneOf(box);
+  volumeLiveLight(scene, liveOf(box, { lamp: 1, across: 1 }), { physical: true });
+  const light = volumeLiveLight(scene, liveOf(box, { across: 1 }), { physical: true });
+  const marks = new Set();
+  for (const list of light.decals.values()) for (const ring of list) marks.add(ring.markId);
+  assert.ok(marks.has(box.marks.lamp), "кольца погашенной лампы выброшены");
+  const fresh = tapeStand();
+  const freshScene = sceneOf(fresh);
+  const once = volumeLiveLight(freshScene, liveOf(fresh, { across: 1 }), { physical: true });
+  const camera = { at: { x: -2000, y: 1000, z: 1600 }, yaw: -Math.PI / 2, pitch: -0.25 };
+  assert.equal(roomsOf(light), roomsOf(once));
+  assert.deepEqual(frameLog(scene, light, camera), frameLog(freshScene, once, camera));
 });

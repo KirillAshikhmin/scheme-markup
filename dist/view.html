@@ -41637,19 +41637,48 @@ return built ? built.shades : null;
 }
 function volumeLampBuilt(scene, live) {
 if (!scene || !scene.order) return null;
-const ids = [];
-for (const [markId, item] of live || []) if (item && item.kind === "light") ids.push(markId);
-ids.sort();
-const sign = ids.join(" ");
-const held = volumeDecalMemo.get(scene);
-if (held && held.sign === sign) return held;
-const built = { sign, ...volumeLampDecalsBuild(scene, ids, live) };
-volumeDecalMemo.set(scene, built);
-return built;
+let held = volumeDecalMemo.get(scene);
+if (!held) volumeDecalMemo.set(scene, (held = { lit: new Set(), decals: new Map(), raw: new Map(), shades: new Map() }));
+const fresh = [];
+for (const markId of volumeLitLamps(live)) if (!held.lit.has(markId)) fresh.push(markId);
+if (fresh.length === 0) return held;
+const built = volumeLampDecalsBuild(scene, fresh, live);
+const hosts = new Set();
+for (const [host, items] of built.decals) {
+held.decals.set(host, volumeMergeByMark(held.decals.get(host), items));
+hosts.add(host);
+}
+for (const [host, items] of built.raw) {
+held.raw.set(host, volumeMergeByMark(held.raw.get(host), items));
+hosts.add(host);
+}
+for (const markId of fresh) held.lit.add(markId);
+volumeShadeMix(held.decals, held.raw, held.shades, hosts);
+return held;
+}
+function volumeLitLamps(live) {
+const out = [];
+for (const [markId, item] of live || []) {
+if (!item || item.on !== true || item.heat || item.kind !== "light") continue;
+out.push(markId);
+}
+return out.sort();
+}
+function volumeMergeByMark(was, items) {
+if (!was || was.length === 0) return items;
+const out = [];
+let here = 0;
+let there = 0;
+while (here < was.length && there < items.length) {
+out.push(String(items[there].markId) < String(was[here].markId) ? items[there++] : was[here++]);
+}
+while (here < was.length) out.push(was[here++]);
+while (there < items.length) out.push(items[there++]);
+return out;
 }
 function volumeLampDecalsBuild(scene, ids, live) {
 const decals = new Map();
-const shades = new Map();
+const raw = new Map();
 const byRoom = volumeDecalHosts(scene);
 const ways = volumeLampOpenings(scene).filter((way) => !way.shut);
 const occluders = scene.occluders || [];
@@ -41660,12 +41689,11 @@ const item = live.get(markId);
 for (const source of volumeLampSources(place, scene, item && item.roomId)) {
 if (!source.room) continue;
 const blockers = volumeShadeBlockers(occluders, source.room, source.at);
-const shade = blockers.length > 0 ? { blockers, shades, planes: new Map() } : null;
+const shade = blockers.length > 0 ? { blockers, shades: raw, planes: new Map() } : null;
 volumeSourcePools(decals, byRoom, ways, source.room, markId, source, shade);
 }
 }
-volumeShadeMix(decals, shades);
-return { decals, shades };
+return { decals, raw };
 }
 const volumeHostMemo = new WeakMap();
 function volumeDecalHosts(scene) {
@@ -42063,8 +42091,13 @@ return { x: middle.x, y: middle.y };
 }
 return { x: x / (3 * area), y: y / (3 * area) };
 }
-function volumeShadeMix(decals, shades) {
-for (const [host, list] of shades) {
+function volumeShadeMix(decals, raw, shades, hosts) {
+for (const host of hosts) {
+const list = raw.get(host);
+if (!list || list.length === 0) {
+shades.delete(host);
+continue;
+}
 const n = host.n;
 const ax = Math.abs(n.x);
 const ay = Math.abs(n.y);
@@ -42073,7 +42106,8 @@ const u = az >= ax && az >= ay ? "x" : ax >= ay ? "y" : "x";
 const v = az >= ax && az >= ay ? "y" : "z";
 const rings = (decals.get(host) || []).map((ring) => ({ ring, flat: volumeFlat2(ring.p, u, v) }));
 const kept = [];
-for (const shade of list) {
+for (const own of list) {
+const shade = { ...own };
 const px = shade.at[u];
 const py = shade.at[v];
 const keeps = new Map();
