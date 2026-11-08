@@ -17810,10 +17810,43 @@ return { widthMm: Math.round(length), depthMm: Number(object.depthMm) };
 }
 function markPlaceHolder(project, mark) {
 const own = mark && Array.isArray(mark.points) ? mark.points : [];
-if (!mark || markObjectId(mark) === null) return { object: null, points: own };
+if (!mark || markObjectId(mark) === null) return { object: null, points: own, atMm: null };
 const place = markPlace(project, mark);
-if (place.from !== "object" || !place.bridged || !place.object) return { object: null, points: own };
-return { object: place.object, points: place.points };
+if (place.from !== "object" || !place.bridged || !place.object) return { object: null, points: own, atMm: null };
+return { object: place.object, points: place.points, atMm: place.atMm };
+}
+function planFitShiftMm(project, schemeId, atMm, deltaMm) {
+if (!atMm || !deltaMm) return deltaMm;
+const box = planBoxMm(project, schemeId);
+if (!box) return deltaMm;
+const fit = (raw, at, low, high) => Math.min(Math.max(raw, Math.min(0, low - at)), Math.max(0, high - at));
+return {
+x: fit(deltaMm.x, atMm.x, box.minX, box.maxX),
+y: fit(deltaMm.y, atMm.y, box.minY, box.maxY),
+};
+}
+function planBoxMm(project, schemeId) {
+const corners = [
+{ x: 0, y: 0 },
+{ x: 1, y: 0 },
+{ x: 1, y: 1 },
+{ x: 0, y: 1 },
+].map((point) => planFractionToMm(project, schemeId, point));
+if (corners.some((point) => !point)) return null;
+const xs = corners.map((point) => point.x);
+const ys = corners.map((point) => point.y);
+const box = { minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys) };
+const midX = (box.minX + box.maxX) / 2;
+const midY = (box.minY + box.maxY) / 2;
+const outside = (point) => {
+const fraction = planMmToFraction(project, schemeId, point);
+return !fraction || fraction.x < 0 || fraction.x > 1 || fraction.y < 0 || fraction.y > 1;
+};
+if (outside({ x: box.minX, y: midY })) box.minX += 1;
+if (outside({ x: box.maxX, y: midY })) box.maxX -= 1;
+if (outside({ x: midX, y: box.minY })) box.minY += 1;
+if (outside({ x: midX, y: box.maxY })) box.maxY -= 1;
+return box;
 }
 function moveMarkPlace(project, markId, shift) {
 const mark = requireMark(project, markId);
@@ -17824,7 +17857,8 @@ return { project: updateMark(project, markId, { points }).project, moved: "mark"
 }
 const deltaMm = planShiftToMm(project, mark.schemeId, shift);
 if (!deltaMm) return { project, moved: null };
-return { project: moveSchemeObject(project, held.object.id, deltaMm).project, moved: "object" };
+const fitted = planFitShiftMm(project, mark.schemeId, held.atMm, deltaMm);
+return { project: moveSchemeObject(project, held.object.id, fitted).project, moved: "object" };
 }
 function objectDeviceMake(project, objectId, typeId) {
 const object = findSchemeObject(project, objectId);
@@ -18434,8 +18468,18 @@ const dy = Number(wall.bMm.y) - Number(wall.aMm.y);
 const len = Math.hypot(dx, dy);
 if (!(len > 0)) return null;
 const side = ((at.x - wall.aMm.x) * dy - (at.y - wall.aMm.y) * dx) / len;
-if (side === 0) return null;
+if (side === 0) return wallTieSide(project, mark, wall);
 return side > 0 ? "left" : "right";
+}
+function wallTieSide(project, mark, wall) {
+const along = markWall(mark);
+const atMm = along && along.wallId === wall.id ? along.atMm : null;
+const rooms = WALL_SIDES.map((side) => ({ side, roomId: wallRoomId(project, wall.id, side, atMm) }));
+const own = mark && mark.roomId ? rooms.find((item) => item.roomId === mark.roomId) : null;
+if (own) return own.side;
+const named = rooms.filter((item) => item.roomId);
+if (named.length === 1) return named[0].side;
+return "left";
 }
 function wallAlongOf(wall, points) {
 const vectors = wallVectors(wall);

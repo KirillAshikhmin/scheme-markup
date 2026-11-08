@@ -31,16 +31,21 @@ import {
   createProject,
   findMark,
   findSchemeObject,
+  markOnWall,
   markPlace,
   markPlaceHolder,
   markWall,
+  markWallSide,
   moveMarkPlace,
   moveSchemeObject,
   planShiftToMm,
   setMarkObject,
+  setMarkWall,
   setPlanOrigin,
   setPlanScale,
+  updateSchemeObject,
   updateType,
+  wallElevation,
 } from "../src/model.js";
 import {
   canvasCommitAllowed,
@@ -231,6 +236,134 @@ test("линия и блок многих точек везут свои точ�
   findMark(after, base.mark.id).points.forEach((point, index) => {
     assert.ok(Math.abs(point.x - (host.points[index].x + 0.05)) < 1e-12, "точка блока уехала не на тот сдвиг");
   });
+});
+
+// ——— край плана держит знак (ремонт по ревью) ————————————————————————————
+//
+// Правило в сборке старше жеста: точка метки зажимается долями 0…1 (дефект
+// D73), вставленная копия едет целиком, пока не войдёт в план (таск 222). До
+// ремонта связанный прибор был единственным, кто из него вышел: метка без
+// связи вставала у кромки, а вещь уезжала на три плана и пропадала с листа —
+// в перечень неразмещённых она при этом не попадала, потому что точки метки
+// целы.
+
+test("сдвиг в три плана оставляет знак прибора на плане, как и точку метки", () => {
+  const base = scene();
+  const linked = linkedScene();
+  // План 1200 × 800 точек по 100 точек в метре: прямоугольник 12 000 × 8 000 мм.
+  const far = { x: 3, y: 3 };
+  const free = canvasMoveMarks(base.project, [base.mark.id], far);
+  assert.deepEqual(findMark(free, base.mark.id).points[0], { x: 1, y: 1 }, "метка без связи перестала зажиматься кромкой");
+
+  const after = canvasMoveMarks(linked.project, [linked.mark.id], far);
+  assert.deepEqual(thingOf(after, linked.object.id).atMm, { x: 12000, y: 8000 }, "вещь уехала за план");
+  const shown = visibleMark(after, findMark(after, linked.mark.id));
+  assert.deepEqual(shown.points[0], { x: 1, y: 1 }, "знак прибора ушёл с плана: " + JSON.stringify(shown.points[0]));
+
+  // И в другую сторону — к нулю, а не в минус.
+  const back = canvasMoveMarks(linked.project, [linked.mark.id], { x: -3, y: -3 });
+  assert.deepEqual(thingOf(back, linked.object.id).atMm, { x: 0, y: 0 });
+  assert.deepEqual(visibleMark(back, findMark(back, linked.mark.id)).points[0], { x: 0, y: 0 });
+});
+
+test("вещь, уже стоящая за планом, рывком внутрь не втягивается", () => {
+  const linked = linkedScene();
+  // Вещь начерчена за подложкой: в «Чертеже» так можно — он подложкой не
+  // ограничен. Жест плана обязан её не дёргать.
+  const out = updateSchemeObject(linked.project, linked.object.id, { atMm: { x: 15000, y: 200 } }).project;
+  const away = canvasMoveMarks(out, [linked.mark.id], { x: 1, y: 0 });
+  assert.deepEqual(thingOf(away, linked.object.id).atMm, { x: 15000, y: 200 }, "вещь за планом уехала ещё дальше");
+  // А к плану она едет свободно: сдвиг на ширину плана (12 000 мм) доезжает
+  // весь, потому что приезжает внутрь.
+  const home = canvasMoveMarks(out, [linked.mark.id], { x: -1, y: 0 });
+  assert.equal(thingOf(home, linked.object.id).atMm.x, 3000, "вещь к плану не поехала");
+  // Длинный сдвиг к плану довозит её до дальнего края и не дальше.
+  const across = canvasMoveMarks(out, [linked.mark.id], { x: -3, y: 0 });
+  assert.equal(thingOf(across, linked.object.id).atMm.x, 0, "вещь проехала план насквозь");
+});
+
+test("зажим стоит у жеста плана, а не у вещи: «Чертёж» подложкой не ограничен", () => {
+  const linked = linkedScene();
+  // Ручной перенос вещи в мастерской идёт той же дверью `moveSchemeObject` —
+  // и края плана не знает. Иначе стену и вещь нельзя было бы начертить за
+  // подложкой, а чертят там обычно.
+  const far = moveSchemeObject(linked.project, linked.object.id, { x: 40000, y: 0 }).project;
+  assert.deepEqual(thingOf(far, linked.object.id).atMm, { x: 42000, y: 200 });
+});
+
+// ——— привязка, выбранная рукой, переживает резолвер (ремонт по ревью) ———————
+
+test("стену, названную рукой, резолвер не отбирает — пересчитывается только отступ", () => {
+  const base = scene();
+  const wallId = base.project.walls[0].id;
+  // Телевизор на тумбе в 800 мм от стены: автоматике он уже не настенный.
+  const stand = updateSchemeObject(base.project, base.object.id, { atMm: { x: 3200, y: 800 } }).project;
+  const linked = setMarkObject(stand, base.mark.id, base.object.id).project;
+  assert.equal(markWall(findMark(applyMarkWalls(linked).project, base.mark.id)), null, "пример не тот: автопривязка уцелела");
+
+  // Инженер назвал стену сам (G202) — и автоматика её не трогает.
+  const byHand = setMarkWall(linked, base.mark.id, { wallId, atMm: 3200 }, { manual: true }).project;
+  const kept = findMark(applyMarkWalls(byHand).project, base.mark.id);
+  assert.deepEqual(markWall(kept), { wallId, atMm: 3200, toMm: null }, "рука инженера потеряна");
+
+  // Отступ вдоль выбранной стены — следствие места прибора, и он едет за вещью.
+  const slid = updateSchemeObject(byHand, base.object.id, { atMm: { x: 4500, y: 800 } }).project;
+  assert.equal(markWall(findMark(applyMarkWalls(slid).project, base.mark.id)).atMm, 4500);
+});
+
+// ——— вещь ровно на оси стены (ремонт по ревью) ————————————————————————————
+//
+// Довод прежней шапки `markWallSide` («доли плана дробные, точное попадание на
+// ось почти невозможно») держался ровно до связи: у прибора на вход приходит
+// записанное целое число миллиметров, которое магнит сетки чертежа сажает на
+// круглые значения. Ответ `null` уносил такой прибор с **обеих** развёрток.
+
+function onAxis() {
+  const base = scene();
+  const room = addRoom(base.project, { name: "Комната" });
+  // Контур лежит ниже стены (y = 0) и доходит до неё: «своя сторона» одна.
+  const outline = addOutline(room.project, {
+    schemeId: base.schemeId,
+    roomId: room.room.id,
+    points: [
+      { x: 0, y: 0 },
+      { x: 0.5, y: 0 },
+      { x: 0.5, y: 0.4 },
+      { x: 0, y: 0.4 },
+    ],
+  });
+  // Вещь серединой ровно на оси стены: колонна, ниша, короб — обычное дело.
+  const project = updateSchemeObject(outline.project, base.object.id, { atMm: { x: 2000, y: 0 } }).project;
+  return { ...base, project: setMarkObject(project, base.mark.id, base.object.id).project, roomId: room.room.id };
+}
+
+test("прибор ровно на оси стены получает сторону, а не пропадает с обеих развёрток", () => {
+  const made = onAxis();
+  const bound = applyMarkWalls(applyRoomOutlines(made.project).project).project;
+  const mark = findMark(bound, made.mark.id);
+  const side = markWallSide(bound, mark);
+  assert.ok(side === "left" || side === "right", "сторона снова null: прибор пропал с обеих развёрток");
+  assert.equal(markOnWall(bound, mark), true, "прибор на стене перестал считаться настенным");
+  // Ответ устойчив: второй зов даёт то же слово.
+  assert.equal(markWallSide(bound, mark), side);
+  // И на развёртке он виден — ровно на одной стороне.
+  const wallId = bound.walls[0].id;
+  const seen = ["left", "right"].filter((view) =>
+    wallElevation(bound, wallId, view).marks.some((item) => item.id === made.mark.id),
+  );
+  assert.deepEqual(seen, [side], "прибор виден не на той стороне: " + JSON.stringify(seen));
+});
+
+test("ничью разнимает помещение: сторона с комнатой старше запасного «слева»", () => {
+  const made = onAxis();
+  const bound = applyMarkWalls(applyRoomOutlines(made.project).project).project;
+  // Контур лежит под стеной, то есть со стороны «right» (левая нормаль
+  // смотрит вверх, в сторону улицы). Туда прибор и уходит.
+  assert.equal(markWallSide(bound, findMark(bound, made.mark.id)), "right");
+
+  // Убрали контур — обе стороны стали равны, и ничья достаётся «слева».
+  const bare = applyMarkWalls({ ...bound, outlines: [], marks: bound.marks.map((item) => ({ ...item, roomId: null })) }).project;
+  assert.equal(markWallSide(bare, findMark(bare, made.mark.id)), "left");
 });
 
 // ——— блок ——————————————————————————————————————————————————————————————

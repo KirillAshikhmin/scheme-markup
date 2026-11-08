@@ -8234,10 +8234,84 @@ function schemeObjectSpansMm(object, corners) {
  */
 export function markPlaceHolder(project, mark) {
   const own = mark && Array.isArray(mark.points) ? mark.points : [];
-  if (!mark || markObjectId(mark) === null) return { object: null, points: own };
+  if (!mark || markObjectId(mark) === null) return { object: null, points: own, atMm: null };
   const place = markPlace(project, mark);
-  if (place.from !== "object" || !place.bridged || !place.object) return { object: null, points: own };
-  return { object: place.object, points: place.points };
+  if (place.from !== "object" || !place.bridged || !place.object) return { object: null, points: own, atMm: null };
+  return { object: place.object, points: place.points, atMm: place.atMm };
+}
+
+/**
+ * **Край плана держит знак** — зажим переноса прибора, в целых миллиметрах.
+ *
+ * Правило в сборке старше жеста: точка метки зажимается долями 0…1
+ * (`clampFraction` в `normalizePoints`, дефект D73), вставленная копия едет
+ * целиком, пока не войдёт в план (`markShapeAt`, таск 222). Метка за планом —
+ * это тихая потеря работы: она не печатается, её нет ни на листе, ни в архиве,
+ * а в объекте она есть. У связанного прибора ровно та же беда: уехала вещь —
+ * уехал и знак, а в перечне неразмещённых его нет, потому что точки метки
+ * целы.
+ *
+ * Зажимается **вещь**, а не точка знака: место знака считает резолвер по вещи,
+ * и зажми мы его отдельно, знак и вещь разошлись бы на то, что отрезали.
+ *
+ * На плане держат **знак**, а не габарит: у метки её размер за край тоже
+ * никто не подрезает. Поэтому границей служит место знака — середина вещи, та
+ * самая, которую отдаёт `markPlace().atMm`.
+ *
+ * **Вещь, уже стоящая за планом, рывком внутрь не втягивается.** Чертёж живёт
+ * в миллиметрах и подложкой не ограничен (ручной перенос вещи в «Чертеже»
+ * зажима не знает и знать не должен); сюда такая вещь попадает только рукой за
+ * знак, и дёрнуть её на другой конец листа в ответ на сдвиг в миллиметр было
+ * бы хуже, чем оставить как есть. Поэтому в допустимый отрезок всегда входит
+ * ноль: к плану такая вещь едет свободно, от плана — не дальше, чем стоит.
+ */
+function planFitShiftMm(project, schemeId, atMm, deltaMm) {
+  if (!atMm || !deltaMm) return deltaMm;
+  const box = planBoxMm(project, schemeId);
+  if (!box) return deltaMm;
+  // В отрезок допустимого сдвига **всегда входит ноль**: к плану едем
+  // свободно, от плана — не дальше, чем уже стоим.
+  const fit = (raw, at, low, high) => Math.min(Math.max(raw, Math.min(0, low - at)), Math.max(0, high - at));
+  return {
+    x: fit(deltaMm.x, atMm.x, box.minX, box.maxX),
+    y: fit(deltaMm.y, atMm.y, box.minY, box.maxY),
+  };
+}
+
+/**
+ * Прямоугольник плана в целых миллиметрах чертежа — или `null`, если моста
+ * нет. Это те же доли 0…1, в которых живут точки метки (ADR 002), переведённые
+ * тем же мостом: своего понятия «край плана» у чертежа не заводится.
+ *
+ * Границы **поджимаются проверкой, а не арифметикой**: `planFractionToMm`
+ * округляет до целого миллиметра, и посчитанный им угол может оказаться на
+ * полмиллиметра снаружи доли 1. Каждая граница спрашивается обратным переводом
+ * и отступает на миллиметр внутрь, если вышла наружу; направление «внутрь»
+ * берётся от середины прямоугольника, поэтому поворот привязки на четверть
+ * оборота ничего не путает.
+ */
+function planBoxMm(project, schemeId) {
+  const corners = [
+    { x: 0, y: 0 },
+    { x: 1, y: 0 },
+    { x: 1, y: 1 },
+    { x: 0, y: 1 },
+  ].map((point) => planFractionToMm(project, schemeId, point));
+  if (corners.some((point) => !point)) return null;
+  const xs = corners.map((point) => point.x);
+  const ys = corners.map((point) => point.y);
+  const box = { minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys) };
+  const midX = (box.minX + box.maxX) / 2;
+  const midY = (box.minY + box.maxY) / 2;
+  const outside = (point) => {
+    const fraction = planMmToFraction(project, schemeId, point);
+    return !fraction || fraction.x < 0 || fraction.x > 1 || fraction.y < 0 || fraction.y > 1;
+  };
+  if (outside({ x: box.minX, y: midY })) box.minX += 1;
+  if (outside({ x: box.maxX, y: midY })) box.maxX -= 1;
+  if (outside({ x: midX, y: box.minY })) box.minY += 1;
+  if (outside({ x: midX, y: box.maxY })) box.maxY -= 1;
+  return box;
 }
 
 /**
@@ -8266,7 +8340,12 @@ export function moveMarkPlace(project, markId, shift) {
   // стоит, потому что молчаливый `NaN` в миллиметрах уехал бы в объект.
   const deltaMm = planShiftToMm(project, mark.schemeId, shift);
   if (!deltaMm) return { project, moved: null };
-  return { project: moveSchemeObject(project, held.object.id, deltaMm).project, moved: "object" };
+  // Край плана держит знак — тем же правилом, каким его держит зажим точки
+  // метки (`planFitShiftMm`). Зажим стоит **здесь, у жеста плана**, а не в
+  // `moveSchemeObject`: ручной перенос вещи в «Чертеже» подложкой не
+  // ограничен, и ограничивать его нельзя — чертят и за краем картинки.
+  const fitted = planFitShiftMm(project, mark.schemeId, held.atMm, deltaMm);
+  return { project: moveSchemeObject(project, held.object.id, fitted).project, moved: "object" };
 }
 
 // ——— вещь становится устройством (R02.1–R02.3, история 7в) ————————————————
@@ -9412,10 +9491,19 @@ function markMiddleMm(project, mark) {
  * при первом же переносе метки или стены, как врал бы незачем пересчитанный
  * `wallAtMm`; лишнее поле в каждой привязанной метке файл тоже не красит.
  *
- * `null` — метка стоит ровно на оси стены, и стороны у неё нет. Случай
- * вырожденный (доли плана — дробные, точное попадание на ось почти
- * невозможно), но врать в нём «слева» нельзя: на развёртке это была бы
- * розетка не на той стене.
+ * **Попадание ровно на ось стены — ничья, а не «стороны нет»** (ремонт таска
+ * 252). Прежде здесь отвечал `null` с доводом «доли плана дробные, точное
+ * попадание почти невозможно», и довод этот держался ровно до связи с вещью: у
+ * связанного прибора на вход приходит записанное **целое число миллиметров**,
+ * которое магнит сетки чертежа сажает на круглые значения, а вещь в стене
+ * (колонна, ниша, короб) — обычное дело, так и сказано в шапке
+ * `workshopWallTurnDeg`. Ответ `null` уносил такой прибор **с обеих**
+ * развёрток разом и менял ему посадку в «Объёме», и ничего об этом не
+ * говорилось.
+ *
+ * Ничью разнимает `wallTieSide` — одним правилом на план, развёртку и объём.
+ * `null` остаётся только там, где стороны правда не из чего считать: нет
+ * стены, нет её длины, нет места метки.
  */
 export function markWallSide(project, mark) {
   const binding = markWall(mark);
@@ -9442,8 +9530,38 @@ export function markWallSideOn(project, mark, wallId) {
   // Левая нормаль в экранных осях (`y` вниз) — `(u.y, −u.x)`, та же, что у
   // стороны открывания двери.
   const side = ((at.x - wall.aMm.x) * dy - (at.y - wall.aMm.y) * dx) / len;
-  if (side === 0) return null;
+  if (side === 0) return wallTieSide(project, mark, wall);
   return side > 0 ? "left" : "right";
+}
+
+/**
+ * Чья сторона, когда прибор стоит **ровно на оси стены**: он в самой стене, и
+ * обе стороны одинаково его. Ответ обязан быть устойчивым — его спрашивают
+ * план, развёртка и «Объём», и разойдись они, прибор оказался бы в трёх местах.
+ *
+ * Порядок правил — от самого осмысленного к запасному:
+ *
+ *   1. **помещение метки**: у прибора оно уже записано (`applyRoomOutlines`),
+ *      и сторона, под которой лежит это помещение, — его сторона. Розетка в
+ *      торце простенка кухни остаётся на развёртке кухни;
+ *   2. **единственная сторона с помещением**: стена между комнатой и улицей
+ *      отдаёт прибор комнате — на развёртке улицы ему делать нечего;
+ *   3. **«слева»** — запасной ответ, когда обе стороны равны (внутренняя
+ *      стена без контуров, две одинаковые комнаты). Это ничья, а не измерение,
+ *      и названа она так прямо: лучше одна развёртка, чем ни одной.
+ *
+ * Пробы помещения стоят **только на этой ветке**: на объектах заказчика ничья
+ * не случается ни разу (0 вещей из 174), и кадр за неё не платит.
+ */
+function wallTieSide(project, mark, wall) {
+  const along = markWall(mark);
+  const atMm = along && along.wallId === wall.id ? along.atMm : null;
+  const rooms = WALL_SIDES.map((side) => ({ side, roomId: wallRoomId(project, wall.id, side, atMm) }));
+  const own = mark && mark.roomId ? rooms.find((item) => item.roomId === mark.roomId) : null;
+  if (own) return own.side;
+  const named = rooms.filter((item) => item.roomId);
+  if (named.length === 1) return named[0].side;
+  return "left";
 }
 
 // Отступ метки вдоль одной стены и зазор до её **грани**. Зазор у линии — по
