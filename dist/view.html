@@ -4815,20 +4815,18 @@ top: auto;
 bottom: 8px;
 }
 #app[data-app="view"][data-screen="volume"] .view-notes {
-top: calc(var(--canvas-corner-edge) + var(--canvas-corner-size) + var(--canvas-corner-gap));
+top: calc(var(--canvas-corner-edge) + 2 * (var(--canvas-corner-size) + var(--canvas-corner-gap)));
 }
 #app[data-app="view"][data-screen="volume"] #canvas-area:has(.view-notes) .canvas-hint:not(.is-collapsed) {
 top: calc(
-var(--canvas-corner-edge) + var(--canvas-corner-size) + var(--canvas-corner-gap) + var(--view-notes-h, 0px)
+var(--canvas-corner-edge) + 2 * (var(--canvas-corner-size) + var(--canvas-corner-gap)) + var(--view-notes-h, 0px)
 );
 }
 #app[data-app="view"][data-screen="volume"].is-mobile
 #canvas-area:has(.view-notes)
 .volume__stage:has(.canvas-hint:not(.canvas-hint--info):not(.is-collapsed))
 .volume__paramsBtn {
-top: calc(
-var(--canvas-corner-edge) + 2 * (var(--canvas-corner-size) + var(--canvas-corner-gap)) + var(--view-notes-h, 0px)
-);
+top: calc(var(--canvas-corner-edge) + var(--canvas-corner-size) + var(--canvas-corner-gap));
 }
 .view-scn {
 display: flex;
@@ -8371,6 +8369,7 @@ phaseMorning: "утро",
 phaseDay: "день",
 phaseEvening: "вечер",
 sunrise: "Рассвет {rise}, закат {set} — умолчание. Укажите координаты объекта, и они посчитаются по ним",
+sunriseBare: "Рассвет {rise}, закат {set} — умолчание",
 sunriseSite: "Рассвет {rise}, закат {set} — по координатам объекта",
 simulation: "Имитация умного дома",
 simulationHint:
@@ -51117,8 +51116,13 @@ return Boolean(state) && appAllows("editMarks", state) && !canvasSimLocked(state
 function canvasSimLocked(state) {
 return Boolean(state) && state.simRunning === true && canvasOnScreen(state);
 }
+function canvasRefusalText(state) {
+if (!appAllows("editHints", state)) return null;
+return canvasSimLocked(state) ? strings.sim.bar.editLocked : strings.mobile.viewOnly;
+}
 function canvasViewOnly() {
-if (canvasApi) canvasApi.notify(canvasSimLocked(canvasState()) ? strings.sim.bar.editLocked : strings.mobile.viewOnly);
+const said = canvasRefusalText(canvasState());
+if (said && canvasApi) canvasApi.notify(said);
 return false;
 }
 const CANVAS_MODE_SCALE = "scale";
@@ -63967,9 +63971,10 @@ return text("volume.clockRealLine", where);
 }
 return text("volume.clockRunning", { ...where, day: volumeDayText(clock ? clock.speed : null) });
 }
-function volumeParamsSunLine(times) {
+function volumeParamsSunLine(times, opts = {}) {
 const where = { rise: volumeClockText(times.riseMin), set: volumeClockText(times.setMin) };
-return times.bySite ? text("volume.sunriseSite", where) : text("volume.sunrise", where);
+if (times.bySite) return text("volume.sunriseSite", where);
+return text(opts.hints === false ? "volume.sunriseBare" : "volume.sunrise", where);
 }
 function volumeFloorOptionLabel(option) {
 return text("volume.stairOption", { floor: option.floor, name: option.name });
@@ -64070,7 +64075,7 @@ on: { click: () => volumeParamsFix(null, now()) },
 state,
 uiEl("p", { class: "volume__paramsSub", text: strings.volume.speed }),
 uiEl("div", { class: "volume__paramsRow" }, [speedSelect(chosen)]),
-uiEl("p", { class: "tools__note", text: volumeParamsSunLine(times()) }),
+uiEl("p", { class: "tools__note", text: volumeParamsSunLine(times(), { hints: hints() }) }),
 checkRow(strings.volume.smooth, chosen.smooth, strings.volume.smoothHint, (on) =>
 volumeParamsFlag("smooth", on),
 ),

@@ -539,10 +539,19 @@ export function volumeParamsLine(clock, minutes, phase, day) {
   return text("volume.clockRunning", { ...where, day: volumeDayText(clock ? clock.speed : null) });
 }
 
-/** Строка про рассвет и закат: по координатам объекта или по умолчанию. */
-export function volumeParamsSunLine(times) {
+/**
+ * Строка про рассвет и закат: по координатам объекта или по умолчанию.
+ *
+ * `opts.hints === false` — страница, где объект не правят (умение `editHints`):
+ * умолчание названо, а зова нет. Координаты задают в свойствах объекта
+ * (`editProject`), которых в просмотре не бывает, и звать туда заказчика
+ * значило бы обещать дверь, которой у него нет (ревью ветки, F1). Сами часы
+ * рассвета и заката остаются: по ним в поле ходит солнце.
+ */
+export function volumeParamsSunLine(times, opts = {}) {
   const where = { rise: volumeClockText(times.riseMin), set: volumeClockText(times.setMin) };
-  return times.bySite ? text("volume.sunriseSite", where) : text("volume.sunrise", where);
+  if (times.bySite) return text("volume.sunriseSite", where);
+  return text(opts.hints === false ? "volume.sunriseBare" : "volume.sunrise", where);
 }
 
 /**
@@ -742,7 +751,7 @@ export function createVolumeParamsFields(options) {
         uiEl("div", { class: "volume__paramsRow" }, [speedSelect(chosen)]),
         // Рассвет и закат — тоже состояние, а не описание: они считаны по дате,
         // часам и координатам объекта и меняются от них.
-        uiEl("p", { class: "tools__note", text: volumeParamsSunLine(times()) }),
+        uiEl("p", { class: "tools__note", text: volumeParamsSunLine(times(), { hints: hints() }) }),
         // «Плавные светила» стоят в группе времени: отметка меняет не картинку,
         // а то, как часто время доходит до неба.
         checkRow(strings.volume.smooth, chosen.smooth, strings.volume.smoothHint, (on) =>

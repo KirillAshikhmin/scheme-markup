@@ -26,11 +26,11 @@ import {
   viewManifestJson,
 } from "../build.js";
 import { APP_KINDS, LAYOUT_ABILITIES, VIEW_ABILITIES, appAllows } from "../src/app.js";
-import { canvasHintText } from "../src/canvas.js";
+import { canvasHintText, canvasRefusalText } from "../src/canvas.js";
 import { addScheme, createProject, setSchemeFloor } from "../src/model.js";
 import { schemesRowMeta } from "../src/panels/schemes.js";
 import { volumeFloorAction, volumeNotes } from "../src/panels/volume.js";
-import { volumeFloorsNote } from "../src/panels/volumeParams.js";
+import { volumeFloorsNote, volumeParamsSunLine } from "../src/panels/volumeParams.js";
 import { STORE_DB_NAME, storeDatabaseName, storeNamespace, storeUse } from "../src/store.js";
 import { strings, text } from "../src/strings.js";
 
@@ -164,6 +164,34 @@ test("слова о правке гасит умение, а не правка �
   for (const why of ["one", "noFloor", "none"]) {
     assert.equal(volumeFloorsNote({ ...plan, why }, false, { hints: false }), "", why);
   }
+});
+
+test("ни отказ на клавишу правки, ни зов за координатами до заказчика не доходят", () => {
+  // Отказы на Ctrl+Z, Ctrl+V, Delete и жесты правки говорили «Режим просмотра
+  // — правка на компьютере» уведомлением: правки на этой странице нет вовсе, и
+  // обещать её на другом устройстве нечем. Слова отказа решает одна чистая
+  // дверь, `canvasRefusalText`; `null` — промолчать.
+  const made = addScheme(createProject(), { name: "1 этаж", width: 1000, height: 500 });
+  const state = (app) => ({ project: made.project, schemeId: made.scheme.id, mode: "select", layout: "mobile", app });
+  assert.equal(canvasRefusalText(state("edit")), strings.mobile.viewOnly, "в «Разметке» отказ по-прежнему вслух");
+  assert.equal(
+    canvasRefusalText({ ...state("edit"), simRunning: true, screen: "scheme" }),
+    strings.sim.bar.editLocked,
+    "у запущенного дома слова свои",
+  );
+  assert.equal(canvasRefusalText(state("view")), null, "на странице просмотра отказ молчит");
+  assert.equal(canvasRefusalText({ ...state("view"), simRunning: true, screen: "scheme" }), null);
+
+  // Рассвет и закат: умолчание названо, а зова за координатами нет — свойств
+  // объекта в просмотре не бывает.
+  const times = { riseMin: 540, setMin: 1260, bySite: false };
+  assert.ok(volumeParamsSunLine(times).includes("координат"), volumeParamsSunLine(times));
+  const bare = volumeParamsSunLine(times, { hints: false });
+  assert.ok(!bare.includes("координат"), bare);
+  assert.ok(bare.includes("09:00") && bare.includes("21:00") && bare.includes("умолчание"), bare);
+  // Координаты объекта заданы — это про его объект, и говорится оно обоим.
+  const own = { riseMin: 300, setMin: 1300, bySite: true };
+  assert.equal(volumeParamsSunLine(own, { hints: false }), volumeParamsSunLine(own));
 });
 
 test("умение `editHints` спрашивают там, где стояли слова инженера", () => {

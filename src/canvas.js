@@ -237,11 +237,31 @@ export function canvasSimLocked(state) {
   return Boolean(state) && state.simRunning === true && canvasOnScreen(state);
 }
 
-// Отказ вслух: правка, которая не случилась, должна быть видна. Молчаливый
-// отказ в этой сборке уже стоил четырёх тасков. У запущенного дома слова свои:
-// остановить дом — и правка вернётся.
+/**
+ * Что сказать об отказе правки — или `null`, если говорить не о чем.
+ *
+ * Отказ вслух: правка, которая не случилась, должна быть видна. Молчаливый
+ * отказ в этой сборке уже стоил четырёх тасков. У запущенного дома слова свои:
+ * остановить дом — и правка вернётся.
+ *
+ * На странице просмотра отказ **молчит** (умение `editHints`, ревью ветки F1):
+ * Ctrl+Z, Ctrl+V, Delete и жесты правки заказчик нажимает не потому, что
+ * собрался править, а мимо, — и оба текста обращены к инженеру («остановите
+ * дом, чтобы править», «правка на компьютере»). Правки на этой странице нет
+ * вовсе, обещать её на другом устройстве нечем, и сказать тут не о чем.
+ *
+ * Чистая и вынесена наружу по той же причине, что `canvasHintText`: слова
+ * отказа — единственное, что человек об этом узнаёт, и решение о них
+ * проверяется без браузера.
+ */
+export function canvasRefusalText(state) {
+  if (!appAllows("editHints", state)) return null;
+  return canvasSimLocked(state) ? strings.sim.bar.editLocked : strings.mobile.viewOnly;
+}
+
 function canvasViewOnly() {
-  if (canvasApi) canvasApi.notify(canvasSimLocked(canvasState()) ? strings.sim.bar.editLocked : strings.mobile.viewOnly);
+  const said = canvasRefusalText(canvasState());
+  if (said && canvasApi) canvasApi.notify(said);
   return false;
 }
 
