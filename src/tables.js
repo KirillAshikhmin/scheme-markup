@@ -23,6 +23,7 @@ import {
   findType,
   labelOf,
   markControlChannel,
+  markPairLabel,
   markControlLinks,
   markControlledBy,
   markControlsByChannel,
@@ -180,7 +181,10 @@ function tableJoin(values, separator) {
 // Обозначение строки — обозначение метки. У сведённых меток оно одно на всех
 // (на том и сведены), поэтому берётся у ведущей.
 function tableEntryLabel(project, entry) {
-  return labelOf(project, entry.head.id);
+  // Связанный прибор называется парой «ТВ1 · Телевизор»; без связи — прежнее
+  // обозначение (`markPairLabel` отдаёт `labelOf` как есть). Сведённая
+  // строка из нескольких меток остаётся обозначением: имя вещи у неё чьё?
+  return entry.marks.length === 1 ? markPairLabel(project, entry.head) : labelOf(project, entry.head.id);
 }
 
 // Тип у строки один: обозначение назвало его однозначно. Склейка осталась
@@ -446,7 +450,7 @@ export function marksTable(project, filter, groupBy, options = {}) {
 // Ссылка на метку: обозначение, а для метки из другого помещения — ещё и
 // помещение. На объекте в три этажа «С1» само по себе не говорит ничего.
 function tableLinkLabel(project, mark, roomId) {
-  const label = labelOf(project, mark.id);
+  const label = markPairLabel(project, mark);
   if (!mark.roomId || mark.roomId === roomId) return label;
   const room = findRoom(project, mark.roomId);
   return room ? label + " (" + room.name + ")" : label;

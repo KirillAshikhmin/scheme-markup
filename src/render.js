@@ -7177,7 +7177,18 @@ export function drawElevation(ctx, elevation, box, options = {}) {
   // Знак метки или её изображение в прямоугольнике с серединой в `(x, y)`.
   const drawRowMark = (mark, box, x, y) => {
     if (box.view) {
-      drawObjectView(ctx, box.view, { x: x - box.width / 2, y: y - box.height / 2, width: box.width, height: box.height }, mark.color);
+      const rect = { x: x - box.width / 2, y: y - box.height / 2, width: box.width, height: box.height };
+      // Связанный прибор развёрнут углом своей вещи (таск 02, история 12);
+      // у метки без связи угла нет, и вызовов `ctx` не прибавляется ни одного.
+      if (typeof mark.turnDeg === "number" && mark.turnDeg % 360 !== 0) {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate((mark.turnDeg * Math.PI) / 180);
+        drawObjectView(ctx, box.view, { x: -box.width / 2, y: -box.height / 2, width: box.width, height: box.height }, mark.color);
+        ctx.restore();
+      } else {
+        drawObjectView(ctx, box.view, rect, mark.color);
+      }
     } else {
       drawShape(ctx, mark.shape, x, y, 9 * unit, mark.color);
     }

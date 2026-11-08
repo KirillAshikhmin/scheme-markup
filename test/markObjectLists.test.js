@@ -59,3 +59,12 @@ test("таблица объекта без связей не меняется о
   const off = setMarkObject(linked.project, base.mark.id, null);
   assert.equal(toCsv(marksTable(off.project, {}, "category")), toCsv(marksTable(base.project, {}, "category")));
 });
+
+test("строка связанного прибора называет и вещь, несвязанного — только обозначение", () => {
+  const base = world();
+  const plain = toCsv(marksTable(base.project, {}, "category"));
+  const linked = setMarkObject(base.project, base.mark.id, base.paired.id);
+  const csv = toCsv(marksTable(linked.project, {}, "category"));
+  assert.ok(csv.includes(" · "), "имя вещи не попало в строку: " + csv);
+  assert.ok(!plain.includes(" · "));
+});

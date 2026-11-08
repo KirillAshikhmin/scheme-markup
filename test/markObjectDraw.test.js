@@ -14,6 +14,7 @@ import {
   createProject,
   findMark,
   setMarkObject,
+  setMarkWall,
   setPlanOrigin,
   setPlanScale,
   updateSchemeObject,
@@ -123,4 +124,23 @@ test("в «Объёме» тело связанной метки стоит на
   // Без связи тело стоит на точке метки и повёрнутым не бывает.
   const free = volumeMarks(base.project, base.schemeId, { rooms: [], walls: [] }).placed.find((item) => item.markId === base.mark.id);
   assert.notDeepEqual(free ? free.frame && free.frame.at : null, { x: 2000, y: 200 });
+});
+
+test("на развёртке изображение связанной метки повёрнуто углом вещи, без связи кадр прежний", async () => {
+  const { drawElevation } = await import("../src/render.js");
+  const { wallElevation } = await import("../src/model.js");
+  const base = scene();
+  const wallId = base.project.walls[0].id;
+  const draw = (project) => {
+    const rec = recorder();
+    const elevation = wallElevation(project, wallId, "right");
+    drawElevation(rec.ctx, elevation, { x: 0, y: 0, width: 800, height: 400 }, { views: true });
+    return rec.log;
+  };
+  const bound = setMarkWall(base.project, base.mark.id, { wallId, atMm: 2000, toMm: null }).project;
+  const linked = setMarkObject(bound, base.mark.id, base.object.id).project;
+  const turned = draw(linked).filter((call) => call[0] === "rotate");
+  const free = draw(bound).filter((call) => call[0] === "rotate");
+  assert.equal(free.length, 0, "без связи появился поворот");
+  assert.equal(turned.length, 1, "не повёрнуто " + JSON.stringify(wallElevation(linked, wallId, "right").marks.map((m) => [m.turnDeg, m.heightMm, m.view, m.fromMm])));
 });
