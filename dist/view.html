@@ -7395,6 +7395,7 @@ typeDevice: "аксессуар типа",
 markDevice: "аксессуар метки",
 markDeviceReset: "аксессуар как у типа",
 markCurtainSide: "сторона открывания шторы",
+markHanging: "вид люстры",
 addScenario: "новый сценарий",
 editScenario: "правка сценария",
 removeScenario: "удаление сценария",
@@ -7470,6 +7471,7 @@ commentOnePoint: "У комментария одна точка: плашка с
 pointerOnlyComment: "Указатель бывает только у комментария",
 pointerUnknown: "Указатель или включён, или выключен",
 curtainSideUnknown: "Штора открывается влево, вправо или от центра",
+hangingOnlyChandelier: "Висячей бывает люстра: у остальных меток висячего тела нет, и нарисовать его нечем",
 commentNoLinks: "Комментарий ничем не управляет — это надпись на плане, а не устройство",
 commentNoEquipment: "Оборудование ставится в точку, а не в комментарий",
 typeKindNotLine: "Метка нарисована линией, а тип {code} — точечный: линии подходят только линейные типы",
@@ -8501,6 +8503,8 @@ marks: {
 curtainSide: "Сторона открывания",
 curtainSideHint: "Куда собирается ткань, когда штору открывают, — если смотреть на неё из комнаты",
 curtainSides: { left: "Влево", right: "Вправо", center: "От центра в стороны" },
+hanging: "Висячая",
+hangingHint: "Люстра на цепи от потолочной чашки, ярусами книзу. Видно в «Объёме»; на плане знак у обеих люстр один. Длина подвеса — из высоты метки",
 count: "Показано {shown} из {total}",
 onWall: "На стене, {at} м от угла",
 onWallNamed: "На стене {name}, {at} м от угла",
@@ -12852,6 +12856,853 @@ for (const part of icon.parts || []) drawPart(ctx, box, part);
 ctx.restore();
 }
 
+// src/objectModels/kit.js
+const MODEL_MATERIALS = ["body", "dark", "light", "metal", "glass"];
+const MODEL_CLEARS = ["sheer", "glass"];
+const MODEL_ARTS = ["nature", "desktop", "geometry"];
+const MODEL_CYL_SIDES = 8;
+function modelPart(kind, name, part) {
+const material = MODEL_MATERIALS.includes(part.material) ? part.material : "body";
+return {
+kind,
+name,
+lit: part.lit === true,
+bulb: Number.isInteger(part.bulb) ? part.bulb : null,
+material,
+toFloor: part.toFloor === true,
+clear: MODEL_CLEARS.includes(part.clear) ? part.clear : null,
+art: MODEL_ARTS.includes(part.art) ? part.art : null,
+x: part.x === undefined ? -0.5 : part.x,
+y: part.y === undefined ? -0.5 : part.y,
+z: part.z === undefined ? 0 : part.z,
+width: part.width === undefined ? 1 : part.width,
+depth: part.depth === undefined ? 1 : part.depth,
+height: part.height === undefined ? 1 : part.height,
+};
+}
+function modelBox(name, part = {}) {
+return modelPart("box", name, part);
+}
+function modelCyl(name, part = {}) {
+return modelPart("cyl", name, part);
+}
+function modelTube(name, part = {}) {
+return {
+...modelPart("tube", name, part),
+axis: part.axis === "x" ? "x" : "y",
+round: part.round === true,
+};
+}
+function modelCone(name, part = {}) {
+return modelPart("cone", name, part);
+}
+function modelPlate(name, points, part = {}) {
+const xs = points.map((point) => point[0]);
+const ys = points.map((point) => point[1]);
+const x = Math.min(...xs);
+const y = Math.min(...ys);
+return {
+...modelPart("plate", name, { ...part, x, width: Math.max(...xs) - x, y, depth: Math.max(...ys) - y }),
+points: points.map(([px, py]) => [px, py]),
+};
+}
+function modelSlab(name, z, height, material) {
+return modelBox(name, { z, height, material });
+}
+function modelFront(name, depth, material) {
+return modelBox(name, { y: -0.5, depth, material });
+}
+function modelKeys(count, y, depth) {
+return viewKeyRects(count, VIEW_KEYS_FRAME).map((rect, index) => ({
+...modelBox("key" + (index + 1), {
+x: rect.x,
+width: rect.width,
+y,
+depth,
+z: 0.5 - (rect.y + rect.height),
+height: rect.height,
+material: "light",
+}),
+channel: index + 1,
+}));
+}
+function modelParts(...items) {
+return items.flat(Infinity).filter(Boolean);
+}
+
+// src/objectModels/climate.js
+const MODELS_CLIMATE = {
+thermostat: modelParts(
+modelBox("screen", { x: -0.3, width: 0.6, y: -0.5, depth: 0.06, z: 0.48, height: 0.34, material: "dark", lit: true }),
+modelBox("plate", { y: -0.44, depth: 0.94, material: "light" }),
+),
+warmFloor: modelParts(
+modelBox("coil", { x: -0.42, width: 0.84, y: -0.42, depth: 0.84, z: 0.4, height: 0.6, lit: true }),
+modelBox("mat", { z: 0, height: 0.4, material: "light" }),
+),
+conditioner: modelParts(
+modelBox("louvers", { x: -0.44, width: 0.88, y: -0.5, depth: 0.3, z: 0.08, height: 0.22, material: "dark" }),
+modelBox("panel", { x: -0.46, width: 0.92, y: -0.5, depth: 0.3, z: 0.3, height: 0.65, material: "light" }),
+modelBox("case", { y: -0.2, depth: 0.7 }),
+),
+breezer: modelParts(
+modelCyl("grille", { x: -0.26, width: 0.52, y: -0.5, depth: 0.3, z: 0.24, height: 0.52, material: "dark" }),
+modelBox("case", { y: -0.2, depth: 0.7 }),
+),
+hood: modelParts(
+modelBox("canopy", { z: 0, height: 0.55 }),
+modelBox("duct", { x: -0.14, width: 0.28, y: 0.08, depth: 0.3, z: 0.55, height: 0.45, material: "metal" }),
+),
+vent: modelParts(
+modelCyl("wheel", { x: -0.3, width: 0.6, y: -0.5, depth: 0.4, z: 0.2, height: 0.6, material: "dark" }),
+modelBox("frame", { y: -0.1, depth: 0.6 }),
+),
+dehumidifier: modelParts(
+modelBox("grille", { x: -0.3, width: 0.6, y: -0.5, depth: 0.2, z: 0.12, height: 0.48, material: "dark" }),
+modelBox("case", { y: -0.3, depth: 0.8, z: 0, height: 0.9 }),
+),
+};
+
+// src/objectModels/lines.js
+const LINE_SPOT_STEP_MM = 600;
+const LINE_SPOT_MAX = 10;
+const MODELS_LINES = {
+"ТР": {
+stepMm: LINE_SPOT_STEP_MM,
+max: LINE_SPOT_MAX,
+acrossShare: 0.85,
+dropShare: 1.1,
+biteShare: 0.3,
+parts: modelParts(modelCyl("spot", { material: "light", lit: true })),
+},
+"КШ": {
+stepMm: 300,
+max: LINE_SPOT_MAX,
+acrossShare: 0.3,
+alongShare: 0.92,
+waveShare: 0.3,
+dropShare: 0,
+biteShare: 0.3,
+toFloor: true,
+parts: modelParts(modelBox("fold", { material: "light", clear: "sheer" })),
+},
+};
+
+// src/objectModels/light.js
+const MODELS_LIGHT = {
+xmasTree: modelParts(
+modelBox("trunk", { x: -0.06, width: 0.12, y: -0.06, depth: 0.12, z: 0, height: 0.12, material: "dark" }),
+modelCone("lower", { x: -0.5, width: 1, y: -0.5, depth: 1, z: 0.08, height: 0.56 }),
+modelCone("upper", { x: -0.36, width: 0.72, y: -0.36, depth: 0.72, z: 0.4, height: 0.52 }),
+modelBox("star", { x: -0.05, width: 0.1, y: -0.05, depth: 0.1, z: 0.9, height: 0.1, material: "light", lit: true, bulb: 1 }),
+),
+lamp: modelParts(
+modelCyl("shade", { z: 0, height: 0.52, material: "light", lit: true }),
+modelCyl("tier", { x: -0.28, width: 0.56, y: -0.28, depth: 0.56, z: 0.52, height: 0.22, material: "light", lit: true }),
+modelBox("rod", { x: -0.05, width: 0.1, y: -0.05, depth: 0.1, z: 0.74, height: 0.26, material: "metal" }),
+),
+mirror: modelParts(
+modelTube("glass", { axis: "y", round: true, x: -0.44, width: 0.88, y: -0.5, depth: 0.3, z: 0.06, height: 0.88, material: "glass" }),
+modelTube("glow", { axis: "y", round: true, y: -0.2, depth: 0.7, material: "light", lit: true }),
+),
+chandelier: modelParts(
+modelBox("canopy", { x: -0.2, width: 0.4, y: -0.2, depth: 0.4, z: 0.9, height: 0.1, material: "metal" }),
+modelBox("dropLong", { x: -0.42, width: 0.12, y: -0.1, depth: 0.2, z: 0, height: 0.9, material: "light", lit: true }),
+modelBox("dropMid", { x: -0.12, width: 0.12, y: -0.32, depth: 0.2, z: 0.18, height: 0.72, material: "light", lit: true }),
+modelBox("dropShort", { x: 0.1, width: 0.12, y: 0.06, depth: 0.2, z: 0.36, height: 0.54, material: "light", lit: true }),
+modelBox("dropTop", { x: 0.3, width: 0.12, y: -0.14, depth: 0.2, z: 0.54, height: 0.36, material: "light", lit: true }),
+),
+chandelierHanging: modelParts(
+modelBox("canopy", { x: -0.12, width: 0.24, y: -0.12, depth: 0.24, z: 0.94, height: 0.06, material: "metal" }),
+modelBox("chain", { x: -0.03, width: 0.06, y: -0.03, depth: 0.06, z: 0.06, height: 0.88, material: "metal" }),
+modelBox("tierTop", { x: -0.5, width: 1, y: -0.5, depth: 1, z: 0.4, height: 0.12, material: "light", lit: true }),
+modelBox("tierMid", { x: -0.36, width: 0.72, y: -0.36, depth: 0.72, z: 0.22, height: 0.12, material: "light", lit: true }),
+modelBox("tierLow", { x: -0.2, width: 0.4, y: -0.2, depth: 0.4, z: 0.04, height: 0.12, material: "light", lit: true }),
+),
+nightLight: modelParts(
+modelBox("glow", { x: -0.34, width: 0.68, y: -0.5, depth: 0.35, z: 0.08, height: 0.26, material: "light", lit: true }),
+modelBox("case", { x: -0.42, width: 0.84, y: -0.15, depth: 0.65, z: 0.08, height: 0.7 }),
+),
+stripVertical: modelParts(
+modelBox("diffuser", { x: -0.34, width: 0.68, y: -0.5, depth: 0.3, material: "light", lit: true }),
+modelBox("profile", { y: -0.2, depth: 0.7 }),
+),
+};
+const MODELS_LIGHT_HANGING = Object.freeze({ chandelier: "chandelierHanging" });
+
+// src/objectModels/net.js
+const MODELS_NET = {
+wifi: modelParts(
+modelCyl("disc", { z: 0, height: 0.6, material: "light" }),
+modelCyl("cap", { x: -0.3, width: 0.6, y: -0.3, depth: 0.6, z: 0.6, height: 0.4 }),
+),
+speaker: modelParts(
+modelCyl("case", { z: 0, height: 0.84 }),
+modelCyl("top", { x: -0.35, width: 0.7, y: -0.35, depth: 0.7, z: 0.84, height: 0.16, material: "dark" }),
+),
+panelControl: modelParts(
+modelBox("screen", { x: -0.3, width: 0.6, y: -0.5, depth: 0.35, z: 0.2, height: 0.6, material: "glass" }),
+modelBox("frame", { y: -0.15, depth: 0.65 }),
+),
+intercom: modelParts(
+modelBox("screen", { x: -0.32, width: 0.64, y: -0.5, depth: 0.35, z: 0.3, height: 0.62, material: "glass" }),
+modelCyl("button", { x: -0.1, width: 0.2, y: -0.5, depth: 0.3, z: 0.08, height: 0.16, material: "light" }),
+modelBox("frame", { y: -0.15, depth: 0.65 }),
+),
+projector: modelParts(
+modelBox("lens", { x: 0.08, width: 0.3, y: -0.5, depth: 0.3, z: 0.25, height: 0.5, material: "dark" }),
+modelBox("case", { x: -0.46, width: 0.92, y: -0.2, depth: 0.62, z: 0.1, height: 0.8 }),
+modelBox("mount", { x: -0.3, width: 0.6, y: 0.42, depth: 0.08, z: 0.4, height: 0.4, material: "metal" }),
+),
+receiver: modelParts(
+modelBox("panel", { x: -0.44, width: 0.88, y: -0.5, depth: 0.3, z: 0.15, height: 0.7, material: "glass" }),
+modelBox("case", { y: -0.2, depth: 0.7 }),
+),
+};
+
+// src/objectModels/power.js
+function socketParts({ radius, pin, hole, layers }) {
+const [pinsDepth, recessDepth] = layers;
+const recessAt = -0.5 + pinsDepth;
+const frameAt = recessAt + recessDepth;
+const socketPin = (name, x) =>
+modelBox(name, { x, width: hole, y: -0.5, depth: pinsDepth, z: 0.5 - hole / 2, height: hole, material: "dark" });
+return modelParts(
+socketPin("pinLeft", -pin - hole / 2),
+socketPin("pinRight", pin - hole / 2),
+modelTube("recess", {
+axis: "y",
+x: -radius,
+width: radius * 2,
+y: recessAt,
+depth: recessDepth,
+z: 0.5 - radius,
+height: radius * 2,
+material: "light",
+}),
+modelBox("frame", { y: frameAt, depth: 0.5 - frameAt }),
+);
+}
+const MODEL_SWITCH_KEYS_MAX = 4;
+const switchParts = (count) => modelParts(modelKeys(count, -0.5, 0.4), modelBox("frame", { y: -0.1, depth: 0.6 }));
+const toggleParts = (count) =>
+modelParts(
+modelBox("lever", { x: -0.11, width: 0.22, y: -0.5, depth: 0.25, z: 0.36, height: 0.28, material: "dark" }),
+modelKeys(count, -0.25, 0.2),
+modelBox("frame", { y: -0.05, depth: 0.55 }),
+);
+const MODELS_POWER = {
+socket: socketParts({
+radius: 0.3,
+pin: 0.12,
+hole: 0.11,
+layers: [0.05, 0.1],
+}),
+socket380: socketParts({
+radius: 0.37,
+pin: 0.15,
+hole: 0.12,
+layers: [0.05, 0.2],
+}),
+switch1: switchParts(1),
+switch2: switchParts(2),
+switch3: switchParts(3),
+switchToggle: toggleParts(1),
+data: modelParts(
+modelBox("port", { x: -0.18, width: 0.36, y: -0.5, depth: 0.38, z: 0.3, height: 0.42, material: "dark" }),
+modelBox("frame", { y: -0.12, depth: 0.62 }),
+),
+panelBox: modelParts(
+modelBox("latch", { x: 0.3, width: 0.12, y: -0.5, depth: 0.2, z: 0.42, height: 0.16, material: "metal" }),
+modelBox("door", { y: -0.3, depth: 0.25, material: "light" }),
+modelBox("case", { y: -0.05, depth: 0.55 }),
+),
+};
+const MODELS_KEYED = {
+switch1: { build: switchParts, keys: 1, max: MODEL_SWITCH_KEYS_MAX },
+switch2: { build: switchParts, keys: 2, max: MODEL_SWITCH_KEYS_MAX },
+switch3: { build: switchParts, keys: 3, max: MODEL_SWITCH_KEYS_MAX },
+switchToggle: { build: toggleParts, keys: 1, max: MODEL_SWITCH_KEYS_MAX - 1 },
+};
+
+// src/objectModels/stairs.js
+const OBJECT_STAIR_KEYS = Object.freeze(["stairs", "stairsL", "stairsU", "stairsSpiral"]);
+const OBJECT_STAIR_MIRRORED = Object.freeze(["stairsL", "stairsU", "stairsSpiral"]);
+const STAIR_RISE_MM = 175;
+const STAIR_TREAD_MM = 40;
+const STAIR_TREAD_SHARE = 0.8;
+const STAIR_STEPS_MIN = 4;
+const STAIR_STEPS_MAX = 30;
+const STAIR_RUN_MM = 1100;
+const STAIR_L_SIDE_MM = 2700;
+const STAIR_U_WIDTH_MM = 2300;
+const STAIR_POST_SHARE = 0.16;
+const STAIR_SPIRAL_TURNS = 1;
+function objectStairKey(key) {
+return OBJECT_STAIR_KEYS.includes(key);
+}
+function objectStairSteps(heightMm) {
+const rises = Math.round(Math.max(0, Number(heightMm) || 0) / STAIR_RISE_MM);
+return Math.min(STAIR_STEPS_MAX, Math.max(STAIR_STEPS_MIN, rises - 1));
+}
+function objectStairModel(key, { widthMm, depthMm, heightMm, mirror = false } = {}) {
+const width = Number(widthMm);
+const depth = Number(depthMm);
+const height = Number(heightMm);
+if (!objectStairKey(key) || !(width > 0) || !(depth > 0) || !(height > 0)) return null;
+const steps = objectStairSteps(height);
+const thick = Math.min(STAIR_TREAD_MM, height / (steps + 1) / 2) / height;
+const z = (index) => (index + 1) / (steps + 1) - thick;
+const flip = mirror === true && OBJECT_STAIR_MIRRORED.includes(key);
+const plan = { width, depth, steps, z, thick, flip };
+if (key === "stairsSpiral") return objectStairSpiral(plan);
+const boards = key === "stairsL" ? objectStairL(plan) : key === "stairsU" ? objectStairU(plan) : objectStairStraight(plan);
+return modelParts(
+boards.map((board, index) =>
+modelBox("step" + (index + 1), {
+x: flip ? -(board.x + board.width) : board.x,
+width: board.width,
+y: board.y,
+depth: board.depth,
+z: z(index),
+height: thick,
+material: board.landing ? "light" : index % 2 === 0 ? "body" : "light",
+}),
+),
+);
+}
+function stairTread(axis, middle, span, from, to, landing = false) {
+const narrow = span * STAIR_TREAD_SHARE;
+const low = Math.min(from, to);
+const run = Math.abs(to - from);
+if (axis === "y") return { x: middle - narrow / 2, width: narrow, y: low, depth: run, landing };
+return { x: low, width: run, y: middle - narrow / 2, depth: narrow, landing };
+}
+function objectStairStraight({ steps }) {
+const out = [];
+for (let index = 0; index < steps; index += 1) {
+out.push(stairTread("y", 0, 1, -0.5 + index / steps, -0.5 + (index + 1) / steps));
+}
+return out;
+}
+function stairRun(out, axis, middle, span, from, to, count) {
+for (let index = 0; index < count; index += 1) {
+const a = from + ((to - from) * index) / count;
+const b = from + ((to - from) * (index + 1)) / count;
+out.push(stairTread(axis, middle, span, a, b));
+}
+}
+function stairSplit(steps, first, second) {
+const runs = Math.max(2, steps - 1);
+const one = Math.min(runs - 1, Math.max(1, Math.round((runs * first) / Math.max(1e-9, first + second))));
+return { one, two: runs - one };
+}
+function objectStairL({ width, depth, steps }) {
+const runX = (Math.min(width, depth) * (STAIR_RUN_MM / STAIR_L_SIDE_MM)) / width;
+const runY = (Math.min(width, depth) * (STAIR_RUN_MM / STAIR_L_SIDE_MM)) / depth;
+const split = stairSplit(steps, 1 - runY, 1 - runX);
+const out = [];
+stairRun(out, "y", -0.5 + runX / 2, runX, -0.5, 0.5 - runY, split.one);
+const corner = stairTread("y", -0.5 + runX / 2, runX, 0.5 - runY / 2 - (runY * STAIR_TREAD_SHARE) / 2, 0.5 - runY / 2 + (runY * STAIR_TREAD_SHARE) / 2, true);
+out.push(corner);
+stairRun(out, "x", 0.5 - runY / 2, runY, -0.5 + runX, 0.5, split.two);
+return out;
+}
+function objectStairU({ width, depth, steps }) {
+const run = STAIR_RUN_MM / STAIR_U_WIDTH_MM;
+const runY = Math.min(0.45, (width * run) / depth);
+const split = stairSplit(steps, 1 - runY, 1 - runY);
+const out = [];
+stairRun(out, "y", -0.5 + run / 2, run, -0.5, 0.5 - runY, split.one);
+const narrowY = runY * STAIR_TREAD_SHARE;
+const edge = (run * (1 - STAIR_TREAD_SHARE)) / 2;
+out.push({ x: -0.5 + edge, width: 1 - edge * 2, y: 0.5 - runY / 2 - narrowY / 2, depth: narrowY, landing: true });
+stairRun(out, "y", 0.5 - run / 2, run, 0.5 - runY, -0.5, split.two);
+return out;
+}
+function objectStairSpiral({ steps, z, thick, flip }) {
+const post = STAIR_POST_SHARE / 2;
+const outer = post + (0.5 - post) * STAIR_TREAD_SHARE;
+const turn = (Math.PI * 2 * STAIR_SPIRAL_TURNS) / steps;
+const start = -Math.PI / 2;
+const sign = flip ? 1 : -1;
+const point = (radius, angle) => [Math.cos(angle) * radius, Math.sin(angle) * radius];
+const treads = [];
+for (let index = 0; index < steps; index += 1) {
+const a = start + sign * turn * index;
+const b = start + sign * turn * (index + 1);
+const mid = (a + b) / 2;
+treads.push(
+modelPlate("step" + (index + 1), [point(post, a), point(outer, a), point(outer, mid), point(outer, b), point(post, b)], {
+z: z(index),
+height: thick,
+material: index % 2 === 0 ? "body" : "light",
+}),
+);
+}
+return modelParts(modelCyl("post", { x: -post, width: post * 2, y: -post, depth: post * 2, z: 0, height: 1, material: "metal" }), treads);
+}
+
+// src/objectModels/objects.js
+const MODEL_STAIR_FLOOR_MM = 2800;
+const modelStair = (key, widthMm, depthMm) => objectStairModel(key, { widthMm, depthMm, heightMm: MODEL_STAIR_FLOOR_MM });
+const MODEL_SHAFT = modelParts(modelBox("shaft"));
+const MODEL_PLUMBING = modelParts(
+modelCyl("bowl", { x: -0.3, width: 0.6, y: -0.5, depth: 0.75, z: 0, height: 0.62, material: "light" }),
+modelBox("cistern", { x: -0.32, width: 0.64, y: 0.2, depth: 0.3, z: 0.3, height: 0.7 }),
+);
+const MODEL_TOILET = modelParts(
+modelBox("foot", { x: -0.18, width: 0.36, y: -0.22, depth: 0.44, z: 0, height: 0.22 }),
+modelCyl("bowl", { x: -0.43, width: 0.86, y: -0.5, depth: 0.72, z: 0.22, height: 0.34, material: "light" }),
+modelCyl("seat", { x: -0.45, width: 0.9, y: -0.5, depth: 0.76, z: 0.56, height: 0.05, material: "dark" }),
+modelCyl("lid", { x: -0.45, width: 0.9, y: -0.5, depth: 0.76, z: 0.61, height: 0.05, material: "light" }),
+modelBox("cistern", { x: -0.45, width: 0.9, y: 0.16, depth: 0.34, z: 0.5, height: 0.46 }),
+modelBox("flush", { x: -0.08, width: 0.16, y: 0.28, depth: 0.12, z: 0.96, height: 0.04, material: "metal" }),
+);
+const MODEL_LAUNDRY = modelParts(
+modelTube("drum", { axis: "y", x: -0.4, width: 0.8, y: -0.4, depth: 0.74, z: 0.2, height: 0.56, material: "metal" }),
+modelTube("hatch", { axis: "y", x: -0.36, width: 0.72, y: -0.5, depth: 0.08, z: 0.235, height: 0.5, material: "glass" }),
+modelBox("case", { y: -0.42, depth: 0.92 }),
+);
+const MODELS_OBJECTS = {
+column: MODEL_SHAFT,
+duct: MODEL_SHAFT,
+niche: modelParts(
+modelBox("back", { y: 0.25, depth: 0.25 }),
+modelBox("shelf", { x: -0.46, width: 0.92, y: -0.5, depth: 0.95, z: 0.46, height: 0.08, material: "light" }),
+),
+stairs: modelStair("stairs", 1100, 2700),
+panel: MODELS_POWER.panelBox,
+radiator: modelParts(
+modelBox("panel", { y: -0.35, depth: 0.7, z: 0, height: 0.92 }),
+modelBox("grid", { x: -0.46, width: 0.92, y: -0.4, depth: 0.8, z: 0.92, height: 0.08, material: "light" }),
+),
+counter: modelParts(
+modelBox("top", { z: 0.88, height: 0.12, material: "light" }),
+modelBox("front", { y: -0.5, depth: 0.9, z: 0, height: 0.88 }),
+),
+plumbing: MODEL_PLUMBING,
+toilet: MODEL_TOILET,
+bathtub: modelParts(
+modelBox("sideLeft", { x: -0.5, width: 0.03, y: -0.5, depth: 1, z: 0, height: 1 }),
+modelBox("sideRight", { x: 0.47, width: 0.03, y: -0.5, depth: 1, z: 0, height: 1 }),
+modelBox("apron", { x: -0.47, width: 0.94, y: -0.5, depth: 0.07, z: 0, height: 1 }),
+modelBox("back", { x: -0.47, width: 0.94, y: 0.43, depth: 0.07, z: 0, height: 1 }),
+modelBox("bottom", { x: -0.47, width: 0.94, y: -0.43, depth: 0.86, z: 0, height: 0.25 }),
+modelBox("water", { x: -0.45, width: 0.9, y: -0.41, depth: 0.82, z: 0.25, height: 0.07, material: "glass" }),
+modelBox("tap", { x: -0.46, width: 0.1, y: -0.07, depth: 0.14, z: 0.9, height: 0.1, material: "metal" }),
+),
+cabinet: modelParts(
+modelBox("door", { x: -0.46, width: 0.92, y: -0.5, depth: 0.15, z: 0.03, height: 0.94, material: "light" }),
+modelBox("case", { y: -0.35, depth: 0.85 }),
+),
+wardrobeOpen: modelParts(
+modelBox("shelfTop", { z: 0.86, height: 0.03, material: "light" }),
+modelBox("post", { x: -0.015, width: 0.03, z: 0, height: 0.86, material: "dark" }),
+modelBox("rod", { x: -0.48, width: 0.46, y: -0.02, depth: 0.04, z: 0.78, height: 0.02, material: "metal" }),
+modelBox("clothes", { x: -0.45, width: 0.4, y: -0.3, depth: 0.6, z: 0.38, height: 0.4, material: "body" }),
+modelBox("shelfLow", { x: -0.48, width: 0.46, z: 0.14, height: 0.03, material: "light" }),
+[0.14, 0.3, 0.46, 0.62, 0.78].map((z, index) =>
+modelBox("shelf" + (index + 1), { x: 0.015, width: 0.485, z, height: 0.03, material: "light" }),
+),
+),
+shoeRack: modelParts(
+modelBox("sideLeft", { x: -0.5, width: 0.04, z: 0, height: 1 }),
+modelBox("sideRight", { x: 0.46, width: 0.04, z: 0, height: 1 }),
+modelBox("shelfLow", { x: -0.46, width: 0.92, z: 0.08, height: 0.06, material: "light" }),
+modelBox("shelfMid", { x: -0.46, width: 0.92, z: 0.48, height: 0.06, material: "light" }),
+modelBox("top", { x: -0.46, width: 0.92, z: 0.92, height: 0.08 }),
+),
+coatRack: modelParts(
+modelBox("board", { y: 0.38, depth: 0.12, z: 0.3, height: 0.4, material: "dark" }),
+modelBox("shelf", { z: 0.9, height: 0.1, material: "light" }),
+[-0.3, 0, 0.3].map((x, index) =>
+modelBox("hook" + (index + 1), { x: x - 0.025, width: 0.05, y: -0.1, depth: 0.48, z: 0.36, height: 0.06, material: "metal" }),
+),
+),
+table: modelParts(
+modelBox("top", { z: 0.88, height: 0.12, material: "light" }),
+modelBox("legLeft", { x: -0.46, width: 0.16, y: -0.3, depth: 0.6, z: 0, height: 0.88 }),
+modelBox("legRight", { x: 0.3, width: 0.16, y: -0.3, depth: 0.6, z: 0, height: 0.88 }),
+),
+bed: modelParts(
+modelBox("frame", { z: 0, height: 0.5 }),
+modelBox("mattress", { x: -0.46, width: 0.92, y: -0.5, depth: 0.85, z: 0.5, height: 0.5, material: "light" }),
+modelBox("headboard", { y: 0.35, depth: 0.15, material: "dark" }),
+),
+pool: modelParts(
+modelBox("basin", { z: 0, height: 0.78 }),
+modelBox("water", { x: -0.44, width: 0.88, y: -0.44, depth: 0.88, z: 0.78, height: 0.12, material: "glass" }),
+),
+washer: MODEL_LAUNDRY,
+dryerMachine: MODEL_LAUNDRY,
+sink: modelParts(
+modelCyl("bowl", { x: -0.4, width: 0.8, y: -0.44, depth: 0.74, z: 0.55, height: 0.45, material: "light" }),
+modelBox("pedestal", { x: -0.18, width: 0.36, y: -0.2, depth: 0.4, z: 0, height: 0.55 }),
+modelBox("tap", { x: -0.06, width: 0.12, y: 0.3, depth: 0.12, z: 0.8, height: 0.2, material: "metal" }),
+),
+shower: modelParts(
+modelBox("riser", { x: -0.07, width: 0.14, y: 0.3, depth: 0.14, z: 0, height: 0.92, material: "metal" }),
+modelBox("head", { x: -0.18, width: 0.36, y: 0.05, depth: 0.35, z: 0.92, height: 0.08, material: "light" }),
+),
+dresser: modelParts(
+modelBox("drawerHigh", { x: -0.44, width: 0.88, y: -0.5, depth: 0.16, z: 0.52, height: 0.42, material: "light" }),
+modelBox("drawerLow", { x: -0.44, width: 0.88, y: -0.5, depth: 0.16, z: 0.06, height: 0.42, material: "light" }),
+modelBox("case", { y: -0.34, depth: 0.84 }),
+),
+picture: modelParts(
+modelBox("canvas", { x: -0.42, width: 0.84, y: -0.5, depth: 0.5, z: 0.08, height: 0.84, material: "light", art: "geometry" }),
+modelBox("frame", { y: 0, depth: 0.5 }),
+),
+stove: modelParts(
+modelBox("oven", { x: -0.4, width: 0.8, y: -0.5, depth: 0.2, z: 0.1, height: 0.72, material: "glass" }),
+modelBox("case", { y: -0.3, depth: 0.8, z: 0, height: 0.9 }),
+modelBox("hob", { z: 0.9, height: 0.1, material: "dark" }),
+),
+dishwasher: modelParts(
+modelBox("front", { x: -0.46, width: 0.92, y: -0.5, depth: 0.2, z: 0, height: 0.86, material: "light" }),
+modelBox("panel", { x: -0.46, width: 0.92, y: -0.5, depth: 0.2, z: 0.86, height: 0.14, material: "dark" }),
+modelBox("case", { y: -0.3, depth: 0.8 }),
+),
+sofa: modelParts(
+modelBox("back", { y: 0.2, depth: 0.3 }),
+modelBox("seat", { x: -0.46, width: 0.92, y: -0.42, depth: 0.62, z: 0, height: 0.5, material: "light" }),
+modelBox("armLeft", { x: -0.5, width: 0.12, y: -0.5, depth: 0.7, z: 0, height: 0.62 }),
+modelBox("armRight", { x: 0.38, width: 0.12, y: -0.5, depth: 0.7, z: 0, height: 0.62 }),
+),
+armchair: modelParts(
+modelBox("back", { y: 0.16, depth: 0.34 }),
+modelBox("seat", { x: -0.34, width: 0.68, y: -0.4, depth: 0.56, z: 0, height: 0.46, material: "light" }),
+modelBox("armLeft", { x: -0.5, width: 0.2, y: -0.46, depth: 0.62, z: 0, height: 0.58 }),
+modelBox("armRight", { x: 0.3, width: 0.2, y: -0.46, depth: 0.62, z: 0, height: 0.58 }),
+),
+coffeeTable: modelParts(
+modelBox("top", { z: 0.78, height: 0.22, material: "light" }),
+modelBox("shelf", { x: -0.36, width: 0.72, y: -0.36, depth: 0.72, z: 0.2, height: 0.1, material: "light" }),
+modelBox("legLeft", { x: -0.44, width: 0.1, y: -0.2, depth: 0.4, z: 0, height: 0.78 }),
+modelBox("legRight", { x: 0.34, width: 0.1, y: -0.2, depth: 0.4, z: 0, height: 0.78 }),
+),
+deskSet: modelParts(
+modelBox("top", { x: -0.48, width: 0.96, y: 0.05, depth: 0.45, z: 0.56, height: 0.06, material: "light" }),
+modelBox("screen", { x: -0.24, width: 0.48, y: 0.3, depth: 0.08, z: 0.62, height: 0.33, material: "dark", lit: true, art: "desktop" }),
+modelBox("chairSeat", { x: -0.2, width: 0.4, y: -0.4, depth: 0.4, z: 0.3, height: 0.1 }),
+modelBox("chairBack", { x: -0.2, width: 0.4, y: -0.4, depth: 0.08, z: 0.4, height: 0.6, material: "light" }),
+),
+stool: modelParts(
+modelCyl("seat", { z: 0.8, height: 0.2, material: "light" }),
+modelCyl("leg", { x: -0.16, width: 0.32, y: -0.16, depth: 0.32, z: 0, height: 0.8 }),
+),
+fridge: modelParts(
+modelBox("doorHigh", { x: -0.46, width: 0.92, y: -0.5, depth: 0.18, z: 0.36, height: 0.62, material: "light" }),
+modelBox("doorLow", { x: -0.46, width: 0.92, y: -0.5, depth: 0.18, z: 0.02, height: 0.31, material: "light" }),
+modelBox("case", { y: -0.32, depth: 0.82 }),
+),
+treadmill: modelParts(
+modelBox("deck", { x: -0.44, width: 0.88, y: -0.5, depth: 0.76, z: 0, height: 0.16 }),
+modelBox("belt", { x: -0.3, width: 0.6, y: -0.48, depth: 0.7, z: 0.16, height: 0.04, material: "dark" }),
+modelBox("post", { x: -0.4, width: 0.8, y: 0.26, depth: 0.16, z: 0, height: 0.78, material: "metal" }),
+modelBox("console", { x: -0.4, width: 0.8, y: 0.24, depth: 0.22, z: 0.78, height: 0.22, material: "light" }),
+),
+projectorScreen: modelParts(
+modelBox("case", { z: 0.9, height: 0.1 }),
+modelBox("canvas", { x: -0.47, width: 0.94, y: -0.5, depth: 0.1, z: 0.03, height: 0.87, material: "light" }),
+modelBox("bar", { x: -0.47, width: 0.94, y: -0.5, depth: 0.2, z: 0, height: 0.03, material: "dark" }),
+),
+stairsExit: modelParts(
+modelBox("step", { y: 0.25, depth: 0.25, z: 0, height: 1 }),
+modelBox("landing", { x: -0.42, width: 0.84, y: -0.5, depth: 0.75, z: 0, height: 0.5, material: "light" }),
+modelBox("edgeLeft", { x: -0.5, width: 0.08, y: -0.5, depth: 0.75, z: 0, height: 1, material: "dark" }),
+modelBox("edgeRight", { x: 0.42, width: 0.08, y: -0.5, depth: 0.75, z: 0, height: 1, material: "dark" }),
+),
+stairsL: modelStair("stairsL", 2700, 2700),
+stairsU: modelStair("stairsU", 2300, 2700),
+stairsSpiral: modelStair("stairsSpiral", 1600, 1600),
+lift: modelParts(
+modelBox("wallLeft", { x: -0.5, width: 0.08, z: 0, height: 1 }),
+modelBox("wallRight", { x: 0.42, width: 0.08, z: 0, height: 1 }),
+modelBox("cabin", { x: -0.36, width: 0.72, y: -0.3, depth: 0.66, z: 0.05, height: 0.7, material: "light" }),
+modelBox("door", { x: -0.3, width: 0.6, y: -0.5, depth: 0.08, z: 0, height: 0.8, material: "metal" }),
+),
+gate: modelParts(
+modelBox("postLeft", { x: -0.5, width: 0.05, z: 0, height: 1, material: "dark" }),
+modelBox("postMid", { x: 0.2, width: 0.05, z: 0, height: 1, material: "dark" }),
+modelBox("postRight", { x: 0.45, width: 0.05, z: 0, height: 1, material: "dark" }),
+modelBox("leaf", { x: -0.45, width: 0.65, y: -0.3, depth: 0.6, z: 0.04, height: 0.9 }),
+modelBox("wicket", { x: 0.25, width: 0.2, y: -0.3, depth: 0.6, z: 0.04, height: 0.84, material: "light" }),
+),
+acOutdoor: modelParts(
+modelBox("case", { y: -0.3, depth: 0.8 }),
+modelTube("fan", { axis: "y", x: -0.3, width: 0.6, y: -0.5, depth: 0.12, z: 0.12, height: 0.76, material: "metal" }),
+modelBox("bracket", { x: -0.4, width: 0.8, y: 0.4, depth: 0.1, z: 0.1, height: 0.1, material: "dark" }),
+),
+pumpUnit: modelParts(
+modelCyl("tank", { x: -0.5, width: 0.56, y: -0.4, depth: 0.8, z: 0.1, height: 0.9, material: "light" }),
+modelBox("pump", { x: 0.1, width: 0.36, y: -0.3, depth: 0.6, z: 0.1, height: 0.4, material: "metal" }),
+modelBox("frame", { z: 0, height: 0.1, material: "dark" }),
+),
+generator: modelParts(
+modelBox("case", { z: 0, height: 0.9 }),
+modelBox("grille", { x: -0.46, width: 0.3, y: -0.5, depth: 0.08, z: 0.2, height: 0.5, material: "light" }),
+modelBox("exhaust", { x: 0.26, width: 0.1, y: 0.1, depth: 0.1, z: 0.9, height: 0.1, material: "metal" }),
+),
+ups: modelParts(
+modelBox("case", { y: -0.3, depth: 0.8 }),
+modelBox("panel", { x: -0.42, width: 0.84, y: -0.5, depth: 0.24, z: 0.74, height: 0.2, material: "light" }),
+modelBox("batteries", { x: -0.42, width: 0.84, y: -0.5, depth: 0.24, z: 0.06, height: 0.6, material: "dark" }),
+),
+evCharger: modelParts(
+modelBox("case", { y: -0.2, depth: 0.7 }),
+modelBox("face", { x: -0.36, width: 0.72, y: -0.5, depth: 0.3, z: 0.3, height: 0.5, material: "light" }),
+modelBox("cable", { x: 0.3, width: 0.16, y: -0.5, depth: 0.3, z: 0, height: 0.3, material: "dark" }),
+),
+railing: modelParts(
+modelBox("postLeft", { x: -0.5, width: 0.06, z: 0, height: 1, material: "metal" }),
+modelBox("postRight", { x: 0.44, width: 0.06, z: 0, height: 1, material: "metal" }),
+modelBox("rail", { z: 0.92, height: 0.08, material: "metal" }),
+modelBox("glass", { x: -0.46, width: 0.92, y: -0.4, depth: 0.8, z: 0.06, height: 0.86, material: "glass", clear: "glass" }),
+),
+fence: modelParts(
+modelBox("postLeft", { x: -0.5, width: 0.08, z: 0, height: 1, material: "dark" }),
+modelBox("postRight", { x: 0.42, width: 0.08, z: 0, height: 1, material: "dark" }),
+modelBox("panel", { x: -0.5, width: 1, y: -0.35, depth: 0.7, z: 0.05, height: 0.9 }),
+modelBox("cap", { x: -0.5, width: 1, y: -0.35, depth: 0.7, z: 0.95, height: 0.05, material: "light" }),
+),
+rack: modelParts(
+modelBox("case", { y: -0.3, depth: 0.8 }),
+modelFront("door", 0.3, "light"),
+modelBox("gear", { x: -0.38, width: 0.76, y: -0.46, depth: 0.5, z: 0.3, height: 0.2, material: "dark" }),
+),
+boiler: modelParts(
+modelBox("case", { y: -0.2, depth: 0.7, z: 0.08, height: 0.92 }),
+modelBox("panel", { x: -0.4, width: 0.8, y: -0.5, depth: 0.32, z: 0.6, height: 0.26, material: "light" }),
+modelBox("pipes", { x: -0.34, width: 0.68, y: -0.3, depth: 0.3, z: 0, height: 0.08, material: "metal" }),
+),
+waterHeater: modelParts(
+modelCyl("tank", { x: -0.46, width: 0.92, y: -0.46, depth: 0.84, z: 0.04, height: 0.92 }),
+modelBox("bracket", { x: -0.2, width: 0.4, y: 0.3, depth: 0.2, z: 0.2, height: 0.6, material: "metal" }),
+),
+manifold: modelParts(
+modelBox("case", { y: -0.1, depth: 0.6 }),
+modelBox("comb", { x: -0.4, width: 0.8, y: -0.5, depth: 0.4, z: 0.5, height: 0.14, material: "metal" }),
+modelBox("loops", { x: -0.4, width: 0.8, y: -0.5, depth: 0.4, z: 0, height: 0.3, material: "dark" }),
+),
+ventUnit: modelParts(
+modelBox("case", { x: -0.44, width: 0.88, y: -0.5, depth: 1, z: 0, height: 1 }),
+modelBox("ductLeft", { x: -0.5, width: 0.06, y: -0.3, depth: 0.6, z: 0.3, height: 0.4, material: "metal" }),
+modelBox("ductRight", { x: 0.44, width: 0.06, y: -0.3, depth: 0.6, z: 0.3, height: 0.4, material: "metal" }),
+),
+fireplace: modelParts(
+modelBox("case", { z: 0, height: 0.92 }),
+modelBox("firebox", { x: -0.34, width: 0.68, y: -0.5, depth: 0.5, z: 0.12, height: 0.5, material: "dark" }),
+modelBox("mantel", { x: -0.5, width: 1, y: -0.5, depth: 1, z: 0.92, height: 0.08, material: "light" }),
+),
+kitchenIsland: modelParts(
+modelBox("top", { z: 0.9, height: 0.1, material: "light" }),
+modelBox("body", { x: -0.48, width: 0.96, y: -0.48, depth: 0.96, z: 0.08, height: 0.82 }),
+modelBox("plinth", { x: -0.44, width: 0.88, y: -0.44, depth: 0.88, z: 0, height: 0.08, material: "dark" }),
+),
+barCounter: modelParts(
+modelBox("top", { x: -0.5, width: 1, y: -0.5, depth: 1, z: 0.93, height: 0.07, material: "light" }),
+modelBox("body", { x: -0.46, width: 0.92, y: -0.2, depth: 0.7, z: 0, height: 0.93 }),
+modelBox("footRail", { x: -0.46, width: 0.92, y: -0.46, depth: 0.1, z: 0.18, height: 0.06, material: "metal" }),
+),
+wallMirror: modelParts(
+modelBox("frame", { y: 0, depth: 0.5 }),
+modelBox("glass", { x: -0.44, width: 0.88, y: -0.5, depth: 0.5, z: 0.04, height: 0.92, material: "metal" }),
+),
+rug: modelParts(
+modelBox("pile", { x: -0.5, width: 1, y: -0.5, depth: 1, z: 0, height: 0.7, material: "light" }),
+modelBox("border", { x: -0.44, width: 0.88, y: -0.44, depth: 0.88, z: 0.7, height: 0.3 }),
+),
+chest: modelParts(
+modelBox("case", { y: -0.3, depth: 0.8 }),
+modelBox("drawerHigh", { x: -0.46, width: 0.92, y: -0.5, depth: 0.22, z: 0.7, height: 0.24, material: "light" }),
+modelBox("drawerMid", { x: -0.46, width: 0.92, y: -0.5, depth: 0.22, z: 0.38, height: 0.24, material: "light" }),
+modelBox("drawerLow", { x: -0.46, width: 0.92, y: -0.5, depth: 0.22, z: 0.06, height: 0.24, material: "light" }),
+),
+kitchenCabinet: modelParts(
+modelBox("case", { y: -0.3, depth: 0.8 }),
+modelBox("doorLeft", { x: -0.46, width: 0.45, y: -0.5, depth: 0.22, z: 0.06, height: 0.88, material: "light" }),
+modelBox("doorRight", { x: 0.01, width: 0.45, y: -0.5, depth: 0.22, z: 0.06, height: 0.88, material: "light" }),
+),
+shelving: modelParts(
+modelBox("sideLeft", { x: -0.5, width: 0.06, z: 0, height: 1 }),
+modelBox("sideRight", { x: 0.44, width: 0.06, z: 0, height: 1 }),
+modelBox("shelfLow", { x: -0.44, width: 0.88, y: -0.4, depth: 0.8, z: 0.3, height: 0.06, material: "light" }),
+modelBox("shelfHigh", { x: -0.44, width: 0.88, y: -0.4, depth: 0.8, z: 0.64, height: 0.06, material: "light" }),
+),
+plant: modelParts(
+modelBox("pot", { x: -0.35, width: 0.7, y: -0.35, depth: 0.7, z: 0, height: 0.3 }),
+modelBox("stem", { x: -0.05, width: 0.1, y: -0.05, depth: 0.1, z: 0.3, height: 0.3, material: "dark" }),
+modelCyl("crown", { x: -0.5, width: 1, y: -0.5, depth: 1, z: 0.5, height: 0.5, material: "light" }),
+),
+treePot: modelParts(
+modelBox("pot", { x: -0.32, width: 0.64, y: -0.32, depth: 0.64, z: 0, height: 0.22 }),
+modelBox("trunk", { x: -0.05, width: 0.1, y: -0.05, depth: 0.1, z: 0.22, height: 0.38, material: "dark" }),
+modelBox("crownLow", { x: -0.5, width: 1, y: -0.5, depth: 1, z: 0.52, height: 0.26, material: "light" }),
+modelBox("crownHigh", { x: -0.34, width: 0.68, y: -0.34, depth: 0.68, z: 0.74, height: 0.26, material: "light" }),
+),
+floorLamp: modelParts(
+modelBox("base", { x: -0.33, width: 0.66, y: -0.33, depth: 0.66, z: 0, height: 0.04, material: "metal" }),
+modelBox("stem", { x: -0.04, width: 0.08, y: -0.04, depth: 0.08, z: 0.04, height: 0.74, material: "metal" }),
+modelCyl("shade", { x: -0.5, width: 1, y: -0.5, depth: 1, z: 0.78, height: 0.22, material: "light" }),
+),
+car: modelParts(
+modelBox("body", { z: 0.12, height: 0.5 }),
+modelBox("cabin", { x: -0.44, width: 0.88, y: -0.1, depth: 0.44, z: 0.62, height: 0.38, material: "glass" }),
+modelBox("wheelFront", { y: -0.36, depth: 0.13, z: 0, height: 0.4, material: "dark" }),
+modelBox("wheelRear", { y: 0.2, depth: 0.13, z: 0, height: 0.4, material: "dark" }),
+),
+};
+
+// src/objectModels/sense.js
+const MODELS_SENSE = {
+lightSensor: modelParts(
+modelCyl("window", { x: -0.2, width: 0.4, y: -0.5, depth: 0.12, z: 0.3, height: 0.4, material: "dark" }),
+modelCyl("puck", { x: -0.5, width: 1, y: -0.38, depth: 0.88, z: 0, height: 1, material: "light" }),
+),
+climateSensor: modelParts(
+modelBox("tubeT", { x: -0.34, width: 0.12, y: -0.5, depth: 0.04, z: 0.12, height: 0.76, material: "dark" }),
+modelBox("tubeH", { x: -0.06, width: 0.12, y: -0.5, depth: 0.04, z: 0.12, height: 0.76, material: "dark" }),
+modelBox("tubeC", { x: 0.22, width: 0.12, y: -0.5, depth: 0.04, z: 0.12, height: 0.76, material: "dark" }),
+modelBox("case", { y: -0.46, depth: 0.96, material: "light" }),
+),
+presence: modelParts(
+modelCyl("dome", { x: -0.38, width: 0.76, y: -0.38, depth: 0.76, z: 0, height: 0.62, material: "light" }),
+modelCyl("base", { z: 0.62, height: 0.38 }),
+),
+motion: modelParts(
+modelCyl("lens", { x: -0.22, width: 0.44, y: -0.5, depth: 0.35, z: 0.28, height: 0.44, material: "dark" }),
+modelBox("case", { x: -0.4, width: 0.8, y: -0.15, depth: 0.65, z: 0.05, height: 0.9 }),
+),
+opening: modelParts(
+modelBox("reed", { x: -0.5, width: 0.55, y: -0.5, depth: 0.7, z: 0, height: 1 }),
+modelBox("magnet", { x: 0.12, width: 0.38, y: -0.5, depth: 0.6, z: 0.1, height: 0.8, material: "light" }),
+),
+leak: modelParts(
+modelCyl("puck", { x: -0.43, width: 0.86, y: -0.43, depth: 0.86, z: 0.1, height: 0.9 }),
+modelBox("probes", { x: -0.34, width: 0.68, y: -0.08, depth: 0.16, z: 0, height: 0.1, material: "metal" }),
+),
+camera: modelParts(
+modelCyl("lens", { x: -0.25, width: 0.5, y: -0.5, depth: 0.4, z: 0.25, height: 0.5, material: "dark" }),
+modelBox("case", { x: -0.42, width: 0.84, y: -0.1, depth: 0.45, z: 0.12, height: 0.76 }),
+modelBox("mount", { x: -0.12, width: 0.24, y: 0.35, depth: 0.15, z: 0.3, height: 0.4, material: "metal" }),
+),
+};
+
+// src/objectModels/things.js
+const MODELS_THINGS = {
+drain: modelParts(
+modelCyl("socket", { x: -0.31, width: 0.62, y: -0.5, depth: 0.45, z: 0.19, height: 0.62, material: "dark" }),
+modelCyl("flange", { y: -0.05, depth: 0.55 }),
+),
+waterOutlet: modelParts(
+modelCyl("outlet", { x: -0.21, width: 0.42, y: -0.5, depth: 0.25, z: 0.29, height: 0.42, material: "metal" }),
+modelBox("plate", { y: -0.25, depth: 0.75 }),
+),
+valve: modelParts(
+modelCyl("case", { x: -0.35, width: 0.7, y: -0.35, depth: 0.7, z: 0.05, height: 0.55 }),
+modelBox("handle", { x: -0.4, width: 0.8, y: -0.2, depth: 0.4, z: 0.6, height: 0.35, material: "metal" }),
+),
+towelDryer: modelParts(
+modelBox("postLeft", { x: -0.44, width: 0.16, y: -0.3, depth: 0.6 }),
+modelBox("postRight", { x: 0.28, width: 0.16, y: -0.3, depth: 0.6 }),
+modelBox("rungLow", { x: -0.3, width: 0.6, y: -0.25, depth: 0.5, z: 0.2, height: 0.1, material: "metal" }),
+modelBox("rungHigh", { x: -0.3, width: 0.6, y: -0.25, depth: 0.5, z: 0.58, height: 0.1, material: "metal" }),
+),
+tv: modelParts(
+modelBox("screen", { x: -0.47, width: 0.94, y: -0.5, depth: 0.1, z: 0.04, height: 0.92, material: "dark", lit: true, art: "nature" }),
+modelBox("case", { x: -0.46, width: 0.92, y: -0.4, depth: 0.3, z: 0.06, height: 0.88 }),
+modelBox("bracket", { x: -0.1, width: 0.2, y: -0.1, depth: 0.6, z: 0.3, height: 0.4, material: "metal" }),
+),
+vacuum: modelParts(
+modelCyl("puck", { z: 0, height: 0.8 }),
+modelCyl("turret", { x: -0.15, width: 0.3, y: -0.15, depth: 0.3, z: 0.8, height: 0.2, material: "dark" }),
+),
+appliance: modelParts(
+modelBox("door", { x: -0.46, width: 0.92, y: -0.5, depth: 0.3, z: 0.06, height: 0.88, material: "light" }),
+modelBox("case", { y: -0.2, depth: 0.7 }),
+),
+curtainRail: modelParts(
+modelBox("rod", { x: -0.5, width: 1, y: -0.3, depth: 0.4, z: 0.82, height: 0.16, material: "metal" }),
+modelBox("foldLeft", { x: -0.47, width: 0.3, y: 0.02, depth: 0.3, z: 0, height: 0.82, material: "light", toFloor: true, clear: "sheer" }),
+modelBox("foldMiddle", { x: -0.15, width: 0.3, y: -0.28, depth: 0.3, z: 0, height: 0.82, material: "light", toFloor: true, clear: "sheer" }),
+modelBox("foldRight", { x: 0.17, width: 0.3, y: 0.02, depth: 0.3, z: 0, height: 0.82, material: "light", toFloor: true, clear: "sheer" }),
+),
+};
+
+// src/objectModels/registry.js
+const OBJECT_MODEL_BODY_MAX = 5;
+const OBJECT_MODEL_FACE_MAX = 30;
+const OBJECT_MODEL_THING_BODY_MAX = 15;
+const OBJECT_MODEL_THING_FACE_MAX = 90;
+function objectModelLimits(key) {
+return objectCatalogEntry(key)
+? { bodies: OBJECT_MODEL_THING_BODY_MAX, faces: OBJECT_MODEL_THING_FACE_MAX }
+: { bodies: OBJECT_MODEL_BODY_MAX, faces: OBJECT_MODEL_FACE_MAX };
+}
+const MODEL_FAMILIES = [
+MODELS_POWER,
+MODELS_LIGHT,
+MODELS_CLIMATE,
+MODELS_SENSE,
+MODELS_NET,
+MODELS_THINGS,
+MODELS_OBJECTS,
+];
+const MODELS = {};
+const CLASHES = [];
+for (const family of MODEL_FAMILIES) {
+for (const [key, parts] of Object.entries(family)) {
+if (MODELS[key]) CLASHES.push(key);
+MODELS[key] = { key, parts };
+}
+}
+function objectModelByKey(key) {
+return key && MODELS[key] ? MODELS[key] : null;
+}
+function objectModelKeys() {
+return Object.keys(MODELS).sort();
+}
+function objectModelClashes() {
+return [...CLASHES];
+}
+function objectModelFaceCount(model) {
+let faces = 0;
+for (const part of (model && model.parts) || []) {
+if (part.kind === "plate") faces += part.points.length + 2;
+else faces += part.kind === "cyl" || part.kind === "tube" ? MODEL_CYL_SIDES + 2 : part.kind === "cone" ? MODEL_CYL_SIDES + 1 : 6;
+}
+return faces;
+}
+function objectModelChannels(model, channels) {
+const keyed = model && MODELS_KEYED[model.key];
+if (!keyed) return model;
+const want = Math.max(1, Math.min(Math.round(Number(channels) || 1), keyed.max));
+if (want === keyed.keys) return model;
+return { key: model.key, parts: keyed.build(want), keys: want };
+}
+const MODELS_HANGING = { ...MODELS_LIGHT_HANGING };
+function objectModelHangingKeys() {
+return Object.keys(MODELS_HANGING);
+}
+function objectModelHanging(model, hanging) {
+const key = model && hanging === true ? MODELS_HANGING[model.key] : null;
+const other = key ? objectModelByKey(key) : null;
+return other || model;
+}
+function objectLineModel(code) {
+const key = String(code || "").trim();
+const found = key === "" ? null : MODELS_LINES[key];
+return found ? { key, ...found } : null;
+}
+function objectLineModelCodes() {
+return Object.keys(MODELS_LINES);
+}
+function objectModelForName(name) {
+return objectModelByKey(objectCatalogKeyByName(name));
+}
+
 // src/sim/hubTypes.js
 const HUB_TYPE_FREEZE = (value) => Object.freeze(value);
 const HUB_SERVICE_TYPES = HUB_TYPE_FREEZE({
@@ -15344,6 +16195,7 @@ const MARK_PATCH_FIELDS = [
 "original",
 "pointer",
 "curtainSide",
+"hanging",
 "objectId",
 ...MARK_DIMENSION_FIELDS,
 ];
@@ -15376,6 +16228,17 @@ if (Object.prototype.hasOwnProperty.call(changes, field)) {
 changes[field] = markDimensionValue(changes[field], field);
 }
 }
+let unhang = false;
+if (Object.prototype.hasOwnProperty.call(changes, "hanging")) {
+if (changes.hanging === true) {
+if (!markHangingCan(project, project.marks.find((mark) => mark.id === markId))) {
+throw modelError("hangingOnlyChandelier");
+}
+} else {
+unhang = true;
+delete changes.hanging;
+}
+}
 let unlink = false;
 if (Object.prototype.hasOwnProperty.call(changes, "objectId")) {
 const wanted = changes.objectId == null || changes.objectId === "" ? null : changes.objectId;
@@ -15391,6 +16254,7 @@ changes.objectId = wanted;
 const marks = project.marks.map((mark) => {
 if (mark.id !== markId) return mark;
 const next = { ...mark, ...changes };
+if (unhang) delete next.hanging;
 return unlink ? markWithoutObject(next) : next;
 });
 return { project: withProject(project, { marks }), mark: marks.find((mark) => mark.id === markId) };
@@ -18423,6 +19287,18 @@ return u.x * normal.y + u.y * -normal.x > 0 ? "left" : "right";
 }
 function setMarkCurtainSide(project, markId, side) {
 return updateMark(project, markId, { curtainSide: side === null || side === undefined ? null : side });
+}
+function markHangingCan(project, mark) {
+if (!mark || mark.kind !== "point" || markIsComment(mark)) return false;
+const name = typeViewName(project, mark.typeId);
+return name !== null && objectModelHangingKeys().includes(name);
+}
+function markHanging(project, mark) {
+if (!mark || mark.hanging !== true) return false;
+return markHangingCan(project, mark);
+}
+function setMarkHanging(project, markId, on) {
+return updateMark(project, markId, { hanging: on === true ? true : null });
 }
 function markWallManual(mark) {
 return Boolean(mark && mark.wallManual);
@@ -24060,198 +24936,6 @@ function markSpareTitle(list) {
 const named = list || [];
 if (named.length <= MARK_LIST_SHOWN) return "";
 return named.map((item) => item.label).join(", ");
-}
-
-// src/objectModels/kit.js
-const MODEL_MATERIALS = ["body", "dark", "light", "metal", "glass"];
-const MODEL_CLEARS = ["sheer", "glass"];
-const MODEL_ARTS = ["nature", "desktop", "geometry"];
-const MODEL_CYL_SIDES = 8;
-function modelPart(kind, name, part) {
-const material = MODEL_MATERIALS.includes(part.material) ? part.material : "body";
-return {
-kind,
-name,
-lit: part.lit === true,
-bulb: Number.isInteger(part.bulb) ? part.bulb : null,
-material,
-toFloor: part.toFloor === true,
-clear: MODEL_CLEARS.includes(part.clear) ? part.clear : null,
-art: MODEL_ARTS.includes(part.art) ? part.art : null,
-x: part.x === undefined ? -0.5 : part.x,
-y: part.y === undefined ? -0.5 : part.y,
-z: part.z === undefined ? 0 : part.z,
-width: part.width === undefined ? 1 : part.width,
-depth: part.depth === undefined ? 1 : part.depth,
-height: part.height === undefined ? 1 : part.height,
-};
-}
-function modelBox(name, part = {}) {
-return modelPart("box", name, part);
-}
-function modelCyl(name, part = {}) {
-return modelPart("cyl", name, part);
-}
-function modelTube(name, part = {}) {
-return {
-...modelPart("tube", name, part),
-axis: part.axis === "x" ? "x" : "y",
-round: part.round === true,
-};
-}
-function modelCone(name, part = {}) {
-return modelPart("cone", name, part);
-}
-function modelPlate(name, points, part = {}) {
-const xs = points.map((point) => point[0]);
-const ys = points.map((point) => point[1]);
-const x = Math.min(...xs);
-const y = Math.min(...ys);
-return {
-...modelPart("plate", name, { ...part, x, width: Math.max(...xs) - x, y, depth: Math.max(...ys) - y }),
-points: points.map(([px, py]) => [px, py]),
-};
-}
-function modelSlab(name, z, height, material) {
-return modelBox(name, { z, height, material });
-}
-function modelFront(name, depth, material) {
-return modelBox(name, { y: -0.5, depth, material });
-}
-function modelKeys(count, y, depth) {
-return viewKeyRects(count, VIEW_KEYS_FRAME).map((rect, index) => ({
-...modelBox("key" + (index + 1), {
-x: rect.x,
-width: rect.width,
-y,
-depth,
-z: 0.5 - (rect.y + rect.height),
-height: rect.height,
-material: "light",
-}),
-channel: index + 1,
-}));
-}
-function modelParts(...items) {
-return items.flat(Infinity).filter(Boolean);
-}
-
-// src/objectModels/stairs.js
-const OBJECT_STAIR_KEYS = Object.freeze(["stairs", "stairsL", "stairsU", "stairsSpiral"]);
-const OBJECT_STAIR_MIRRORED = Object.freeze(["stairsL", "stairsU", "stairsSpiral"]);
-const STAIR_RISE_MM = 175;
-const STAIR_TREAD_MM = 40;
-const STAIR_TREAD_SHARE = 0.8;
-const STAIR_STEPS_MIN = 4;
-const STAIR_STEPS_MAX = 30;
-const STAIR_RUN_MM = 1100;
-const STAIR_L_SIDE_MM = 2700;
-const STAIR_U_WIDTH_MM = 2300;
-const STAIR_POST_SHARE = 0.16;
-const STAIR_SPIRAL_TURNS = 1;
-function objectStairKey(key) {
-return OBJECT_STAIR_KEYS.includes(key);
-}
-function objectStairSteps(heightMm) {
-const rises = Math.round(Math.max(0, Number(heightMm) || 0) / STAIR_RISE_MM);
-return Math.min(STAIR_STEPS_MAX, Math.max(STAIR_STEPS_MIN, rises - 1));
-}
-function objectStairModel(key, { widthMm, depthMm, heightMm, mirror = false } = {}) {
-const width = Number(widthMm);
-const depth = Number(depthMm);
-const height = Number(heightMm);
-if (!objectStairKey(key) || !(width > 0) || !(depth > 0) || !(height > 0)) return null;
-const steps = objectStairSteps(height);
-const thick = Math.min(STAIR_TREAD_MM, height / (steps + 1) / 2) / height;
-const z = (index) => (index + 1) / (steps + 1) - thick;
-const flip = mirror === true && OBJECT_STAIR_MIRRORED.includes(key);
-const plan = { width, depth, steps, z, thick, flip };
-if (key === "stairsSpiral") return objectStairSpiral(plan);
-const boards = key === "stairsL" ? objectStairL(plan) : key === "stairsU" ? objectStairU(plan) : objectStairStraight(plan);
-return modelParts(
-boards.map((board, index) =>
-modelBox("step" + (index + 1), {
-x: flip ? -(board.x + board.width) : board.x,
-width: board.width,
-y: board.y,
-depth: board.depth,
-z: z(index),
-height: thick,
-material: board.landing ? "light" : index % 2 === 0 ? "body" : "light",
-}),
-),
-);
-}
-function stairTread(axis, middle, span, from, to, landing = false) {
-const narrow = span * STAIR_TREAD_SHARE;
-const low = Math.min(from, to);
-const run = Math.abs(to - from);
-if (axis === "y") return { x: middle - narrow / 2, width: narrow, y: low, depth: run, landing };
-return { x: low, width: run, y: middle - narrow / 2, depth: narrow, landing };
-}
-function objectStairStraight({ steps }) {
-const out = [];
-for (let index = 0; index < steps; index += 1) {
-out.push(stairTread("y", 0, 1, -0.5 + index / steps, -0.5 + (index + 1) / steps));
-}
-return out;
-}
-function stairRun(out, axis, middle, span, from, to, count) {
-for (let index = 0; index < count; index += 1) {
-const a = from + ((to - from) * index) / count;
-const b = from + ((to - from) * (index + 1)) / count;
-out.push(stairTread(axis, middle, span, a, b));
-}
-}
-function stairSplit(steps, first, second) {
-const runs = Math.max(2, steps - 1);
-const one = Math.min(runs - 1, Math.max(1, Math.round((runs * first) / Math.max(1e-9, first + second))));
-return { one, two: runs - one };
-}
-function objectStairL({ width, depth, steps }) {
-const runX = (Math.min(width, depth) * (STAIR_RUN_MM / STAIR_L_SIDE_MM)) / width;
-const runY = (Math.min(width, depth) * (STAIR_RUN_MM / STAIR_L_SIDE_MM)) / depth;
-const split = stairSplit(steps, 1 - runY, 1 - runX);
-const out = [];
-stairRun(out, "y", -0.5 + runX / 2, runX, -0.5, 0.5 - runY, split.one);
-const corner = stairTread("y", -0.5 + runX / 2, runX, 0.5 - runY / 2 - (runY * STAIR_TREAD_SHARE) / 2, 0.5 - runY / 2 + (runY * STAIR_TREAD_SHARE) / 2, true);
-out.push(corner);
-stairRun(out, "x", 0.5 - runY / 2, runY, -0.5 + runX, 0.5, split.two);
-return out;
-}
-function objectStairU({ width, depth, steps }) {
-const run = STAIR_RUN_MM / STAIR_U_WIDTH_MM;
-const runY = Math.min(0.45, (width * run) / depth);
-const split = stairSplit(steps, 1 - runY, 1 - runY);
-const out = [];
-stairRun(out, "y", -0.5 + run / 2, run, -0.5, 0.5 - runY, split.one);
-const narrowY = runY * STAIR_TREAD_SHARE;
-const edge = (run * (1 - STAIR_TREAD_SHARE)) / 2;
-out.push({ x: -0.5 + edge, width: 1 - edge * 2, y: 0.5 - runY / 2 - narrowY / 2, depth: narrowY, landing: true });
-stairRun(out, "y", 0.5 - run / 2, run, 0.5 - runY, -0.5, split.two);
-return out;
-}
-function objectStairSpiral({ steps, z, thick, flip }) {
-const post = STAIR_POST_SHARE / 2;
-const outer = post + (0.5 - post) * STAIR_TREAD_SHARE;
-const turn = (Math.PI * 2 * STAIR_SPIRAL_TURNS) / steps;
-const start = -Math.PI / 2;
-const sign = flip ? 1 : -1;
-const point = (radius, angle) => [Math.cos(angle) * radius, Math.sin(angle) * radius];
-const treads = [];
-for (let index = 0; index < steps; index += 1) {
-const a = start + sign * turn * index;
-const b = start + sign * turn * (index + 1);
-const mid = (a + b) / 2;
-treads.push(
-modelPlate("step" + (index + 1), [point(post, a), point(outer, a), point(outer, mid), point(outer, b), point(post, b)], {
-z: z(index),
-height: thick,
-material: index % 2 === 0 ? "body" : "light",
-}),
-);
-}
-return modelParts(modelCyl("post", { x: -post, width: post * 2, y: -post, depth: post * 2, z: 0, height: 1, material: "metal" }), treads);
 }
 
 // src/render.js
@@ -38334,644 +39018,6 @@ const glow = VOLUME_MOON_GLOW * moon;
 return { rgb: volumeMix((tint && tint.rgb) || VOLUME_NIGHT_RGB, VOLUME_MOON_LIGHT_RGB, glow / (dark + glow)), share: dark + glow };
 }
 
-// src/objectModels/climate.js
-const MODELS_CLIMATE = {
-thermostat: modelParts(
-modelBox("screen", { x: -0.3, width: 0.6, y: -0.5, depth: 0.06, z: 0.48, height: 0.34, material: "dark", lit: true }),
-modelBox("plate", { y: -0.44, depth: 0.94, material: "light" }),
-),
-warmFloor: modelParts(
-modelBox("coil", { x: -0.42, width: 0.84, y: -0.42, depth: 0.84, z: 0.4, height: 0.6, lit: true }),
-modelBox("mat", { z: 0, height: 0.4, material: "light" }),
-),
-conditioner: modelParts(
-modelBox("louvers", { x: -0.44, width: 0.88, y: -0.5, depth: 0.3, z: 0.08, height: 0.22, material: "dark" }),
-modelBox("panel", { x: -0.46, width: 0.92, y: -0.5, depth: 0.3, z: 0.3, height: 0.65, material: "light" }),
-modelBox("case", { y: -0.2, depth: 0.7 }),
-),
-breezer: modelParts(
-modelCyl("grille", { x: -0.26, width: 0.52, y: -0.5, depth: 0.3, z: 0.24, height: 0.52, material: "dark" }),
-modelBox("case", { y: -0.2, depth: 0.7 }),
-),
-hood: modelParts(
-modelBox("canopy", { z: 0, height: 0.55 }),
-modelBox("duct", { x: -0.14, width: 0.28, y: 0.08, depth: 0.3, z: 0.55, height: 0.45, material: "metal" }),
-),
-vent: modelParts(
-modelCyl("wheel", { x: -0.3, width: 0.6, y: -0.5, depth: 0.4, z: 0.2, height: 0.6, material: "dark" }),
-modelBox("frame", { y: -0.1, depth: 0.6 }),
-),
-dehumidifier: modelParts(
-modelBox("grille", { x: -0.3, width: 0.6, y: -0.5, depth: 0.2, z: 0.12, height: 0.48, material: "dark" }),
-modelBox("case", { y: -0.3, depth: 0.8, z: 0, height: 0.9 }),
-),
-};
-
-// src/objectModels/lines.js
-const LINE_SPOT_STEP_MM = 600;
-const LINE_SPOT_MAX = 10;
-const MODELS_LINES = {
-"ТР": {
-stepMm: LINE_SPOT_STEP_MM,
-max: LINE_SPOT_MAX,
-acrossShare: 0.85,
-dropShare: 1.1,
-biteShare: 0.3,
-parts: modelParts(modelCyl("spot", { material: "light", lit: true })),
-},
-"КШ": {
-stepMm: 300,
-max: LINE_SPOT_MAX,
-acrossShare: 0.3,
-alongShare: 0.92,
-waveShare: 0.3,
-dropShare: 0,
-biteShare: 0.3,
-toFloor: true,
-parts: modelParts(modelBox("fold", { material: "light", clear: "sheer" })),
-},
-};
-
-// src/objectModels/light.js
-const MODELS_LIGHT = {
-xmasTree: modelParts(
-modelBox("trunk", { x: -0.06, width: 0.12, y: -0.06, depth: 0.12, z: 0, height: 0.12, material: "dark" }),
-modelCone("lower", { x: -0.5, width: 1, y: -0.5, depth: 1, z: 0.08, height: 0.56 }),
-modelCone("upper", { x: -0.36, width: 0.72, y: -0.36, depth: 0.72, z: 0.4, height: 0.52 }),
-modelBox("star", { x: -0.05, width: 0.1, y: -0.05, depth: 0.1, z: 0.9, height: 0.1, material: "light", lit: true, bulb: 1 }),
-),
-lamp: modelParts(
-modelCyl("shade", { z: 0, height: 0.52, material: "light", lit: true }),
-modelCyl("tier", { x: -0.28, width: 0.56, y: -0.28, depth: 0.56, z: 0.52, height: 0.22, material: "light", lit: true }),
-modelBox("rod", { x: -0.05, width: 0.1, y: -0.05, depth: 0.1, z: 0.74, height: 0.26, material: "metal" }),
-),
-mirror: modelParts(
-modelTube("glass", { axis: "y", round: true, x: -0.44, width: 0.88, y: -0.5, depth: 0.3, z: 0.06, height: 0.88, material: "glass" }),
-modelTube("glow", { axis: "y", round: true, y: -0.2, depth: 0.7, material: "light", lit: true }),
-),
-chandelier: modelParts(
-modelBox("canopy", { x: -0.2, width: 0.4, y: -0.2, depth: 0.4, z: 0.9, height: 0.1, material: "metal" }),
-modelBox("dropLong", { x: -0.42, width: 0.12, y: -0.1, depth: 0.2, z: 0, height: 0.9, material: "light", lit: true }),
-modelBox("dropMid", { x: -0.12, width: 0.12, y: -0.32, depth: 0.2, z: 0.18, height: 0.72, material: "light", lit: true }),
-modelBox("dropShort", { x: 0.1, width: 0.12, y: 0.06, depth: 0.2, z: 0.36, height: 0.54, material: "light", lit: true }),
-modelBox("dropTop", { x: 0.3, width: 0.12, y: -0.14, depth: 0.2, z: 0.54, height: 0.36, material: "light", lit: true }),
-),
-nightLight: modelParts(
-modelBox("glow", { x: -0.34, width: 0.68, y: -0.5, depth: 0.35, z: 0.08, height: 0.26, material: "light", lit: true }),
-modelBox("case", { x: -0.42, width: 0.84, y: -0.15, depth: 0.65, z: 0.08, height: 0.7 }),
-),
-stripVertical: modelParts(
-modelBox("diffuser", { x: -0.34, width: 0.68, y: -0.5, depth: 0.3, material: "light", lit: true }),
-modelBox("profile", { y: -0.2, depth: 0.7 }),
-),
-};
-
-// src/objectModels/net.js
-const MODELS_NET = {
-wifi: modelParts(
-modelCyl("disc", { z: 0, height: 0.6, material: "light" }),
-modelCyl("cap", { x: -0.3, width: 0.6, y: -0.3, depth: 0.6, z: 0.6, height: 0.4 }),
-),
-speaker: modelParts(
-modelCyl("case", { z: 0, height: 0.84 }),
-modelCyl("top", { x: -0.35, width: 0.7, y: -0.35, depth: 0.7, z: 0.84, height: 0.16, material: "dark" }),
-),
-panelControl: modelParts(
-modelBox("screen", { x: -0.3, width: 0.6, y: -0.5, depth: 0.35, z: 0.2, height: 0.6, material: "glass" }),
-modelBox("frame", { y: -0.15, depth: 0.65 }),
-),
-intercom: modelParts(
-modelBox("screen", { x: -0.32, width: 0.64, y: -0.5, depth: 0.35, z: 0.3, height: 0.62, material: "glass" }),
-modelCyl("button", { x: -0.1, width: 0.2, y: -0.5, depth: 0.3, z: 0.08, height: 0.16, material: "light" }),
-modelBox("frame", { y: -0.15, depth: 0.65 }),
-),
-projector: modelParts(
-modelBox("lens", { x: 0.08, width: 0.3, y: -0.5, depth: 0.3, z: 0.25, height: 0.5, material: "dark" }),
-modelBox("case", { x: -0.46, width: 0.92, y: -0.2, depth: 0.62, z: 0.1, height: 0.8 }),
-modelBox("mount", { x: -0.3, width: 0.6, y: 0.42, depth: 0.08, z: 0.4, height: 0.4, material: "metal" }),
-),
-receiver: modelParts(
-modelBox("panel", { x: -0.44, width: 0.88, y: -0.5, depth: 0.3, z: 0.15, height: 0.7, material: "glass" }),
-modelBox("case", { y: -0.2, depth: 0.7 }),
-),
-};
-
-// src/objectModels/power.js
-function socketParts({ radius, pin, hole, layers }) {
-const [pinsDepth, recessDepth] = layers;
-const recessAt = -0.5 + pinsDepth;
-const frameAt = recessAt + recessDepth;
-const socketPin = (name, x) =>
-modelBox(name, { x, width: hole, y: -0.5, depth: pinsDepth, z: 0.5 - hole / 2, height: hole, material: "dark" });
-return modelParts(
-socketPin("pinLeft", -pin - hole / 2),
-socketPin("pinRight", pin - hole / 2),
-modelTube("recess", {
-axis: "y",
-x: -radius,
-width: radius * 2,
-y: recessAt,
-depth: recessDepth,
-z: 0.5 - radius,
-height: radius * 2,
-material: "light",
-}),
-modelBox("frame", { y: frameAt, depth: 0.5 - frameAt }),
-);
-}
-const MODEL_SWITCH_KEYS_MAX = 4;
-const switchParts = (count) => modelParts(modelKeys(count, -0.5, 0.4), modelBox("frame", { y: -0.1, depth: 0.6 }));
-const toggleParts = (count) =>
-modelParts(
-modelBox("lever", { x: -0.11, width: 0.22, y: -0.5, depth: 0.25, z: 0.36, height: 0.28, material: "dark" }),
-modelKeys(count, -0.25, 0.2),
-modelBox("frame", { y: -0.05, depth: 0.55 }),
-);
-const MODELS_POWER = {
-socket: socketParts({
-radius: 0.3,
-pin: 0.12,
-hole: 0.11,
-layers: [0.05, 0.1],
-}),
-socket380: socketParts({
-radius: 0.37,
-pin: 0.15,
-hole: 0.12,
-layers: [0.05, 0.2],
-}),
-switch1: switchParts(1),
-switch2: switchParts(2),
-switch3: switchParts(3),
-switchToggle: toggleParts(1),
-data: modelParts(
-modelBox("port", { x: -0.18, width: 0.36, y: -0.5, depth: 0.38, z: 0.3, height: 0.42, material: "dark" }),
-modelBox("frame", { y: -0.12, depth: 0.62 }),
-),
-panelBox: modelParts(
-modelBox("latch", { x: 0.3, width: 0.12, y: -0.5, depth: 0.2, z: 0.42, height: 0.16, material: "metal" }),
-modelBox("door", { y: -0.3, depth: 0.25, material: "light" }),
-modelBox("case", { y: -0.05, depth: 0.55 }),
-),
-};
-const MODELS_KEYED = {
-switch1: { build: switchParts, keys: 1, max: MODEL_SWITCH_KEYS_MAX },
-switch2: { build: switchParts, keys: 2, max: MODEL_SWITCH_KEYS_MAX },
-switch3: { build: switchParts, keys: 3, max: MODEL_SWITCH_KEYS_MAX },
-switchToggle: { build: toggleParts, keys: 1, max: MODEL_SWITCH_KEYS_MAX - 1 },
-};
-
-// src/objectModels/objects.js
-const MODEL_STAIR_FLOOR_MM = 2800;
-const modelStair = (key, widthMm, depthMm) => objectStairModel(key, { widthMm, depthMm, heightMm: MODEL_STAIR_FLOOR_MM });
-const MODEL_SHAFT = modelParts(modelBox("shaft"));
-const MODEL_PLUMBING = modelParts(
-modelCyl("bowl", { x: -0.3, width: 0.6, y: -0.5, depth: 0.75, z: 0, height: 0.62, material: "light" }),
-modelBox("cistern", { x: -0.32, width: 0.64, y: 0.2, depth: 0.3, z: 0.3, height: 0.7 }),
-);
-const MODEL_TOILET = modelParts(
-modelBox("foot", { x: -0.18, width: 0.36, y: -0.22, depth: 0.44, z: 0, height: 0.22 }),
-modelCyl("bowl", { x: -0.43, width: 0.86, y: -0.5, depth: 0.72, z: 0.22, height: 0.34, material: "light" }),
-modelCyl("seat", { x: -0.45, width: 0.9, y: -0.5, depth: 0.76, z: 0.56, height: 0.05, material: "dark" }),
-modelCyl("lid", { x: -0.45, width: 0.9, y: -0.5, depth: 0.76, z: 0.61, height: 0.05, material: "light" }),
-modelBox("cistern", { x: -0.45, width: 0.9, y: 0.16, depth: 0.34, z: 0.5, height: 0.46 }),
-modelBox("flush", { x: -0.08, width: 0.16, y: 0.28, depth: 0.12, z: 0.96, height: 0.04, material: "metal" }),
-);
-const MODEL_LAUNDRY = modelParts(
-modelTube("drum", { axis: "y", x: -0.4, width: 0.8, y: -0.4, depth: 0.74, z: 0.2, height: 0.56, material: "metal" }),
-modelTube("hatch", { axis: "y", x: -0.36, width: 0.72, y: -0.5, depth: 0.08, z: 0.235, height: 0.5, material: "glass" }),
-modelBox("case", { y: -0.42, depth: 0.92 }),
-);
-const MODELS_OBJECTS = {
-column: MODEL_SHAFT,
-duct: MODEL_SHAFT,
-niche: modelParts(
-modelBox("back", { y: 0.25, depth: 0.25 }),
-modelBox("shelf", { x: -0.46, width: 0.92, y: -0.5, depth: 0.95, z: 0.46, height: 0.08, material: "light" }),
-),
-stairs: modelStair("stairs", 1100, 2700),
-panel: MODELS_POWER.panelBox,
-radiator: modelParts(
-modelBox("panel", { y: -0.35, depth: 0.7, z: 0, height: 0.92 }),
-modelBox("grid", { x: -0.46, width: 0.92, y: -0.4, depth: 0.8, z: 0.92, height: 0.08, material: "light" }),
-),
-counter: modelParts(
-modelBox("top", { z: 0.88, height: 0.12, material: "light" }),
-modelBox("front", { y: -0.5, depth: 0.9, z: 0, height: 0.88 }),
-),
-plumbing: MODEL_PLUMBING,
-toilet: MODEL_TOILET,
-bathtub: modelParts(
-modelBox("sideLeft", { x: -0.5, width: 0.03, y: -0.5, depth: 1, z: 0, height: 1 }),
-modelBox("sideRight", { x: 0.47, width: 0.03, y: -0.5, depth: 1, z: 0, height: 1 }),
-modelBox("apron", { x: -0.47, width: 0.94, y: -0.5, depth: 0.07, z: 0, height: 1 }),
-modelBox("back", { x: -0.47, width: 0.94, y: 0.43, depth: 0.07, z: 0, height: 1 }),
-modelBox("bottom", { x: -0.47, width: 0.94, y: -0.43, depth: 0.86, z: 0, height: 0.25 }),
-modelBox("water", { x: -0.45, width: 0.9, y: -0.41, depth: 0.82, z: 0.25, height: 0.07, material: "glass" }),
-modelBox("tap", { x: -0.46, width: 0.1, y: -0.07, depth: 0.14, z: 0.9, height: 0.1, material: "metal" }),
-),
-cabinet: modelParts(
-modelBox("door", { x: -0.46, width: 0.92, y: -0.5, depth: 0.15, z: 0.03, height: 0.94, material: "light" }),
-modelBox("case", { y: -0.35, depth: 0.85 }),
-),
-wardrobeOpen: modelParts(
-modelBox("shelfTop", { z: 0.86, height: 0.03, material: "light" }),
-modelBox("post", { x: -0.015, width: 0.03, z: 0, height: 0.86, material: "dark" }),
-modelBox("rod", { x: -0.48, width: 0.46, y: -0.02, depth: 0.04, z: 0.78, height: 0.02, material: "metal" }),
-modelBox("clothes", { x: -0.45, width: 0.4, y: -0.3, depth: 0.6, z: 0.38, height: 0.4, material: "body" }),
-modelBox("shelfLow", { x: -0.48, width: 0.46, z: 0.14, height: 0.03, material: "light" }),
-[0.14, 0.3, 0.46, 0.62, 0.78].map((z, index) =>
-modelBox("shelf" + (index + 1), { x: 0.015, width: 0.485, z, height: 0.03, material: "light" }),
-),
-),
-shoeRack: modelParts(
-modelBox("sideLeft", { x: -0.5, width: 0.04, z: 0, height: 1 }),
-modelBox("sideRight", { x: 0.46, width: 0.04, z: 0, height: 1 }),
-modelBox("shelfLow", { x: -0.46, width: 0.92, z: 0.08, height: 0.06, material: "light" }),
-modelBox("shelfMid", { x: -0.46, width: 0.92, z: 0.48, height: 0.06, material: "light" }),
-modelBox("top", { x: -0.46, width: 0.92, z: 0.92, height: 0.08 }),
-),
-coatRack: modelParts(
-modelBox("board", { y: 0.38, depth: 0.12, z: 0.3, height: 0.4, material: "dark" }),
-modelBox("shelf", { z: 0.9, height: 0.1, material: "light" }),
-[-0.3, 0, 0.3].map((x, index) =>
-modelBox("hook" + (index + 1), { x: x - 0.025, width: 0.05, y: -0.1, depth: 0.48, z: 0.36, height: 0.06, material: "metal" }),
-),
-),
-table: modelParts(
-modelBox("top", { z: 0.88, height: 0.12, material: "light" }),
-modelBox("legLeft", { x: -0.46, width: 0.16, y: -0.3, depth: 0.6, z: 0, height: 0.88 }),
-modelBox("legRight", { x: 0.3, width: 0.16, y: -0.3, depth: 0.6, z: 0, height: 0.88 }),
-),
-bed: modelParts(
-modelBox("frame", { z: 0, height: 0.5 }),
-modelBox("mattress", { x: -0.46, width: 0.92, y: -0.5, depth: 0.85, z: 0.5, height: 0.5, material: "light" }),
-modelBox("headboard", { y: 0.35, depth: 0.15, material: "dark" }),
-),
-pool: modelParts(
-modelBox("basin", { z: 0, height: 0.78 }),
-modelBox("water", { x: -0.44, width: 0.88, y: -0.44, depth: 0.88, z: 0.78, height: 0.12, material: "glass" }),
-),
-washer: MODEL_LAUNDRY,
-dryerMachine: MODEL_LAUNDRY,
-sink: modelParts(
-modelCyl("bowl", { x: -0.4, width: 0.8, y: -0.44, depth: 0.74, z: 0.55, height: 0.45, material: "light" }),
-modelBox("pedestal", { x: -0.18, width: 0.36, y: -0.2, depth: 0.4, z: 0, height: 0.55 }),
-modelBox("tap", { x: -0.06, width: 0.12, y: 0.3, depth: 0.12, z: 0.8, height: 0.2, material: "metal" }),
-),
-shower: modelParts(
-modelBox("riser", { x: -0.07, width: 0.14, y: 0.3, depth: 0.14, z: 0, height: 0.92, material: "metal" }),
-modelBox("head", { x: -0.18, width: 0.36, y: 0.05, depth: 0.35, z: 0.92, height: 0.08, material: "light" }),
-),
-dresser: modelParts(
-modelBox("drawerHigh", { x: -0.44, width: 0.88, y: -0.5, depth: 0.16, z: 0.52, height: 0.42, material: "light" }),
-modelBox("drawerLow", { x: -0.44, width: 0.88, y: -0.5, depth: 0.16, z: 0.06, height: 0.42, material: "light" }),
-modelBox("case", { y: -0.34, depth: 0.84 }),
-),
-picture: modelParts(
-modelBox("canvas", { x: -0.42, width: 0.84, y: -0.5, depth: 0.5, z: 0.08, height: 0.84, material: "light", art: "geometry" }),
-modelBox("frame", { y: 0, depth: 0.5 }),
-),
-stove: modelParts(
-modelBox("oven", { x: -0.4, width: 0.8, y: -0.5, depth: 0.2, z: 0.1, height: 0.72, material: "glass" }),
-modelBox("case", { y: -0.3, depth: 0.8, z: 0, height: 0.9 }),
-modelBox("hob", { z: 0.9, height: 0.1, material: "dark" }),
-),
-dishwasher: modelParts(
-modelBox("front", { x: -0.46, width: 0.92, y: -0.5, depth: 0.2, z: 0, height: 0.86, material: "light" }),
-modelBox("panel", { x: -0.46, width: 0.92, y: -0.5, depth: 0.2, z: 0.86, height: 0.14, material: "dark" }),
-modelBox("case", { y: -0.3, depth: 0.8 }),
-),
-sofa: modelParts(
-modelBox("back", { y: 0.2, depth: 0.3 }),
-modelBox("seat", { x: -0.46, width: 0.92, y: -0.42, depth: 0.62, z: 0, height: 0.5, material: "light" }),
-modelBox("armLeft", { x: -0.5, width: 0.12, y: -0.5, depth: 0.7, z: 0, height: 0.62 }),
-modelBox("armRight", { x: 0.38, width: 0.12, y: -0.5, depth: 0.7, z: 0, height: 0.62 }),
-),
-armchair: modelParts(
-modelBox("back", { y: 0.16, depth: 0.34 }),
-modelBox("seat", { x: -0.34, width: 0.68, y: -0.4, depth: 0.56, z: 0, height: 0.46, material: "light" }),
-modelBox("armLeft", { x: -0.5, width: 0.2, y: -0.46, depth: 0.62, z: 0, height: 0.58 }),
-modelBox("armRight", { x: 0.3, width: 0.2, y: -0.46, depth: 0.62, z: 0, height: 0.58 }),
-),
-coffeeTable: modelParts(
-modelBox("top", { z: 0.78, height: 0.22, material: "light" }),
-modelBox("shelf", { x: -0.36, width: 0.72, y: -0.36, depth: 0.72, z: 0.2, height: 0.1, material: "light" }),
-modelBox("legLeft", { x: -0.44, width: 0.1, y: -0.2, depth: 0.4, z: 0, height: 0.78 }),
-modelBox("legRight", { x: 0.34, width: 0.1, y: -0.2, depth: 0.4, z: 0, height: 0.78 }),
-),
-deskSet: modelParts(
-modelBox("top", { x: -0.48, width: 0.96, y: 0.05, depth: 0.45, z: 0.56, height: 0.06, material: "light" }),
-modelBox("screen", { x: -0.24, width: 0.48, y: 0.3, depth: 0.08, z: 0.62, height: 0.33, material: "dark", lit: true, art: "desktop" }),
-modelBox("chairSeat", { x: -0.2, width: 0.4, y: -0.4, depth: 0.4, z: 0.3, height: 0.1 }),
-modelBox("chairBack", { x: -0.2, width: 0.4, y: -0.4, depth: 0.08, z: 0.4, height: 0.6, material: "light" }),
-),
-stool: modelParts(
-modelCyl("seat", { z: 0.8, height: 0.2, material: "light" }),
-modelCyl("leg", { x: -0.16, width: 0.32, y: -0.16, depth: 0.32, z: 0, height: 0.8 }),
-),
-fridge: modelParts(
-modelBox("doorHigh", { x: -0.46, width: 0.92, y: -0.5, depth: 0.18, z: 0.36, height: 0.62, material: "light" }),
-modelBox("doorLow", { x: -0.46, width: 0.92, y: -0.5, depth: 0.18, z: 0.02, height: 0.31, material: "light" }),
-modelBox("case", { y: -0.32, depth: 0.82 }),
-),
-treadmill: modelParts(
-modelBox("deck", { x: -0.44, width: 0.88, y: -0.5, depth: 0.76, z: 0, height: 0.16 }),
-modelBox("belt", { x: -0.3, width: 0.6, y: -0.48, depth: 0.7, z: 0.16, height: 0.04, material: "dark" }),
-modelBox("post", { x: -0.4, width: 0.8, y: 0.26, depth: 0.16, z: 0, height: 0.78, material: "metal" }),
-modelBox("console", { x: -0.4, width: 0.8, y: 0.24, depth: 0.22, z: 0.78, height: 0.22, material: "light" }),
-),
-projectorScreen: modelParts(
-modelBox("case", { z: 0.9, height: 0.1 }),
-modelBox("canvas", { x: -0.47, width: 0.94, y: -0.5, depth: 0.1, z: 0.03, height: 0.87, material: "light" }),
-modelBox("bar", { x: -0.47, width: 0.94, y: -0.5, depth: 0.2, z: 0, height: 0.03, material: "dark" }),
-),
-stairsExit: modelParts(
-modelBox("step", { y: 0.25, depth: 0.25, z: 0, height: 1 }),
-modelBox("landing", { x: -0.42, width: 0.84, y: -0.5, depth: 0.75, z: 0, height: 0.5, material: "light" }),
-modelBox("edgeLeft", { x: -0.5, width: 0.08, y: -0.5, depth: 0.75, z: 0, height: 1, material: "dark" }),
-modelBox("edgeRight", { x: 0.42, width: 0.08, y: -0.5, depth: 0.75, z: 0, height: 1, material: "dark" }),
-),
-stairsL: modelStair("stairsL", 2700, 2700),
-stairsU: modelStair("stairsU", 2300, 2700),
-stairsSpiral: modelStair("stairsSpiral", 1600, 1600),
-lift: modelParts(
-modelBox("wallLeft", { x: -0.5, width: 0.08, z: 0, height: 1 }),
-modelBox("wallRight", { x: 0.42, width: 0.08, z: 0, height: 1 }),
-modelBox("cabin", { x: -0.36, width: 0.72, y: -0.3, depth: 0.66, z: 0.05, height: 0.7, material: "light" }),
-modelBox("door", { x: -0.3, width: 0.6, y: -0.5, depth: 0.08, z: 0, height: 0.8, material: "metal" }),
-),
-gate: modelParts(
-modelBox("postLeft", { x: -0.5, width: 0.05, z: 0, height: 1, material: "dark" }),
-modelBox("postMid", { x: 0.2, width: 0.05, z: 0, height: 1, material: "dark" }),
-modelBox("postRight", { x: 0.45, width: 0.05, z: 0, height: 1, material: "dark" }),
-modelBox("leaf", { x: -0.45, width: 0.65, y: -0.3, depth: 0.6, z: 0.04, height: 0.9 }),
-modelBox("wicket", { x: 0.25, width: 0.2, y: -0.3, depth: 0.6, z: 0.04, height: 0.84, material: "light" }),
-),
-acOutdoor: modelParts(
-modelBox("case", { y: -0.3, depth: 0.8 }),
-modelTube("fan", { axis: "y", x: -0.3, width: 0.6, y: -0.5, depth: 0.12, z: 0.12, height: 0.76, material: "metal" }),
-modelBox("bracket", { x: -0.4, width: 0.8, y: 0.4, depth: 0.1, z: 0.1, height: 0.1, material: "dark" }),
-),
-pumpUnit: modelParts(
-modelCyl("tank", { x: -0.5, width: 0.56, y: -0.4, depth: 0.8, z: 0.1, height: 0.9, material: "light" }),
-modelBox("pump", { x: 0.1, width: 0.36, y: -0.3, depth: 0.6, z: 0.1, height: 0.4, material: "metal" }),
-modelBox("frame", { z: 0, height: 0.1, material: "dark" }),
-),
-generator: modelParts(
-modelBox("case", { z: 0, height: 0.9 }),
-modelBox("grille", { x: -0.46, width: 0.3, y: -0.5, depth: 0.08, z: 0.2, height: 0.5, material: "light" }),
-modelBox("exhaust", { x: 0.26, width: 0.1, y: 0.1, depth: 0.1, z: 0.9, height: 0.1, material: "metal" }),
-),
-ups: modelParts(
-modelBox("case", { y: -0.3, depth: 0.8 }),
-modelBox("panel", { x: -0.42, width: 0.84, y: -0.5, depth: 0.24, z: 0.74, height: 0.2, material: "light" }),
-modelBox("batteries", { x: -0.42, width: 0.84, y: -0.5, depth: 0.24, z: 0.06, height: 0.6, material: "dark" }),
-),
-evCharger: modelParts(
-modelBox("case", { y: -0.2, depth: 0.7 }),
-modelBox("face", { x: -0.36, width: 0.72, y: -0.5, depth: 0.3, z: 0.3, height: 0.5, material: "light" }),
-modelBox("cable", { x: 0.3, width: 0.16, y: -0.5, depth: 0.3, z: 0, height: 0.3, material: "dark" }),
-),
-railing: modelParts(
-modelBox("postLeft", { x: -0.5, width: 0.06, z: 0, height: 1, material: "metal" }),
-modelBox("postRight", { x: 0.44, width: 0.06, z: 0, height: 1, material: "metal" }),
-modelBox("rail", { z: 0.92, height: 0.08, material: "metal" }),
-modelBox("glass", { x: -0.46, width: 0.92, y: -0.4, depth: 0.8, z: 0.06, height: 0.86, material: "glass", clear: "glass" }),
-),
-fence: modelParts(
-modelBox("postLeft", { x: -0.5, width: 0.08, z: 0, height: 1, material: "dark" }),
-modelBox("postRight", { x: 0.42, width: 0.08, z: 0, height: 1, material: "dark" }),
-modelBox("panel", { x: -0.5, width: 1, y: -0.35, depth: 0.7, z: 0.05, height: 0.9 }),
-modelBox("cap", { x: -0.5, width: 1, y: -0.35, depth: 0.7, z: 0.95, height: 0.05, material: "light" }),
-),
-rack: modelParts(
-modelBox("case", { y: -0.3, depth: 0.8 }),
-modelFront("door", 0.3, "light"),
-modelBox("gear", { x: -0.38, width: 0.76, y: -0.46, depth: 0.5, z: 0.3, height: 0.2, material: "dark" }),
-),
-boiler: modelParts(
-modelBox("case", { y: -0.2, depth: 0.7, z: 0.08, height: 0.92 }),
-modelBox("panel", { x: -0.4, width: 0.8, y: -0.5, depth: 0.32, z: 0.6, height: 0.26, material: "light" }),
-modelBox("pipes", { x: -0.34, width: 0.68, y: -0.3, depth: 0.3, z: 0, height: 0.08, material: "metal" }),
-),
-waterHeater: modelParts(
-modelCyl("tank", { x: -0.46, width: 0.92, y: -0.46, depth: 0.84, z: 0.04, height: 0.92 }),
-modelBox("bracket", { x: -0.2, width: 0.4, y: 0.3, depth: 0.2, z: 0.2, height: 0.6, material: "metal" }),
-),
-manifold: modelParts(
-modelBox("case", { y: -0.1, depth: 0.6 }),
-modelBox("comb", { x: -0.4, width: 0.8, y: -0.5, depth: 0.4, z: 0.5, height: 0.14, material: "metal" }),
-modelBox("loops", { x: -0.4, width: 0.8, y: -0.5, depth: 0.4, z: 0, height: 0.3, material: "dark" }),
-),
-ventUnit: modelParts(
-modelBox("case", { x: -0.44, width: 0.88, y: -0.5, depth: 1, z: 0, height: 1 }),
-modelBox("ductLeft", { x: -0.5, width: 0.06, y: -0.3, depth: 0.6, z: 0.3, height: 0.4, material: "metal" }),
-modelBox("ductRight", { x: 0.44, width: 0.06, y: -0.3, depth: 0.6, z: 0.3, height: 0.4, material: "metal" }),
-),
-fireplace: modelParts(
-modelBox("case", { z: 0, height: 0.92 }),
-modelBox("firebox", { x: -0.34, width: 0.68, y: -0.5, depth: 0.5, z: 0.12, height: 0.5, material: "dark" }),
-modelBox("mantel", { x: -0.5, width: 1, y: -0.5, depth: 1, z: 0.92, height: 0.08, material: "light" }),
-),
-kitchenIsland: modelParts(
-modelBox("top", { z: 0.9, height: 0.1, material: "light" }),
-modelBox("body", { x: -0.48, width: 0.96, y: -0.48, depth: 0.96, z: 0.08, height: 0.82 }),
-modelBox("plinth", { x: -0.44, width: 0.88, y: -0.44, depth: 0.88, z: 0, height: 0.08, material: "dark" }),
-),
-barCounter: modelParts(
-modelBox("top", { x: -0.5, width: 1, y: -0.5, depth: 1, z: 0.93, height: 0.07, material: "light" }),
-modelBox("body", { x: -0.46, width: 0.92, y: -0.2, depth: 0.7, z: 0, height: 0.93 }),
-modelBox("footRail", { x: -0.46, width: 0.92, y: -0.46, depth: 0.1, z: 0.18, height: 0.06, material: "metal" }),
-),
-wallMirror: modelParts(
-modelBox("frame", { y: 0, depth: 0.5 }),
-modelBox("glass", { x: -0.44, width: 0.88, y: -0.5, depth: 0.5, z: 0.04, height: 0.92, material: "metal" }),
-),
-rug: modelParts(
-modelBox("pile", { x: -0.5, width: 1, y: -0.5, depth: 1, z: 0, height: 0.7, material: "light" }),
-modelBox("border", { x: -0.44, width: 0.88, y: -0.44, depth: 0.88, z: 0.7, height: 0.3 }),
-),
-chest: modelParts(
-modelBox("case", { y: -0.3, depth: 0.8 }),
-modelBox("drawerHigh", { x: -0.46, width: 0.92, y: -0.5, depth: 0.22, z: 0.7, height: 0.24, material: "light" }),
-modelBox("drawerMid", { x: -0.46, width: 0.92, y: -0.5, depth: 0.22, z: 0.38, height: 0.24, material: "light" }),
-modelBox("drawerLow", { x: -0.46, width: 0.92, y: -0.5, depth: 0.22, z: 0.06, height: 0.24, material: "light" }),
-),
-kitchenCabinet: modelParts(
-modelBox("case", { y: -0.3, depth: 0.8 }),
-modelBox("doorLeft", { x: -0.46, width: 0.45, y: -0.5, depth: 0.22, z: 0.06, height: 0.88, material: "light" }),
-modelBox("doorRight", { x: 0.01, width: 0.45, y: -0.5, depth: 0.22, z: 0.06, height: 0.88, material: "light" }),
-),
-shelving: modelParts(
-modelBox("sideLeft", { x: -0.5, width: 0.06, z: 0, height: 1 }),
-modelBox("sideRight", { x: 0.44, width: 0.06, z: 0, height: 1 }),
-modelBox("shelfLow", { x: -0.44, width: 0.88, y: -0.4, depth: 0.8, z: 0.3, height: 0.06, material: "light" }),
-modelBox("shelfHigh", { x: -0.44, width: 0.88, y: -0.4, depth: 0.8, z: 0.64, height: 0.06, material: "light" }),
-),
-plant: modelParts(
-modelBox("pot", { x: -0.35, width: 0.7, y: -0.35, depth: 0.7, z: 0, height: 0.3 }),
-modelBox("stem", { x: -0.05, width: 0.1, y: -0.05, depth: 0.1, z: 0.3, height: 0.3, material: "dark" }),
-modelCyl("crown", { x: -0.5, width: 1, y: -0.5, depth: 1, z: 0.5, height: 0.5, material: "light" }),
-),
-treePot: modelParts(
-modelBox("pot", { x: -0.32, width: 0.64, y: -0.32, depth: 0.64, z: 0, height: 0.22 }),
-modelBox("trunk", { x: -0.05, width: 0.1, y: -0.05, depth: 0.1, z: 0.22, height: 0.38, material: "dark" }),
-modelBox("crownLow", { x: -0.5, width: 1, y: -0.5, depth: 1, z: 0.52, height: 0.26, material: "light" }),
-modelBox("crownHigh", { x: -0.34, width: 0.68, y: -0.34, depth: 0.68, z: 0.74, height: 0.26, material: "light" }),
-),
-floorLamp: modelParts(
-modelBox("base", { x: -0.33, width: 0.66, y: -0.33, depth: 0.66, z: 0, height: 0.04, material: "metal" }),
-modelBox("stem", { x: -0.04, width: 0.08, y: -0.04, depth: 0.08, z: 0.04, height: 0.74, material: "metal" }),
-modelCyl("shade", { x: -0.5, width: 1, y: -0.5, depth: 1, z: 0.78, height: 0.22, material: "light" }),
-),
-car: modelParts(
-modelBox("body", { z: 0.12, height: 0.5 }),
-modelBox("cabin", { x: -0.44, width: 0.88, y: -0.1, depth: 0.44, z: 0.62, height: 0.38, material: "glass" }),
-modelBox("wheelFront", { y: -0.36, depth: 0.13, z: 0, height: 0.4, material: "dark" }),
-modelBox("wheelRear", { y: 0.2, depth: 0.13, z: 0, height: 0.4, material: "dark" }),
-),
-};
-
-// src/objectModels/sense.js
-const MODELS_SENSE = {
-lightSensor: modelParts(
-modelCyl("window", { x: -0.2, width: 0.4, y: -0.5, depth: 0.12, z: 0.3, height: 0.4, material: "dark" }),
-modelCyl("puck", { x: -0.5, width: 1, y: -0.38, depth: 0.88, z: 0, height: 1, material: "light" }),
-),
-climateSensor: modelParts(
-modelBox("tubeT", { x: -0.34, width: 0.12, y: -0.5, depth: 0.04, z: 0.12, height: 0.76, material: "dark" }),
-modelBox("tubeH", { x: -0.06, width: 0.12, y: -0.5, depth: 0.04, z: 0.12, height: 0.76, material: "dark" }),
-modelBox("tubeC", { x: 0.22, width: 0.12, y: -0.5, depth: 0.04, z: 0.12, height: 0.76, material: "dark" }),
-modelBox("case", { y: -0.46, depth: 0.96, material: "light" }),
-),
-presence: modelParts(
-modelCyl("dome", { x: -0.38, width: 0.76, y: -0.38, depth: 0.76, z: 0, height: 0.62, material: "light" }),
-modelCyl("base", { z: 0.62, height: 0.38 }),
-),
-motion: modelParts(
-modelCyl("lens", { x: -0.22, width: 0.44, y: -0.5, depth: 0.35, z: 0.28, height: 0.44, material: "dark" }),
-modelBox("case", { x: -0.4, width: 0.8, y: -0.15, depth: 0.65, z: 0.05, height: 0.9 }),
-),
-opening: modelParts(
-modelBox("reed", { x: -0.5, width: 0.55, y: -0.5, depth: 0.7, z: 0, height: 1 }),
-modelBox("magnet", { x: 0.12, width: 0.38, y: -0.5, depth: 0.6, z: 0.1, height: 0.8, material: "light" }),
-),
-leak: modelParts(
-modelCyl("puck", { x: -0.43, width: 0.86, y: -0.43, depth: 0.86, z: 0.1, height: 0.9 }),
-modelBox("probes", { x: -0.34, width: 0.68, y: -0.08, depth: 0.16, z: 0, height: 0.1, material: "metal" }),
-),
-camera: modelParts(
-modelCyl("lens", { x: -0.25, width: 0.5, y: -0.5, depth: 0.4, z: 0.25, height: 0.5, material: "dark" }),
-modelBox("case", { x: -0.42, width: 0.84, y: -0.1, depth: 0.45, z: 0.12, height: 0.76 }),
-modelBox("mount", { x: -0.12, width: 0.24, y: 0.35, depth: 0.15, z: 0.3, height: 0.4, material: "metal" }),
-),
-};
-
-// src/objectModels/things.js
-const MODELS_THINGS = {
-drain: modelParts(
-modelCyl("socket", { x: -0.31, width: 0.62, y: -0.5, depth: 0.45, z: 0.19, height: 0.62, material: "dark" }),
-modelCyl("flange", { y: -0.05, depth: 0.55 }),
-),
-waterOutlet: modelParts(
-modelCyl("outlet", { x: -0.21, width: 0.42, y: -0.5, depth: 0.25, z: 0.29, height: 0.42, material: "metal" }),
-modelBox("plate", { y: -0.25, depth: 0.75 }),
-),
-valve: modelParts(
-modelCyl("case", { x: -0.35, width: 0.7, y: -0.35, depth: 0.7, z: 0.05, height: 0.55 }),
-modelBox("handle", { x: -0.4, width: 0.8, y: -0.2, depth: 0.4, z: 0.6, height: 0.35, material: "metal" }),
-),
-towelDryer: modelParts(
-modelBox("postLeft", { x: -0.44, width: 0.16, y: -0.3, depth: 0.6 }),
-modelBox("postRight", { x: 0.28, width: 0.16, y: -0.3, depth: 0.6 }),
-modelBox("rungLow", { x: -0.3, width: 0.6, y: -0.25, depth: 0.5, z: 0.2, height: 0.1, material: "metal" }),
-modelBox("rungHigh", { x: -0.3, width: 0.6, y: -0.25, depth: 0.5, z: 0.58, height: 0.1, material: "metal" }),
-),
-tv: modelParts(
-modelBox("screen", { x: -0.47, width: 0.94, y: -0.5, depth: 0.1, z: 0.04, height: 0.92, material: "dark", lit: true, art: "nature" }),
-modelBox("case", { x: -0.46, width: 0.92, y: -0.4, depth: 0.3, z: 0.06, height: 0.88 }),
-modelBox("bracket", { x: -0.1, width: 0.2, y: -0.1, depth: 0.6, z: 0.3, height: 0.4, material: "metal" }),
-),
-vacuum: modelParts(
-modelCyl("puck", { z: 0, height: 0.8 }),
-modelCyl("turret", { x: -0.15, width: 0.3, y: -0.15, depth: 0.3, z: 0.8, height: 0.2, material: "dark" }),
-),
-appliance: modelParts(
-modelBox("door", { x: -0.46, width: 0.92, y: -0.5, depth: 0.3, z: 0.06, height: 0.88, material: "light" }),
-modelBox("case", { y: -0.2, depth: 0.7 }),
-),
-curtainRail: modelParts(
-modelBox("rod", { x: -0.5, width: 1, y: -0.3, depth: 0.4, z: 0.82, height: 0.16, material: "metal" }),
-modelBox("foldLeft", { x: -0.47, width: 0.3, y: 0.02, depth: 0.3, z: 0, height: 0.82, material: "light", toFloor: true, clear: "sheer" }),
-modelBox("foldMiddle", { x: -0.15, width: 0.3, y: -0.28, depth: 0.3, z: 0, height: 0.82, material: "light", toFloor: true, clear: "sheer" }),
-modelBox("foldRight", { x: 0.17, width: 0.3, y: 0.02, depth: 0.3, z: 0, height: 0.82, material: "light", toFloor: true, clear: "sheer" }),
-),
-};
-
-// src/objectModels/registry.js
-const OBJECT_MODEL_BODY_MAX = 5;
-const OBJECT_MODEL_FACE_MAX = 30;
-const OBJECT_MODEL_THING_BODY_MAX = 15;
-const OBJECT_MODEL_THING_FACE_MAX = 90;
-function objectModelLimits(key) {
-return objectCatalogEntry(key)
-? { bodies: OBJECT_MODEL_THING_BODY_MAX, faces: OBJECT_MODEL_THING_FACE_MAX }
-: { bodies: OBJECT_MODEL_BODY_MAX, faces: OBJECT_MODEL_FACE_MAX };
-}
-const MODEL_FAMILIES = [
-MODELS_POWER,
-MODELS_LIGHT,
-MODELS_CLIMATE,
-MODELS_SENSE,
-MODELS_NET,
-MODELS_THINGS,
-MODELS_OBJECTS,
-];
-const MODELS = {};
-const CLASHES = [];
-for (const family of MODEL_FAMILIES) {
-for (const [key, parts] of Object.entries(family)) {
-if (MODELS[key]) CLASHES.push(key);
-MODELS[key] = { key, parts };
-}
-}
-function objectModelByKey(key) {
-return key && MODELS[key] ? MODELS[key] : null;
-}
-function objectModelKeys() {
-return Object.keys(MODELS).sort();
-}
-function objectModelClashes() {
-return [...CLASHES];
-}
-function objectModelFaceCount(model) {
-let faces = 0;
-for (const part of (model && model.parts) || []) {
-if (part.kind === "plate") faces += part.points.length + 2;
-else faces += part.kind === "cyl" || part.kind === "tube" ? MODEL_CYL_SIDES + 2 : part.kind === "cone" ? MODEL_CYL_SIDES + 1 : 6;
-}
-return faces;
-}
-function objectModelChannels(model, channels) {
-const keyed = model && MODELS_KEYED[model.key];
-if (!keyed) return model;
-const want = Math.max(1, Math.min(Math.round(Number(channels) || 1), keyed.max));
-if (want === keyed.keys) return model;
-return { key: model.key, parts: keyed.build(want), keys: want };
-}
-function objectLineModel(code) {
-const key = String(code || "").trim();
-const found = key === "" ? null : MODELS_LINES[key];
-return found ? { key, ...found } : null;
-}
-function objectLineModelCodes() {
-return Object.keys(MODELS_LINES);
-}
-function objectModelForName(name) {
-return objectModelByKey(objectCatalogKeyByName(name));
-}
-
 // src/volume/marks.js
 const VOLUME_MARK_LIFT_MM = 2;
 const VOLUME_MARK_MIN_MM = 20;
@@ -39330,7 +39376,12 @@ curtainSide: MARK_CURTAIN_SIDES.includes(mark.curtainSide) ? mark.curtainSide : 
 spare: box.guessed,
 objectId: null,
 postMm,
-model: view ? objectModelChannels(objectModelByKey(view.name), typeChannels(project, mark.typeId)) : null,
+model: view
+? objectModelHanging(
+objectModelChannels(objectModelByKey(view.name), typeChannels(project, mark.typeId)),
+markHanging(project, mark),
+)
+: null,
 };
 const heightMm = seat && typeof seat.heightMm === "number" ? seat.heightMm : sizes.heightAboveFloor;
 const owned = volumeObjectPlace(project, mark);
@@ -62753,6 +62804,7 @@ sizesOwn: markHasDimensions(mark),
 sizesInherited: MARK_DIMENSION_FIELDS.some((field) => sizes[field + "From"] === "type" || sizes[field + "From"] === "group"),
 device: deviceMarkField(project, mark.id),
 curtain: markIsCurtain(project, mark.id) ? markCurtainSide(project, mark.id) : null,
+hanging: markHangingCan(project, mark) ? markHanging(project, mark) : null,
 lengthText: marksLengthText(project, mark),
 wallText: marksWallText(project, mark),
 wallId: markWall(mark) ? mark.wallId : null,
@@ -63125,6 +63177,22 @@ fail(error);
 });
 return select;
 }
+function hangingField(state, mark, on) {
+const box = uiEl("input", { type: "checkbox" });
+box.checked = on === true;
+if (!appAllows("editMarks", state)) box.disabled = true;
+box.addEventListener("change", () => {
+const now = getState();
+if (!now.project) return;
+try {
+const next = setMarkHanging(now.project, mark.id, box.checked);
+if (next.project !== now.project) canvasCommit(now.project, next.project, strings.history.markHanging);
+} catch (error) {
+fail(error);
+}
+});
+return uiCheckRow(box, strings.marks.hanging, strings.marks.hangingHint);
+}
 function roomField(state, mark) {
 const manual = markRoomManual(mark);
 const select = uiEl("select", {
@@ -63295,6 +63363,9 @@ title: strings.marks.focus,
 head,
 view.fields ? roomField(state, mark) : null,
 view.fields && view.fields.curtain ? curtainField(state, mark, view.fields.curtain) : null,
+view.fields && view.fields.hanging !== null && view.fields.hanging !== undefined
+? hangingField(state, mark, view.fields.hanging)
+: null,
 view.fields
 ? uiEl("div", { class: "mark-row__fields" }, [
 uiEl("input", {

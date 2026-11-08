@@ -31,6 +31,8 @@ import {
   markDeviceProfile,
   markControlsByChannel,
   markCurtainSide,
+  markHanging,
+  markHangingCan,
   markDimensions,
   markHasDimensions,
   markIsCurtain,
@@ -51,6 +53,7 @@ import {
   setMarkDevice,
   setMarkDimensions,
   setMarkFreeNumber,
+  setMarkHanging,
   setMarkNumber,
   setMarkWall,
   styleOf,
@@ -64,7 +67,7 @@ import {
 } from "../model.js";
 import { planToScreen, typeIcon, visibleMark } from "../render.js";
 import { canvasCommit } from "../canvas.js";
-import { UI_SIGN, uiButton, uiEl, uiIconButton, uiModal, uiPrompt, uiSignCell } from "./ui.js";
+import { UI_SIGN, uiButton, uiCheckRow, uiEl, uiIconButton, uiModal, uiPrompt, uiSignCell } from "./ui.js";
 // Прокрутка колонки одна на всю колонку (таск 194), и низ кадра закрывает не
 // только кнопка смыкания, но и рейка заголовков. Кто прокручивается, сколько
 // закрыто накладкой и какова рейка — общий счёт, свой у списка быть не должен.
@@ -590,6 +593,12 @@ export function marksRowModel(project, row, options = {}) {
     // Сторона открывания шторы (правка после сборки сценариев): у шторы — её
     // сторона (своя или та, куда она открывалась до правки), у остальных `null`.
     curtain: markIsCurtain(project, mark.id) ? markCurtainSide(project, mark.id) : null,
+    // Отметка «Висячая» у люстры (таск 256, G397): `null` — такой метке
+    // отметка не предлагается и строки в карточке не будет; `false` — есть
+    // где поставить, но не стоит. Поэтому разметка спрашивает `!== null`, а
+    // не «истинно ли»: снятая отметка обязана оставаться видимой — иначе
+    // снять её было бы можно, а вернуть нет.
+    hanging: markHangingCan(project, mark) ? markHanging(project, mark) : null,
     // Длина линейной метки по плану — в метрах, и только когда у схемы есть
     // калибровка масштаба. Пусто значит «посчитать неоткуда»: без масштаба
     // строка остаётся ровно такой, какой была до этой задачи. Размер изделия
@@ -1099,6 +1108,30 @@ function mountMarksPanel(host, api) {
     return select;
   }
 
+  /**
+   * «Висячая» у люстры (таск 256, G397) — **отметкой, как «Стеклянная» у
+   * двери**: заказчик попросил переключать «как и у тех же дверей опция
+   * Стеклянные», а там это галочка в плашке выделенного проёма. Здесь плашка
+   * метки — раскрытая строка списка, и галочка встаёт в неё рядом со стороной
+   * открывания шторы: два свойства одной породы живут в одном месте.
+   */
+  function hangingField(state, mark, on) {
+    const box = uiEl("input", { type: "checkbox" });
+    box.checked = on === true;
+    if (!appAllows("editMarks", state)) box.disabled = true;
+    box.addEventListener("change", () => {
+      const now = getState();
+      if (!now.project) return;
+      try {
+        const next = setMarkHanging(now.project, mark.id, box.checked);
+        if (next.project !== now.project) canvasCommit(now.project, next.project, strings.history.markHanging);
+      } catch (error) {
+        fail(error);
+      }
+    });
+    return uiCheckRow(box, strings.marks.hanging, strings.marks.hangingHint);
+  }
+
   function roomField(state, mark) {
     const manual = markRoomManual(mark);
     const select = uiEl("select", {
@@ -1320,6 +1353,9 @@ function mountMarksPanel(host, api) {
         head,
         view.fields ? roomField(state, mark) : null,
         view.fields && view.fields.curtain ? curtainField(state, mark, view.fields.curtain) : null,
+        view.fields && view.fields.hanging !== null && view.fields.hanging !== undefined
+          ? hangingField(state, mark, view.fields.hanging)
+          : null,
         // «Расположение» и «Комментарий» — каждое на своей строке.
         //
         // Это отмена прежнего решения, и обе просьбы тут от одного человека.

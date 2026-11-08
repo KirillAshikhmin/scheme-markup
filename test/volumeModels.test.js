@@ -743,6 +743,11 @@ const LIT_PARTS = [
   "chandelier.dropMid",
   "chandelier.dropShort",
   "chandelier.dropTop",
+  // Висячая люстра (таск 256, G397): светятся её ярусы, а чашка и цепь — нет.
+  // Правило то же, что у обычной: светится то, откуда идёт свет.
+  "chandelierHanging.tierTop",
+  "chandelierHanging.tierMid",
+  "chandelierHanging.tierLow",
   "nightLight.glow",
   "mirror.glow",
   "stripVertical.diffuser",
@@ -772,7 +777,7 @@ test("светиться может ровно то, что светится в 
   assert.deepEqual(lit.sort(), [...LIT_PARTS].sort());
   // Подставка лампы, чашка люстры, корпус ночника, стекло зеркала, корпус и
   // кронштейн телевизора — не светятся: светится только то, откуда идёт свет.
-  for (const [key, name] of [["lamp", "rod"], ["chandelier", "canopy"], ["nightLight", "case"], ["mirror", "glass"], ["tv", "case"], ["tv", "bracket"]]) {
+  for (const [key, name] of [["lamp", "rod"], ["chandelier", "canopy"], ["chandelierHanging", "canopy"], ["chandelierHanging", "chain"], ["nightLight", "case"], ["mirror", "glass"], ["tv", "case"], ["tv", "bracket"]]) {
     assert.equal(bodies(key).find((part) => part.name === name).lit, false, key + "." + name);
   }
   const linesLit = [];

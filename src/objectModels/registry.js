@@ -26,7 +26,7 @@
 import { objectCatalogEntry, objectCatalogKeyByName } from "../objectCatalog.js";
 import { MODELS_CLIMATE } from "./climate.js";
 import { MODELS_LINES } from "./lines.js";
-import { MODELS_LIGHT } from "./light.js";
+import { MODELS_LIGHT, MODELS_LIGHT_HANGING } from "./light.js";
 import { MODELS_NET } from "./net.js";
 import { MODELS_OBJECTS } from "./objects.js";
 import { MODELS_KEYED, MODELS_POWER } from "./power.js";
@@ -160,6 +160,45 @@ export function objectModelChannels(model, channels) {
   const want = Math.max(1, Math.min(Math.round(Number(channels) || 1), keyed.max));
   if (want === keyed.keys) return model;
   return { key: model.key, parts: keyed.build(want), keys: want };
+}
+
+// ——— висячий вариант тела (таск 256, G397) ————————————————————————————————
+//
+// Слова заказчика: «Люстре добавь другой вариант - висячая… и что бы
+// переключалось как и у тех же дверей опция Стеклянные».
+//
+// **Устроено как число каналов, а не как второе изображение.** У метки есть
+// отметка (`mark.hanging`, правило — `markHangingCan` в `model.js`), и она
+// подменяет **модель**, оставляя изображение, габарит и знак на плане теми же,
+// — ровно так же, как `objectModelChannels` подменяет клавишную модель по
+// числу каналов типа. Своё изображение завести было нельзя: имя изображения
+// живёт у **типа** (ADR 005), а висячая люстра — свойство одной метки, и
+// типом её не разведёшь, не разведя заодно легенду, таблицы и развёртку.
+//
+// Пары «обычная → висячая» объявлены там, где лежат оба описания
+// (`MODELS_LIGHT_HANGING` в `light.js`). Здесь — только две двери к ним.
+const MODELS_HANGING = { ...MODELS_LIGHT_HANGING };
+
+/**
+ * Имена изображений, у которых висячий вариант есть. Единственный ответ на
+ * «кому предлагать отметку»: своего списка кодов или имён в модели и в панели
+ * не заводится — разойдись он с этим, отметка предлагалась бы там, где её
+ * некуда применить.
+ */
+export function objectModelHangingKeys() {
+  return Object.keys(MODELS_HANGING);
+}
+
+/**
+ * **Висячий вариант модели.** Модель, у которой варианта нет, и модель с
+ * неснятой отметкой проходят насквозь **той же ссылкой** — как у клавиш: общее
+ * описание остаётся общим, и кадр метки без отметки совпадает грань в грань с
+ * тем, что он рисовал до этой правки (G68).
+ */
+export function objectModelHanging(model, hanging) {
+  const key = model && hanging === true ? MODELS_HANGING[model.key] : null;
+  const other = key ? objectModelByKey(key) : null;
+  return other || model;
 }
 
 /**
