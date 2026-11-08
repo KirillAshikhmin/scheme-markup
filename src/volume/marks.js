@@ -15,6 +15,8 @@ import {
   hexToRgb,
   labelOf,
   markIsComment,
+  markObjectId,
+  markPlace,
   markSizes,
   markWall,
   markWallSideOn,
@@ -195,6 +197,24 @@ function volumeMarkPathMm(project, mark) {
     out.push(at);
   }
   return out;
+}
+
+/**
+ * Место связанного прибора, если оно берётся у вещи, иначе `null`.
+ *
+ * Только точечная метка и только вещь-прямоугольник с высотой: у полосы угла
+ * нет, у вещи «во всю высоту» нет середины. Остальные связанные метки стоят
+ * как стояли — по своим точкам. Само место считает `markPlace`; здесь только
+ * решение, годится ли оно для тела.
+ */
+function volumeObjectPlace(project, mark) {
+  if (!mark || mark.kind !== "point" || markObjectId(mark) === null) return null;
+  const place = markPlace(project, mark);
+  if (place.from !== "object" || !place.object || place.object.shape === "polyline") return null;
+  if (!place.atMm || place.turnDeg === null) return null;
+  const { length, depth, width } = place.sizes;
+  if (place.heightAboveFloor === null || width === null || !(length > 0) || !(depth > 0)) return null;
+  return place;
 }
 
 function volumePathMiddle(path) {
@@ -720,6 +740,9 @@ export function volumeBlockSeats(project, marks) {
   };
   for (const mark of marks || []) {
     if (!mark || mark.kind !== "point" || markIsComment(mark)) continue;
+    // У связанного прибора своё место — вещи (таск 02): посты рамки к нему не
+    // применяются, иначе блок сдвинул бы тело с вещи.
+    if (volumeObjectPlace(project, mark)) continue;
     const points = mark.points || [];
     const group = findGroup(project, mark.groupId);
     // Не блок: одиночная метка без группы. Группа из одной метки тоже ничего не
@@ -1033,6 +1056,46 @@ export function volumeMarkPlacement(project, mark, where = [], seat = null) {
   // выключателя одной высоты, нарисованные 2 × 2, иначе легли бы в один ряд —
   // рамка на два ряда их и разводит по вертикали на 71 мм.
   const heightMm = seat && typeof seat.heightMm === "number" ? seat.heightMm : sizes.heightAboveFloor;
+
+  // ——— связанный прибор: тело стоит на месте вещи и развёрнуто её углом ———
+  // Своего угла у метки нет; берётся `turnDeg` вещи (R05.1). Габарит, посадка
+  // и середина — тоже вещи, через `markPlace`, своей арифметики здесь нет.
+  const owned = volumeObjectPlace(project, mark);
+  if (owned) {
+    const angle = (owned.turnDeg * Math.PI) / 180;
+    const u = { x: Math.cos(angle), y: Math.sin(angle) };
+    const f = { x: Math.sin(angle), y: -Math.cos(angle) };
+    const at = { x: owned.atMm.x, y: owned.atMm.y };
+    const sideLen = owned.sizes.length;
+    const sideDepth = owned.sizes.depth;
+    const high = owned.sizes.width;
+    const bottom = owned.heightAboveFloor - high / 2;
+    const top = bottom + high;
+    const centre = owned.heightAboveFloor;
+    const room = volumeRoomAt(where, at);
+    return {
+      ...common,
+      spare: false,
+      postMm: null,
+      mode: VOLUME_MARK_ROOM,
+      roomId: room ? room.roomId : null,
+      heightMm: centre,
+      prisms: [{ corners: volumeBoxCorners(at, u, sideLen, sideDepth), bottomMm: bottom, topMm: top }],
+      repeat: null,
+      anchor: { x: at.x, y: at.y, z: centre },
+      frame: { at, bottomMm: bottom, u, f, widthMm: sideLen, depthMm: sideDepth, heightMm: high },
+      // Лицо — наружная грань, против `f`: как у вещи на стене.
+      face: {
+        origin: { x: at.x - (f.x * sideDepth) / 2, y: at.y - (f.y * sideDepth) / 2, z: centre },
+        u: { x: u.x, y: u.y, z: 0 },
+        v: { x: 0, y: 0, z: 1 },
+        normal: { x: -f.x, y: -f.y, z: 0 },
+        widthMm: sideLen,
+        heightMm: high,
+      },
+    };
+  }
+
   const binding = markWall(mark);
   const wall = binding ? findWall(project, binding.wallId) : null;
   const vectors = wall ? wallVectors(wall) : null;

@@ -34,6 +34,8 @@ import {
   markControlLinks,
   markIsComment,
   markLabelLeader,
+  markObjectId,
+  markPlace,
   markPointer,
   marksInDrawOrder,
   listedTypes,
@@ -2650,7 +2652,19 @@ export function visibleMarks(project, scheme, filter) {
   if (!project || !scheme) return [];
   return marksInDrawOrder(
     project.marks.filter((mark) => mark.schemeId === scheme.id && markVisible(project, mark, filter)),
-  );
+  ).map((mark) => markAtObject(project, mark));
+}
+
+// Связанный прибор (таск 02): знак ложится на место вещи, а не на записанную
+// точку. Подставляется **здесь, в одной двери**, поэтому кадр, `hitTest`,
+// стопки, подписи, связи и выгрузки видят одно и то же место. Объект метки при
+// этом не меняется ни байтом: вместо неё возвращается копия с точками вещи, а
+// метка без связи (и связь без моста мм ↔ доли) отдаётся самой собой.
+function markAtObject(project, mark) {
+  if (markObjectId(mark) === null) return mark;
+  const place = markPlace(project, mark);
+  if (place.from !== "object" || !place.bridged || place.points === mark.points) return mark;
+  return { ...mark, points: place.points };
 }
 
 // ——— стопка совпавших меток ———————————————————————————————————————————
