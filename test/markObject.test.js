@@ -26,6 +26,8 @@ import assert from "node:assert/strict";
 import {
   addMark,
   addScheme,
+  setMarkWall,
+  wallElevation,
   addSchemeObject,
   addToGroup,
   addWall,
@@ -35,9 +37,11 @@ import {
   markObjectCan,
   markObjectId,
   markOfObject,
+  markPairLabel,
   markPlace,
   markSizes,
   markSnapshot,
+  schemeObjectPaired,
   objectDeviceDrop,
   objectDeviceMake,
   pasteMark,
@@ -297,6 +301,73 @@ test("связь едет через те же двери, что остальн
   const without = setMarkObject(patched.project, put.mark.id, null).project;
   const back = pasteMark(without, snapshot, { schemeId: put.schemeId, point: { x: 0.6, y: 0.6 } });
   assert.equal(markObjectId(back.mark), put.object.id, "связь не доехала до переноса");
+});
+
+// ——— пара одной строкой (R06, история 14) ——————————————————————————————
+
+test("строку даёт метка: имя прибора — обозначение плюс имя вещи, а вещь второй строки не получает", () => {
+  const withTv = tvAt(scene());
+  const put = markOf(withTv, "ТВ");
+
+  // Без связи имя прибора — **ровно** обозначение метки: список и таблицы
+  // объекта без связей не меняются ни на знак (G68).
+  assert.equal(markPairLabel(put.project, put.mark), "ТВ1");
+  assert.equal(schemeObjectPaired(put.project, put.object), false, "несвязанная вещь сочлась парой");
+
+  const linked = setMarkObject(put.project, put.mark.id, put.object.id);
+  assert.equal(markPairLabel(linked.project, linked.mark), "ТВ1 · Телевизор");
+  assert.equal(schemeObjectPaired(linked.project, put.object), true);
+
+  // Связь сняли — имя и ответ вернулись к прежним.
+  const off = setMarkObject(linked.project, put.mark.id, null);
+  assert.equal(markPairLabel(off.project, off.mark), "ТВ1");
+  assert.equal(schemeObjectPaired(off.project, put.object), false);
+
+  // Вещь, которой нет, и метка, которой нет, отвечают, а не падают.
+  assert.equal(schemeObjectPaired(linked.project, null), false);
+  assert.equal(schemeObjectPaired(linked.project, { id: "нет такой" }), false);
+  assert.equal(markPairLabel(linked.project, null), "");
+});
+
+// ——— развёртка знает угол и место вещи (история 12) ——————————————————————
+
+test("развёртка получает угол вещи и место прибора, а без связи лист не меняется", () => {
+  const withTv = tvAt(scene(), { atMm: { x: 2000, y: 50 }, turnDeg: 0 });
+  const put = markOf(withTv, "ТВ", { x: 0.3, y: 0.05 });
+  const wallId = withTv.project.walls[0].id;
+  const bound = setMarkWall(put.project, put.mark.id, { wallId, atMm: 2000 }, { manual: true });
+
+  const before = wallElevation(bound.project, wallId, "right").marks.find((row) => row.id === put.mark.id);
+  assert.ok(before, "метка не попала на развёртку — пример не тот");
+  // Своего угла у метки нет вовсе: без связи разворачивать нечего.
+  assert.equal(before.turnDeg, null);
+  assert.equal(before.placeFrom, "mark");
+  assert.equal(before.objectName, "");
+
+  const linked = setMarkObject(bound.project, put.mark.id, put.object.id);
+  const after = wallElevation(linked.project, wallId, "right").marks.find((row) => row.id === put.mark.id);
+  assert.equal(after.turnDeg, 0, "угол вещи не доехал до развёртки");
+  assert.equal(after.placeFrom, "object");
+  assert.equal(after.objectName, "Телевизор");
+  // Габарит и посадку на листе теперь меряет вещь: 1240 вдоль, 720 вверх,
+  // середина на 500 + 720 / 2.
+  assert.deepEqual(after.sizeMm, { width: 1240, height: 720 });
+  assert.equal(after.heightMm, 860);
+  // Повернули вещь — поехал и угол на листе, и больше ничего.
+  const turned = updateSchemeObject(linked.project, put.object.id, { turnDeg: 30 });
+  const spun = wallElevation(turned.project, wallId, "right").marks.find((row) => row.id === put.mark.id);
+  assert.equal(spun.turnDeg, 30);
+  assert.deepEqual({ ...spun, turnDeg: 0 }, { ...after, turnDeg: 0 }, "от поворота вещи на листе поехало что-то ещё");
+
+  // А лист объекта **без связей** остаётся прежним до поля: это и есть G68.
+  const plain = markOf(scene(), "В", { x: 0.3, y: 0.05 });
+  const plainBound = setMarkWall(plain.project, plain.mark.id, { wallId: plain.project.walls[0].id, atMm: 2000 }, { manual: true });
+  const row = wallElevation(plainBound.project, plain.project.walls[0].id, "right").marks[0];
+  const sizes = markSizes(plainBound.project, findMark(plainBound.project, plain.mark.id));
+  assert.deepEqual(row.sizeMm, { width: sizes.length, height: sizes.width });
+  assert.equal(row.heightMm, sizes.heightAboveFloor);
+  assert.equal(row.heightFrom, sizes.heightAboveFloorFrom);
+  assert.equal(row.heightOwn, sizes.heightAboveFloorOwn);
 });
 
 // ——— вещь становится устройством (R02.3) ————————————————————————————————
