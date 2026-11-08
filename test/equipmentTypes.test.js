@@ -88,14 +88,18 @@ test("новый объект получает стартовый справоч
   assert.equal(new Set(names).size, names.length);
 });
 
-test("справочник объекта живёт своей жизнью: два объекта не делят один тип", () => {
+test("справочник объекта живёт своей жизнью: правка одного не доходит до другого", () => {
   const first = createProject({ name: "Первый" });
   const second = createProject({ name: "Второй" });
+  // Номера справочника у двух объектов **совпадают**: счётчик живёт в объекте
+  // и считает с единицы (G08, «Свой у каждого объекта»). Своей жизнью
+  // справочник живёт не от разных номеров, а оттого, что объекты — разные
+  // документы: ключ в хранилище у них свой (`id`, `key`), и правка одного не
+  // доходит до другого. Это и проверяется — правкой, а не числами.
   const ids = new Set(equipmentTypesInOrder(first).map((item) => item.id));
-  assert.equal(
+  assert.ok(
     equipmentTypesInOrder(second).some((item) => ids.has(item.id)),
-    false,
-    "объекты делят идентификаторы справочника",
+    "номера справочника разошлись — счётчик перестал считать с единицы",
   );
   // Правка в одном объекте второго не касается — как и у типов меток.
   const renamed = updateEquipmentType(first, equipmentTypesInOrder(first)[0].id, { name: "Своё название" });
@@ -190,14 +194,15 @@ test("G68: объект, размеченный до появления типо
   assert.deepEqual(equipmentTypesInOrder(seeded.project).map((item) => item.name), ["Реле 2 канала"]);
 });
 
-test("стартовый набор выдаётся свежими идентификаторами на каждый вызов", () => {
+test("стартовый набор нумеруется с единицы: шаблон живёт вне объекта", () => {
   const first = equipmentTypeTemplate();
   const second = equipmentTypeTemplate();
   assert.equal(first.length, second.length);
-  assert.equal(
-    first.some((item) => second.some((other) => other.id === item.id)),
-    false,
-  );
+  // Шаблон — не объект: счётчика у него нет и быть не может, поэтому номера в
+  // нём свои, с единицы, и два вызова дают одни и те же. Уникальными они
+  // становятся, попав в объект: `createProject` раздаёт их заново своей кассой.
+  assert.deepEqual(first.map((item) => item.id), second.map((item) => item.id));
+  assert.deepEqual(first.map((item) => item.id), first.map((item, index) => String(index + 1)));
   assert.deepEqual(first.map((item) => item.order), first.map((item, index) => index));
 });
 

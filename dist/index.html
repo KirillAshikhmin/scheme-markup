@@ -7639,6 +7639,8 @@ schemeObjectCatalogUnknown: "Такой вещи в каталоге нет: {ke
 schemeObjectShapeUnknown: "Объект схемы задаётся прямоугольником или ломаной",
 schemeObjectShortLine: "Ломаная объекта схемы — не меньше двух вершин",
 schemeObjectTurnInvalid: "Поворот объекта схемы — число градусов",
+markObjectRefused: "Связать не получилось: {why}",
+objectDeviceNoPlan: "Чтобы сделать вещь устройством, у схемы нужны масштаб и привязка чертежа к плану: без них место метки не посчитать",
 unknownCommitOption: "Правка не выполнена: в опциях команды неизвестный ключ {keys}. Известны: {known}",
 commitOptionsNotObject: "Правка не выполнена: опции команды — объект с ключами {keys}, а не список",
 nothingToPaste: "Вставлять нечего: в буфере нет метки",
@@ -8658,6 +8660,13 @@ compactAllGroup: "{code} · {name}",
 compactAllNothing: "Дыр в нумерации нет ни у одного типа — смыкать нечего",
 compactAllNoProject: "Объект не открыт",
 },
+markObject: {
+whyNoMark: "метки нет — возможно, её удалили",
+whyNoObject: "вещи нет — возможно, её удалили с чертежа",
+whyOtherScheme: "вещь стоит на другой схеме, а прибор живёт на одном листе",
+whyTaken: "вещь уже связана с меткой {label}",
+whyComment: "комментарий — надпись на чертеже, а не прибор: связывать его с вещью нечему",
+},
 markSizes: {
 typeTitle: "Размеры по умолчанию: {label}",
 typeHint:
@@ -8870,6 +8879,7 @@ dresser: "Тумба",
 sink: "Раковина",
 shower: "Душ",
 towelDryer: "Полотенцесушитель",
+hood: "Вытяжка",
 pool: "Бассейн",
 fridge: "Холодильник",
 stove: "Плита",
@@ -10892,6 +10902,17 @@ heightAboveFloorMm: 0,
 words: ["душ"],
 },
 {
+key: "towelDryer",
+category: "sanitary",
+mount: "wall",
+shape: "rect",
+widthMm: 500,
+depthMm: 100,
+heightMm: 800,
+heightAboveFloorMm: 500,
+words: ["полотенцесуш"],
+},
+{
 key: "pool",
 category: "sanitary",
 mount: "inFloor",
@@ -10935,6 +10956,28 @@ heightMm: 400,
 heightAboveFloorMm: 0,
 legacy: true,
 words: ["сантехник"],
+},
+{
+key: "tv",
+category: "appliances",
+mount: "wall",
+shape: "rect",
+widthMm: 1240,
+depthMm: 80,
+heightMm: 720,
+heightAboveFloorMm: 500,
+words: ["телевизор"],
+},
+{
+key: "hood",
+category: "appliances",
+mount: "wall",
+shape: "rect",
+widthMm: 600,
+depthMm: 500,
+heightMm: 350,
+heightAboveFloorMm: 1500,
+words: ["вытяжк"],
 },
 {
 key: "fridge",
@@ -11366,10 +11409,7 @@ heightAboveFloorMm: 0,
 words: ["автомобил"],
 },
 ];
-const RETIRED = [
-{ key: "tv", mount: "wall", words: ["телевизор"] },
-{ key: "towelDryer", mount: "wall", words: ["полотенцесуш"] },
-];
+const RETIRED = [];
 const named = (entry) => (entry ? { ...entry, name: strings.schemeObjectKinds[entry.key] || entry.key } : null);
 const BY_KEY = new Map(CATALOG.map((entry) => [entry.key, entry]));
 const RETIRED_BY_KEY = new Map(RETIRED.map((entry) => [entry.key, entry]));
@@ -14153,8 +14193,105 @@ const TEMPLATE_TYPES = [
 { category: "appliances", code: "НЕ", name: strings.types.xmasTree, shape: "trapezoid", view: "xmasTree", sizes: { length: 1000, width: 1000, depth: 2100, heightAboveFloor: 0 } },
 { category: "sensors", code: "ДОС", name: strings.types.lightSensor, shape: "circle-dot", view: "lightSensor", sizes: { length: 60, width: 60, depth: 20, heightAboveFloor: 2200 } },
 ];
-function newId() {
+function newStorageId() {
 return globalThis.crypto.randomUUID();
+}
+const ID_COUNTER_KEY = "#id";
+function idNumberOf(id) {
+if (typeof id === "number") return Number.isInteger(id) && id > 0 ? id : null;
+if (typeof id !== "string" || !/^[1-9][0-9]*$/.test(id)) return null;
+const value = Number(id);
+return Number.isSafeInteger(value) ? value : null;
+}
+const ID_FLOOR_CACHE = new WeakMap();
+function idFloor(project) {
+if (!project || typeof project !== "object") return 0;
+const known = ID_FLOOR_CACHE.get(project);
+if (known !== undefined) return known;
+let top = 0;
+const see = (value) => {
+const number = idNumberOf(value);
+if (number !== null && number > top) top = number;
+};
+for (const owner of ID_OWNERS) {
+for (const item of idOwnList(project, owner)) {
+see(item && item.id);
+if (owner.nested) for (const child of idNestedList(item, owner)) see(child && child.id);
+}
+}
+ID_FLOOR_CACHE.set(project, top);
+return top;
+}
+function idMint(project) {
+const counters = { ...(project && project.counters ? project.counters : {}) };
+const floor = idFloor(project);
+return {
+counters,
+next() {
+const value = Math.max(Number(counters[ID_COUNTER_KEY]) || 0, floor) + 1;
+counters[ID_COUNTER_KEY] = value;
+return String(value);
+},
+};
+}
+const ID_OWNERS = [
+{
+key: "marks",
+refs: {
+schemeId: "schemes",
+typeId: "markTypes",
+groupId: "groups",
+roomId: "rooms",
+wallId: "walls",
+objectId: "schemeObjects",
+},
+},
+{ key: "groups", refs: { schemeId: "schemes" }, lists: { markIds: "marks" } },
+{ key: "outlines", refs: { schemeId: "schemes", roomId: "rooms" } },
+{ key: "schemes", nested: "guides" },
+{ key: "rooms" },
+{ key: "categories" },
+{ key: "markTypes", refs: { categoryId: "categories" } },
+{ key: "walls", refs: { schemeId: "schemes" } },
+{ key: "openings", refs: { wallId: "walls" } },
+{ key: "schemeObjects", refs: { schemeId: "schemes", kindId: "schemeObjectKinds" } },
+{ key: "schemeObjectKinds" },
+{ key: "equipmentTypes" },
+{ key: "equipment", refs: { typeId: "equipmentTypes" } },
+{
+key: "placements",
+refs: { equipmentId: "equipment", markId: "marks" },
+lists: { links: "marks" },
+},
+{ key: "scenarios" },
+{ key: "logicBindings", refs: { scenarioId: "scenarios", markId: "marks" } },
+];
+function idOwnList(project, owner) {
+const list = project[owner.key];
+return Array.isArray(list) ? list : [];
+}
+function idNestedList(item, owner) {
+const list = item && owner.nested ? item[owner.nested] : null;
+return Array.isArray(list) ? list : [];
+}
+function templateMint() {
+let last = 0;
+return () => {
+last += 1;
+return String(last);
+};
+}
+function nextId(project) {
+const mint = idMint(project);
+const id = mint.next();
+return { project: { ...project, counters: mint.counters }, id };
+}
+function nextIds(project, count) {
+const want = Number.isFinite(Number(count)) ? Math.max(0, Math.floor(Number(count))) : 0;
+const mint = idMint(project);
+const ids = [];
+for (let index = 0; index < want; index += 1) ids.push(mint.next());
+return { project: { ...project, counters: mint.counters }, ids };
 }
 function nowIso() {
 return new Date().toISOString();
@@ -14171,7 +14308,8 @@ function withProject(project, patch) {
 return { ...project, ...patch, updatedAt: nowIso() };
 }
 function defaultTemplate() {
-const categoryIds = new Map(TEMPLATE_CATEGORIES.map((category) => [category.key, newId()]));
+const mint = templateMint();
+const categoryIds = new Map(TEMPLATE_CATEGORIES.map((category) => [category.key, mint()]));
 const categories = TEMPLATE_CATEGORIES.map((category, index) => ({
 id: categoryIds.get(category.key),
 name: category.name,
@@ -14181,7 +14319,7 @@ lineStyle: null,
 order: index,
 }));
 const markTypes = TEMPLATE_TYPES.map((type, index) => ({
-id: newId(),
+id: mint(),
 categoryId: categoryIds.get(type.category),
 code: type.code,
 name: type.name,
@@ -14201,8 +14339,8 @@ const source = template && template.categories && template.markTypes ? clone(tem
 const stamp = nowIso();
 const project = {
 formatVersion: FORMAT_VERSION,
-id: newId(),
-key: newId(),
+id: newStorageId(),
+key: newStorageId(),
 name: (template && template.name) || strings.project.untitled,
 createdAt: stamp,
 updatedAt: stamp,
@@ -14230,7 +14368,7 @@ accepted: [],
 counters: {},
 view: { ...DEFAULT_VIEW, ...(source.view || {}) },
 };
-return acceptFromDictionary(project, new Set());
+return acceptFromDictionary(idsMigrate(project).project, new Set());
 }
 const QUERY_LETTER = /[0-9a-zа-яё]/;
 const QUERY_DIGIT = /[0-9]/;
@@ -14364,15 +14502,19 @@ changed: true,
 };
 }
 function addScheme(project, { name, imageId = null, width = 0, height = 0 } = {}) {
+const mint = idMint(project);
 const scheme = {
-id: newId(),
+id: mint.next(),
 name: String(name || "").trim() || strings.project.defaultSchemeName,
 imageId,
 width,
 height,
 order: project.schemes.length,
 };
-return { project: withProject(project, { schemes: [...project.schemes, scheme] }), scheme };
+return {
+project: withProject(project, { schemes: [...project.schemes, scheme], counters: mint.counters }),
+scheme,
+};
 }
 function updateScheme(project, schemeId, patch) {
 requireScheme(project, schemeId);
@@ -14658,10 +14800,10 @@ return top;
 function nextNumber(project, counters, code) {
 return Math.max(counters[code] || 0, highestNumber(project, code)) + 1;
 }
-function makeMark({ schemeId, typeId, kind, points, number, groupId = null }) {
+function makeMark({ id, schemeId, typeId, kind, points, number, groupId = null }) {
 const comment = kind === MARK_KIND_COMMENT ? { pointer: false } : null;
 return {
-id: newId(),
+id,
 schemeId,
 typeId,
 number,
@@ -14691,24 +14833,25 @@ if (kind === "line" && vertices.length < MARK_LINE_MIN_POINTS) throw modelError(
 if (kind === MARK_KIND_COMMENT && vertices.length !== 1) throw modelError("commentOnePoint");
 const mode = blockMode || type.blockMode || "each";
 if (!BLOCK_MODES.includes(mode)) throw modelError("unknownBlockMode");
-const counters = { ...project.counters };
+const mint = idMint(project);
+const counters = mint.counters;
 const created = [];
 if (kind === "point" && vertices.length > 1 && mode === "each") {
 for (const point of vertices) {
 const number = nextNumber(project, counters, type.code);
 counters[type.code] = number;
-created.push(makeMark({ schemeId, typeId, kind, points: [point], number }));
+created.push(makeMark({ id: mint.next(), schemeId, typeId, kind, points: [point], number }));
 }
 } else {
 const number = nextNumber(project, counters, type.code);
 counters[type.code] = number;
-created.push(makeMark({ schemeId, typeId, kind, points: vertices, number }));
+created.push(makeMark({ id: mint.next(), schemeId, typeId, kind, points: vertices, number }));
 }
 let groups = project.groups;
 let group = null;
 if (created.length > 1) {
 group = {
-id: newId(),
+id: mint.next(),
 schemeId,
 markIds: created.map((mark) => mark.id),
 labelOffset: null,
@@ -14971,10 +15114,12 @@ if (host) {
 const grown = updateMark(project, host.id, { points: [...host.points, point] });
 return { project: grown.project, mark: grown.mark, group: findGroup(project, mark.groupId) };
 }
-const counters = { ...project.counters };
+const mint = idMint(project);
+const counters = mint.counters;
 const number = nextNumber(project, counters, type.code);
 counters[type.code] = number;
 const created = makeMark({
+id: mint.next(),
 schemeId: mark.schemeId,
 typeId: type.id,
 kind: "point",
@@ -14991,7 +15136,7 @@ item.id === group.id ? { ...item, markIds: [...item.markIds, created.id] } : ite
 );
 group = groups.find((item) => item.id === group.id);
 } else {
-group = { id: newId(), schemeId: mark.schemeId, markIds: [markId, created.id], labelOffset: null };
+group = { id: mint.next(), schemeId: mark.schemeId, markIds: [markId, created.id], labelOffset: null };
 created.groupId = group.id;
 groups = [...groups, group];
 marks = marks.map((item) => (item.id === markId ? { ...item, groupId: group.id } : item));
@@ -15013,10 +15158,14 @@ const theirs = findGroup(project, other.groupId);
 const ours = findGroup(project, mark.groupId);
 const host = theirs || ours;
 if (!host) {
-const group = { id: newId(), schemeId: other.schemeId, markIds: [other.id, mark.id], labelOffset: null };
+const mint = idMint(project);
+const group = { id: mint.next(), schemeId: other.schemeId, markIds: [other.id, mark.id], labelOffset: null };
 const joined = new Set(group.markIds);
 const marks = project.marks.map((item) => (joined.has(item.id) ? { ...item, groupId: group.id } : item));
-return { project: withProject(project, { marks, groups: [...project.groups, group] }), group };
+return {
+project: withProject(project, { marks, groups: [...project.groups, group], counters: mint.counters }),
+group,
+};
 }
 const guest = theirs ? ours : null;
 const brought = theirs ? (guest ? guest.markIds : [mark.id]) : [other.id];
@@ -15250,6 +15399,7 @@ const MARK_PATCH_FIELDS = [
 "original",
 "pointer",
 "curtainSide",
+"objectId",
 ...MARK_DIMENSION_FIELDS,
 ];
 function updateMark(project, markId, patch) {
@@ -15281,7 +15431,23 @@ if (Object.prototype.hasOwnProperty.call(changes, field)) {
 changes[field] = markDimensionValue(changes[field], field);
 }
 }
-const marks = project.marks.map((mark) => (mark.id === markId ? { ...mark, ...changes } : mark));
+let unlink = false;
+if (Object.prototype.hasOwnProperty.call(changes, "objectId")) {
+const wanted = changes.objectId == null || changes.objectId === "" ? null : changes.objectId;
+if (wanted === null) {
+unlink = true;
+delete changes.objectId;
+} else {
+const can = markObjectCan(project, markId, wanted);
+if (!can.ok) throw modelError("markObjectRefused", { why: can.why });
+changes.objectId = wanted;
+}
+}
+const marks = project.marks.map((mark) => {
+if (mark.id !== markId) return mark;
+const next = { ...mark, ...changes };
+return unlink ? markWithoutObject(next) : next;
+});
 return { project: withProject(project, { marks }), mark: marks.find((mark) => mark.id === markId) };
 }
 function deleteMark(project, markId) {
@@ -15382,7 +15548,7 @@ return { ...mark, z: value };
 });
 return { project: withProject(project, { marks }), moved: true };
 }
-const MARK_COPY_FIELDS = ["location", "original", ...MARK_DIMENSION_FIELDS];
+const MARK_COPY_FIELDS = ["location", "original", "objectId", ...MARK_DIMENSION_FIELDS];
 function markSnapshot(project, markId) {
 const mark = requireMark(project, markId);
 const snapshot = {
@@ -15393,6 +15559,7 @@ closed: mark.closed === true,
 location: typeof mark.location === "string" ? mark.location : "",
 original: typeof mark.original === "string" ? mark.original : "",
 };
+snapshot.objectId = markObjectId(mark);
 const sizes = markDimensions(mark);
 for (const field of MARK_DIMENSION_FIELDS) snapshot[field] = sizes[field];
 const device = markDeviceCopy(mark);
@@ -15427,7 +15594,9 @@ const patch = {};
 if (kind === "line" && snapshot.closed === true) patch.closed = true;
 for (const field of MARK_COPY_FIELDS) {
 const value = snapshot[field];
-if (value !== null && value !== undefined && value !== "") patch[field] = value;
+if (value === null || value === undefined || value === "") continue;
+if (field === "objectId" && !markObjectCan(result.project, result.mark.id, value).ok) continue;
+patch[field] = value;
 }
 let pasted = result;
 if (Object.keys(patch).length > 0) pasted = updateMark(result.project, result.mark.id, patch);
@@ -15713,8 +15882,9 @@ view = null,
 device,
 } = {},
 ) {
+const mint = idMint(project);
 const type = {
-id: newId(),
+id: mint.next(),
 categoryId,
 code: normalizeCode(code, project),
 name: normalizeName(name),
@@ -15732,7 +15902,10 @@ type.view = String(view);
 const record = deviceRecordFromEdit(device);
 if (record !== undefined) type.device = record;
 if (!findCategory(project, categoryId)) throw modelError("categoryNotFound");
-return { project: withProject(project, { markTypes: [...project.markTypes, type] }), type };
+return {
+project: withProject(project, { markTypes: [...project.markTypes, type], counters: mint.counters }),
+type,
+};
 }
 function updateType(project, typeId, patch = {}) {
 const current = requireType(project, typeId);
@@ -15782,15 +15955,19 @@ const markTypes = project.markTypes
 return { project: withProject(project, { markTypes }), deleted: type };
 }
 function addCategory(project, { name, color, shape, lineStyle = null } = {}) {
+const mint = idMint(project);
 const category = {
-id: newId(),
+id: mint.next(),
 name: normalizeName(name),
 color: String(color || FALLBACK_COLOR),
 shape: checkShape(shape, { allowNull: false }),
 lineStyle: checkLineStyle(lineStyle, { allowNull: true }),
 order: project.categories.length,
 };
-return { project: withProject(project, { categories: [...project.categories, category] }), category };
+return {
+project: withProject(project, { categories: [...project.categories, category], counters: mint.counters }),
+category,
+};
 }
 function updateCategory(project, categoryId, patch = {}) {
 const current = findCategory(project, categoryId);
@@ -16320,8 +16497,12 @@ return /^#[0-9a-fA-F]{6}$/.test(color) ? color.toUpperCase() : fallback;
 function addRoom(project, room) {
 const name = normalizeName(typeof room === "string" ? room : room && room.name);
 const wanted = typeof room === "object" && room ? room.color : null;
-const created = { id: newId(), name, color: normalizeColor(wanted, nextRoomColor(project)) };
-return { project: withProject(project, { rooms: [...project.rooms, created] }), room: created };
+const mint = idMint(project);
+const created = { id: mint.next(), name, color: normalizeColor(wanted, nextRoomColor(project)) };
+return {
+project: withProject(project, { rooms: [...project.rooms, created], counters: mint.counters }),
+room: created,
+};
 }
 function updateRoom(project, roomId, patch = {}) {
 const current = findRoom(project, roomId);
@@ -16457,15 +16638,19 @@ return list;
 function addOutline(project, { schemeId, roomId, points } = {}) {
 requireScheme(project, schemeId);
 if (!findRoom(project, roomId)) throw modelError("roomNotFound");
+const mint = idMint(project);
 const outline = {
-id: newId(),
+id: mint.next(),
 schemeId,
 roomId,
 points: normalizeOutlinePoints(points),
 labelOffset: null,
 labelAngle: 0,
 };
-return { project: withProject(project, { outlines: [...outlinesOf(project), outline] }), outline };
+return {
+project: withProject(project, { outlines: [...outlinesOf(project), outline], counters: mint.counters }),
+outline,
+};
 }
 const OUTLINE_PATCH_FIELDS = ["points", "roomId", "labelOffset", "labelAngle"];
 function updateOutline(project, outlineId, patch) {
@@ -16520,31 +16705,36 @@ function schemeGuides(project, schemeId) {
 const scheme = findScheme(project, schemeId);
 return scheme && Array.isArray(scheme.guides) ? scheme.guides : [];
 }
-function withGuides(project, schemeId, guides) {
+function withGuides(project, schemeId, guides, counters) {
 const schemes = project.schemes.map((scheme) => (scheme.id === schemeId ? { ...scheme, guides } : scheme));
-return withProject(project, { schemes });
+return withProject(project, counters ? { schemes, counters } : { schemes });
 }
 function setSchemeGuides(project, schemeId, guides) {
 requireScheme(project, schemeId);
 const before = schemeGuides(project, schemeId);
+const mint = idMint(project);
 const list = (Array.isArray(guides) ? guides : []).map((guide) => {
 if (!guide || !GUIDE_AXES.includes(guide.axis)) throw modelError("guideAxisUnknown");
 const at = clampFraction(Number(guide.at));
 if (!Number.isFinite(at)) throw modelError("guideAtInvalid");
-return { id: guide.id || newId(), axis: guide.axis, at };
+return { id: guide.id || mint.next(), axis: guide.axis, at };
 });
 const same =
 before.length === list.length &&
 before.every((guide, index) => guide.id === list[index].id && guide.axis === list[index].axis && guide.at === list[index].at);
 if (same) return { project, guides: before, changed: false };
-return { project: withGuides(project, schemeId, list), guides: list, changed: true };
+return { project: withGuides(project, schemeId, list, mint.counters), guides: list, changed: true };
 }
 function addSchemeGuide(project, schemeId, { axis, at } = {}) {
 requireScheme(project, schemeId);
 if (!GUIDE_AXES.includes(axis)) throw modelError("guideAxisUnknown");
-const guide = { id: newId(), axis, at: clampFraction(Number(at)) };
+const mint = idMint(project);
+const guide = { id: mint.next(), axis, at: clampFraction(Number(at)) };
 if (!Number.isFinite(guide.at)) throw modelError("guideAtInvalid");
-return { project: withGuides(project, schemeId, [...schemeGuides(project, schemeId), guide]), guide };
+return {
+project: withGuides(project, schemeId, [...schemeGuides(project, schemeId), guide], mint.counters),
+guide,
+};
 }
 function moveSchemeGuide(project, schemeId, guideId, at) {
 requireScheme(project, schemeId);
@@ -16809,7 +16999,8 @@ requireScheme(project, schemeId);
 const a = drawingPointMm(aMm);
 const b = drawingPointMm(bMm);
 if (a.x === b.x && a.y === b.y) throw modelError("wallPointsSame");
-const wall = { id: newId(), schemeId, aMm: a, bMm: b, thicknessMm: wallThicknessMm(thicknessMm) };
+const mint = idMint(project);
+const wall = { id: mint.next(), schemeId, aMm: a, bMm: b, thicknessMm: wallThicknessMm(thicknessMm) };
 return { project: withProject(project, { walls: [...wallsOf(project), wall] }), wall };
 }
 function updateWall(project, wallId, patch = {}) {
@@ -17260,8 +17451,9 @@ const wall = requireWall(project, wallId);
 if (!OPENING_KINDS.includes(kind)) throw modelError("openingKindUnknown");
 const height = drawingHeightMm(heightMm);
 if (height === null) throw modelError("drawingMmNotPositive");
+const mint = idMint(project);
 const opening = {
-id: newId(),
+id: mint.next(),
 wallId,
 kind,
 atMm: drawingOffsetMm(atMm),
@@ -17325,8 +17517,9 @@ const TEMPLATE_SCHEME_OBJECT_KINDS = [
 "cabinet",
 ];
 function schemeObjectKindTemplate() {
+const mint = templateMint();
 return TEMPLATE_SCHEME_OBJECT_KINDS.map((key, index) => ({
-id: newId(),
+id: mint(),
 name: strings.schemeObjectKinds[key] || key,
 order: index,
 }));
@@ -17370,10 +17563,16 @@ return key;
 }
 function ensureSchemeObjectKinds(project) {
 if (schemeObjectKindsOf(project).length > 0) return { project, added: false };
-return { project: withProject(project, { schemeObjectKinds: schemeObjectKindTemplate() }), added: true };
+const mint = idMint(project);
+const schemeObjectKinds = schemeObjectKindTemplate().map((item) => ({ ...item, id: mint.next() }));
+return {
+project: withProject(project, { schemeObjectKinds, counters: mint.counters }),
+added: true,
+};
 }
 function addSchemeObjectKind(project, { name } = {}) {
-const item = { id: newId(), name: normalizeName(name), order: schemeObjectKindsOf(project).length };
+const mint = idMint(project);
+const item = { id: mint.next(), name: normalizeName(name), order: schemeObjectKindsOf(project).length };
 return {
 project: withProject(project, { schemeObjectKinds: [...schemeObjectKindsOf(project), item] }),
 schemeObjectKind: item,
@@ -17463,8 +17662,9 @@ requireScheme(project, schemeId);
 if (catalogKey) requireSchemeObjectKey(catalogKey);
 else if (!findSchemeObjectKind(project, kindId)) throw modelError("schemeObjectKindNotFound");
 if (!SCHEME_OBJECT_SHAPES.includes(shape)) throw modelError("schemeObjectShapeUnknown");
+const mint = idMint(project);
 const object = {
-id: newId(),
+id: mint.next(),
 schemeId,
 ...(catalogKey ? { catalogKey } : { kindId }),
 shape,
@@ -17473,7 +17673,13 @@ heightMm: drawingHeightMm(heightMm),
 heightAboveFloorMm: drawingOffsetMm(heightAboveFloorMm),
 ...schemeObjectMirrorField(shape, mirror),
 };
-return { project: withProject(project, { schemeObjects: [...schemeObjectsOf(project), object] }), schemeObject: object };
+return {
+project: withProject(project, {
+schemeObjects: [...schemeObjectsOf(project), object],
+counters: mint.counters,
+}),
+schemeObject: object,
+};
 }
 function schemeObjectNaming(current, patch) {
 const has = (key) => Object.prototype.hasOwnProperty.call(patch, key);
@@ -17516,7 +17722,151 @@ function deleteSchemeObject(project, objectId) {
 const object = findSchemeObject(project, objectId);
 if (!object) throw modelError("schemeObjectNotFound");
 const schemeObjects = schemeObjectsOf(project).filter((item) => item.id !== objectId);
-return { project: withProject(project, { schemeObjects }), deleted: object };
+const marks = marksWithoutObject(project, new Set([objectId]));
+return {
+project: withProject(project, marks ? { schemeObjects, marks } : { schemeObjects }),
+deleted: object,
+};
+}
+function markObjectId(mark) {
+const value = mark ? mark.objectId : null;
+if (value == null || value === "") return null;
+return typeof value === "string" || typeof value === "number" ? value : null;
+}
+function markOfObject(project, objectId) {
+if (!project || !objectId) return null;
+return project.marks.find((mark) => markObjectId(mark) === objectId) || null;
+}
+function markObjectCan(project, markId, objectId) {
+const mark = findMark(project, markId);
+if (!mark) return { ok: false, why: strings.markObject.whyNoMark };
+if (markIsComment(mark)) return { ok: false, why: strings.markObject.whyComment };
+const object = findSchemeObject(project, objectId);
+if (!object) return { ok: false, why: strings.markObject.whyNoObject };
+if (object.schemeId !== mark.schemeId) return { ok: false, why: strings.markObject.whyOtherScheme };
+const taken = markOfObject(project, object.id);
+if (taken && taken.id !== mark.id) {
+return { ok: false, why: text("markObject.whyTaken", { label: markLabel(project, taken) }) };
+}
+return { ok: true };
+}
+function setMarkObject(project, markId, objectId) {
+const mark = requireMark(project, markId);
+const wanted = objectId == null || objectId === "" ? null : objectId;
+if (markObjectId(mark) === wanted) return { project, mark };
+return updateMark(project, markId, { objectId: wanted });
+}
+function markWithoutObject(mark) {
+if (!mark || !Object.prototype.hasOwnProperty.call(mark, "objectId")) return mark;
+const rest = { ...mark };
+delete rest.objectId;
+return rest;
+}
+function marksWithoutObject(project, goneIds) {
+if (!project || goneIds.size === 0) return null;
+let touched = false;
+const marks = project.marks.map((mark) => {
+const linked = markObjectId(mark);
+if (linked === null || !goneIds.has(linked)) return mark;
+touched = true;
+return markWithoutObject(mark);
+});
+return touched ? marks : null;
+}
+function markPlace(project, mark) {
+const own = {
+points: mark && Array.isArray(mark.points) ? mark.points : [],
+atMm: mark && Array.isArray(mark.points) && mark.points.length > 0
+? planFractionToMm(project, mark.schemeId, mark.points[0])
+: null,
+turnDeg: null,
+sizes: markSizes(project, mark),
+object: null,
+from: "mark",
+bridged: false,
+};
+own.heightAboveFloor = own.sizes.heightAboveFloor;
+const object = mark ? findSchemeObject(project, markObjectId(mark)) : null;
+if (!object || object.schemeId !== mark.schemeId) return own;
+const corners = schemeObjectCorners(object);
+const atMm = object.shape === "polyline" ? schemeObjectMiddleMm(corners) : drawingPointMm(object.atMm);
+const heightMm = typeof object.heightMm === "number" ? object.heightMm : null;
+const bottomMm = Number(object.heightAboveFloorMm || 0);
+const sizes = {};
+const spans = schemeObjectSpansMm(object, corners);
+const values = {
+length: spans.widthMm,
+depth: spans.depthMm,
+width: heightMm,
+heightAboveFloor: heightMm === null ? null : bottomMm + heightMm / 2,
+};
+for (const field of MARK_DIMENSION_FIELDS) {
+sizes[field] = values[field];
+sizes[field + "Own"] = false;
+sizes[field + "From"] = values[field] === null ? null : "object";
+}
+const single = mark.kind === "point" && own.points.length <= 1;
+const fraction = single ? planMmToFraction(project, mark.schemeId, atMm) : null;
+return {
+points: fraction ? [fraction] : own.points,
+atMm,
+turnDeg: object.shape === "polyline" ? null : schemeObjectTurnDeg(object.turnDeg),
+sizes,
+heightAboveFloor: sizes.heightAboveFloor,
+object,
+from: "object",
+bridged: Boolean(fraction),
+};
+}
+function schemeObjectMiddleMm(corners) {
+if (corners.length === 0) return { x: 0, y: 0 };
+const xs = corners.map((point) => point.x);
+const ys = corners.map((point) => point.y);
+return {
+x: Math.round((Math.min(...xs) + Math.max(...xs)) / 2),
+y: Math.round((Math.min(...ys) + Math.max(...ys)) / 2),
+};
+}
+function schemeObjectSpansMm(object, corners) {
+if (object.shape !== "polyline") {
+return { widthMm: Number(object.widthMm), depthMm: Number(object.depthMm) };
+}
+let length = 0;
+for (let index = 1; index < corners.length; index += 1) {
+length += Math.hypot(corners[index].x - corners[index - 1].x, corners[index].y - corners[index - 1].y);
+}
+return { widthMm: Math.round(length), depthMm: Number(object.depthMm) };
+}
+function objectDeviceMake(project, objectId, typeId) {
+const object = findSchemeObject(project, objectId);
+if (!object) throw modelError("schemeObjectNotFound");
+const type = requireType(project, typeId);
+const taken = markOfObject(project, object.id);
+if (taken) throw modelError("markObjectRefused", { why: text("markObject.whyTaken", { label: markLabel(project, taken) }) });
+const corners = schemeObjectCorners(object);
+const atMm = object.shape === "polyline" ? schemeObjectMiddleMm(corners) : object.atMm;
+const kind = typeKindOf(project, type.id);
+const line =
+object.shape === "polyline"
+? [corners[0], corners[corners.length - 1]]
+: [corners[0], corners[1]];
+const wanted = kind === "line" ? line : [atMm];
+const points = [];
+for (const value of wanted) {
+const fraction = planMmToFraction(project, object.schemeId, value);
+if (!fraction) throw modelError("objectDeviceNoPlan");
+points.push(fraction);
+}
+const added = addMark(project, { schemeId: object.schemeId, typeId: type.id, kind, points });
+const linked = setMarkObject(added.project, added.mark.id, object.id);
+return { project: linked.project, mark: linked.mark, schemeObject: object };
+}
+function objectDeviceDrop(project, objectId) {
+const object = findSchemeObject(project, objectId);
+if (!object) throw modelError("schemeObjectNotFound");
+const mark = markOfObject(project, object.id);
+if (!mark) return { project, deleted: null };
+return { project: deleteMark(project, mark.id).project, deleted: mark };
 }
 function wallHeightOf(project, { schemeId, roomId } = {}) {
 const room = roomId ? findRoom(project, roomId) : null;
@@ -17940,7 +18290,8 @@ x: Math.round(Number(wall.aMm.x) + vectors.u.x * at) || 0,
 y: Math.round(Number(wall.aMm.y) + vectors.u.y * at) || 0,
 };
 const first = { ...wall, bMm: point };
-const second = { ...wall, id: newId(), aMm: point };
+const mint = idMint(project);
+const second = { ...wall, id: mint.next(), aMm: point };
 const firstLength = wallLengthMm(first);
 const secondLength = wallLengthMm(second);
 const fit = (from, width, room) => Math.max(0, Math.min(from, room - width));
@@ -18934,7 +19285,7 @@ return { project: withProject(project, { marks }), changed };
 function ensureProjectKey(project) {
 if (!project) return { project, changed: false };
 if (typeof project.key === "string" && project.key) return { project, changed: false };
-return { project: { ...project, key: newId() }, changed: true };
+return { project: { ...project, key: newStorageId() }, changed: true };
 }
 function updateProject(project, patch = {}) {
 const next = {};
@@ -19000,6 +19351,167 @@ return next;
 });
 if (!changed) return { project, guessed: [] };
 return { project: { ...project, markTypes }, guessed };
+}
+function idsMovedTree(value, moves) {
+if (Array.isArray(value)) {
+let out = value;
+for (let index = 0; index < value.length; index += 1) {
+const next = idsMovedTree(value[index], moves);
+if (next === value[index]) continue;
+if (out === value) out = [...value];
+out[index] = next;
+}
+return out;
+}
+if (!value || typeof value !== "object") return value;
+let out = value;
+for (const key of Object.keys(value)) {
+const moved = moves[key] ? moves[key].get(value[key]) : undefined;
+const next = moved === undefined ? idsMovedTree(value[key], moves) : moved;
+if (next === value[key]) continue;
+if (out === value) out = { ...value };
+out[key] = next;
+}
+return out;
+}
+function idsMovedKey(key, all) {
+const at = String(key == null ? "" : key).indexOf(":");
+if (at < 0) return key;
+const head = key.slice(0, at + 1);
+const tail = key.slice(at + 1);
+let touched = false;
+const moved = tail
+.split(/([,+#])/)
+.map((piece) => {
+const next = all.get(piece);
+if (next === undefined) return piece;
+touched = true;
+return next;
+})
+.join("");
+return touched ? head + moved : key;
+}
+function idsMigrate(project) {
+if (!project || typeof project !== "object") return { project, changed: false, renumbered: 0 };
+const seen = new Set();
+let need = false;
+for (const owner of ID_OWNERS) {
+for (const item of idOwnList(project, owner)) {
+for (const entity of [item, ...idNestedList(item, owner)]) {
+const number = idNumberOf(entity && entity.id);
+if (number === null || seen.has(number)) need = true;
+else seen.add(number);
+}
+}
+}
+if (!need) {
+const floor = idFloor(project);
+const counter = Number(project.counters && project.counters[ID_COUNTER_KEY]) || 0;
+if (counter >= floor) return { project, changed: false, renumbered: 0 };
+return {
+project: { ...project, counters: { ...project.counters, [ID_COUNTER_KEY]: floor } },
+changed: true,
+renumbered: 0,
+};
+}
+let last = 0;
+const next = () => {
+last += 1;
+return String(last);
+};
+const maps = new Map();
+const all = new Map();
+const twice = new Set();
+for (const owner of ID_OWNERS) {
+const map = new Map();
+maps.set(owner.key, map);
+for (const item of idOwnList(project, owner)) {
+for (const entity of [item, ...idNestedList(item, owner)]) {
+const was = entity && entity.id;
+if (was == null || was === "" || map.has(was)) continue;
+const fresh = next();
+map.set(was, fresh);
+if (all.has(was)) twice.add(was);
+all.set(was, fresh);
+}
+}
+}
+for (const was of twice) all.delete(was);
+const patch = idsRewrite(project, maps, all);
+patch.counters = { ...project.counters, [ID_COUNTER_KEY]: last };
+return { project: { ...project, ...patch }, changed: true, renumbered: last };
+}
+function idsRewrite(project, maps, all) {
+const moveBy = (collection, value) => {
+const map = maps.get(collection);
+const moved = map ? map.get(value) : undefined;
+return moved === undefined ? value : moved;
+};
+const patch = {};
+for (const owner of ID_OWNERS) {
+const list = idOwnList(project, owner);
+if (list.length === 0) continue;
+patch[owner.key] = list.map((item) => {
+const fresh = { ...item, id: moveBy(owner.key, item.id) };
+for (const [field, collection] of Object.entries(owner.refs || {})) {
+if (!Object.prototype.hasOwnProperty.call(item, field) || item[field] == null) continue;
+fresh[field] = moveBy(collection, item[field]);
+}
+for (const [field, collection] of Object.entries(owner.lists || {})) {
+if (!Array.isArray(item[field])) continue;
+fresh[field] = item[field].map((value) => moveBy(collection, value));
+}
+if (owner.nested && Array.isArray(item[owner.nested])) {
+fresh[owner.nested] = item[owner.nested].map((child) => ({
+...child,
+id: moveBy(owner.key, child.id),
+}));
+}
+return fresh;
+});
+}
+if (Array.isArray(patch.marks)) {
+patch.marks = patch.marks.map((mark) => {
+const fresh = { ...mark };
+if (Array.isArray(mark.controls)) {
+fresh.controls = mark.controls.map((item) =>
+typeof item === "string"
+? moveBy("marks", item)
+: item && typeof item === "object"
+? { ...item, id: moveBy("marks", item.id) }
+: item,
+);
+}
+if (deviceObject(mark.device) && mark.device.doorId) {
+fresh.device = { ...mark.device, doorId: moveBy("openings", mark.device.doorId) };
+}
+return fresh;
+});
+}
+if (Array.isArray(patch.scenarios)) {
+const moves = { markId: maps.get("marks"), scenarioId: maps.get("scenarios") };
+patch.scenarios = patch.scenarios.map((scenario) =>
+scenario && scenario.kind === "block" && scenario.targets
+? { ...scenario, targets: idsMovedTree(scenario.targets, moves) }
+: scenario,
+);
+}
+const accepted = acceptedOf(project);
+if (accepted.length > 0 && all.size > 0) {
+patch.accepted = accepted.map((record) => {
+const key = idsMovedKey(record.key, all);
+return key === record.key ? record : { ...record, key };
+});
+}
+return patch;
+}
+function idsReplace(project, replacements) {
+if (!project || typeof project !== "object") return { project, changed: false };
+const all = replacements instanceof Map ? new Map(replacements) : new Map(Object.entries(replacements || {}));
+for (const [was, now] of all) if (was === now || now == null) all.delete(was);
+if (all.size === 0) return { project, changed: false };
+const maps = new Map(ID_OWNERS.map((owner) => [owner.key, all]));
+return { project: { ...project, ...idsRewrite(project, maps, all) }, changed: true };
 }
 function fillTypeSizes(project) {
 if (!project || !Array.isArray(project.markTypes)) return { project, changed: false, filled: 0 };
@@ -19122,8 +19634,9 @@ const TEMPLATE_EQUIPMENT_TYPES = [
 "enclosure",
 ];
 function equipmentTypeTemplate() {
+const mint = templateMint();
 return TEMPLATE_EQUIPMENT_TYPES.map((key, index) => ({
-id: newId(),
+id: mint(),
 name: strings.equipmentTypes[key] || key,
 order: index,
 }));
@@ -19142,9 +19655,13 @@ if (!typeId) return null;
 return equipmentTypesOf(project).find((item) => item.id === typeId) || null;
 }
 function addEquipmentType(project, { name } = {}) {
-const item = { id: newId(), name: normalizeName(name), order: equipmentTypesOf(project).length };
+const mint = idMint(project);
+const item = { id: mint.next(), name: normalizeName(name), order: equipmentTypesOf(project).length };
 return {
-project: withProject(project, { equipmentTypes: [...equipmentTypesOf(project), item] }),
+project: withProject(project, {
+equipmentTypes: [...equipmentTypesOf(project), item],
+counters: mint.counters,
+}),
 equipmentType: item,
 };
 }
@@ -19206,15 +19723,19 @@ const id = value == null ? "" : String(value);
 return id && findEquipmentType(project, id) ? id : "";
 }
 function addEquipment(project, { name, vendor, code, typeId } = {}) {
+const mint = idMint(project);
 const item = {
-id: newId(),
+id: mint.next(),
 name: normalizeName(name),
 vendor: equipmentText(vendor),
 code: equipmentText(code),
 typeId: equipmentTypeRef(project, typeId),
 order: equipmentOf(project).length,
 };
-return { project: withProject(project, { equipment: [...equipmentOf(project), item] }), equipment: item };
+return {
+project: withProject(project, { equipment: [...equipmentOf(project), item], counters: mint.counters }),
+equipment: item,
+};
 }
 function updateEquipment(project, equipmentId, patch = {}) {
 const current = requireEquipment(project, equipmentId);
@@ -19313,14 +19834,18 @@ function addPlacement(project, { equipmentId, markId, links } = {}) {
 requireEquipment(project, equipmentId);
 const mark = requireMark(project, markId);
 if (markIsComment(mark)) throw modelError("commentNoEquipment");
+const mint = idMint(project);
 const placement = {
-id: newId(),
+id: mint.next(),
 equipmentId,
 markId,
 links: placementLinks(project, links, markId),
 };
 return {
-project: withProject(project, { placements: [...placementsOf(project), placement] }),
+project: withProject(project, {
+placements: [...placementsOf(project), placement],
+counters: mint.counters,
+}),
 placement,
 };
 }
@@ -19447,7 +19972,8 @@ function addScenario(project, scenario = {}) {
 const source = deviceObject(scenario) ? scenario : {};
 if (!SCENARIO_KINDS.includes(source.kind)) throw modelError("scenarioKindUnknown");
 const list = scenariosList(project);
-const id = typeof source.id === "string" && source.id && !findScenario(project, source.id) ? source.id : newId();
+const mint = idMint(project);
+const id = typeof source.id === "string" && source.id && !findScenario(project, source.id) ? source.id : mint.next();
 const base = {
 id,
 kind: source.kind,
@@ -19460,7 +19986,10 @@ description: "",
 ...(source.kind === "block" ? { targets: [] } : { source: "", origin: SCENARIO_ORIGINS[0], fileName: "" }),
 };
 const created = scenarioFields(source, base);
-return { project: withScenarios(project, [...list, created]), scenario: created };
+return {
+project: withScenarios(project, [...list, created], { counters: mint.counters }),
+scenario: created,
+};
 }
 function updateScenario(project, scenarioId, patch = {}) {
 const current = requireScenario(project, scenarioId);
@@ -19512,15 +20041,22 @@ if (!Number.isInteger(binding.service) || binding.service < 0) throw modelError(
 return binding;
 }
 function addLogicBinding(project, { scenarioId, markId, service = 0, options = {}, active = true } = {}) {
+const mint = idMint(project);
 const binding = logicBindingChecked(project, {
-id: newId(),
+id: mint.next(),
 scenarioId,
 markId,
 service,
 options: deviceObject(options) ? clone(options) : {},
 active: active !== false,
 });
-return { project: withProject(project, { logicBindings: [...logicBindingsList(project), binding] }), binding };
+return {
+project: withProject(project, {
+logicBindings: [...logicBindingsList(project), binding],
+counters: mint.counters,
+}),
+binding,
+};
 }
 function updateLogicBinding(project, bindingId, patch = {}) {
 const current = requireLogicBinding(project, bindingId);
@@ -22101,7 +22637,7 @@ if (ours.id && ours.id === theirs.id) return true;
 for (const key of ["schemes", "marks", "rooms", "markTypes"]) {
 const mine = mergeIndex(mergeList(ours, key));
 for (const item of mergeList(theirs, key)) {
-if (mine.has(item.id)) return true;
+if (mine.has(item.id) && idNumberOf(item.id) === null) return true;
 }
 }
 return false;
@@ -22445,6 +22981,8 @@ if (marks.has(binding.markId) && scenario && scenario.kind === "logic") return t
 report.conflicts.push({ code: "danglingRef", entity: "logicBindings", id: binding.id, kept: "none", item: binding });
 return false;
 });
+const objects = mergeIndex(merged.schemeObjects);
+const linkedObjects = new Set();
 merged.marks = merged.marks.map((mark) => {
 const patch = {};
 if (mark.groupId && !groups.has(mark.groupId)) patch.groupId = null;
@@ -22455,15 +22993,51 @@ const controls = Array.isArray(mark.controls)
 if (Array.isArray(controls) && controls.length !== mark.controls.length) patch.controls = controls;
 const next = Object.keys(patch).length === 0 ? mark : { ...mark, ...patch };
 if (mark.wallId && !walls.has(mark.wallId)) return markWithoutWall(next);
+const linked = markObjectId(next);
+if (linked === null) return next;
+const object = objects.get(linked);
+if (!object || object.schemeId !== next.schemeId || linkedObjects.has(linked)) {
+return markWithoutObject(next);
+}
+linkedObjects.add(linked);
 return next;
 });
 return merged;
 }
+function mergeIdClash(ours, theirs, base, winner) {
+if (!base) return { ours, theirs, reissued: [] };
+const clashed = new Set();
+for (const entity of MERGE_ENTITIES) {
+const mine = mergeIndex(mergeList(ours, entity));
+const known = mergeIndex(mergeList(base, entity));
+for (const item of mergeList(theirs, entity)) {
+if (!item || known.has(item.id)) continue;
+const twin = mine.get(item.id);
+if (!twin || mergeSame(twin, item)) continue;
+clashed.add(item.id);
+}
+}
+if (clashed.size === 0) return { ours, theirs, reissued: [] };
+const moving = winner === "theirs" ? ours : theirs;
+const other = winner === "theirs" ? theirs : ours;
+const ids = [...clashed];
+const fresh = nextIds({ ...moving, counters: mergeCounters(moving, other) }, ids.length);
+const replacements = new Map(ids.map((id, at) => [id, fresh.ids[at]]));
+const moved = idsReplace(fresh.project, replacements);
+const reissued = ids.map((id, at) => ({ side: winner === "theirs" ? "ours" : "theirs", was: id, now: fresh.ids[at] }));
+return winner === "theirs"
+? { ours: moved.project, theirs, reissued }
+: { ours, theirs: moved.project, reissued };
+}
 function mergeProjects(ours, theirs, base, options = {}) {
-if (!ours || !theirs) return { project: ours || theirs || null, changed: false, changes: [], conflicts: [], renumbered: [], counts: { added: 0, updated: 0, removed: 0, conflicts: 0, renumbered: 0 } };
+if (!ours || !theirs) return { project: ours || theirs || null, changed: false, changes: [], conflicts: [], renumbered: [], reissued: [], counts: { added: 0, updated: 0, removed: 0, conflicts: 0, renumbered: 0 } };
 const winner = options.winner === "ours" || options.winner === "theirs" ? options.winner : mergeWinner(ours, theirs);
 const ancestor = base && areRelatedProjects(ours, base) ? base : null;
-const report = { changes: [], conflicts: [], renumbered: [] };
+const report = { changes: [], conflicts: [], renumbered: [], reissued: [] };
+const parted = mergeIdClash(ours, theirs, ancestor, winner);
+ours = parted.ours;
+theirs = parted.theirs;
+report.reissued = parted.reissued;
 const merged = { ...ours };
 const absent = [];
 for (const entity of MERGE_ENTITIES) {
@@ -22518,6 +23092,7 @@ quiet,
 changes: report.changes,
 conflicts: report.conflicts,
 renumbered: report.renumbered,
+reissued: report.reissued,
 counts,
 };
 }
@@ -37558,7 +38133,10 @@ modelBox("shelfTop", { z: 0.86, height: 0.03, material: "light" }),
 modelBox("post", { x: -0.015, width: 0.03, z: 0, height: 0.86, material: "dark" }),
 modelBox("rod", { x: -0.48, width: 0.46, y: -0.02, depth: 0.04, z: 0.78, height: 0.02, material: "metal" }),
 modelBox("clothes", { x: -0.45, width: 0.4, y: -0.3, depth: 0.6, z: 0.38, height: 0.4, material: "body" }),
-modelBox("shelf", { x: 0.015, width: 0.485, z: 0.45, height: 0.03, material: "light" }),
+modelBox("shelfLow", { x: -0.48, width: 0.46, z: 0.14, height: 0.03, material: "light" }),
+[0.14, 0.3, 0.46, 0.62, 0.78].map((z, index) =>
+modelBox("shelf" + (index + 1), { x: 0.015, width: 0.485, z, height: 0.03, material: "light" }),
+),
 ),
 shoeRack: modelParts(
 modelBox("sideLeft", { x: -0.5, width: 0.04, z: 0, height: 1 }),
@@ -37883,6 +38461,13 @@ modelBox("foldRight", { x: 0.17, width: 0.3, y: 0.02, depth: 0.3, z: 0, height: 
 // src/objectModels/registry.js
 const OBJECT_MODEL_BODY_MAX = 5;
 const OBJECT_MODEL_FACE_MAX = 30;
+const OBJECT_MODEL_THING_BODY_MAX = 15;
+const OBJECT_MODEL_THING_FACE_MAX = 90;
+function objectModelLimits(key) {
+return objectCatalogEntry(key)
+? { bodies: OBJECT_MODEL_THING_BODY_MAX, faces: OBJECT_MODEL_THING_FACE_MAX }
+: { bodies: OBJECT_MODEL_BODY_MAX, faces: OBJECT_MODEL_FACE_MAX };
+}
 const MODEL_FAMILIES = [
 MODELS_POWER,
 MODELS_LIGHT,
@@ -51887,7 +52472,7 @@ const error = new Error(text("errors." + key, vars));
 error.code = key;
 return error;
 }
-const CANVAS_SCENARIO_FIELDS = ["scenarios", "logicBindings", "markTypes"];
+const CANVAS_SCENARIO_FIELDS = ["scenarios", "logicBindings", "markTypes", "counters"];
 function canvasOnlyField(before, after, field) {
 if (!Array.isArray(before) || !Array.isArray(after) || before.length !== after.length) return false;
 return before.every((item, index) => {
@@ -51907,7 +52492,7 @@ if (key === "updatedAt" || before[key] === after[key]) continue;
 if (!CANVAS_SCENARIO_FIELDS.includes(key)) return "marks";
 changed.push(key);
 }
-if (changed.length === 0) return "marks";
+if (changed.length === 0 || changed.every((key) => key === "counters")) return "marks";
 if (changed.includes("markTypes")) return canvasOnlyField(before.markTypes, after.markTypes, "device") ? "profiles" : "marks";
 if (changed.length === 1 && changed[0] === "scenarios" && canvasOnlyField(before.scenarios, after.scenarios, "active")) return "scenarioActive";
 return "scenarios";

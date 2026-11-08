@@ -56,6 +56,12 @@ const BENCH_THINGS = {
   bed: [1600, 2000, 500],
   dresser: [1200, 500, 900],
   cabinet: [1000, 600, 2000],
+  // Гардеробная, обувница и вешалка стоят в сцене с подъёма предела тел до
+  // пятнадцати (сборка «связь метки и вещи», G06): именно у них модель
+  // выросла, и без них замер «до и после» не увидел бы цены правки вовсе.
+  wardrobeOpen: [1600, 600, 2200],
+  shoeRack: [800, 350, 1000],
+  coatRack: [900, 300, 1800],
 };
 
 function thingAt(box, catalogKey, x, y, turnDeg = 0) {
@@ -111,6 +117,9 @@ export function benchFlat() {
   thingAt(box, "cabinet", -4000, 900, 90);
   thingAt(box, "bed", 2900, 300);
   thingAt(box, "dresser", 1500, -1350);
+  thingAt(box, "wardrobeOpen", 4200, -1300, 180);
+  thingAt(box, "shoeRack", 600, 1100);
+  thingAt(box, "coatRack", -300, 1250);
   return box;
 }
 

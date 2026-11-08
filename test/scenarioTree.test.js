@@ -424,6 +424,19 @@ test("заготовки дают сценарий без проблем-лов�
   }
 });
 
+// Все `markId`, которые лежат в дереве блоков. Обход по значению — тот же, что
+// у модели (`scenarioMarkRefs`): форму блока ведёт `scenarioTree.js`, а ссылку
+// на метку ищут по имени поля.
+function scenarioMarkIdsIn(value, out = []) {
+  if (Array.isArray(value)) {
+    for (const item of value) scenarioMarkIdsIn(item, out);
+  } else if (value && typeof value === "object") {
+    if (value.markId !== undefined && value.markId !== null) out.push(value.markId);
+    for (const key of Object.keys(value)) if (key !== "markId") scenarioMarkIdsIn(value[key], out);
+  }
+  return out;
+}
+
 test("«Сохранить как заготовку»: устройства становятся пустыми местами, остальное сохраняется", () => {
   const scenario = scenarioOf(
     [
@@ -438,9 +451,13 @@ test("«Сохранить как заготовку»: устройства с�
   const template = scenarioToTemplate(scenario, project);
   assert.equal(template.name, "Свет");
   assert.deepEqual(template.slots.map((slot) => slot.key), ["device1", "device2", "device3"].slice(0, 3));
-  const text = JSON.stringify(template.scenario);
-  assert.equal(text.includes(marks.ДД1), false, "метка осталась в заготовке");
-  assert.equal(text.includes(marks.С1), false);
+  // Номер метки ищется **значением поля**, а не подстрокой: с переходом на
+  // короткие номера (G08) `id` метки — это «3», и такая подстрока найдётся в
+  // любой задержке на 120 секунд. Подстрокой этот тест проверял бы что угодно,
+  // кроме того, что проверяет.
+  const kept = scenarioMarkIdsIn(template.scenario);
+  assert.equal(kept.includes(marks.ДД1), false, "метка осталась в заготовке");
+  assert.equal(kept.includes(marks.С1), false);
   // Одна метка — одно место, даже когда она стоит в нескольких блоках.
   const refs = [];
   const walk = (value) => {

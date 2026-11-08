@@ -497,7 +497,12 @@ test("столкнувшаяся группа переезжает целико�
 
   const merged = mergeProjects(ours, theirs, base);
   const numbers = numbersById(merged.project);
-  const groupNumbers = new Set(group.map((id) => numbers[id]));
+  // Номер сущности у одной из столкнувшихся меток переехал (`mergeIdClash`):
+  // счётчик у разошедшихся копий один, и оба участника выдали своей новой метке
+  // один и тот же номер. Слияние об этом говорит отчётом `reissued` — иначе
+  // следить за меткой по её `id` стало бы нельзя.
+  const moved = new Map(merged.reissued.map((item) => [item.was, item.now]));
+  const groupNumbers = new Set(group.map((id) => numbers[moved.get(id) || id]));
   assert.equal(groupNumbers.size, 1, "группу разорвало по разным номерам: " + [...groupNumbers].join(", "));
   assert.notEqual(numbers[alien.mark.id], [...groupNumbers][0], "чужая метка осталась в группе");
 

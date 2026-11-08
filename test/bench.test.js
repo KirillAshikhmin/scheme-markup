@@ -11,7 +11,10 @@ test("сцены стенда: квартира с мебелью и зал — 
   const flat = BENCH_SCENES.flat();
   assert.equal(flat.lamps.length, 5);
   assert.equal(flat.doors.length, 2);
-  assert.equal(flat.project.schemeObjects.length, 6);
+  // Девять вещей: шесть прежних плюс гардеробная, обувница и вешалка — их
+  // поставили в сцену, чтобы подъём предела тел до пятнадцати (G06) было чем
+  // замерить.
+  assert.equal(flat.project.schemeObjects.length, 9);
   const hall = BENCH_SCENES.hall();
   assert.equal(hall.lamps.length, 20);
   assert.equal(hall.project.schemeObjects.length, 48);

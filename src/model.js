@@ -1008,8 +1008,220 @@ const TEMPLATE_TYPES = [
   { category: "sensors", code: "ДОС", name: strings.types.lightSensor, shape: "circle-dot", view: "lightSensor", sizes: { length: 60, width: 60, depth: 20, heightAboveFloor: 2200 } },
 ];
 
-function newId() {
+// Идентификатор, которому номер **не положен**: ключи хранилищ браузера.
+// Почему именно эти три — у `nextId` ниже.
+function newStorageId() {
   return globalThis.crypto.randomUUID();
+}
+
+// ——— номера вместо uuid (G08–G11) ————————————————————————————————————————
+//
+// Слова заказчика: «Давай переделаем метки на инкремент, начиная с 1, вместо
+// UUID. При чем он постоянно увеличивается». И следом, на вопрос «у чего» —
+// «Всё, у чего есть id», «Свой у каждого объекта».
+//
+// ——— что получилось ———
+//
+// Счётчик живёт **в объекте**, в том же `project.counters`, где уже лежат
+// счётчики номеров меток по коду типа, под ключом `ID_COUNTER_KEY`. Ключ не
+// может столкнуться с кодом типа: код — это только буквы (`normalizeCode`), а
+// здесь решётка.
+//
+// Номера **уникальны по всем видам сразу** — как uuid сегодня. Это не
+// аккуратность ради аккуратности: ссылка на сущность в этом объекте — просто
+// значение поля (`mark.roomId`, `opening.wallId`), и раздели мы нумерацию по
+// коллекциям, номер 3 значил бы и комнату, и стену, и ошибка в поле перестала
+// бы быть видимой — она стала бы правдоподобной.
+//
+// Счётчик **только растёт**: номер удалённой сущности никому больше не
+// достаётся (G09). Дыры в номерах — то же сознательное решение, что у номеров
+// меток (ADR 003): распечатка с «Р14» не должна протухать от того, что кто-то
+// удалил Р13.
+//
+// ——— почему номер — строка, а не число ———
+//
+// Это развилка, и выбор здесь объявлен вслух. В файле номер читается как
+// `"id": "17"` — короткое целое, uuid не остаётся ни одного, и ровно это
+// заказчик и просил. Но тип значения остался **строкой**, а не числом, и вот
+// чем это оплачено и что на этом сэкономлено.
+//
+// Идентификатор в этой сборке — строка по всему коду: по нему ключуются
+// `Map`/`Set` и записи `{ [markId]: … }`, его проверяют `typeof id ===
+// "string"` стражи в потоке имитации (`sim/home.js`, `sim/blocks.js`,
+// `sim/engine.js`), в разборе блочных сценариев (`scenarioMarkRefs` здесь же,
+// `scenarioTree.js`), в памяти вида (`app.js`, `screenPlace.js`) и в слиянии
+// (`merge.js`). Замер прогоном: смена типа на число роняет **около шестисот**
+// тестов в 85 файлах — весь дом, сценарии, слияние, ссылку на объект; смена
+// на строку-число роняет два, и оба проверяют форму uuid, а не поведение.
+// Стража `typeof === "string"` — это не придирка к типу, это «ссылка на
+// месте»: для числа она отвечает «нет ссылки», и дом молча теряет связи.
+//
+// Поэтому номер — десятичная строка. Само число отдаёт `idNumberOf`, и адрес
+// аксессуара читается из него (`deviceAid`), а не из хэша.
+export const ID_COUNTER_KEY = "#id";
+
+/**
+ * Номер идентификатора числом: `"17"` → `17`. `null` — это не номер, а uuid
+ * прежней разметки, встроенный ключ (`COMMENT_TYPE_ID`) или мусор.
+ *
+ * Единственная дверь к числу: своего `Number(id)` не заводить — он принял бы и
+ * `" 17 "`, и `"17px"`, и `"1e3"`.
+ */
+export function idNumberOf(id) {
+  if (typeof id === "number") return Number.isInteger(id) && id > 0 ? id : null;
+  if (typeof id !== "string" || !/^[1-9][0-9]*$/.test(id)) return null;
+  const value = Number(id);
+  return Number.isSafeInteger(value) ? value : null;
+}
+
+// Самый большой номер, который в объекте уже занят. Нужен ровно для одного:
+// счётчик мог потеряться (объект собран руками, пришёл из ссылки без
+// `counters`, слит из двух), и выдавать поверх занятого номера нельзя — это
+// сшивка двух разных сущностей в одну, самая дорогая из возможных поломок.
+// Правило то же, что у номеров меток (`nextNumber` смотрит на `highestNumber`).
+//
+// Снимок помнится на объект (`WeakMap`): каждая правка даёт новый объект, и
+// обход всех коллекций идёт раз на правку, а не раз на сущность.
+const ID_FLOOR_CACHE = new WeakMap();
+
+function idFloor(project) {
+  if (!project || typeof project !== "object") return 0;
+  const known = ID_FLOOR_CACHE.get(project);
+  if (known !== undefined) return known;
+  let top = 0;
+  const see = (value) => {
+    const number = idNumberOf(value);
+    if (number !== null && number > top) top = number;
+  };
+  for (const owner of ID_OWNERS) {
+    for (const item of idOwnList(project, owner)) {
+      see(item && item.id);
+      if (owner.nested) for (const child of idNestedList(item, owner)) see(child && child.id);
+    }
+  }
+  ID_FLOOR_CACHE.set(project, top);
+  return top;
+}
+
+// Касса номеров на одну правку: копия `counters`, из которой берут номера, и
+// она же едет в патч. Так устроена и выдача номеров меток в `addMark` — две
+// метки одной правки обязаны получить два разных номера, а счётчик обязан
+// доехать до объекта один раз.
+function idMint(project) {
+  const counters = { ...(project && project.counters ? project.counters : {}) };
+  const floor = idFloor(project);
+  return {
+    counters,
+    next() {
+      const value = Math.max(Number(counters[ID_COUNTER_KEY]) || 0, floor) + 1;
+      counters[ID_COUNTER_KEY] = value;
+      return String(value);
+    },
+  };
+}
+
+// ——— где в объекте лежат идентификаторы и ссылки на них ————————————————————
+//
+// **Одна таблица, два читателя.** По ней считается занятый номер (`idFloor`) и
+// по ней же идёт перенумерация (`idsMigrate`). Второго списка коллекций в
+// сборке быть не должно: разойдись они — перенумерация переписала бы не все
+// ссылки, а это молча испорченный объект, самая дорогая из поломок.
+//
+// `key` — коллекция верхнего уровня. `refs` — поля сущности, где лежит ссылка:
+// **имя поля → коллекция, на которую оно смотрит**. Коллекция названа, а не
+// угадывается по значению, и это главное: номера уникальны по всем видам, но
+// отвечать «чей это номер» догадкой нельзя. `lists` — то же, но поле держит
+// список ссылок. `nested` — сущности **внутри** сущности со своими
+// идентификаторами (направляющие схемы).
+//
+// Чего в таблице нет и почему:
+//   — `project.id`, `project.key`, `scheme.imageId` — ключи в хранилищах
+//     браузера, общих для всех объектов (G08.1). Номер им не положен;
+//   — `mark.controls` («чем управляет»), `mark.device.doorId`, дерево блоков
+//     сценария и ключи принятых предупреждений — ссылки непростой формы, и
+//     каждая переписывается своим куском `idsMigrate` поимённо.
+const ID_OWNERS = [
+  // Метки первыми — слова заказчика «начиная с 1»: в готовом объекте они и
+  // получают 1…N подряд.
+  {
+    key: "marks",
+    refs: {
+      schemeId: "schemes",
+      typeId: "markTypes",
+      groupId: "groups",
+      roomId: "rooms",
+      wallId: "walls",
+      objectId: "schemeObjects",
+    },
+  },
+  { key: "groups", refs: { schemeId: "schemes" }, lists: { markIds: "marks" } },
+  { key: "outlines", refs: { schemeId: "schemes", roomId: "rooms" } },
+  { key: "schemes", nested: "guides" },
+  { key: "rooms" },
+  { key: "categories" },
+  { key: "markTypes", refs: { categoryId: "categories" } },
+  { key: "walls", refs: { schemeId: "schemes" } },
+  { key: "openings", refs: { wallId: "walls" } },
+  { key: "schemeObjects", refs: { schemeId: "schemes", kindId: "schemeObjectKinds" } },
+  { key: "schemeObjectKinds" },
+  { key: "equipmentTypes" },
+  { key: "equipment", refs: { typeId: "equipmentTypes" } },
+  {
+    key: "placements",
+    refs: { equipmentId: "equipment", markId: "marks" },
+    lists: { links: "marks" },
+  },
+  { key: "scenarios" },
+  { key: "logicBindings", refs: { scenarioId: "scenarios", markId: "marks" } },
+];
+
+function idOwnList(project, owner) {
+  const list = project[owner.key];
+  return Array.isArray(list) ? list : [];
+}
+
+function idNestedList(item, owner) {
+  const list = item && owner.nested ? item[owner.nested] : null;
+  return Array.isArray(list) ? list : [];
+}
+
+// Касса для **шаблона** — справочника, который живёт вне объекта (стартовый
+// набор, сохранённая заготовка). Счётчика у него нет и быть не может: он не
+// объект. Номера здесь свои, с единицы, и уникальны внутри одного вызова; попав
+// в объект, они раздаются заново его счётчиком (`createProject` → `idsMigrate`).
+function templateMint() {
+  let last = 0;
+  return () => {
+    last += 1;
+    return String(last);
+  };
+}
+
+/**
+ * Следующий номер объекта: `{project, id}`. Счётчик в объекте сдвинут, номер
+ * больше никому не достанется.
+ *
+ * Дверь для того, кто заводит сущность **вне модели** (и для тестов): внутри
+ * модели номера берёт касса `idMint`, чтобы одна правка двигала счётчик один
+ * раз.
+ */
+export function nextId(project) {
+  const mint = idMint(project);
+  const id = mint.next();
+  return { project: { ...project, counters: mint.counters }, id };
+}
+
+/**
+ * То же пачкой: `{project, ids}` на `count` сущностей — **одна** правка
+ * счётчика на всех. Поштучный `nextId` в цикле дал бы те же номера, но
+ * столько же промежуточных объектов.
+ */
+export function nextIds(project, count) {
+  const want = Number.isFinite(Number(count)) ? Math.max(0, Math.floor(Number(count))) : 0;
+  const mint = idMint(project);
+  const ids = [];
+  for (let index = 0; index < want; index += 1) ids.push(mint.next());
+  return { project: { ...project, counters: mint.counters }, ids };
 }
 
 function nowIso() {
@@ -1032,8 +1244,12 @@ function withProject(project, patch) {
 }
 
 export function defaultTemplate() {
-  // Идентификаторы новые на каждый вызов: два объекта не делят ни категорию, ни тип.
-  const categoryIds = new Map(TEMPLATE_CATEGORIES.map((category) => [category.key, newId()]));
+  // Номера новые на каждый вызов и свои внутри шаблона: два объекта не делят
+  // ни категорию, ни тип. Шаблон живёт **вне объекта** — ни счётчика, ни
+  // `project.counters` у него нет, — поэтому номера здесь свои, с единицы, и
+  // `createProject` раздаёт их заново своей кассой (`idsMigrate`).
+  const mint = templateMint();
+  const categoryIds = new Map(TEMPLATE_CATEGORIES.map((category) => [category.key, mint()]));
   const categories = TEMPLATE_CATEGORIES.map((category, index) => ({
     id: categoryIds.get(category.key),
     name: category.name,
@@ -1043,7 +1259,7 @@ export function defaultTemplate() {
     order: index,
   }));
   const markTypes = TEMPLATE_TYPES.map((type, index) => ({
-    id: newId(),
+    id: mint(),
     categoryId: categoryIds.get(type.category),
     code: type.code,
     name: type.name,
@@ -1088,13 +1304,17 @@ export function createProject(template) {
   const stamp = nowIso();
   const project = {
     formatVersion: FORMAT_VERSION,
-    id: newId(),
+    // Номер объекту **не положен**: его `id` и `key` — ключи в хранилищах
+    // браузера, общих для всех объектов, и два объекта с номером 1 затёрли бы
+    // друг друга (G08.1). То же у `scheme.imageId`: это ключ подложки в общем
+    // хранилище картинок.
+    id: newStorageId(),
     // Постоянный ключ объекта: заводится здесь и не меняется никогда — ни при
     // загрузке файла, ни при копировании, ни при переименовании. По нему два
     // файла узнают друг в друге один проект. `id` для этого не годится: его
     // перевыдаёт приёмка файла (`autosave.adoptLoadedProject`), иначе двое
     // писали бы в один снимок, — и у участников одного проекта он разный.
-    key: newId(),
+    key: newStorageId(),
     name: (template && template.name) || strings.project.untitled,
     createdAt: stamp,
     updatedAt: stamp,
@@ -1143,7 +1363,13 @@ export function createProject(template) {
   // «Создать объект». Поэтому ответ «так и задумано» даётся сразу — иначе
   // пустой объект встречал бы десятком жёлтых строк. Список принятых при этом
   // виден, и любую строку возвращают одним нажатием.
-  return acceptFromDictionary(project, new Set());
+  //
+  // Нумерация идёт **до** этого: ключ принятия складывается из идентификаторов
+  // типов и категорий, и принять их под номерами шаблона значило бы записать в
+  // объект ответы на вопросы о сущностях, которых в нём уже нет. Заодно у
+  // нового объекта сразу стоит счётчик номеров (`ID_COUNTER_KEY`): справочник
+  // пришёл из шаблона со своей нумерацией, и в объекте она раздаётся заново.
+  return acceptFromDictionary(idsMigrate(project).project, new Set());
 }
 
 // ——— поиск ———————————————————————————————————————————————————————————
@@ -1423,15 +1649,19 @@ export function resizeSchemePlan(project, schemeId, { width, height } = {}) {
 }
 
 export function addScheme(project, { name, imageId = null, width = 0, height = 0 } = {}) {
+  const mint = idMint(project);
   const scheme = {
-    id: newId(),
+    id: mint.next(),
     name: String(name || "").trim() || strings.project.defaultSchemeName,
     imageId,
     width,
     height,
     order: project.schemes.length,
   };
-  return { project: withProject(project, { schemes: [...project.schemes, scheme] }), scheme };
+  return {
+    project: withProject(project, { schemes: [...project.schemes, scheme], counters: mint.counters }),
+    scheme,
+  };
 }
 
 export function updateScheme(project, schemeId, patch) {
@@ -2027,12 +2257,14 @@ function nextNumber(project, counters, code) {
   return Math.max(counters[code] || 0, highestNumber(project, code)) + 1;
 }
 
-function makeMark({ schemeId, typeId, kind, points, number, groupId = null }) {
+function makeMark({ id, schemeId, typeId, kind, points, number, groupId = null }) {
   // Указатель есть только у комментария, и поле заводится только ему: розетке
   // `pointer` ничего не значил бы, а в файле проекта лежал бы у каждой метки.
   const comment = kind === MARK_KIND_COMMENT ? { pointer: false } : null;
   return {
-    id: newId(),
+    // Номер метки как сущности приходит доводом: одна правка ставит блок из
+    // трёх меток, и касса объекта обязана двинуться на три, а не трижды.
+    id,
     schemeId,
     typeId,
     number,
@@ -2078,26 +2310,30 @@ export function addMark(project, { schemeId, typeId, kind = "point", points, blo
   const mode = blockMode || type.blockMode || "each";
   if (!BLOCK_MODES.includes(mode)) throw modelError("unknownBlockMode");
 
-  const counters = { ...project.counters };
+  // Касса одна на правку: в `counters` лежат и номера меток по коду типа, и
+  // номер сущности. Две метки одной правки обязаны получить два разных номера,
+  // а счётчик обязан доехать до объекта один раз.
+  const mint = idMint(project);
+  const counters = mint.counters;
   const created = [];
 
   if (kind === "point" && vertices.length > 1 && mode === "each") {
     for (const point of vertices) {
       const number = nextNumber(project, counters, type.code);
       counters[type.code] = number;
-      created.push(makeMark({ schemeId, typeId, kind, points: [point], number }));
+      created.push(makeMark({ id: mint.next(), schemeId, typeId, kind, points: [point], number }));
     }
   } else {
     const number = nextNumber(project, counters, type.code);
     counters[type.code] = number;
-    created.push(makeMark({ schemeId, typeId, kind, points: vertices, number }));
+    created.push(makeMark({ id: mint.next(), schemeId, typeId, kind, points: vertices, number }));
   }
 
   let groups = project.groups;
   let group = null;
   if (created.length > 1) {
     group = {
-      id: newId(),
+      id: mint.next(),
       schemeId,
       markIds: created.map((mark) => mark.id),
       labelOffset: null,
@@ -2567,10 +2803,12 @@ export function addToGroup(project, markId, side, options = {}) {
     return { project: grown.project, mark: grown.mark, group: findGroup(project, mark.groupId) };
   }
 
-  const counters = { ...project.counters };
+  const mint = idMint(project);
+  const counters = mint.counters;
   const number = nextNumber(project, counters, type.code);
   counters[type.code] = number;
   const created = makeMark({
+    id: mint.next(),
     schemeId: mark.schemeId,
     typeId: type.id,
     kind: "point",
@@ -2588,7 +2826,7 @@ export function addToGroup(project, markId, side, options = {}) {
     );
     group = groups.find((item) => item.id === group.id);
   } else {
-    group = { id: newId(), schemeId: mark.schemeId, markIds: [markId, created.id], labelOffset: null };
+    group = { id: mint.next(), schemeId: mark.schemeId, markIds: [markId, created.id], labelOffset: null };
     created.groupId = group.id;
     groups = [...groups, group];
     marks = marks.map((item) => (item.id === markId ? { ...item, groupId: group.id } : item));
@@ -2663,10 +2901,14 @@ export function joinToBlock(project, markId, otherId) {
   const ours = findGroup(project, mark.groupId);
   const host = theirs || ours;
   if (!host) {
-    const group = { id: newId(), schemeId: other.schemeId, markIds: [other.id, mark.id], labelOffset: null };
+    const mint = idMint(project);
+    const group = { id: mint.next(), schemeId: other.schemeId, markIds: [other.id, mark.id], labelOffset: null };
     const joined = new Set(group.markIds);
     const marks = project.marks.map((item) => (joined.has(item.id) ? { ...item, groupId: group.id } : item));
-    return { project: withProject(project, { marks, groups: [...project.groups, group] }), group };
+    return {
+      project: withProject(project, { marks, groups: [...project.groups, group], counters: mint.counters }),
+      group,
+    };
   }
   // Кого приводят: всю группу приходящей стороны или её одну метку. Блока нет
   // у второй метки — приходит она сама, и хозяином остаётся блок первой. Дыр в
@@ -3301,6 +3543,11 @@ const MARK_PATCH_FIELDS = [
   "original",
   "pointer",
   "curtainSide",
+  // Связь с вещью чертежа (R01). Поле стоит здесь, а не правится в обход
+  // белого списка, как ярус `z`: иначе оно молча исчезало бы на первой же
+  // правке карточки. Правило у связи одно — `markObjectCan`, — и проверяется
+  // оно здесь же; названная дверь `setMarkObject` ходит через эту.
+  "objectId",
   ...MARK_DIMENSION_FIELDS,
 ];
 
@@ -3348,7 +3595,25 @@ export function updateMark(project, markId, patch) {
       changes[field] = markDimensionValue(changes[field], field);
     }
   }
-  const marks = project.marks.map((mark) => (mark.id === markId ? { ...mark, ...changes } : mark));
+  // Связь с вещью: одно правило на обе двери. Пустое значение — «снять», и
+  // поле тогда **убирается**, а не обнуляется (G68).
+  let unlink = false;
+  if (Object.prototype.hasOwnProperty.call(changes, "objectId")) {
+    const wanted = changes.objectId == null || changes.objectId === "" ? null : changes.objectId;
+    if (wanted === null) {
+      unlink = true;
+      delete changes.objectId;
+    } else {
+      const can = markObjectCan(project, markId, wanted);
+      if (!can.ok) throw modelError("markObjectRefused", { why: can.why });
+      changes.objectId = wanted;
+    }
+  }
+  const marks = project.marks.map((mark) => {
+    if (mark.id !== markId) return mark;
+    const next = { ...mark, ...changes };
+    return unlink ? markWithoutObject(next) : next;
+  });
   return { project: withProject(project, { marks }), mark: marks.find((mark) => mark.id === markId) };
 }
 
@@ -3560,7 +3825,13 @@ export function moveMarkOrder(project, markIds, move, options = {}) {
 //   — «Чем управляет»: это утверждение инженера про конкретные светильники, а
 //     не свойство розетки. Копия, которая молча повторяет чужие связи, дорисует
 //     в таблице то, чего никто не говорил.
-export const MARK_COPY_FIELDS = ["location", "original", ...MARK_DIMENSION_FIELDS];
+//   — связь с вещью: она **в списке**, но доезжает до копии редко и нарочно.
+//     Связь у вещи одна, и пока жив исходник, вещь занята — копия выходит без
+//     связи (`markObjectCan` отказывает, и поле просто не ставится). А вот
+//     «скопировал, удалил, вставил» — перенос прибора, и там связь доезжает:
+//     вещь освободилась. Молчаливого отказа здесь бояться нечего — связь видна
+//     на плане контуром вещи.
+export const MARK_COPY_FIELDS = ["location", "original", "objectId", ...MARK_DIMENSION_FIELDS];
 
 /**
  * Снимок метки для буфера обмена.
@@ -3580,6 +3851,11 @@ export function markSnapshot(project, markId) {
     location: typeof mark.location === "string" ? mark.location : "",
     original: typeof mark.original === "string" ? mark.original : "",
   };
+  // Связь с вещью — тем же правилом, что размеры: ключ в снимке есть всегда, а
+  // «связи нет» приходит честным `null`. Снимок — это буфер обмена, а не
+  // объект: в нём `null` ничего не дописывает ни одной метке, зато отсутствие
+  // ключа читалось бы как `undefined` и доехало бы до копии.
+  snapshot.objectId = markObjectId(mark);
   // Размеры читаются только через `markDimensions`: у метки из старого объекта
   // этих полей нет вовсе, и `undefined` в снимке доехал бы до копии.
   const sizes = markDimensions(mark);
@@ -3640,7 +3916,11 @@ export function pasteMark(project, snapshot, { schemeId, point } = {}) {
   if (kind === "line" && snapshot.closed === true) patch.closed = true;
   for (const field of MARK_COPY_FIELDS) {
     const value = snapshot[field];
-    if (value !== null && value !== undefined && value !== "") patch[field] = value;
+    if (value === null || value === undefined || value === "") continue;
+    // Вещь занята исходником — копия выходит без связи, и это не отказ, а
+    // правило: связь у вещи одна.
+    if (field === "objectId" && !markObjectCan(result.project, result.mark.id, value).ok) continue;
+    patch[field] = value;
   }
   // Про зажим у вставки своего слова нет, и оно ей не нужно: `markShapeAt`
   // двигает **всю** копию целиком, пока она не войдёт в план, — правило
@@ -4126,8 +4406,9 @@ export function addType(
     device,
   } = {},
 ) {
+  const mint = idMint(project);
   const type = {
-    id: newId(),
+    id: mint.next(),
     categoryId,
     code: normalizeCode(code, project),
     name: normalizeName(name),
@@ -4157,7 +4438,10 @@ export function addType(
   const record = deviceRecordFromEdit(device);
   if (record !== undefined) type.device = record;
   if (!findCategory(project, categoryId)) throw modelError("categoryNotFound");
-  return { project: withProject(project, { markTypes: [...project.markTypes, type] }), type };
+  return {
+    project: withProject(project, { markTypes: [...project.markTypes, type], counters: mint.counters }),
+    type,
+  };
 }
 
 export function updateType(project, typeId, patch = {}) {
@@ -4222,15 +4506,19 @@ export function deleteType(project, typeId) {
 }
 
 export function addCategory(project, { name, color, shape, lineStyle = null } = {}) {
+  const mint = idMint(project);
   const category = {
-    id: newId(),
+    id: mint.next(),
     name: normalizeName(name),
     color: String(color || FALLBACK_COLOR),
     shape: checkShape(shape, { allowNull: false }),
     lineStyle: checkLineStyle(lineStyle, { allowNull: true }),
     order: project.categories.length,
   };
-  return { project: withProject(project, { categories: [...project.categories, category] }), category };
+  return {
+    project: withProject(project, { categories: [...project.categories, category], counters: mint.counters }),
+    category,
+  };
 }
 
 export function updateCategory(project, categoryId, patch = {}) {
@@ -5047,8 +5335,12 @@ function normalizeColor(value, fallback) {
 export function addRoom(project, room) {
   const name = normalizeName(typeof room === "string" ? room : room && room.name);
   const wanted = typeof room === "object" && room ? room.color : null;
-  const created = { id: newId(), name, color: normalizeColor(wanted, nextRoomColor(project)) };
-  return { project: withProject(project, { rooms: [...project.rooms, created] }), room: created };
+  const mint = idMint(project);
+  const created = { id: mint.next(), name, color: normalizeColor(wanted, nextRoomColor(project)) };
+  return {
+    project: withProject(project, { rooms: [...project.rooms, created], counters: mint.counters }),
+    room: created,
+  };
 }
 
 export function updateRoom(project, roomId, patch = {}) {
@@ -5262,15 +5554,19 @@ export function addOutline(project, { schemeId, roomId, points } = {}) {
   // Смещение подписи — в пикселях плана, как у метки и у блока; угол — из
   // `LABEL_ANGLES`. У контуров, размеченных до этого, полей нет вовсе: пустое
   // смещение и нулевой угол — это и есть прежняя подпись в центре контура.
+  const mint = idMint(project);
   const outline = {
-    id: newId(),
+    id: mint.next(),
     schemeId,
     roomId,
     points: normalizeOutlinePoints(points),
     labelOffset: null,
     labelAngle: 0,
   };
-  return { project: withProject(project, { outlines: [...outlinesOf(project), outline] }), outline };
+  return {
+    project: withProject(project, { outlines: [...outlinesOf(project), outline], counters: mint.counters }),
+    outline,
+  };
 }
 
 const OUTLINE_PATCH_FIELDS = ["points", "roomId", "labelOffset", "labelAngle"];
@@ -5358,9 +5654,9 @@ export function schemeGuides(project, schemeId) {
   return scheme && Array.isArray(scheme.guides) ? scheme.guides : [];
 }
 
-function withGuides(project, schemeId, guides) {
+function withGuides(project, schemeId, guides, counters) {
   const schemes = project.schemes.map((scheme) => (scheme.id === schemeId ? { ...scheme, guides } : scheme));
-  return withProject(project, { schemes });
+  return withProject(project, counters ? { schemes, counters } : { schemes });
 }
 
 /**
@@ -5380,25 +5676,30 @@ function withGuides(project, schemeId, guides) {
 export function setSchemeGuides(project, schemeId, guides) {
   requireScheme(project, schemeId);
   const before = schemeGuides(project, schemeId);
+  const mint = idMint(project);
   const list = (Array.isArray(guides) ? guides : []).map((guide) => {
     if (!guide || !GUIDE_AXES.includes(guide.axis)) throw modelError("guideAxisUnknown");
     const at = clampFraction(Number(guide.at));
     if (!Number.isFinite(at)) throw modelError("guideAtInvalid");
-    return { id: guide.id || newId(), axis: guide.axis, at };
+    return { id: guide.id || mint.next(), axis: guide.axis, at };
   });
   const same =
     before.length === list.length &&
     before.every((guide, index) => guide.id === list[index].id && guide.axis === list[index].axis && guide.at === list[index].at);
   if (same) return { project, guides: before, changed: false };
-  return { project: withGuides(project, schemeId, list), guides: list, changed: true };
+  return { project: withGuides(project, schemeId, list, mint.counters), guides: list, changed: true };
 }
 
 export function addSchemeGuide(project, schemeId, { axis, at } = {}) {
   requireScheme(project, schemeId);
   if (!GUIDE_AXES.includes(axis)) throw modelError("guideAxisUnknown");
-  const guide = { id: newId(), axis, at: clampFraction(Number(at)) };
+  const mint = idMint(project);
+  const guide = { id: mint.next(), axis, at: clampFraction(Number(at)) };
   if (!Number.isFinite(guide.at)) throw modelError("guideAtInvalid");
-  return { project: withGuides(project, schemeId, [...schemeGuides(project, schemeId), guide]), guide };
+  return {
+    project: withGuides(project, schemeId, [...schemeGuides(project, schemeId), guide], mint.counters),
+    guide,
+  };
 }
 
 export function moveSchemeGuide(project, schemeId, guideId, at) {
@@ -5913,7 +6214,8 @@ export function addWall(project, { schemeId, aMm, bMm, thicknessMm } = {}) {
   const a = drawingPointMm(aMm);
   const b = drawingPointMm(bMm);
   if (a.x === b.x && a.y === b.y) throw modelError("wallPointsSame");
-  const wall = { id: newId(), schemeId, aMm: a, bMm: b, thicknessMm: wallThicknessMm(thicknessMm) };
+  const mint = idMint(project);
+  const wall = { id: mint.next(), schemeId, aMm: a, bMm: b, thicknessMm: wallThicknessMm(thicknessMm) };
   return { project: withProject(project, { walls: [...wallsOf(project), wall] }), wall };
 }
 
@@ -6910,8 +7212,9 @@ export function addOpening(
   if (!OPENING_KINDS.includes(kind)) throw modelError("openingKindUnknown");
   const height = drawingHeightMm(heightMm);
   if (height === null) throw modelError("drawingMmNotPositive");
+  const mint = idMint(project);
   const opening = {
-    id: newId(),
+    id: mint.next(),
     wallId,
     kind,
     atMm: drawingOffsetMm(atMm),
@@ -7026,8 +7329,9 @@ const TEMPLATE_SCHEME_OBJECT_KINDS = [
 // Свежие идентификаторы на каждый вызов — как у `defaultTemplate`: два объекта
 // не должны делить id справочника.
 export function schemeObjectKindTemplate() {
+  const mint = templateMint();
   return TEMPLATE_SCHEME_OBJECT_KINDS.map((key, index) => ({
-    id: newId(),
+    id: mint(),
     name: strings.schemeObjectKinds[key] || key,
     order: index,
   }));
@@ -7132,11 +7436,20 @@ function requireSchemeObjectKey(key) {
  */
 export function ensureSchemeObjectKinds(project) {
   if (schemeObjectKindsOf(project).length > 0) return { project, added: false };
-  return { project: withProject(project, { schemeObjectKinds: schemeObjectKindTemplate() }), added: true };
+  // Номера шаблона свои, с единицы, — в объекте они обязаны стать номерами
+  // его кассы, иначе справочник видов занял бы номера, которые касса потом
+  // выдала бы метке.
+  const mint = idMint(project);
+  const schemeObjectKinds = schemeObjectKindTemplate().map((item) => ({ ...item, id: mint.next() }));
+  return {
+    project: withProject(project, { schemeObjectKinds, counters: mint.counters }),
+    added: true,
+  };
 }
 
 export function addSchemeObjectKind(project, { name } = {}) {
-  const item = { id: newId(), name: normalizeName(name), order: schemeObjectKindsOf(project).length };
+  const mint = idMint(project);
+  const item = { id: mint.next(), name: normalizeName(name), order: schemeObjectKindsOf(project).length };
   return {
     project: withProject(project, { schemeObjectKinds: [...schemeObjectKindsOf(project), item] }),
     schemeObjectKind: item,
@@ -7257,8 +7570,9 @@ export function addSchemeObject(
   if (catalogKey) requireSchemeObjectKey(catalogKey);
   else if (!findSchemeObjectKind(project, kindId)) throw modelError("schemeObjectKindNotFound");
   if (!SCHEME_OBJECT_SHAPES.includes(shape)) throw modelError("schemeObjectShapeUnknown");
+  const mint = idMint(project);
   const object = {
-    id: newId(),
+    id: mint.next(),
     schemeId,
     ...(catalogKey ? { catalogKey } : { kindId }),
     shape,
@@ -7267,7 +7581,13 @@ export function addSchemeObject(
     heightAboveFloorMm: drawingOffsetMm(heightAboveFloorMm),
     ...schemeObjectMirrorField(shape, mirror),
   };
-  return { project: withProject(project, { schemeObjects: [...schemeObjectsOf(project), object] }), schemeObject: object };
+  return {
+    project: withProject(project, {
+      schemeObjects: [...schemeObjectsOf(project), object],
+      counters: mint.counters,
+    }),
+    schemeObject: object,
+  };
 }
 
 // Чем вещь названа после правки. Ключ каталога и вид справочника — два
@@ -7329,7 +7649,337 @@ export function deleteSchemeObject(project, objectId) {
   const object = findSchemeObject(project, objectId);
   if (!object) throw modelError("schemeObjectNotFound");
   const schemeObjects = schemeObjectsOf(project).filter((item) => item.id !== objectId);
-  return { project: withProject(project, { schemeObjects }), deleted: object };
+  // Вещь ушла — связь с ней снята, а метка осталась **там, где стояла**
+  // (R01.4). Стоять ей есть где без единой правки: `mark.points` у связанной
+  // метки не переписывается никогда, и место она берёт у вещи только пока
+  // вещь есть. Электрика — номер, аксессуар, связи, сценарии — цела: носитель
+  // всего этого метка, а не вещь.
+  const marks = marksWithoutObject(project, new Set([objectId]));
+  return {
+    project: withProject(project, marks ? { schemeObjects, marks } : { schemeObjects }),
+    deleted: object,
+  };
+}
+
+// ——— связь метки и вещи чертежа (R01, история 1) ——————————————————————————
+//
+// Слова заказчика: «Давай подумаем про объединение меток и объектов чертежа
+// (ТВ, вытяжка, бра на шкафе и т.д.), что бы их нормально отрисовывать,
+// располагать, поворачивать и т.д. Может просто связь объекта и связи, а может
+// ещё что придумаешь».
+//
+// Придумано и выбрано на брифинге три решения, и держится на них всё
+// остальное:
+//
+//   1. **Связь — одно поле у метки** (`mark.objectId`), без обратной ссылки у
+//      вещи. Два источника правды об одной связи расходятся на первой же
+//      правке, и тогда вещь считала бы себя связанной с меткой, которая о ней
+//      не знает. Поле необязательное: у метки, которую не связывали, его нет
+//      вовсе (G68).
+//   2. **Место связанной метки считается, а не переписывается** — резолвер
+//      `markPlace`. Переписывай мы `mark.points` на каждую правку вещи, объект
+//      менялся бы от сдвига мебели, а у готовых объектов доли плана поехали бы
+//      на первом же открытии.
+//   3. **Носитель электрики остаётся меткой.** Ключ устройства — `mark.id` —
+//      стоит примерно в тысяче мест: адрес аксессуара, `buildHomeSpec`,
+//      `simLive`, сценарии, привязки логики, свет в объёме, связи,
+//      оборудование, поиск, таблицы. «Вещь-устройство» строится как **вещь
+//      плюс связанная метка**, и тогда ни одна из этих ссылок не меняется, а
+//      человек видит один прибор.
+//
+// Снаружи поле не читает никто: хранение, правила занятости и порядок обхода
+// прячутся за четырьмя дверьми ниже.
+
+/**
+ * Вещь чертежа, с которой связана метка, или `null`.
+ *
+ * Единственная дверь к полю. У метки прежней разметки его нет вовсе, и
+ * отсутствие приходит тем же `null`, что снятая связь.
+ */
+export function markObjectId(mark) {
+  const value = mark ? mark.objectId : null;
+  if (value == null || value === "") return null;
+  return typeof value === "string" || typeof value === "number" ? value : null;
+}
+
+/**
+ * Связанная метка вещи или `null`.
+ *
+ * Считается **обходом меток**, а не обратной ссылкой: обратной ссылки в файле
+ * нет нарочно (решение 1 выше). Обход идёт в порядке массива — порядке
+ * постановки, — поэтому ответ устойчив: связь у вещи одна, и первая же метка с
+ * этим номером и есть она.
+ */
+export function markOfObject(project, objectId) {
+  if (!project || !objectId) return null;
+  return project.marks.find((mark) => markObjectId(mark) === objectId) || null;
+}
+
+/**
+ * Можно ли связать метку с вещью: `{ok: true}` или `{ok: false, why}`.
+ *
+ * `why` — готовая строка человеку: по ней гаснет команда и пишется причина. «Не
+ * показать команду молча» — это требование истории 1.3: инженер должен узнать,
+ * **почему** нельзя, а не гадать.
+ *
+ * Правила три, и все три про целость пары:
+ *
+ *   — **вещь другой схемы** связана быть не может: метка стоит на своём листе,
+ *     и место с чужого листа означало бы прибор, которого на этом листе нет;
+ *   — **занятая вещь**: связь у вещи одна. Иначе `markOfObject` перестал бы
+ *     отвечать, две метки спорили бы за один габарит, а в списке у одного
+ *     прибора появилось бы две строки — ровно то, от чего пара и заводится;
+ *   — **комментарий** не связывается ни с чем: это надпись на чертеже, а не
+ *     изделие (`markIsComment`), и в списках, таблицах и подсчётах его нет.
+ *     То же правило у привязки к стене (`markWallBindable`) и у блока.
+ */
+export function markObjectCan(project, markId, objectId) {
+  const mark = findMark(project, markId);
+  if (!mark) return { ok: false, why: strings.markObject.whyNoMark };
+  if (markIsComment(mark)) return { ok: false, why: strings.markObject.whyComment };
+  const object = findSchemeObject(project, objectId);
+  if (!object) return { ok: false, why: strings.markObject.whyNoObject };
+  if (object.schemeId !== mark.schemeId) return { ok: false, why: strings.markObject.whyOtherScheme };
+  const taken = markOfObject(project, object.id);
+  if (taken && taken.id !== mark.id) {
+    return { ok: false, why: text("markObject.whyTaken", { label: markLabel(project, taken) }) };
+  }
+  return { ok: true };
+}
+
+/**
+ * Поставить или снять связь: `{project, mark}`. `null` — снять.
+ *
+ * Снятая связь **убирает поле**, а не обнуляет его: метка без связи и метка со
+ * снятой связью обязаны читаться одинаково, иначе упаковка дописала бы старому
+ * объекту то, чего в нём не было (G68; то же правило у привязки к стене).
+ *
+ * Связь уже такая — **тот же** объект по ссылке: ни `updatedAt`, ни лишнего
+ * шага истории эта тишина не стоит.
+ */
+export function setMarkObject(project, markId, objectId) {
+  const mark = requireMark(project, markId);
+  const wanted = objectId == null || objectId === "" ? null : objectId;
+  if (markObjectId(mark) === wanted) return { project, mark };
+  return updateMark(project, markId, { objectId: wanted });
+}
+
+/**
+ * Запись метки без связи: поле **удаляется**. Дверь для слияния и для правок,
+ * которые снимают связь не через `setMarkObject` (ушла вещь, ушла схема) —
+ * какое поле составляет связь, знает модель, а не они.
+ */
+export function markWithoutObject(mark) {
+  if (!mark || !Object.prototype.hasOwnProperty.call(mark, "objectId")) return mark;
+  const rest = { ...mark };
+  delete rest.objectId;
+  return rest;
+}
+
+// Метки без связи с ушедшими вещами. `null` — связи ни у одной, и список меток
+// в патч не идёт: правка на пустом месте стоила бы `updatedAt` каждому
+// удалению вещи.
+function marksWithoutObject(project, goneIds) {
+  if (!project || goneIds.size === 0) return null;
+  let touched = false;
+  const marks = project.marks.map((mark) => {
+    const linked = markObjectId(mark);
+    if (linked === null || !goneIds.has(linked)) return mark;
+    touched = true;
+    return markWithoutObject(mark);
+  });
+  return touched ? marks : null;
+}
+
+/**
+ * **Место прибора — один резолвер, и своей арифметики к нему не заводить.**
+ *
+ * `{points, atMm, turnDeg, sizes, heightAboveFloor, object, from, bridged}`:
+ *
+ *   `points`           — доли плана, где стоит знак;
+ *   `atMm`             — то же в миллиметрах чертежа или `null`, если моста нет;
+ *   `turnDeg`          — угол вещи; `null` у метки: **своего угла у метки нет
+ *                        вовсе** (R05.1), и нового поля под него не заводится;
+ *   `sizes`            — размеры в осях метки, той же формы, что у `markSizes`
+ *                        (`<поле>`, `<поле>Own`, `<поле>From`);
+ *   `heightAboveFloor` — посадка в осях метки, то есть **середина** прибора;
+ *   `object`           — сама вещь или `null`;
+ *   `from`             — `"object"` или `"mark"`;
+ *   `bridged`          — пришли ли `points` от вещи.
+ *
+ * **Без связи ответ равен сегодняшнему**, и это главное его свойство: точки —
+ * точки метки, размеры — `markSizes` со всей лестницей наследования, угла нет.
+ * Поэтому кадр объекта без связей не меняется ни на вызов (проверяется
+ * журналом вызовов `ctx`).
+ *
+ * **Со связью место, габарит, угол и высоту даёт вещь**, с переводом осей: у
+ * метки `length` идёт вдоль поверхности, `depth` — от неё, `width` — вверх, а
+ * `heightAboveFloor` — **середина**; у вещи это `widthMm`, `depthMm`,
+ * `heightMm` и **низ** (`heightAboveFloorMm`). Отсюда середина = низ + высота
+ * / 2. Высоты у вещи может не быть вовсе («во всю высоту помещения») — тогда
+ * не бывает и середины, и ответ честный `null`, как у метки без высоты.
+ *
+ * **Моста мм ↔ доли может не быть** (нет калибровки или привязки начала
+ * координат): тогда чертёж на подложку не ложится вовсе, вещь на плане не
+ * рисуется, и знак остаётся там, где стоит сама метка — `bridged: false`.
+ * Выдумывать ему место нельзя: доли плана без моста не считаются.
+ *
+ * **Полоса** (`shape: "polyline"`) угла не имеет и в объекте (`turnDeg` у неё
+ * нет), поэтому и здесь его нет; место — середина её габарита, а габарит берёт
+ * ширину полосы и её протяжённость. Связать с полосой разрешено: «Любая вещь»
+ * — решение брифинга, а столешница с подсветкой — обычное дело.
+ */
+export function markPlace(project, mark) {
+  const own = {
+    points: mark && Array.isArray(mark.points) ? mark.points : [],
+    atMm: mark && Array.isArray(mark.points) && mark.points.length > 0
+      ? planFractionToMm(project, mark.schemeId, mark.points[0])
+      : null,
+    turnDeg: null,
+    sizes: markSizes(project, mark),
+    object: null,
+    from: "mark",
+    bridged: false,
+  };
+  own.heightAboveFloor = own.sizes.heightAboveFloor;
+  const object = mark ? findSchemeObject(project, markObjectId(mark)) : null;
+  if (!object || object.schemeId !== mark.schemeId) return own;
+
+  const corners = schemeObjectCorners(object);
+  // У прямоугольника место записано серединой — его и берём, а не считаем по
+  // углам: углы округлены до миллиметра порознь, и обратный счёт давал бы
+  // полмиллиметра разницы на пустом месте. У полосы середины не записано.
+  const atMm = object.shape === "polyline" ? schemeObjectMiddleMm(corners) : drawingPointMm(object.atMm);
+  const heightMm = typeof object.heightMm === "number" ? object.heightMm : null;
+  const bottomMm = Number(object.heightAboveFloorMm || 0);
+  const sizes = {};
+  const spans = schemeObjectSpansMm(object, corners);
+  const values = {
+    length: spans.widthMm,
+    depth: spans.depthMm,
+    width: heightMm,
+    heightAboveFloor: heightMm === null ? null : bottomMm + heightMm / 2,
+  };
+  for (const field of MARK_DIMENSION_FIELDS) {
+    sizes[field] = values[field];
+    // Габарит вещи — не «своё число метки»: в карточке он виден как
+    // унаследованный, и правится он у вещи. Ступень лестницы называется
+    // `"object"` и стоит выше всех прочих.
+    sizes[field + "Own"] = false;
+    sizes[field + "From"] = values[field] === null ? null : "object";
+  }
+  // **Место знака вещь даёт только точечной метке.** У линии и у блока форма
+  // своя — её провёл человек, — и свести ломаную ленты к середине шкафа
+  // значило бы стереть его работу; у линии в одну вершину и кадра-то нет
+  // (`MARK_LINE_MIN_POINTS`). Габарит, угол и высоту такая метка берёт у вещи
+  // наравне с точечной: это про прибор, а не про рисунок.
+  const single = mark.kind === "point" && own.points.length <= 1;
+  const fraction = single ? planMmToFraction(project, mark.schemeId, atMm) : null;
+  return {
+    points: fraction ? [fraction] : own.points,
+    atMm,
+    turnDeg: object.shape === "polyline" ? null : schemeObjectTurnDeg(object.turnDeg),
+    sizes,
+    heightAboveFloor: sizes.heightAboveFloor,
+    object,
+    from: "object",
+    bridged: Boolean(fraction),
+  };
+}
+
+// Середина габарита по углам — в целых миллиметрах чертежа, как всё в нём.
+function schemeObjectMiddleMm(corners) {
+  if (corners.length === 0) return { x: 0, y: 0 };
+  const xs = corners.map((point) => point.x);
+  const ys = corners.map((point) => point.y);
+  return {
+    x: Math.round((Math.min(...xs) + Math.max(...xs)) / 2),
+    y: Math.round((Math.min(...ys) + Math.max(...ys)) / 2),
+  };
+}
+
+// Длина и глубина вещи в её собственных осях: у прямоугольника записанные
+// числа, у полосы — протяжённость по углам и её ширина.
+function schemeObjectSpansMm(object, corners) {
+  if (object.shape !== "polyline") {
+    return { widthMm: Number(object.widthMm), depthMm: Number(object.depthMm) };
+  }
+  let length = 0;
+  for (let index = 1; index < corners.length; index += 1) {
+    length += Math.hypot(corners[index].x - corners[index - 1].x, corners[index].y - corners[index - 1].y);
+  }
+  return { widthMm: Math.round(length), depthMm: Number(object.depthMm) };
+}
+
+// ——— вещь становится устройством (R02.1–R02.3, история 7в) ————————————————
+//
+// Направление выбрал заказчик: «Вещь можно сделать устройством», «Любая вещь»,
+// «Вещь берёт тип из справочника». Поэтому команда есть у **всякой** вещи
+// каталога, тип человек выбирает из справочника типов объекта, а сборка заводит
+// метку этого типа на месте вещи и связывает их — одним действием, без
+// рисования метки руками.
+//
+// Второго носителя электрики при этом не появляется: устройство — это по-
+// прежнему метка, а вещь даёт ей форму. Обозначение и номер выдаются обычными
+// правилами нумерации типа (`addMark`), и отменяется всё одним шагом истории,
+// потому что одна правка объекта.
+
+/**
+ * Сделать вещь устройством: `{project, mark}` — метка выбранного типа на месте
+ * вещи, связанная с ней.
+ *
+ * Точки метки — середина вещи. Место всё равно считается у вещи резолвером
+ * (`markPlace`), и записанная точка нужна для другого: по ней работают
+ * автоматика помещения и привязки к стене, и по ней метка остаётся там, где
+ * стояла, если вещь удалят (R01.4).
+ *
+ * **Нет моста мм ↔ доли — отказ вслух.** Без калибровки плана и привязки
+ * начала координат доли плана не считаются, и класть метку «куда-нибудь»
+ * нельзя: человек увидел бы прибор не там, где стоит вещь. Это тот же принцип
+ * «догадку показывают, а не применяют».
+ */
+export function objectDeviceMake(project, objectId, typeId) {
+  const object = findSchemeObject(project, objectId);
+  if (!object) throw modelError("schemeObjectNotFound");
+  const type = requireType(project, typeId);
+  const taken = markOfObject(project, object.id);
+  if (taken) throw modelError("markObjectRefused", { why: text("markObject.whyTaken", { label: markLabel(project, taken) }) });
+  const corners = schemeObjectCorners(object);
+  const atMm = object.shape === "polyline" ? schemeObjectMiddleMm(corners) : object.atMm;
+  const kind = typeKindOf(project, type.id);
+  // Линейному типу нужна форма, а не точка: лента по фасаду шкафа проводится
+  // **по самой вещи** — вдоль её лица, — и человек её потом правит, как любой
+  // черновик. Вершины берутся из геометрии вещи, а не гадаются: у
+  // прямоугольника это передняя кромка габарита, у полосы — её концы.
+  const line =
+    object.shape === "polyline"
+      ? [corners[0], corners[corners.length - 1]]
+      : [corners[0], corners[1]];
+  const wanted = kind === "line" ? line : [atMm];
+  const points = [];
+  for (const value of wanted) {
+    const fraction = planMmToFraction(project, object.schemeId, value);
+    if (!fraction) throw modelError("objectDeviceNoPlan");
+    points.push(fraction);
+  }
+  const added = addMark(project, { schemeId: object.schemeId, typeId: type.id, kind, points });
+  const linked = setMarkObject(added.project, added.mark.id, object.id);
+  return { project: linked.project, mark: linked.mark, schemeObject: object };
+}
+
+/**
+ * Убрать устройство у вещи: `{project, deleted}` — связь снята, метка удалена
+ * ровно как её удаление (группы, связи, оборудование и привязки логики уходят
+ * по правилам `deleteMark`). Вещь остаётся на чертеже.
+ *
+ * Устройства у вещи нет — **тот же** объект и `deleted: null`.
+ */
+export function objectDeviceDrop(project, objectId) {
+  const object = findSchemeObject(project, objectId);
+  if (!object) throw modelError("schemeObjectNotFound");
+  const mark = markOfObject(project, object.id);
+  if (!mark) return { project, deleted: null };
+  return { project: deleteMark(project, mark.id).project, deleted: mark };
 }
 
 // ——— чертёж: высота помещения ——————————————————————————————————————————
@@ -8086,7 +8736,8 @@ export function splitWall(project, wallId, atMm) {
     y: Math.round(Number(wall.aMm.y) + vectors.u.y * at) || 0,
   };
   const first = { ...wall, bMm: point };
-  const second = { ...wall, id: newId(), aMm: point };
+  const mint = idMint(project);
+  const second = { ...wall, id: mint.next(), aMm: point };
   const firstLength = wallLengthMm(first);
   const secondLength = wallLengthMm(second);
   // Отступы — от начала своего куска; округление точки деления сдвигает длины
@@ -9960,7 +10611,7 @@ export function applyRoomOutlines(project, schemeId) {
 export function ensureProjectKey(project) {
   if (!project) return { project, changed: false };
   if (typeof project.key === "string" && project.key) return { project, changed: false };
-  return { project: { ...project, key: newId() }, changed: true };
+  return { project: { ...project, key: newStorageId() }, changed: true };
 }
 
 export function updateProject(project, patch = {}) {
@@ -10114,6 +10765,275 @@ export function migrateTypeKinds(project) {
  * у того, где меток больше; у меток остальных сменится приставка подписи.
  * Из двух путей, какими тип попадал в объект, так получиться не могло.
  */
+// ——— перенумерация: uuid → номера (G08, G09, G11) ———————————————————————————
+
+// Ссылка непростой формы: дерево блоков сценария. `markId` и `scenarioId`
+// лежат в нём на любой глубине, и обход идёт **по значению**, а не по формам
+// блоков: форму ведёт `scenarioTree.js`, а ссылку переписывают здесь — ровно
+// так же, как `scenarioMarkRefs` собирает её при удалении метки.
+function idsMovedTree(value, moves) {
+  if (Array.isArray(value)) {
+    let out = value;
+    for (let index = 0; index < value.length; index += 1) {
+      const next = idsMovedTree(value[index], moves);
+      if (next === value[index]) continue;
+      if (out === value) out = [...value];
+      out[index] = next;
+    }
+    return out;
+  }
+  if (!value || typeof value !== "object") return value;
+  let out = value;
+  for (const key of Object.keys(value)) {
+    const moved = moves[key] ? moves[key].get(value[key]) : undefined;
+    const next = moved === undefined ? idsMovedTree(value[key], moves) : moved;
+    if (next === value[key]) continue;
+    if (out === value) out = { ...value };
+    out[key] = next;
+  }
+  return out;
+}
+
+// Ключ принятого предупреждения: `код:о чём`. «О чём» — либо сам
+// идентификатор, либо составной признак набора (`sharedShape:круг#тип,тип`,
+// `closeColors:кат+кат`). Разбирается по разделителям, и переписывается только
+// то, что в точности равно прежнему номеру: имя знака и имя изображения стоят
+// в тех же строках и трогать их нельзя.
+function idsMovedKey(key, all) {
+  const at = String(key == null ? "" : key).indexOf(":");
+  if (at < 0) return key;
+  const head = key.slice(0, at + 1);
+  const tail = key.slice(at + 1);
+  let touched = false;
+  const moved = tail
+    .split(/([,+#])/)
+    .map((piece) => {
+      const next = all.get(piece);
+      if (next === undefined) return piece;
+      touched = true;
+      return next;
+    })
+    .join("");
+  return touched ? head + moved : key;
+}
+
+/**
+ * **Номера вместо uuid: перенумеровать объект целиком** (G08, G11).
+ *
+ * Слова заказчика: «Давай переделаем метки на инкремент, начиная с 1, вместо
+ * UUID… Идентификаторы меток мигрируй. Понимаю риск, что в сценариях оно
+ * сломается».
+ *
+ * Переписываются **все** идентификаторы и **каждая** ссылка на них: таблица
+ * `ID_OWNERS` плюс четыре ссылки непростой формы — «чем управляет»
+ * (`mark.controls`, где элемент бывает и строкой, и `{id, channel}`), дверь
+ * аксессуара (`mark.device.doorId`), дерево блоков сценария и ключи принятых
+ * предупреждений. Пропущенное место — это не «почти перенумеровали», это
+ * объект, у которого розетка управляет чужим светильником.
+ *
+ * **Не переписываются** `project.id`, `project.key` и `scheme.imageId`: это
+ * ключи в хранилищах браузера, общих для **всех** объектов (G08.1). Два
+ * объекта с номером 1 затёрли бы друг друга, а картинки — чужие подложки.
+ *
+ * **Ссылка в никуда остаётся ссылкой в никуда.** Значение, которого нет среди
+ * прежних идентификаторов, не трогается вовсе — иначе битая ссылка могла бы
+ * случайно совпасть с чьим-то новым номером и ожить чужой. По этой же причине
+ * цел встроенный тип комментария (`COMMENT_TYPE_ID`): его в коллекциях нет, и
+ * `mark.typeId: "comment"` проходит насквозь.
+ *
+ * **Идемпотентна** (G11.1): объект, где у каждой сущности уже свой номер,
+ * возвращается **тем же** по ссылке, и второе открытие его не переписывает.
+ * Перенумерация начинается, когда номера нет хоть у одной сущности или когда
+ * один номер занят дважды (так бывает у шаблона, собранного вне объекта: там
+ * нумерация своя). Тогда номера получают **все** — и те, у кого они уже были:
+ * раздавать поверх занятых значило бы сшить две сущности в одну.
+ *
+ * **Цена, принятая заказчиком:** адрес аксессуара считается из номера метки, и
+ * адреса, вписанные числами прямо в текст его JS-сценариев, после
+ * перенумерации указывают в пустоту. Он выбрал это сознательно, отвергнув и
+ * сохранение прежних адресов, и список «было → стало»; дом при этом обязан
+ * идти, а ненайденный адрес — называться в журнале.
+ *
+ * `{project, changed, renumbered}` — сколько идентификаторов выдано заново.
+ */
+export function idsMigrate(project) {
+  if (!project || typeof project !== "object") return { project, changed: false, renumbered: 0 };
+  // Нужна ли перенумерация: номер не у всех или один номер занят дважды.
+  const seen = new Set();
+  let need = false;
+  for (const owner of ID_OWNERS) {
+    for (const item of idOwnList(project, owner)) {
+      for (const entity of [item, ...idNestedList(item, owner)]) {
+        const number = idNumberOf(entity && entity.id);
+        if (number === null || seen.has(number)) need = true;
+        else seen.add(number);
+      }
+    }
+  }
+  if (!need) {
+    // Нумеровать нечего — осталось довести счётчик до занятого номера, если он
+    // отстал (объект из ссылки, собранный руками, слитый из двух). Не отстал —
+    // **тот же** объект: ни правки, ни шага истории эта тишина не стоит.
+    const floor = idFloor(project);
+    const counter = Number(project.counters && project.counters[ID_COUNTER_KEY]) || 0;
+    if (counter >= floor) return { project, changed: false, renumbered: 0 };
+    return {
+      project: { ...project, counters: { ...project.counters, [ID_COUNTER_KEY]: floor } },
+      changed: true,
+      renumbered: 0,
+    };
+  }
+
+  // Номера выдаются с единицы: прежние номера не сохраняются ни одного, и
+  // метки — первой коллекцией в таблице — получают 1…N подряд.
+  let last = 0;
+  const next = () => {
+    last += 1;
+    return String(last);
+  };
+  const maps = new Map();
+  const all = new Map();
+  const twice = new Set();
+  for (const owner of ID_OWNERS) {
+    const map = new Map();
+    maps.set(owner.key, map);
+    for (const item of idOwnList(project, owner)) {
+      for (const entity of [item, ...idNestedList(item, owner)]) {
+        const was = entity && entity.id;
+        if (was == null || was === "" || map.has(was)) continue;
+        const fresh = next();
+        map.set(was, fresh);
+        // Общая таблица — для ключей принятых предупреждений, где коллекция по
+        // значению не названа. Номер, занятый в двух коллекциях (так бывает
+        // только у объекта, собранного руками), в общую таблицу не идёт:
+        // угадывать, чей он, нельзя.
+        if (all.has(was)) twice.add(was);
+        all.set(was, fresh);
+      }
+    }
+  }
+  for (const was of twice) all.delete(was);
+
+  const patch = idsRewrite(project, maps, all);
+  patch.counters = { ...project.counters, [ID_COUNTER_KEY]: last };
+  return { project: { ...project, ...patch }, changed: true, renumbered: last };
+}
+
+/**
+ * **Движок перенумерации: один проход по объекту, одна таблица.** Отдаёт патч —
+ * только те коллекции, которые есть у объекта (пустых полей старому объекту не
+ * дописывается, G68).
+ *
+ * `maps` — `Map<коллекция, Map<было, стало>>` из таблицы `ID_OWNERS`; `all` —
+ * та же замена без разбора по коллекциям, для ключей принятых предупреждений.
+ *
+ * Двух таких проходов в сборке быть не должно: `idsMigrate` зовёт его на весь
+ * объект, `idsReplace` — на поимённо названные номера, и переписывают они
+ * одно и то же место.
+ */
+function idsRewrite(project, maps, all) {
+  const moveBy = (collection, value) => {
+    const map = maps.get(collection);
+    const moved = map ? map.get(value) : undefined;
+    return moved === undefined ? value : moved;
+  };
+  const patch = {};
+  for (const owner of ID_OWNERS) {
+    const list = idOwnList(project, owner);
+    if (list.length === 0) continue;
+    patch[owner.key] = list.map((item) => {
+      const fresh = { ...item, id: moveBy(owner.key, item.id) };
+      for (const [field, collection] of Object.entries(owner.refs || {})) {
+        if (!Object.prototype.hasOwnProperty.call(item, field) || item[field] == null) continue;
+        fresh[field] = moveBy(collection, item[field]);
+      }
+      for (const [field, collection] of Object.entries(owner.lists || {})) {
+        if (!Array.isArray(item[field])) continue;
+        fresh[field] = item[field].map((value) => moveBy(collection, value));
+      }
+      if (owner.nested && Array.isArray(item[owner.nested])) {
+        fresh[owner.nested] = item[owner.nested].map((child) => ({
+          ...child,
+          id: moveBy(owner.key, child.id),
+        }));
+      }
+      return fresh;
+    });
+  }
+
+  // «Чем управляет» и дверь аксессуара — внутри метки, поимённо: элемент
+  // списка связей бывает и строкой, и `{id, channel}`, и пересборка его из
+  // одних идентификаторов теряла бы канал.
+  if (Array.isArray(patch.marks)) {
+    patch.marks = patch.marks.map((mark) => {
+      const fresh = { ...mark };
+      if (Array.isArray(mark.controls)) {
+        fresh.controls = mark.controls.map((item) =>
+          typeof item === "string"
+            ? moveBy("marks", item)
+            : item && typeof item === "object"
+              ? { ...item, id: moveBy("marks", item.id) }
+              : item,
+        );
+      }
+      if (deviceObject(mark.device) && mark.device.doorId) {
+        fresh.device = { ...mark.device, doorId: moveBy("openings", mark.device.doorId) };
+      }
+      return fresh;
+    });
+  }
+
+  // Дерево блоков сценария: `markId` и `scenarioId` на любой глубине.
+  if (Array.isArray(patch.scenarios)) {
+    const moves = { markId: maps.get("marks"), scenarioId: maps.get("scenarios") };
+    patch.scenarios = patch.scenarios.map((scenario) =>
+      scenario && scenario.kind === "block" && scenario.targets
+        ? { ...scenario, targets: idsMovedTree(scenario.targets, moves) }
+        : scenario,
+    );
+  }
+
+  // Принятые предупреждения: ответ «так и задумано» привязан к ключу, а в ключе
+  // стоят идентификаторы. Не перепиши их — и человек получил бы заново весь
+  // список вопросов, на которые уже ответил.
+  const accepted = acceptedOf(project);
+  if (accepted.length > 0 && all.size > 0) {
+    patch.accepted = accepted.map((record) => {
+      const key = idsMovedKey(record.key, all);
+      return key === record.key ? record : { ...record, key };
+    });
+  }
+  return patch;
+}
+
+/**
+ * **Переселить названные номера внутри объекта**: `{project, changed}`.
+ *
+ * Дверь для слияния. Два участника работают от **одного** счётчика, и, поставив
+ * каждый свою метку, оба получают один номер: уникальность номеров держится
+ * счётчиком объекта, а счётчик у разошедшихся копий один. Сложи такие копии по
+ * `id` — и метка напарника молча исчезнет, слившись с нашей. Поэтому одна из
+ * двух сущностей переезжает на свободный номер, и переезжает **со всеми**
+ * ссылками на себя: тем же проходом, которым нумерует `idsMigrate`.
+ *
+ * Номер человеку не виден (видно обозначение, а оно остаётся), поэтому переезд
+ * идёт молча и в отчёт слияния не попадает — в отличие от **номера метки**,
+ * который виден и о котором слияние говорит вслух.
+ *
+ * `replacements` — `Map<было, стало>` или обычный объект. Нечего переселять —
+ * **тот же** объект по ссылке.
+ */
+export function idsReplace(project, replacements) {
+  if (!project || typeof project !== "object") return { project, changed: false };
+  const all = replacements instanceof Map ? new Map(replacements) : new Map(Object.entries(replacements || {}));
+  for (const [was, now] of all) if (was === now || now == null) all.delete(was);
+  if (all.size === 0) return { project, changed: false };
+  // Номер уникален по всем видам сразу, поэтому разбор по коллекциям здесь не
+  // нужен: одна и та же таблица отвечает каждой.
+  const maps = new Map(ID_OWNERS.map((owner) => [owner.key, all]));
+  return { project: { ...project, ...idsRewrite(project, maps, all) }, changed: true };
+}
+
 /**
  * Умолчания размеров доходят до справочника, заведённого раньше них.
  *
@@ -10300,11 +11220,13 @@ const TEMPLATE_EQUIPMENT_TYPES = [
   "enclosure",
 ];
 
-// Свежие идентификаторы на каждый вызов — как у `defaultTemplate`: два объекта
-// не должны делить id справочника.
+// Свежие номера на каждый вызов — как у `defaultTemplate`: два объекта не
+// должны делить id справочника. Номера свои внутри шаблона; попав в объект,
+// они раздаются заново его счётчиком.
 export function equipmentTypeTemplate() {
+  const mint = templateMint();
   return TEMPLATE_EQUIPMENT_TYPES.map((key, index) => ({
-    id: newId(),
+    id: mint(),
     name: strings.equipmentTypes[key] || key,
     order: index,
   }));
@@ -10329,9 +11251,13 @@ export function findEquipmentType(project, typeId) {
 }
 
 export function addEquipmentType(project, { name } = {}) {
-  const item = { id: newId(), name: normalizeName(name), order: equipmentTypesOf(project).length };
+  const mint = idMint(project);
+  const item = { id: mint.next(), name: normalizeName(name), order: equipmentTypesOf(project).length };
   return {
-    project: withProject(project, { equipmentTypes: [...equipmentTypesOf(project), item] }),
+    project: withProject(project, {
+      equipmentTypes: [...equipmentTypesOf(project), item],
+      counters: mint.counters,
+    }),
     equipmentType: item,
   };
 }
@@ -10414,15 +11340,19 @@ function equipmentTypeRef(project, value) {
 }
 
 export function addEquipment(project, { name, vendor, code, typeId } = {}) {
+  const mint = idMint(project);
   const item = {
-    id: newId(),
+    id: mint.next(),
     name: normalizeName(name),
     vendor: equipmentText(vendor),
     code: equipmentText(code),
     typeId: equipmentTypeRef(project, typeId),
     order: equipmentOf(project).length,
   };
-  return { project: withProject(project, { equipment: [...equipmentOf(project), item] }), equipment: item };
+  return {
+    project: withProject(project, { equipment: [...equipmentOf(project), item], counters: mint.counters }),
+    equipment: item,
+  };
 }
 
 export function updateEquipment(project, equipmentId, patch = {}) {
@@ -10569,14 +11499,18 @@ export function addPlacement(project, { equipmentId, markId, links } = {}) {
   // Оборудование ставят в точку, а не в надпись: лист оборудования — это
   // закупка, и комментария в нём нет (G167).
   if (markIsComment(mark)) throw modelError("commentNoEquipment");
+  const mint = idMint(project);
   const placement = {
-    id: newId(),
+    id: mint.next(),
     equipmentId,
     markId,
     links: placementLinks(project, links, markId),
   };
   return {
-    project: withProject(project, { placements: [...placementsOf(project), placement] }),
+    project: withProject(project, {
+      placements: [...placementsOf(project), placement],
+      counters: mint.counters,
+    }),
     placement,
   };
 }
@@ -10772,7 +11706,8 @@ export function addScenario(project, scenario = {}) {
   const source = deviceObject(scenario) ? scenario : {};
   if (!SCENARIO_KINDS.includes(source.kind)) throw modelError("scenarioKindUnknown");
   const list = scenariosList(project);
-  const id = typeof source.id === "string" && source.id && !findScenario(project, source.id) ? source.id : newId();
+  const mint = idMint(project);
+  const id = typeof source.id === "string" && source.id && !findScenario(project, source.id) ? source.id : mint.next();
   const base = {
     id,
     kind: source.kind,
@@ -10785,7 +11720,10 @@ export function addScenario(project, scenario = {}) {
     ...(source.kind === "block" ? { targets: [] } : { source: "", origin: SCENARIO_ORIGINS[0], fileName: "" }),
   };
   const created = scenarioFields(source, base);
-  return { project: withScenarios(project, [...list, created]), scenario: created };
+  return {
+    project: withScenarios(project, [...list, created], { counters: mint.counters }),
+    scenario: created,
+  };
 }
 
 /**
@@ -10860,15 +11798,22 @@ function logicBindingChecked(project, binding) {
  * `service` — индекс сервиса в развёрнутом профиле метки (`markDeviceOf`).
  */
 export function addLogicBinding(project, { scenarioId, markId, service = 0, options = {}, active = true } = {}) {
+  const mint = idMint(project);
   const binding = logicBindingChecked(project, {
-    id: newId(),
+    id: mint.next(),
     scenarioId,
     markId,
     service,
     options: deviceObject(options) ? clone(options) : {},
     active: active !== false,
   });
-  return { project: withProject(project, { logicBindings: [...logicBindingsList(project), binding] }), binding };
+  return {
+    project: withProject(project, {
+      logicBindings: [...logicBindingsList(project), binding],
+      counters: mint.counters,
+    }),
+    binding,
+  };
 }
 
 /** Правка привязки: `markId`, `service`, `options`, `active`. Нечего менять — тот же объект. */

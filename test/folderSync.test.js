@@ -87,10 +87,16 @@ async function objectWithPlan(name) {
 async function peerCopy(project, schemeId, tag = "peer") {
   const copy = JSON.parse(JSON.stringify(project));
   copy.id = tag + "-" + copy.id.slice(5);
+  // Точка — своя у каждого коллеги. Это не украшение фикстуры: номера
+  // сущностей раздаёт счётчик объекта, у разошедшихся копий он один, и двое
+  // выдают своей новой метке один номер. Разные они или это одна метка,
+  // доехавшая до обоих, слияние решает по содержимому (`mergeIdClash`), и
+  // «двое поставили розетку в одну и ту же точку с одним номером» — случай, в
+  // котором ответа нет ни у кого.
   const withMark = addMark(copy, {
     schemeId,
     typeId: copy.markTypes[1].id,
-    points: [{ x: 0.8, y: 0.8 }],
+    points: [{ x: 0.8, y: tag === "peer" ? 0.8 : 0.6 }],
   }).project;
   const second = addScheme(withMark, {
     name: "2 этаж " + tag,

@@ -22,7 +22,12 @@ import {
   COMMENT_TYPE_ID,
   MARK_NUMBER_MAX,
   commentCodeOf,
+  idNumberOf,
+  idsReplace,
+  markObjectId,
+  markWithoutObject,
   markWithoutWall,
+  nextIds,
   projectSite,
   renumberAcceptedRepeats,
 } from "./model.js";
@@ -257,7 +262,13 @@ export function areRelatedProjects(ours, theirs) {
   for (const key of ["schemes", "marks", "rooms", "markTypes"]) {
     const mine = mergeIndex(mergeList(ours, key));
     for (const item of mergeList(theirs, key)) {
-      if (mine.has(item.id)) return true;
+      // **Общий номер родства не доказывает, общий uuid — доказывает.** Номер
+      // раздаёт счётчик самого объекта, и справочник у двух объектов, созданных
+      // из одного шаблона, нумеруется одинаково: прими это за родство — и
+      // слияние складывало бы два **чужих** объекта. Догадка эта и заведена для
+      // копий, разошедшихся до появления ключа, то есть для поры uuid, —
+      // поэтому она и спрашивает только uuid.
+      if (mine.has(item.id) && idNumberOf(item.id) === null) return true;
     }
   }
   return false;
@@ -781,6 +792,13 @@ function mergeReferences(merged, report, sources, winner) {
     return false;
   });
 
+  // Связь метки с вещью чертежа (R01). Вещь одна на связь, поэтому занятость
+  // держится **здесь**: у двух участников могли связаться с одной вещью разные
+  // метки, и в слитом объекте у прибора появилось бы две строки в списке — то
+  // самое двоение, от которого пара и заводится. Первая по массиву —
+  // по порядку постановки — связь сохраняет, остальные её теряют.
+  const objects = mergeIndex(merged.schemeObjects);
+  const linkedObjects = new Set();
   merged.marks = merged.marks.map((mark) => {
     const patch = {};
     if (mark.groupId && !groups.has(mark.groupId)) patch.groupId = null;
@@ -805,9 +823,98 @@ function mergeReferences(merged, report, sources, winner) {
     // 143 их четыре (появился признак ручного выбора), и список в двух местах
     // разошёлся бы на первой же правке.
     if (mark.wallId && !walls.has(mark.wallId)) return markWithoutWall(next);
+    // Связь с вещью, которой больше нет, или с вещью, уже занятой другой
+    // меткой. Поле **убирается**, а не обнуляется: метка без связи и метка со
+    // снятой связью обязаны читаться одинаково (G68). Какое поле составляет
+    // связь, знает модель, а не слияние.
+    const linked = markObjectId(next);
+    if (linked === null) return next;
+    const object = objects.get(linked);
+    if (!object || object.schemeId !== next.schemeId || linkedObjects.has(linked)) {
+      return markWithoutObject(next);
+    }
+    linkedObjects.add(linked);
     return next;
   });
   return merged;
+}
+
+/**
+ * **Один номер у двух разных сущностей.**
+ *
+ * Номера сущностей раздаёт счётчик объекта (`model.nextId`), а счётчик у двух
+ * разошедшихся копий **один**: поставив каждый свою метку, напарники получают
+ * один и тот же номер. Сложи такие копии по `id` — и метка одного из них молча
+ * исчезнет, слившись с чужой. Это самая дорогая из возможных потерь: «вернуть
+ * лишнюю метку — минута работы, восстановить потерянную — некому», и правило
+ * здесь то же.
+ *
+ * Столкновением считается номер, который **у каждой стороны называет своё**
+ * (`mergeSame` говорит «разные») и которого **нет у общего предка** — то есть
+ * обе сущности заведены после расхождения. Есть у предка — это одна сущность,
+ * правленная с двух сторон, и о ней говорит обычное правило спора.
+ *
+ * **Предка нет — ничего не делаем.** Без него «оба завели» и «оба правили»
+ * выглядят одинаково, и переезд превратил бы одну правленную метку в две. Это
+ * тот же объявленный предел слияния без предка, что и «удаления не видны».
+ *
+ * ——— где это правило всё-таки слепо ———
+ *
+ * Содержимое — не доказательство, а лучшая из доступных примет, и обе её
+ * слепоты названы здесь вслух:
+ *
+ *   — **двое завели одинаковое**: тот же тип, та же точка, тот же номер. Для
+ *     слияния это одна сущность, и одна из двух пропадёт. Случай редкий
+ *     (розетка в ту же точку с тем же номером) и видимый — метки на плане
+ *     видно, — но он есть;
+ *   — **сущность доехала до нас и напарник её правил**, а наш снимок-предок
+ *     этого ещё не видел: содержимое разошлось, и переезд задвоит её. Поэтому
+ *     снимок-предок и пишется на каждую нашу запись (`autosaveBase`): свежий
+ *     предок закрывает этот случай совсем.
+ *
+ * Сторона выбрана по правилу самого слияния: «вернуть лишнюю метку — минута
+ * работы, восстановить потерянную — некому». Из двух слепот первая теряет, а
+ * вторая двоит, и потому строже проверяется именно пропажа.
+ *
+ * Разобрать оба случая до конца может только номер, уникальный **между
+ * участниками** (uuid или «номер плюс метка участника»). Нынешний номер —
+ * счётчик объекта с единицы, слово заказчика, — и это его объявленная цена.
+ *
+ * Переезжает сторона, проигравшая спор, и переезжает **со всеми ссылками на
+ * себя** (`model.idsReplace`). Свободные номера берутся у счётчика, сведённого
+ * по обеим сторонам: иначе переезд встал бы на номер, занятый у напарника.
+ *
+ * В отчёт это не идёт: номер сущности человеку не виден, обозначение метки
+ * остаётся её обозначением. Видимый **номер метки** разводит `mergeNumbers`, и
+ * о нём слияние говорит вслух.
+ */
+function mergeIdClash(ours, theirs, base, winner) {
+  if (!base) return { ours, theirs, reissued: [] };
+  const clashed = new Set();
+  for (const entity of MERGE_ENTITIES) {
+    const mine = mergeIndex(mergeList(ours, entity));
+    const known = mergeIndex(mergeList(base, entity));
+    for (const item of mergeList(theirs, entity)) {
+      if (!item || known.has(item.id)) continue;
+      const twin = mine.get(item.id);
+      if (!twin || mergeSame(twin, item)) continue;
+      clashed.add(item.id);
+    }
+  }
+  if (clashed.size === 0) return { ours, theirs, reissued: [] };
+  // Переезжает проигравший спор: обе стороны считают это из одной пары и
+  // приходят к одному ответу.
+  const moving = winner === "theirs" ? ours : theirs;
+  const other = winner === "theirs" ? theirs : ours;
+  const ids = [...clashed];
+  // Счётчик берётся по обеим сторонам, иначе новый номер встал бы на занятый.
+  const fresh = nextIds({ ...moving, counters: mergeCounters(moving, other) }, ids.length);
+  const replacements = new Map(ids.map((id, at) => [id, fresh.ids[at]]));
+  const moved = idsReplace(fresh.project, replacements);
+  const reissued = ids.map((id, at) => ({ side: winner === "theirs" ? "ours" : "theirs", was: id, now: fresh.ids[at] }));
+  return winner === "theirs"
+    ? { ours: moved.project, theirs, reissued }
+    : { ours, theirs: moved.project, reissued };
 }
 
 /**
@@ -817,16 +924,26 @@ function mergeReferences(merged, report, sources, winner) {
  * него слияние становится объединением: удаления не видны, потому что «нет
  * сущности» и «сущность удалили» снаружи выглядят одинаково.
  *
- * Возвращает `{project, changed, changes, conflicts, renumbered, counts}`:
+ * Возвращает `{project, changed, changes, conflicts, renumbered, reissued, counts}`:
  * `changes` — что пришло со стороны (added | updated | removed) с подписью
- * каждой сущности, `conflicts` — где стороны разошлись и чей вариант оставлен.
+ * каждой сущности, `conflicts` — где стороны разошлись и чей вариант оставлен,
+ * `reissued` — сущности, чей номер переехал из-за столкновения
+ * (`mergeIdClash`).
  */
 export function mergeProjects(ours, theirs, base, options = {}) {
-  if (!ours || !theirs) return { project: ours || theirs || null, changed: false, changes: [], conflicts: [], renumbered: [], counts: { added: 0, updated: 0, removed: 0, conflicts: 0, renumbered: 0 } };
+  if (!ours || !theirs) return { project: ours || theirs || null, changed: false, changes: [], conflicts: [], renumbered: [], reissued: [], counts: { added: 0, updated: 0, removed: 0, conflicts: 0, renumbered: 0 } };
 
   const winner = options.winner === "ours" || options.winner === "theirs" ? options.winner : mergeWinner(ours, theirs);
   const ancestor = base && areRelatedProjects(ours, base) ? base : null;
-  const report = { changes: [], conflicts: [], renumbered: [] };
+  const report = { changes: [], conflicts: [], renumbered: [], reissued: [] };
+
+  // Один номер у двух разных сущностей — и одна из них переезжает (см.
+  // `mergeIdClash`). Делается это **до** сложения коллекций: дальше сущности
+  // ищутся по `id`, и столкнувшиеся были бы сложены в одну.
+  const parted = mergeIdClash(ours, theirs, ancestor, winner);
+  ours = parted.ours;
+  theirs = parted.theirs;
+  report.reissued = parted.reissued;
 
   const merged = { ...ours };
   // Коллекция, которой не знала ни одна сторона, так и остаётся незаведённой:
@@ -909,6 +1026,11 @@ export function mergeProjects(ours, theirs, base, options = {}) {
     changes: report.changes,
     conflicts: report.conflicts,
     renumbered: report.renumbered,
+    // Переехавшие номера сущностей: `[{side, was, now}]`. Человеку они не
+    // показываются — номер сущности он не видит, — но тому, кто держит
+    // состояние по `markId` (выделение, живое состояние дома), нужно знать, что
+    // ключ сменился.
+    reissued: report.reissued,
     counts,
   };
 }

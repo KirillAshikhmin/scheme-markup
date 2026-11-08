@@ -1378,7 +1378,12 @@ function canvasOptionError(key, vars) {
 
 // Поля объекта, правка которых может быть не разметкой: сценарии, привязки
 // логики и — только полем `device`, видом аксессуара, — типы меток.
-const CANVAS_SCENARIO_FIELDS = ["scenarios", "logicBindings", "markTypes"];
+// `counters` здесь потому, что счётчик — бухгалтерия, а не разметка: с
+// переходом на номера вместо uuid (G08) каждая новая сущность сдвигает
+// `project.counters[ID_COUNTER_KEY]`, и сценарий с привязкой логики — тоже.
+// Не назови его — и «Добавить сценарий» при запущенном доме перестало бы
+// пускаться: правка выглядела бы правкой разметки.
+const CANVAS_SCENARIO_FIELDS = ["scenarios", "logicBindings", "markTypes", "counters"];
 
 // Списки отличаются только полем `field` у одних и тех же записей по местам.
 function canvasOnlyField(before, after, field) {
@@ -1408,7 +1413,9 @@ export function canvasCommitKind(before, after) {
     if (!CANVAS_SCENARIO_FIELDS.includes(key)) return "marks";
     changed.push(key);
   }
-  if (changed.length === 0) return "marks";
+  // Один сдвинутый счётчик сам по себе ничего не значит: он едет с сущностью,
+  // а сущности не прибавилось. Такую правку разбирает прежнее правило двери.
+  if (changed.length === 0 || changed.every((key) => key === "counters")) return "marks";
   if (changed.includes("markTypes")) return canvasOnlyField(before.markTypes, after.markTypes, "device") ? "profiles" : "marks";
   if (changed.length === 1 && changed[0] === "scenarios" && canvasOnlyField(before.scenarios, after.scenarios, "active")) return "scenarioActive";
   return "scenarios";

@@ -47,7 +47,12 @@ import {
 import { markBoxMm } from "../src/markBox.js";
 import { objectViewByName, objectViewForShape } from "../src/objectViews/registry.js";
 import { MODEL_CLEARS, MODEL_CYL_SIDES, MODEL_MATERIALS, modelBox } from "../src/objectModels/kit.js";
-import { objectCatalogDefaults, objectCatalogKeys, objectCatalogRetiredKeys } from "../src/objectCatalog.js";
+import {
+  objectCatalogDefaults,
+  objectCatalogEntry,
+  objectCatalogKeys,
+  objectCatalogRetiredKeys,
+} from "../src/objectCatalog.js";
 import { LINE_SPOT_MAX } from "../src/objectModels/lines.js";
 import {
   OBJECT_STAIR_KEYS,
@@ -59,7 +64,10 @@ import {
 import {
   OBJECT_MODEL_BODY_MAX,
   OBJECT_MODEL_FACE_MAX,
+  OBJECT_MODEL_THING_BODY_MAX,
+  OBJECT_MODEL_THING_FACE_MAX,
   objectModelByKey,
+  objectModelLimits,
   objectModelClashes,
   objectModelFaceCount,
   objectLineModel,
@@ -316,11 +324,12 @@ test("у каждой вещи каталога есть модель, и дев
     assert.ok(objectModelByKey(key), key + ": вещь каталога без модели");
   }
   // Тридцать два ключа: тринадцать вещей из брифа, девять нынешних видов
-  // (шкаф у них общий), унитаз с ванной (таск 162) и шесть вещей таска 177 —
-  // минус телевизор с полотенцесушителем, ушедшие в метки (таск 186), — плюс
-  // четыре вещи таска 204 (дорожка, экран проектора, выход с лестницы,
-  // автомобиль). Гардеробная, обувница и вешалка — правка 2026-10-27.
-  assert.equal(objectCatalogKeys().length, 62);
+  // (шкаф у них общий), унитаз с ванной (таск 162) и шесть вещей таска 177,
+  // плюс четыре вещи таска 204 (дорожка, экран проектора, выход с лестницы,
+  // автомобиль). Гардеробная, обувница и вешалка — правка 2026-10-27;
+  // телевизор, полотенцесушитель и вытяжка вернулись в каталог сборкой «связь
+  // метки и вещи» (таск 186 уводил первых двух в метки).
+  assert.equal(objectCatalogKeys().length, 65);
   // Мост до каталога: имена нынешних видов из словаря ведут к своим ключам. И
   // имена **ушедших** вещей — тоже: вид прежней разметки, названный
   // «Телевизор» или «Полотенцесушитель», обязан узнаваться как узнавался, иначе
@@ -330,6 +339,9 @@ test("у каждой вещи каталога есть модель, и дев
     assert.ok(found, name + ": вид не узнан по имени");
     assert.equal(found.key, key, name + ": узнан как " + found.key);
   }
+  // Ушедших в метки вещей больше нет ни одной, и строка остаётся дверью для
+  // следующей: тело у такой вещи обязано уцелеть, иначе прежний чертёж
+  // нарисовал бы пустой габарит (G68).
   for (const key of objectCatalogRetiredKeys()) {
     assert.ok(objectModelByKey(key), key + ": у ушедшей в метки вещи пропало тело");
   }
@@ -448,21 +460,52 @@ test("отражение лестницы: нижняя ступень Г-обр
 
 // ——— предел тел и граней ——————————————————————————————————————————————————
 
-test("у модели не больше пяти тел и тридцати граней", () => {
+test("предел модели разделён: метке пять тел, вещи каталога пятнадцать", () => {
   const worst = [];
+  const marksWorst = [];
   // Лестницы — исключение по слову заказчика (правка 2026-10-27): ступени по
   // подъёму не влезают в пять тел. Их на объекте одна-две, и предел у них свой
   // — тест ниже.
+  //
+  // **Пределов два** (G06, «подними лимит до 15»). У метки прежние пять тел и
+  // тридцать граней: меток на схеме сотни, и кадр платит за них. У вещи
+  // встроенного каталога — пятнадцать и девяносто: вещей на объекте единицы, а
+  // гардеробной из пяти тел хватало на одну полку. Предел читается **по
+  // ключу** одной дверью `objectModelLimits`, и своего сравнения «вещь это или
+  // метка» здесь не заводится: ключ у них общий (телевизор, вытяжка и
+  // полотенцесушитель — и вещь, и изображение метки сразу).
   for (const key of objectModelKeys().filter((one) => !OBJECT_STAIR_KEYS.includes(one))) {
     const model = objectModelByKey(key);
     const faces = objectModelFaceCount(model);
+    const limits = objectModelLimits(key);
     assert.ok(
-      model.parts.length <= OBJECT_MODEL_BODY_MAX,
-      key + ": тел " + model.parts.length + " — больше предела",
+      model.parts.length <= limits.bodies,
+      key + ": тел " + model.parts.length + " — больше предела " + limits.bodies,
     );
-    assert.ok(faces <= OBJECT_MODEL_FACE_MAX, key + ": граней " + faces + " — больше предела");
+    assert.ok(faces <= limits.faces, key + ": граней " + faces + " — больше предела " + limits.faces);
     worst.push(faces);
+    if (!objectCatalogEntry(key)) marksWorst.push(faces);
   }
+  // Числа пределов названы здесь, а не только в реестре: поднять предел метке
+  // «заодно» нельзя — именно от этого он и разделён.
+  assert.equal(OBJECT_MODEL_BODY_MAX, 5);
+  assert.equal(OBJECT_MODEL_FACE_MAX, 30);
+  assert.equal(OBJECT_MODEL_THING_BODY_MAX, 15);
+  assert.equal(OBJECT_MODEL_THING_FACE_MAX, 90);
+  assert.deepEqual(objectModelLimits("switch1"), { bodies: 5, faces: 30 });
+  assert.deepEqual(objectModelLimits("wardrobeOpen"), { bodies: 15, faces: 90 });
+  // И у метки средняя цена не поехала: это её кадр и считает.
+  const marksAverage = marksWorst.reduce((sum, value) => sum + value, 0) / marksWorst.length;
+  assert.ok(marksAverage < 20, "средняя цена модели метки в гранях: " + marksAverage.toFixed(1));
+  // Гардеробная — та вещь, ради которой предел и разделён: полок в ней пять, а
+  // не одна (G06).
+  const wardrobe = objectModelByKey("wardrobeOpen");
+  assert.deepEqual(
+    wardrobe.parts.filter((part) => /^shelf[0-9]$/.test(part.name)).map((part) => part.name),
+    ["shelf1", "shelf2", "shelf3", "shelf4", "shelf5"],
+    "полок в секции гардеробной не стало",
+  );
+  assert.equal(wardrobe.parts.length, 10, "тел у гардеробной стало другое число");
   // Средняя цена вещи — то число, которым считается кадр. Прежняя коробка
   // стоила шесть граней, и потолок средней держался на восемнадцати —
   // «втрое дороже коробки».

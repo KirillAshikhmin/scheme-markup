@@ -138,10 +138,11 @@ function place(scene, catalogKey, patch = {}) {
 
 // ——— состав каталога ————————————————————————————————————————————————————
 
-test("в каталоге шестьдесят две вещи, и каждая стоит ровно в одной категории", () => {
+test("в каталоге шестьдесят пять вещей, и каждая стоит ровно в одной категории", () => {
   const keys = objectCatalogKeys();
-  // Гардеробная, обувница и вешалка — правка 2026-10-27.
-  assert.equal(keys.length, 62, "вещей в каталоге стало другое число: " + keys.length);
+  // Гардеробная, обувница и вешалка — правка 2026-10-27; телевизор,
+  // полотенцесушитель и вытяжка вернулись сборкой «связь метки и вещи».
+  assert.equal(keys.length, 65, "вещей в каталоге стало другое число: " + keys.length);
   assert.equal(new Set(keys).size, keys.length, "ключ занят дважды");
   // Тринадцать из брифа заказчика — поимённо: список называли словами, и
   // пропажа любой из них должна краснеть, а не теряться в числе.
@@ -180,19 +181,27 @@ test("в каталоге шестьдесят две вещи, и каждая 
   for (const key of ["treadmill", "projectorScreen", "stairsExit", "car"]) {
     assert.ok(objectCatalogEntry(key), "вещь таска 204 пропала: " + key);
   }
-  // Телевизор и полотенцесушитель — метки (таск 186, G279), и в каталоге их
-  // нет ни одной дверью: ни ключом, ни плиткой, ни умолчанием.
-  for (const key of objectCatalogRetiredKeys()) {
-    assert.equal(objectCatalogEntry(key), null, key + ": ушедшая в метки вещь осталась в каталоге");
-    assert.equal(objectCatalogDefaults(key), null, key + ": у ушедшей вещи остались умолчания");
-    assert.equal(objectCatalogName(key), "", key + ": ушедшая вещь всё ещё называется каталогом");
-    assert.ok(!keys.includes(key), key + ": ушедшая вещь осталась в ключах каталога");
+  // **Телевизор, полотенцесушитель и вытяжка вернулись в каталог** (сборка
+  // «связь метки и вещи»). Таск 186 увёл первых двух в метки, чтобы они
+  // включались в имитации, — и прибор потерял форму: угла у метки нет вовсе, и
+  // телевизор встал на плане по осям. Теперь прибор собирается из вещи и
+  // связанной с ней метки, и отбирать у вещи габарит незачем.
+  //
+  // Проверяется всеми дверьми, которыми их прежде не было: ключ, плитка,
+  // умолчания, имя из словаря.
+  for (const key of ["tv", "towelDryer", "hood"]) {
+    assert.ok(objectCatalogEntry(key), key + ": вещь не вернулась в каталог");
+    assert.ok(objectCatalogDefaults(key), key + ": у вернувшейся вещи нет умолчаний");
+    assert.ok(objectCatalogName(key), key + ": вернувшаяся вещь безымянна");
+    assert.ok(keys.includes(key), key + ": вещи нет в ключах каталога");
     assert.ok(
-      !objectCatalogInOrder().some((entry) => entry.key === key),
-      key + ": ушедшая вещь всё ещё стоит в плитках",
+      objectCatalogInOrder().some((entry) => entry.key === key),
+      key + ": вещь не встала в плитки",
     );
   }
-  assert.deepEqual(objectCatalogRetiredKeys(), ["tv", "towelDryer"]);
+  // Надгробий больше нет ни одного: оба ключа снова каталожные. Механизм при
+  // этом цел — он дверь для следующей ушедшей вещи.
+  assert.deepEqual(objectCatalogRetiredKeys(), []);
   for (const key of ["sofa", "armchair", "coffeeTable", "deskSet", "stool"]) {
     assert.equal(objectCatalogEntry(key).category, "furniture", key + ": вещь ушла не в мебель");
   }
@@ -498,7 +507,10 @@ test("раскладка названа: девять разделов, и «Л�
     "transport",
   ]);
   const sizes = OBJECT_CATEGORIES.map((category) => objectCatalogCategory(category).length);
-  assert.deepEqual(sizes, [17, 6, 7, 6, 6, 7, 5, 7, 1], "вещи переехали между разделами: " + sizes.join(","));
+  // Сантехника выросла полотенцесушителем, техника — телевизором и вытяжкой
+  // (сборка «связь метки и вещи»): обе вещи вернулись туда, откуда таск 186
+  // увёл их в метки, а вытяжка встала рядом с плитой, где её и ищут.
+  assert.deepEqual(sizes, [17, 7, 9, 6, 6, 7, 5, 7, 1], "вещи переехали между разделами: " + sizes.join(","));
   assert.equal(sizes.reduce((sum, value) => sum + value, 0), objectCatalogKeys().length);
   // **Раздел «Лестницы» и лестничная клетка — одно и то же.** Это не
   // совпадение, а то, ради чего раздел и заведён: по этим же ключам объём
@@ -607,8 +619,12 @@ test("имя прежнего вида переводится в ключ тер
   // нет — надгробие отвечает только на вопрос «чем названо то, что уже стоит».
   assert.equal(objectCatalogKeyByName("Телевизор"), "tv");
   assert.equal(objectCatalogKeyByName("Полотенцесушитель"), "towelDryer");
-  assert.equal(objectCatalogRetired("tv").name, "Телевизор");
-  assert.equal(objectCatalogRetired("towelDryer").mount, "wall");
+  assert.equal(objectCatalogKeyByName("Вытяжка над плитой"), "hood");
+  // Надгробий больше нет: вернувшиеся вещи отвечают из каталога, первой же
+  // дверью, и чертёж прежней разметки открывается как открывался.
+  assert.equal(objectCatalogEntry("tv").name, "Телевизор");
+  assert.equal(objectCatalogEntry("towelDryer").mount, "wall");
+  assert.equal(objectCatalogRetired("tv"), null, "ключ каталога прочёлся ушедшим");
   assert.equal(objectCatalogRetired("fridge"), null, "вещь каталога прочлась ушедшей");
   assert.equal(objectCatalogRetired("нет такого"), null);
   assert.equal(objectCatalogKeyByName("Аквариум"), null);
@@ -822,22 +838,34 @@ test("G68: файл с ушедшими вещами переживает кру
   assert.deepEqual(loaded.schemeObjectKinds, project.schemeObjectKinds, "справочник видов поехал");
 });
 
-test("ушедшую в метки вещь больше не поставить, а поставленную по-прежнему можно двигать", () => {
-  // Поставить вещью то, что стало меткой, нельзя — и отказ называет ключ.
+test("вернувшуюся вещь снова ставят, а поставленную прежде по-прежнему можно двигать", () => {
+  // Телевизор снова ставится вещью: таск 186 этого не давал (`addSchemeObject`
+  // отвергал ключ надгробия), и ровно это сборка «связь метки и вещи» вернула.
   const scene = room();
+  const put = addSchemeObject(scene.project, {
+    schemeId: scene.schemeId,
+    catalogKey: "tv",
+    atMm: { x: 2000, y: 1500 },
+    widthMm: 1240,
+    depthMm: 80,
+  });
+  assert.equal(put.schemeObject.catalogKey, "tv");
+  assert.equal(schemeObjectNameOf(put.project, put.schemeObject), "Телевизор");
+  // А ключа, которого в каталоге нет вовсе, по-прежнему нельзя — и отказ
+  // называет его.
   assert.throws(
     () =>
       addSchemeObject(scene.project, {
         schemeId: scene.schemeId,
-        catalogKey: "tv",
+        catalogKey: "аквариум",
         atMm: { x: 2000, y: 1500 },
         widthMm: 1240,
         depthMm: 80,
       }),
-    /tv/,
+    /аквариум/,
   );
   // А та, что уже стоит, правится как любая другая: ни переезд, ни правка
-  // габарита не спотыкаются о пропавшую запись каталога.
+  // габарита не спотыкаются о записи каталога.
   const project = retiredProject();
   const tvId = project.schemeObjects[0].id;
   const moved = updateSchemeObject(project, tvId, { atMm: { x: 2200, y: 140 }, widthMm: 1600 });

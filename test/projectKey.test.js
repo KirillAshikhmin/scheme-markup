@@ -9,7 +9,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { addMark, addScheme, createProject, ensureProjectKey, updateProject } from "../src/model.js";
+import { addMark, addScheme, createProject, ensureProjectKey, idsReplace, updateProject } from "../src/model.js";
 import { packProject, unpackProject, verifyProjectFile } from "../src/projectFile.js";
 import { areRelatedProjects, mergeProjects } from "../src/merge.js";
 import { adoptLoadedProject, autosaveOwnArchive } from "../src/autosave.js";
@@ -34,6 +34,27 @@ function keyless(source) {
   const copy = { ...source };
   delete copy.key;
   return copy;
+}
+
+// Объект **поры uuid**: ни ключа, ни номеров — идентификаторы там были uuid.
+//
+// Это важно ровно там, где проверяется догадка о родстве. Догадка спрашивает
+// общие идентификаторы, а с переходом на номера (G08) общий номер родства не
+// доказывает: счётчик живёт в объекте и считает с единицы, поэтому у двух
+// **чужих** объектов из одного шаблона номера справочника совпадают. Поэтому
+// догадка спрашивает только uuid — то есть ровно ту пору, для которой она и
+// заведена: копии, разошедшиеся до появления ключа. Проверять её на объекте
+// с номерами значило бы проверять не её.
+let oldBuildTag = 0;
+function oldBuild(source) {
+  oldBuildTag += 1;
+  const copy = keyless(source);
+  const tag = "u" + oldBuildTag + "-";
+  const was = new Map();
+  for (const entity of ["categories", "markTypes", "rooms", "schemes", "marks", "groups", "equipmentTypes"]) {
+    for (const item of copy[entity] || []) was.set(item.id, tag + item.id);
+  }
+  return idsReplace(copy, was).project;
 }
 
 test("ключ заводится при создании и переживает импорт, копирование и переименование", async () => {
@@ -89,7 +110,7 @@ test("ключ отвечает там, где догадка врёт: напа
 });
 
 test("файлы без ключа читаются по прежним правилам — догадкой", async () => {
-  const mine = keyless(project("Дача Петровых"));
+  const mine = oldBuild(project("Дача Петровых"));
   const loaded = await unpackProject(await packProject(mine, new Map()));
   assert.equal(loaded.project.key, undefined, "в файле прежней сборки ключа быть не должно");
   assert.equal(loaded.projectKey, null, "в отметке взялся ключ, которого нет");
@@ -99,7 +120,7 @@ test("файлы без ключа читаются по прежним прав
   assert.equal(areRelatedProjects(mine, peer), true, "догадка выключена — старые файлы перестали сливаться");
 
   // И чужой объект без ключа по-прежнему чужой.
-  assert.equal(areRelatedProjects(mine, keyless(project("Чужой объект"))), false);
+  assert.equal(areRelatedProjects(mine, oldBuild(project("Чужой объект"))), false);
 });
 
 test("ключ есть у одного: второй его принимает, и это применяется тихо", () => {
@@ -119,7 +140,9 @@ test("ключ есть у одного: второй его принимает,
 });
 
 test("копии, разошедшиеся до ключей, сливаются догадкой и сходятся на одном ключе", () => {
-  const mine = project("Таунхаус");
+  // Объект поры uuid: догадка работает только с ними (см. `keyless`), а
+  // ключи у копий свои — такими они и разошлись.
+  const mine = { ...oldBuild(project("Таунхаус")), key: "1111-наш" };
   // Копия того же объекта, разошедшаяся раньше: сущности общие, ключи свои.
   const theirs = { ...mine, id: "peer-объект", key: "0000-раньше-нашего" };
 

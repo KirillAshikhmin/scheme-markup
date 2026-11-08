@@ -30,15 +30,20 @@ test("объект из шаблона повторяет справочник �
   const blinds = first.markTypes[1].id;
   assert.deepEqual(styleOf(first, blinds), { color: "#8250DF", shape: "triangle-down", lineStyle: "solid" });
 
-  // Ни одного общего идентификатора: правка справочника одного объекта не
-  // должна ни при каких обстоятельствах указывать на записи другого.
+  // **Номера объекта — свои, а не унесённые из шаблона** (G08). Два объекта из
+  // одного шаблона нумеруются одинаково — счётчик живёт в объекте и считает с
+  // единицы, — и это нарочно; разными у них остаются ключи в хранилище
+  // браузера (`id`, `key`). А вот идентификаторы **снимка шаблона** в объект не
+  // уезжают ни один: иначе правка справочника одного объекта указывала бы на
+  // записи другого.
   const ids = new Set([...first.categories, ...first.markTypes].map((item) => item.id));
-  for (const item of [...second.categories, ...second.markTypes]) {
-    assert.ok(!ids.has(item.id), "идентификатор общий у двух объектов: " + item.id);
-  }
   for (const item of [...snapshot.categories, ...snapshot.markTypes]) {
     assert.ok(!ids.has(item.id), "объект унёс идентификатор из шаблона: " + item.id);
   }
+  const twins = [...second.categories, ...second.markTypes].filter((item) => ids.has(item.id));
+  assert.equal(twins.length, second.categories.length + second.markTypes.length, "нумерация объекта перестала начинаться с единицы");
+  assert.notEqual(first.id, second.id, "два объекта делят ключ в хранилище объектов");
+  assert.notEqual(first.key, second.key, "два объекта делят постоянный ключ");
   assert.notEqual(template.markTypes[0].id, snapshot.markTypes[0].id);
   assert.notEqual(template.categories[0].id, snapshot.categories[0].id);
 });

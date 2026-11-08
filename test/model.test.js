@@ -522,7 +522,12 @@ test("новый объект создаётся из стартового сп�
   assert.equal(project.markTypes.length, 56);
   assert.deepEqual(project.marks, []);
   assert.deepEqual(project.groups, []);
-  assert.deepEqual(project.counters, {});
+  // Счётчик номеров сущностей (G08) у нового объекта уже стоит: справочник
+  // пришёл из шаблона со своей нумерацией, и в объекте номера раздаются
+  // заново. Счётчиков номеров **меток** по коду типа при этом нет ни одного —
+  // меток в объекте нет.
+  assert.deepEqual(Object.keys(project.counters), ["#id"]);
+  assert.equal(project.counters["#id"], project.categories.length + project.markTypes.length + project.equipmentTypes.length);
   assert.ok(project.id);
   assert.ok(project.name);
   const light = project.categories.find((c) => c.name === "Свет");
@@ -975,13 +980,27 @@ test("удаление схемы уносит её метки и группы, 
   assert.deepEqual(objectProblems(after), []);
 });
 
-test("идентификаторы стартового справочника уникальны у каждого объекта", () => {
+test("номера справочника уникальны внутри объекта, а между объектами совпадают нарочно", () => {
   const first = createProject();
   const second = createProject();
   const ids = [...first.categories.map((c) => c.id), ...first.markTypes.map((t) => t.id)];
+  // **Внутри объекта** номер не повторяется ни разу: номера уникальны по всем
+  // видам сразу, и ссылка на число не может попасть не в ту коллекцию.
   assert.equal(new Set(ids).size, first.categories.length + first.markTypes.length);
+  assert.deepEqual(ids, ids.filter((id) => /^[1-9][0-9]*$/.test(id)), "в номерах остался не номер");
+
+  // **Между объектами они совпадают, и это решение, а не промах** (G08,
+  // «Свой у каждого объекта»): счётчик живёт в объекте и считает с единицы.
+  // До номеров справочник выдавался свежими uuid, и на этом держалась догадка
+  // о родстве файлов — она теперь спрашивает только uuid (`areRelatedProjects`).
+  //
+  // Столкнуться в хранилище браузера объекты от этого не могут: ключи там —
+  // `project.id`, `project.key` и `scheme.imageId`, и они остались прежними
+  // (G08.1). Это и проверяется: разные.
   const otherIds = new Set([...second.categories.map((c) => c.id), ...second.markTypes.map((t) => t.id)]);
-  assert.deepEqual(ids.filter((id) => otherIds.has(id)), []);
+  assert.ok(ids.some((id) => otherIds.has(id)), "номера справочника разошлись — счётчик перестал считать с единицы");
+  assert.notEqual(first.id, second.id, "два объекта делят ключ в хранилище объектов");
+  assert.notEqual(first.key, second.key, "два объекта делят постоянный ключ");
 });
 
 test("блок собирается только из точек и только по известной стороне", () => {
