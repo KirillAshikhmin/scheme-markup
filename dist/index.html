@@ -8968,6 +8968,7 @@ wallMirror: "Зеркало",
 rug: "Ковёр",
 chest: "Комод",
 shelving: "Стеллаж",
+kitchenCabinet: "Кухонный шкаф",
 },
 schemeObjectCategories: {
 furniture: "Мебель",
@@ -10905,6 +10906,17 @@ heightAboveFloorMm: 0,
 words: ["комод"],
 },
 {
+key: "kitchenCabinet",
+category: "furniture",
+mount: "floor",
+shape: "rect",
+widthMm: 800,
+depthMm: 600,
+heightMm: 860,
+heightAboveFloorMm: 0,
+words: ["кухонный шкаф", "кухонные шкаф", "кухонный модул", "шкаф кухон", "кухня"],
+},
+{
 key: "shelving",
 category: "furniture",
 mount: "floor",
@@ -12143,6 +12155,16 @@ parts: viewParts(
 viewRect(-0.46, -0.22, 0.92, 0.44, 0.03),
 viewLine(-0.46, 0.08, 0.46, 0.08),
 [-0.3, 0, 0.3].map((x) => viewCircle(x, 0.24, 0.05)),
+),
+},
+kitchenCabinet: {
+shapes: [],
+parts: viewParts(
+viewRect(-0.46, -0.3, 0.92, 0.6, 0.03),
+viewLine(-0.46, 0.14, 0.46, 0.14),
+viewLine(0, 0.14, 0, 0.3),
+viewCircle(-0.08, 0.22, 0.045),
+viewCircle(0.08, 0.22, 0.045),
 ),
 },
 shelving: {
@@ -38494,9 +38516,17 @@ switchToggle: { build: toggleParts, keys: 1, max: MODEL_SWITCH_KEYS_MAX - 1 },
 const MODEL_STAIR_FLOOR_MM = 2800;
 const modelStair = (key, widthMm, depthMm) => objectStairModel(key, { widthMm, depthMm, heightMm: MODEL_STAIR_FLOOR_MM });
 const MODEL_SHAFT = modelParts(modelBox("shaft"));
-const MODEL_TOILET = modelParts(
+const MODEL_PLUMBING = modelParts(
 modelCyl("bowl", { x: -0.3, width: 0.6, y: -0.5, depth: 0.75, z: 0, height: 0.62, material: "light" }),
 modelBox("cistern", { x: -0.32, width: 0.64, y: 0.2, depth: 0.3, z: 0.3, height: 0.7 }),
+);
+const MODEL_TOILET = modelParts(
+modelBox("foot", { x: -0.18, width: 0.36, y: -0.22, depth: 0.44, z: 0, height: 0.22 }),
+modelCyl("bowl", { x: -0.43, width: 0.86, y: -0.5, depth: 0.72, z: 0.22, height: 0.34, material: "light" }),
+modelCyl("seat", { x: -0.45, width: 0.9, y: -0.5, depth: 0.76, z: 0.56, height: 0.05, material: "dark" }),
+modelCyl("lid", { x: -0.45, width: 0.9, y: -0.5, depth: 0.76, z: 0.61, height: 0.05, material: "light" }),
+modelBox("cistern", { x: -0.45, width: 0.9, y: 0.16, depth: 0.34, z: 0.5, height: 0.46 }),
+modelBox("flush", { x: -0.08, width: 0.16, y: 0.28, depth: 0.12, z: 0.96, height: 0.04, material: "metal" }),
 );
 const MODEL_LAUNDRY = modelParts(
 modelTube("drum", { axis: "y", x: -0.4, width: 0.8, y: -0.4, depth: 0.74, z: 0.2, height: 0.56, material: "metal" }),
@@ -38520,12 +38550,16 @@ counter: modelParts(
 modelBox("top", { z: 0.88, height: 0.12, material: "light" }),
 modelBox("front", { y: -0.5, depth: 0.9, z: 0, height: 0.88 }),
 ),
-plumbing: MODEL_TOILET,
+plumbing: MODEL_PLUMBING,
 toilet: MODEL_TOILET,
 bathtub: modelParts(
-modelBox("case", { z: 0, height: 0.9 }),
-modelBox("water", { x: -0.36, width: 0.72, y: -0.4, depth: 0.8, z: 0.9, height: 0.08, material: "glass" }),
-modelBox("tap", { x: -0.47, width: 0.08, y: -0.06, depth: 0.12, z: 0.9, height: 0.1, material: "metal" }),
+modelBox("sideLeft", { x: -0.5, width: 0.03, y: -0.5, depth: 1, z: 0, height: 1 }),
+modelBox("sideRight", { x: 0.47, width: 0.03, y: -0.5, depth: 1, z: 0, height: 1 }),
+modelBox("apron", { x: -0.47, width: 0.94, y: -0.5, depth: 0.07, z: 0, height: 1 }),
+modelBox("back", { x: -0.47, width: 0.94, y: 0.43, depth: 0.07, z: 0, height: 1 }),
+modelBox("bottom", { x: -0.47, width: 0.94, y: -0.43, depth: 0.86, z: 0, height: 0.25 }),
+modelBox("water", { x: -0.45, width: 0.9, y: -0.41, depth: 0.82, z: 0.25, height: 0.07, material: "glass" }),
+modelBox("tap", { x: -0.46, width: 0.1, y: -0.07, depth: 0.14, z: 0.9, height: 0.1, material: "metal" }),
 ),
 cabinet: modelParts(
 modelBox("door", { x: -0.46, width: 0.92, y: -0.5, depth: 0.15, z: 0.03, height: 0.94, material: "light" }),
@@ -38754,6 +38788,11 @@ modelBox("case", { y: -0.3, depth: 0.8 }),
 modelBox("drawerHigh", { x: -0.46, width: 0.92, y: -0.5, depth: 0.22, z: 0.7, height: 0.24, material: "light" }),
 modelBox("drawerMid", { x: -0.46, width: 0.92, y: -0.5, depth: 0.22, z: 0.38, height: 0.24, material: "light" }),
 modelBox("drawerLow", { x: -0.46, width: 0.92, y: -0.5, depth: 0.22, z: 0.06, height: 0.24, material: "light" }),
+),
+kitchenCabinet: modelParts(
+modelBox("case", { y: -0.3, depth: 0.8 }),
+modelBox("doorLeft", { x: -0.46, width: 0.45, y: -0.5, depth: 0.22, z: 0.06, height: 0.88, material: "light" }),
+modelBox("doorRight", { x: 0.01, width: 0.45, y: -0.5, depth: 0.22, z: 0.06, height: 0.88, material: "light" }),
 ),
 shelving: modelParts(
 modelBox("sideLeft", { x: -0.5, width: 0.06, z: 0, height: 1 }),

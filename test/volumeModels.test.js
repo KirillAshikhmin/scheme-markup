@@ -328,8 +328,9 @@ test("у каждой вещи каталога есть модель, и дев
   // плюс четыре вещи таска 204 (дорожка, экран проектора, выход с лестницы,
   // автомобиль). Гардеробная, обувница и вешалка — правка 2026-10-27;
   // телевизор, полотенцесушитель и вытяжка вернулись в каталог сборкой «связь
-  // метки и вещи» (таск 186 уводил первых двух в метки).
-  assert.equal(objectCatalogKeys().length, 65);
+  // метки и вещи» (таск 186 уводил первых двух в метки); кухонный шкаф — таск
+  // 254 (G395).
+  assert.equal(objectCatalogKeys().length, 66);
   // Мост до каталога: имена нынешних видов из словаря ведут к своим ключам. И
   // имена **ушедших** вещей — тоже: вид прежней разметки, названный
   // «Телевизор» или «Полотенцесушитель», обязан узнаваться как узнавался, иначе
@@ -520,8 +521,157 @@ test("предел модели разделён: метке пять тел, в
   // граней, проверяется выше) и цена кадра. Кадр платит не за каталог, а за
   // поставленное: в объекте заказчика шесть вещей и 86 меток, и метки как
   // стоили 6–18 граней, так и стоят.
+  //
+  // **Таск 254 потратил часть этого запаса и не поднял потолок**: ванна с чашей
+  // стоит семь тел вместо трёх, подробный унитаз — шесть вместо двух, и средняя
+  // ушла с 19,2 на 19,8. Запаса осталось мало нарочно: следующему, кто захочет
+  // «чуть подробнее», придётся или уложиться в двадцать, или идти к заказчику
+  // за новым числом — потолок стоит здесь ровно для этого разговора.
   const average = worst.reduce((sum, value) => sum + value, 0) / worst.length;
   assert.ok(average < 20, "средняя цена модели в гранях: " + average.toFixed(1));
+});
+
+// ——— ванна, унитаз и кухонный шкаф (таск 254, G393, G395, G396) ——————————
+
+test("у ванны внутри пусто: чаша сложена бортами, а не выгрызена из бруска", () => {
+  // Слова заказчика: «у ванны сделай углубление? а то сейчас будто там бетонный
+  // блок внутри лежит, убери его». Блоком был корпус во весь габарит, и
+  // проверяется здесь ровно это: **ни одного тела в середине чаши выше воды**.
+  // Глазами такое не держится — тело, добавленное «для веса», пропадёт из
+  // кадра не сразу.
+  const parts = bodies("bathtub");
+  const inside = (x, y, z) =>
+    parts.filter(
+      (part) =>
+        x > part.x &&
+        x < part.x + part.width &&
+        y > part.y &&
+        y < part.y + part.depth &&
+        z > part.z &&
+        z < part.z + part.height,
+    );
+  for (const z of [0.4, 0.6, 0.8, 0.98]) {
+    assert.deepEqual(
+      inside(0, 0, z).map((part) => part.name),
+      [],
+      "на высоте " + z + " середина ванны занята телом — это и есть брусок внутри",
+    );
+  }
+  // А борта, дно и вода на своих местах: чаша должна быть чашей, а не рамкой в
+  // воздухе. Борт стоит по всем четырём сторонам — иначе сверху это корыто.
+  const named = new Map(parts.map((part) => [part.name, part]));
+  assert.deepEqual(
+    [...named.keys()],
+    ["sideLeft", "sideRight", "apron", "back", "bottom", "water", "tap"],
+    "состав ванны изменился",
+  );
+  for (const name of ["sideLeft", "sideRight", "apron", "back"]) {
+    const side = named.get(name);
+    assert.equal(side.z, 0, name + ": борт не от пола");
+    assert.equal(side.z + side.height, 1, name + ": борт не до кромки");
+  }
+  assert.ok(named.get("water").z >= named.get("bottom").z + named.get("bottom").height - 1e-9, "вода не на дне");
+  assert.ok(
+    named.get("water").z + named.get("water").height < 0.75,
+    "вода налита под кромку — углубления в такой ванне не видно",
+  );
+  assert.equal(named.get("tap").material, "metal", "смеситель перестал быть смесителем");
+  // Доли внутри габарита, как у всех: тело, вылезшее за габарит, рисовалось бы
+  // не там, где вещь выделена и измерена (G68).
+  for (const part of parts) {
+    assert.ok(part.x >= -0.5 && part.x + part.width <= 0.5, part.name + ": тело шире габарита");
+    assert.ok(part.y >= -0.5 && part.y + part.depth <= 0.5, part.name + ": тело глубже габарита");
+    assert.ok(part.z >= 0 && part.z + part.height <= 1, part.name + ": тело выше габарита");
+  }
+});
+
+test("унитаз узнаётся: ножка, чаша, сиденье с крышкой, бачок и кнопка смыва", () => {
+  // Слова заказчика: «Унитаз сделай более детализированным, а то не совсем
+  // понятно что это». Тел названо шесть и названы они поимённо: пропади
+  // сиденье или кнопка — вещь снова станет тумбой с ящиком, а число тел об этом
+  // не скажет ничего.
+  const parts = bodies("toilet");
+  const named = new Map(parts.map((part) => [part.name, part]));
+  assert.deepEqual([...named.keys()], ["foot", "bowl", "seat", "lid", "cistern", "flush"], "состав унитаза изменился");
+  assert.ok(parts.length <= objectModelLimits("toilet").bodies, "тел больше предела вещи каталога");
+  // Ножка **уже** чаши: этот перехват у пола и отличает унитаз от тумбы.
+  assert.ok(named.get("foot").width < named.get("bowl").width, "ножка не уже чаши");
+  assert.equal(named.get("foot").z, 0, "ножка не от пола");
+  // Снизу вверх: ножка, чаша, сиденье, крышка — и ни одной дырки между ними.
+  for (const [lower, upper] of [["foot", "bowl"], ["bowl", "seat"], ["seat", "lid"]]) {
+    const below = named.get(lower);
+    assert.ok(
+      Math.abs(below.z + below.height - named.get(upper).z) < 1e-9,
+      upper + " не лежит на " + lower,
+    );
+  }
+  // Сиденье и крышка — овалы шире чаши и той же формы, что она: круглая
+  // накладка на круглой чаше.
+  for (const name of ["bowl", "seat", "lid"]) assert.equal(named.get(name).kind, "cyl", name + ": не овал");
+  assert.ok(named.get("seat").width > named.get("bowl").width, "сиденье не шире чаши");
+  assert.equal(named.get("seat").width, named.get("lid").width, "крышка и сиденье разной ширины");
+  // Тёмное сиденье между светлой чашей и светлой крышкой — то, по чему сиденье
+  // и видно сбоку.
+  assert.equal(named.get("seat").material, "dark");
+  assert.equal(named.get("lid").material, "light");
+  assert.equal(named.get("bowl").material, "light");
+  // Бачок сзади и до верха габарита, кнопка смыва — на нём и металлом.
+  assert.ok(named.get("cistern").y > named.get("bowl").y, "бачок не сзади");
+  const flush = named.get("flush");
+  assert.equal(named.get("cistern").z + named.get("cistern").height, flush.z, "кнопка не на бачке");
+  assert.equal(flush.z + flush.height, 1, "кнопка не на верху габарита");
+  assert.equal(flush.material, "metal");
+  for (const part of parts) {
+    assert.ok(part.x >= -0.5 && part.x + part.width <= 0.5, part.name + ": тело шире габарита");
+    assert.ok(part.y >= -0.5 && part.y + part.depth <= 0.5, part.name + ": тело глубже габарита");
+    assert.ok(part.z >= 0 && part.z + part.height <= 1, part.name + ": тело выше габарита");
+  }
+});
+
+test("кухонный шкаф — комод с вертикальными дверцами, и всеми тремя реестрами", () => {
+  // Слова заказчика: «Добавь кухонные шкафы (как комод, но не с горизонтальными
+  // дверцами, а вертикальными)». Вещь заводится одним ключом в три реестра, и
+  // промах в любом из них оставил бы пустую плитку, габарит без тела или
+  // ключ по-английски в колонке.
+  const entry = objectCatalogEntry("kitchenCabinet");
+  assert.ok(entry, "кухонного шкафа нет в каталоге");
+  assert.equal(entry.name, strings.schemeObjectKinds.kitchenCabinet);
+  assert.equal(entry.category, "furniture");
+  assert.ok(objectViewByName("kitchenCabinet"), "у кухонного шкафа нет изображения");
+  assert.deepEqual(objectCatalogDefaults("kitchenCabinet"), {
+    shape: "rect",
+    widthMm: 800,
+    depthMm: 600,
+    heightMm: 860,
+    heightAboveFloorMm: 0,
+  });
+  // Высота — **ровно низ столешницы**: верх у неё 900 при толщине 40, и шкаф
+  // обязан встать под неё без щели. Разойдись числа — кухонный фронт, собранный
+  // из шкафов и полосы, перестал бы сходиться.
+  const counter = objectCatalogDefaults("counter");
+  assert.equal(entry.heightMm, counter.heightAboveFloorMm, "шкаф не встаёт под столешницу");
+  assert.equal(entry.depthMm, counter.depthMm, "глубина разошлась со столешницей");
+  // Две створки в высоту — против трёх ящиков комода. Шов между ними шире
+  // клетки отпечатка, иначе две створки снялись бы одной.
+  const parts = bodies("kitchenCabinet");
+  assert.deepEqual(parts.map((part) => part.name), ["case", "doorLeft", "doorRight"]);
+  const [left, right] = [parts[1], parts[2]];
+  for (const door of [left, right]) {
+    assert.ok(door.height > 0.8, "створка не во всю высоту");
+    assert.equal(door.material, "light");
+    assert.equal(door.y, -0.5, "створка не на лице");
+  }
+  assert.equal(left.width, right.width, "створки разной ширины");
+  assert.ok(right.x > left.x + left.width, "створки налезают друг на друга");
+  assert.ok(right.x - (left.x + left.width) >= 1 / PRINT_GRID, "шов между створками тоньше клетки отпечатка");
+  // И силуэт у него свой: ни комод, ни шкаф, ни посудомойка.
+  for (const other of ["chest", "cabinet", "dishwasher", "dresser"]) {
+    assert.notEqual(
+      printOf(objectModelByKey("kitchenCabinet")),
+      printOf(objectModelByKey(other)),
+      "кухонный шкаф выглядит как " + other,
+    );
+  }
 });
 
 test("лестница держит свой предел: не больше тридцати ступеней и двухсот граней", () => {
@@ -1070,11 +1220,25 @@ test("общая модель заведена одним описанием, а
   // Где модель общая — там она общая по ссылке, и правка одной правит обе.
   assert.equal(bodies("washer"), bodies("dryerMachine"), "стиральная и сушильная машины");
   assert.equal(bodies("panel"), bodies("panelBox"), "щит на чертеже и щит меткой");
-  // Унитаз и общий вид «Сантехника» — тоже одно описание, и это **условие
-  // G68**: прежний чертёж, где вещь узнаётся по имени «Унитаз», с таска 162
-  // находит модель по ключу `toilet` — и обязан получить ровно то тело,
-  // которое получал по ключу `plumbing`.
-  assert.equal(bodies("plumbing"), bodies("toilet"), "унитаз и общий вид сантехники");
+  // **Унитаз и общий вид «Сантехника» разведены по слову заказчика** (таск
+  // 254, G396): «Унитаз сделай более детализированным, а то не совсем понятно
+  // что это». С таска 162 и до таска 254 описание у них было одно, и это было
+  // условием G68; теперь подробное тело досталось только унитазу, а общий вид
+  // остался прежним — он `legacy` (новым им не размечают), им в чужих чертежах
+  // заведены биде и прочая сантехника, и в его умолчании 700 × 400 × 400
+  // сиденье с бачком не помещаются по долям.
+  //
+  // Чтобы «остался прежним» значило прежним, а не «похожим», тела общего вида
+  // названы здесь числами: это снимок описания **до** таска 254.
+  assert.notEqual(bodies("plumbing"), bodies("toilet"), "унитаз и общий вид сантехники снова одно описание");
+  assert.deepEqual(
+    bodies("plumbing").map((part) => [part.name, part.kind, part.x, part.y, part.z, part.width, part.depth, part.height, part.material]),
+    [
+      ["bowl", "cyl", -0.3, -0.5, 0, 0.6, 0.75, 0.62, "light"],
+      ["cistern", "box", -0.32, 0.2, 0.3, 0.64, 0.3, 0.7, "body"],
+    ],
+    "тело общего вида «Сантехника» поехало — а у прежних чертежей оно обязано остаться прежним (G68)",
+  );
   // А восемь точечных типов света делят модель потому, что делят изображение:
   // ключ у них один, и разводит их габарит.
   assert.equal(objectModelByKey("lamp").key, "lamp");
