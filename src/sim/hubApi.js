@@ -19,7 +19,8 @@
 //     от зависания защищает Worker (таск 07);
 //   — мир хаба над дверью движка (`hubWorld`): `Hub`, `Accessory`, `Service`,
 //     `Characteristic`, `Room`, таймеры `Task` и `Cron` по времени имитации,
-//     `Date` имитации, журнал с `{}`, заглушки сети и почты;
+//     `Date` имитации, журнал с `{}` (адрес, которого в доме нет, —
+//     `hubAddressMissing`), заглушки сети и почты;
 //   — хозяин скриптов для движка (`createHubOwner`): цикл хаба `trigger`/
 //     `compute`/`onStart`, эхо собственной записи, цепочки `context`,
 //     привязки к сервисам с опциями и `variables`, формы опций и исполнитель
@@ -1636,6 +1637,38 @@ export function hubWorld(host, { dry = false } = {}) {
     return found ? charWrap(entry, found.service, found.char) : null;
   }
 
+  // ——— адрес, которого в доме нет ———
+  //
+  // Адрес аксессуара — номер его метки (ADR 012, таск 04 связи меток и
+  // вещей), и перенумерация объекта сломала адреса, вписанные числами в тексты
+  // сценариев и в опции привязок заказчика (G12). Дом от этого не встаёт, но
+  // молчать здесь нельзя: он согласился на сломанные адреса, **чтобы потом их
+  // починить**, а по записи «ошибка на строке 11» не понять, какое устройство
+  // потерялось. Поэтому ненайденный адрес называется своим кодом и со своим
+  // адресом — тем же приёмом, которым блочный сценарий говорит об удалённом
+  // устройстве (`blockDeviceMissing` в `sim/blocks.js`).
+  //
+  // Записывается он **на каждой двери, куда адрес приносит сценарий**, и
+  // только на них: `charByAddress` зовут ещё подписка и свой сервис привязки,
+  // а там адрес даёт сам дом и ненайденным он быть не может.
+  function missingAddress(address) {
+    const context = world.acting();
+    log("error", "hubAddressMissing", {
+      name: context && context.instance ? context.instance.name : "",
+      address: String(address === null || address === undefined ? "" : address),
+    });
+    return null;
+  }
+
+  function askedAccessory(id) {
+    const entry = byAid.get(Number(id));
+    return entry ? accessoryWrap(entry) : missingAddress(id);
+  }
+
+  function askedChar(aid, cid) {
+    return charByAddress(aid, cid) || missingAddress(String(aid) + "." + String(cid));
+  }
+
   // ——— исполнение кода сценариев ———
 
   /** Исполнить `fn` от имени `context`; `{ok, value}` или `{ok: false, error}`. */
@@ -1991,20 +2024,22 @@ export function hubWorld(host, { dry = false } = {}) {
 
   world.api = Object.freeze({
     Hub: Object.freeze({
-      getAccessory: (id) => accessoryWrap(byAid.get(Number(id)) || null),
+      // Адрес приносит сценарий: не нашёлся — журнал называет его
+      // (`missingAddress`), а ответ прежний — `null` и ничего не сделано.
+      getAccessory: (id) => askedAccessory(id),
       getAccessories: () => accessoryList.map(accessoryWrap),
       getRooms: () => roomList.map(roomWrap),
-      getCharacteristic: (aid, cid) => charByAddress(aid, cid),
+      getCharacteristic: (aid, cid) => askedChar(aid, cid),
       getCharacteristicValue: (aid, cid) => {
-        const char = charByAddress(aid, cid);
+        const char = askedChar(aid, cid);
         return char ? char.getValue() : null;
       },
       setCharacteristicValue: (aid, cid, value) => {
-        const char = charByAddress(aid, cid);
+        const char = askedChar(aid, cid);
         if (char) char.setValue(value);
       },
       toggleCharacteristicValue: (aid, cid) => {
-        const char = charByAddress(aid, cid);
+        const char = askedChar(aid, cid);
         if (char) char.toggle();
       },
       subscribe: (handler, ...args) => subscribe(null, handler, args),

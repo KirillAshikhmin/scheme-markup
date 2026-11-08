@@ -16,6 +16,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { buildHomeSpec, deviceAid, deviceAids, homeAccessories, markAccessory } from "../src/sim/home.js";
+import { text } from "../src/strings.js";
 import { simHouse } from "./fixtures/simHome.js";
 import { hubHome } from "./fixtures/sprut/hubHome.js";
 
@@ -33,7 +34,10 @@ test("адрес аксессуара — сам номер метки, а не 
   // Девятизначных адресов больше нет: номера объекта-фикстуры — трёхзначные.
   assert.ok(Math.max(...accessories.map((item) => item.aid)) < 1000, "адрес вне номеров объекта");
   assert.equal(deviceAid("17"), 17);
-  assert.equal(deviceAid(17), 17);
+  // Число адреса не даёт вовсе: id в объекте — десятичная строка и ничто
+  // другое (D01). Прими здесь и число — `17` с `"17"` дали бы один адрес, а
+  // второй аксессуар того же адреса хаб молча потерял бы.
+  assert.equal(deviceAid(17), null);
 });
 
 test("метка без номера адреса не имеет, и аксессуара у неё нет", () => {
@@ -121,7 +125,7 @@ const ADDRESS_SCRIPT = [
   "}",
 ].join("\n");
 
-test("сценарий с прежним адресом устройства не находит: дом идёт, сосед работает, в журнале hubError", () => {
+test("сценарий с прежним адресом: журнал называет адрес своим кодом, дом идёт, сосед работает", () => {
   const box = simHouse();
   // Девятизначное число — адрес прежней сборки (хэш от uuid): такого
   // устройства в доме нет и быть не может.
@@ -136,10 +140,21 @@ test("сценарий с прежним адресом устройства н�
     ],
   });
 
-  // Прежний адрес: сценарий падает, но падает он один.
+  // Прежний адрес: сперва журнал называет **адрес**, которого в доме нет, —
+  // по одной записи об ошибке на строке заказчик не понял бы, что починить.
   home.set("С1", "On", true);
+  const missing = home.log("hubAddressMissing");
+  assert.equal(missing.length, 1, "ненайденный адрес не назван своим кодом");
+  assert.equal(missing[0].kind, "error");
+  assert.equal(missing[0].scenarioId, home.scenarios.addr);
+  assert.equal(missing[0].bindingId, home.bound.stale);
+  assert.equal(missing[0].vars.address, "884254140", "в записи нет адреса, которого не нашли");
+  assert.equal(missing[0].vars.name, "Чужой адрес");
+  assert.ok(text("sim.journal.hubAddressMissing", missing[0].vars).includes("884254140"), "адрес не подставился в строку");
+
+  // И только потом — падение сценария на этом же месте; падает он один.
   const errors = home.log("hubError");
-  assert.equal(errors.length, 1, "ненайденный адрес не назван в журнале");
+  assert.equal(errors.length, 1, "сценарий, не нашедший устройство, не записал ошибку");
   assert.equal(errors[0].kind, "error");
   assert.equal(errors[0].scenarioId, home.scenarios.addr);
   assert.equal(errors[0].bindingId, home.bound.stale);
@@ -152,5 +167,46 @@ test("сценарий с прежним адресом устройства н�
   home.set("С2", "On", true);
   assert.equal(home.value("С3", "On"), true, "сценарий с живым адресом не сработал");
   assert.equal(home.log("hubError").length, 1, "сломался и второй сценарий");
+  assert.equal(home.log("hubAddressMissing").length, 1, "живой адрес назван ненайденным");
   assert.equal(home.value("С1", "On"), true, "дом потерял значение после ошибки сценария");
+});
+
+// Запись значения по адресу исключения не бросает вовсе: нет устройства —
+// `Hub.setCharacteristicValue` просто ничего не делает. Такая потеря была бы
+// полной тишиной — ни ошибки, ни следа, — и заказчик не узнал бы о ней никогда.
+const WRITE_SCRIPT = [
+  "info = {",
+  '  name: "Запись по адресу",',
+  "  sourceServices: [HS.Lightbulb],",
+  "  sourceCharacteristics: [HC.On],",
+  '  options: { target: { type: "String", value: "" } },',
+  "  variables: {}",
+  "};",
+  "function trigger(source, value, variables, options, context) {",
+  "  var parts = String(options.target).split('.');",
+  "  Hub.setCharacteristicValue(parts[0], parts[1], value);",
+  "}",
+].join("\n");
+
+test("запись по прежнему адресу не молчит: журнал называет адрес, исключения нет, дом идёт", () => {
+  const box = simHouse();
+  const live = box.marks["С3"] + ".14";
+  const home = hubHome({
+    box,
+    scripts: [{ key: "write", name: "Запись по адресу", source: WRITE_SCRIPT }],
+    bindings: [
+      { key: "stale", script: "write", mark: "С1", options: { target: "884254140.15" } },
+      { key: "live", script: "write", mark: "С2", options: { target: live } },
+    ],
+  });
+
+  home.set("С1", "On", true);
+  const missing = home.log("hubAddressMissing");
+  assert.equal(missing.length, 1, "немое падение записи: в журнале ни слова");
+  assert.equal(missing[0].vars.address, "884254140.15", "в записи нет адреса характеристики");
+  assert.deepEqual(home.log("hubError"), [], "запись по чужому адресу бросила исключение");
+
+  home.set("С2", "On", true);
+  assert.equal(home.value("С3", "On"), true, "запись по живому адресу не дошла");
+  assert.equal(home.log("hubAddressMissing").length, 1, "живой адрес назван ненайденным");
 });

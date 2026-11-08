@@ -47,6 +47,9 @@ const CONTRACT_CODES = [
   // логические и глобальные сценарии (таск 06)
   "hubTrigger", "hubError", "hubSyntax", "hubLog", "hubNotify", "hubHttp", "hubMail", "hubSsh", "hubNet",
   "hubVisible", "hubGlobalWrite", "hubBindingMissing", "hubLogicManual",
+  // адрес, которого в доме нет (таск 04 связи меток и вещей, G12): адреса в
+  // сценариях заказчика сломались перенумерацией, и журнал называет адрес
+  "hubAddressMissing",
   // страница и поток (таск 07)
   "pageReloaded", "editReset", "noWorker", "scenarioHung", "hungUnknown", "workerError",
   // команды (таск 13)
