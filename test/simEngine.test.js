@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 
 import { SIM_CHAIN_MAX, createSimEngine } from "../src/sim/engine.js";
 import { buildHomeSpec } from "../src/sim/home.js";
-import { addScenario, createProject, setMarkDevice, setTypeDevice } from "../src/model.js";
+import { addScenario, createProject, idsMigrate, labelOf, setMarkDevice, setTypeDevice } from "../src/model.js";
 import { simBigHouse, simHouse, simHouseSpec, simLegacySwitchProject, simLink, simPut, simRecorder } from "./fixtures/simHome.js";
 
 // Полдень 23 октября 2026 года в местных миллисекундах часов имитации.
@@ -308,12 +308,17 @@ test("профиль до G11: двойное и долгое на привяз�
 
 test("G68: объект с профилем до G11 работает как прежде — щелчок переключает нагрузки и шлёт одиночное нажатие", () => {
   const legacy = simLegacySwitchProject();
+  // Объект прежней сборки несёт uuid вместо номеров, а адрес аксессуара теперь
+  // читается из номера метки (таск 04 связи меток и вещей). Дом видит такой
+  // объект **после открытия**: обе трубы нумеруют его `idsMigrate`, и метки
+  // достаются по обозначению (`labelOf`), а не по прежнему uuid.
+  const project = idsMigrate(legacy.project).project;
   const recorder = simRecorder();
   const engine = createSimEngine({ emit: recorder.emit });
-  engine.load(buildHomeSpec(legacy.project));
+  engine.load(buildHomeSpec(project));
   engine.setClock({ simMs: T0 });
   engine.start();
-  const at = (label) => legacy.marks[label];
+  const at = (label) => project.marks.find((mark) => labelOf(project, mark.id) === label).id;
   const presses = (label) =>
     recorder.log().filter((entry) => entry.kind === "press" && entry.markId === at(label)).map((entry) => [entry.service, entry.to]);
   engine.act({ kind: "press", markId: at("В1"), service: 0, press: "single" });

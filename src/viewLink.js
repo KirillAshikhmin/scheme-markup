@@ -7,7 +7,7 @@
 // brotli из `web/vendor/` (`brotliCodec.js`), в тестах `zlib`. Отсюда и
 // чистота: формат проверяется в Node без браузера.
 //
-// Семь шагов упаковки, и порядок их не случаен:
+// Шесть шагов упаковки, и порядок их не случаен:
 //
 //   1. выкинуть то, что не рисуется и не работает: `accepted`,
 //      `equipmentTypes`, `equipment`, `placements` (G10, G15). Фотоподложек в
@@ -23,31 +23,40 @@
 //      (`setSchemeFloor`, `setSchemeAnchor`, `moveMarkOrder`), и читают такие
 //      поля через умолчания. «Нет поля» и «поле пустое» в объекте — одно и то
 //      же состояние;
-//   4. переписать идентификаторы короткими — **с таблицей оригиналов**, чтобы
-//      чтение вернуло те же id, и с **таблицей адресов хаба**, чтобы было чем
-//      доказать, что ни одно устройство адреса не сменило (ADR 021);
-//   5. заменить исходники сценариев ссылкой на библиотеку там, где она уже
+//   4. заменить исходники сценариев ссылкой на библиотеку там, где она уже
 //      известна (`scenario.lib`) или где реестр узнаёт исходник точно;
-//   6. в оставшихся исходниках срезать комментарии и **проверить разбором**;
+//   5. в оставшихся исходниках срезать комментарии и **проверить разбором**;
 //      не разобралось — вернуть исходный текст (G11.1). Сценарий заказчика
 //      дороже сотни знаков в адресе;
-//   7. сжать кодеком и уложить в base64url.
+//   6. сжать кодеком и уложить в base64url.
 //
-// Шаги 1–3, 5 и 6 — это `viewLinkStrip`: чистка без сжатия, по которой удобно
-// мерить и с которой **сверяется круговой прогон**. Шаги 4 и 7 обратимы
-// целиком, поэтому `viewLinkRead(viewLinkPack(p))` даёт ровно
-// `viewLinkStrip(p)` — поле в поле.
+// Шаги 1–5 — это `viewLinkStrip`: чистка без сжатия, по которой удобно мерить
+// и с которой **сверяется круговой прогон**. Шаг 6 обратим целиком, поэтому
+// `viewLinkRead(viewLinkPack(p))` даёт ровно `viewLinkStrip(p)` — поле в поле.
 //
-// **Почему оригиналы id едут в нагрузке, а не выбрасываются.** Короткие id
-// без таблицы оригиналов делают ссылку вдвое короче — и это единственное, что
-// они дают. Цена: адрес аксессуара считается из `mark.id`
-// (`deviceAid`, ADR 012), и у переписанной метки он становится другим. Вернуть
-// его, не храня id, можно было бы только одним способом — пройти по исходникам
-// сценариев и переписать в них числа адресов. А адрес в тексте сценария — это
-// обычное девятизначное число: отличить его от порога, задержки или цвета
-// нечем, и такая правка молча испортила бы код интегратора. Догадку показывают,
-// а не применяют: id остаются своими, адреса остаются своими, а длина ссылки —
-// то, чем за это заплачено (ADR 021).
+// **Идентификаторы едут в нагрузке как есть** (таск 04 связи меток и вещей,
+// G10). Прежде шагов было семь, и четвёртым id переписывались знаками
+// (`~0`, `~1`) **с таблицей оригиналов** (`ids`), потому что без неё чтение не
+// вернуло бы те же id, и с **таблицей адресов хаба** (`aids`), потому что
+// адрес аксессуара считался хэшем от `mark.id` и у переписанной метки
+// становился другим. Обе таблицы держались на одном: id был 36-значным uuid.
+//
+// Теперь id сущности — короткий номер (`"17"`), уникальный по всему объекту, а
+// адрес аксессуара — он же (`deviceAid`, ADR 012). Переписывать короткое
+// коротким нечего, таблица оригиналов повторяла бы те же номера вторым разом,
+// а таблица адресов доказывала бы то, что теперь верно по условию: адрес не
+// может переехать, пока не переехал номер.
+//
+// Чем это заплачено по замеру на четырёх рабочих объектах: снятие таблиц даёт
+// 5,3–7,2% знаков, а вместе с самой перенумерацией ссылка короче на 28–50%.
+// Большую часть выигрыша дают номера, а не снятие таблиц, — и это ответ на
+// прикидку «таблица занимала 27–50%»: столько она занимала, пока в ней лежали
+// uuid.
+//
+// Поэтому версия нагрузки поднята: прежняя ссылка несёт короткие id и без
+// таблицы читается мусором, и такую нагрузку читатель обязан отвергнуть
+// словами, а не принять криво (ADR 021: мигрировать ссылку некому — она живёт
+// в адресе, а не в файле).
 
 // Ссылку на библиотечный скрипт принимает **модель** и только она
 // (`scenarioLibOf`: отпечаток — 64 знака SHA-256, иначе ссылки нет). Своей
@@ -56,12 +65,14 @@
 // сценария вовсе (ревью ветки, F1).
 import { scenarioLibOf } from "./model.js";
 import { strings, text } from "./strings.js";
-// Адреса хаба считает дом — второго счёта здесь не заводится: иначе таблица в
-// нагрузке и таблица в доме разошлись бы на первой же правке `deviceAid`.
-import { deviceAids } from "./sim/home.js";
 
-/** Версия формата нагрузки. Поднимается, когда прежний читатель её не поймёт. */
-export const VIEW_LINK_VERSION = 1;
+/**
+ * Версия формата нагрузки. Поднимается, когда прежний читатель её не поймёт.
+ * Вторая — нагрузка без таблицы прежних номеров меток и без коротких id (таск
+ * 04 связи меток и вещей): ссылка первой версии читается мусором, и чтение
+ * отказывает ей по версии.
+ */
+export const VIEW_LINK_VERSION = 2;
 /** Имя параметра в адресе: `#o=<нагрузка>`. */
 export const VIEW_LINK_PARAM = "o";
 /** Код отказа чтения: битая, обрезанная, чужая строка. */
@@ -103,14 +114,6 @@ const VIEW_LINK_SCALE = 10 ** VIEW_LINK_DIGITS;
 // (2^53), и округление само сдвинуло бы значение. В долях плана и
 // миллиметрах таких чисел не бывает.
 const VIEW_LINK_ROUND_MAX = 1e9;
-
-// Короткий id — это знак-метка и номер в таблице по основанию 36. Знак-метка
-// выбирается так, чтобы **ни одна строка объекта с него не начиналась**:
-// иначе чтение приняло бы за номер чужое значение (скажем, место установки
-// «~1») и подставило бы на его место идентификатор.
-const VIEW_LINK_TOKEN_MARK = "~";
-const VIEW_LINK_TOKEN_TRIES = 8;
-const VIEW_LINK_TOKEN_BASE = 36;
 
 const VIEW_LINK_B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 // Обратная таблица: номер знака по его коду. Знак не из алфавита даёт
@@ -207,7 +210,7 @@ function viewLinkClean(value) {
   return typeof value === "number" ? viewLinkRound(value) : value;
 }
 
-// ——— шаг 6: комментарии из исходника ————————————————————————————————
+// ——— шаг 5: комментарии из исходника —————————————————————————————————
 
 /**
  * Исходник без комментариев — и **только** без них: от исходного текста он
@@ -374,7 +377,7 @@ function viewLinkTrimSource(source) {
   return viewLinkParses(short) ? short : source;
 }
 
-// ——— шаг 5: ссылка на библиотеку —————————————————————————————————————
+// ——— шаг 4: ссылка на библиотеку —————————————————————————————————————
 
 /**
  * Ссылка на библиотечный скрипт для исходника или `null`. Реестр приходит
@@ -432,7 +435,7 @@ function viewLinkScenarios(list, options) {
   return { scenarios, linked, inlined };
 }
 
-// ——— шаги 1–3, 5, 6: чистка —————————————————————————————————————————
+// ——— шаги 1–5: чистка ————————————————————————————————————————————————
 
 /**
  * Объект, очищенный для ссылки: без выкинутых разделов и подложек, с
@@ -482,101 +485,7 @@ function viewLinkStripped(project, opts = {}) {
   return { project: cleaned, scenarios: { linked, inlined } };
 }
 
-// ——— шаг 4: короткие id и таблица адресов ————————————————————————————
-
-/** Все строки-значения объекта: по ним выбирается знак-метка короткого id. */
-function viewLinkWalkStrings(value, seen) {
-  if (Array.isArray(value)) {
-    for (const item of value) viewLinkWalkStrings(item, seen);
-    return;
-  }
-  if (value && typeof value === "object") {
-    for (const item of Object.values(value)) viewLinkWalkStrings(item, seen);
-    return;
-  }
-  if (typeof value === "string") seen.push(value);
-}
-
-/**
- * Знак-метка, с которого не начинается ни одна строка объекта. Без такой
- * проверки короткий id `~1` нельзя было бы отличить от значения `~1`,
- * записанного человеком.
- */
-function viewLinkTokenMark(project) {
-  const seen = [];
-  viewLinkWalkStrings(project, seen);
-  for (let length = 1; length <= VIEW_LINK_TOKEN_TRIES; length += 1) {
-    const mark = VIEW_LINK_TOKEN_MARK.repeat(length);
-    if (!seen.some((item) => item.startsWith(mark))) return mark;
-  }
-  throw viewLinkFail("shape");
-}
-
-/** Идентификаторы объекта в порядке первой встречи: поля `id` на любой глубине. */
-function viewLinkWalkIds(value, order, known) {
-  if (Array.isArray(value)) {
-    for (const item of value) viewLinkWalkIds(item, order, known);
-    return;
-  }
-  if (!value || typeof value !== "object") return;
-  for (const [key, item] of Object.entries(value)) {
-    if (key === "id" && typeof item === "string" && item !== "" && !known.has(item)) {
-      known.set(item, order.length);
-      order.push(item);
-    }
-    viewLinkWalkIds(item, order, known);
-  }
-}
-
-/**
- * Замена строк по таблице — **целым значением, а не подстрокой**: ссылка на
- * метку лежит отдельным значением (`roomId`, `wallId`, запись связи), а
- * идентификатор, попавший в чьё-то примечание, остаётся словом в тексте.
- * Ключи объектов не трогаются: по ним в объекте ходят коды и имена полей, а не
- * идентификаторы.
- */
-function viewLinkMapStrings(value, swap) {
-  if (Array.isArray(value)) return value.map((item) => viewLinkMapStrings(item, swap));
-  if (value && typeof value === "object") {
-    const out = {};
-    for (const [key, item] of Object.entries(value)) out[key] = viewLinkMapStrings(item, swap);
-    return out;
-  }
-  if (typeof value !== "string") return value;
-  const swapped = swap(value);
-  return swapped === undefined ? value : swapped;
-}
-
-/**
- * Адреса аксессуаров объекта: `{<markId>: <aid>}`. Эта таблица уезжает в
- * нагрузку, и по ней чтение проверяет, что ни одно устройство адреса не
- * сменило (ADR 021). Считает её дом (`deviceAids`), второго счёта нет.
- */
-export function viewLinkAids(project) {
-  const table = {};
-  for (const [markId, aid] of deviceAids(project)) table[markId] = aid;
-  return table;
-}
-
-/**
- * Адреса в порядке `project.marks` — так в нагрузке лежит список, а не карта:
- * ключи в ней повторяли бы те же идентификаторы вторым разом.
- */
-function viewLinkAidList(project) {
-  const marks = Array.isArray(project.marks) ? project.marks : [];
-  if (marks.length === 0) return null;
-  // Таблица нужна там, где адрес бывает записан рукой — в тексте сценария и в
-  // настройках привязки. Объекту без сценариев она не нужна, и платить за неё
-  // длиной адреса незачем.
-  const hasScripts =
-    (Array.isArray(project.scenarios) && project.scenarios.length > 0) ||
-    (Array.isArray(project.logicBindings) && project.logicBindings.length > 0);
-  if (!hasScripts) return null;
-  const table = deviceAids(project);
-  return marks.map((mark) => (mark && table.has(mark.id) ? table.get(mark.id) : 0));
-}
-
-// ——— шаг 7: base64url ————————————————————————————————————————————————
+// ——— шаг 6: base64url ————————————————————————————————————————————————
 
 function viewLinkEncode(bytes) {
   let out = "";
@@ -639,23 +548,13 @@ export async function viewLinkPack(project, opts = {}) {
   const compress = opts.compress;
   if (typeof compress !== "function") throw viewLinkFail("codec");
   const stripped = viewLinkStripped(project, opts);
-  const body = stripped.project;
-  const mark = viewLinkTokenMark(body);
-  const order = [];
-  const known = new Map();
-  viewLinkWalkIds(body, order, known);
-  const short = viewLinkMapStrings(body, (value) =>
-    known.has(value) ? mark + known.get(value).toString(VIEW_LINK_TOKEN_BASE) : undefined,
-  );
   const madeAt = opts.madeAt instanceof Date ? opts.madeAt.toISOString() : opts.madeAt || new Date().toISOString();
-  const aids = viewLinkAidList(body);
+  // Объект едет как есть: id в нём — номера, и ни переписывать их короткими, ни
+  // вести таблицы прежних номеров и адресов больше незачем (шапка модуля).
   const payload = {
     v: VIEW_LINK_VERSION,
     at: String(madeAt),
-    mark,
-    ids: order,
-    ...(aids ? { aids } : {}),
-    p: short,
+    p: stripped.project,
   };
   const json = new TextEncoder().encode(JSON.stringify(payload));
   const packed = await compress(json);
@@ -712,17 +611,8 @@ export async function viewLinkRead(linkText, opts = {}) {
   }
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw viewLinkFail("shape");
   if (payload.v !== VIEW_LINK_VERSION) throw viewLinkFail("version", { version: payload.v });
-  const short = payload.p;
-  const mark = typeof payload.mark === "string" && payload.mark !== "" ? payload.mark : null;
-  const ids = Array.isArray(payload.ids) ? payload.ids : null;
-  if (!short || typeof short !== "object" || Array.isArray(short) || !mark || !ids) throw viewLinkFail("shape");
-  const project = viewLinkMapStrings(short, (value) => {
-    if (!value.startsWith(mark)) return undefined;
-    const tail = value.slice(mark.length);
-    if (!/^[0-9a-z]+$/.test(tail)) return undefined;
-    const at = Number.parseInt(tail, VIEW_LINK_TOKEN_BASE);
-    return Number.isInteger(at) && at >= 0 && at < ids.length && typeof ids[at] === "string" ? ids[at] : undefined;
-  });
+  const project = payload.p;
+  if (!project || typeof project !== "object" || Array.isArray(project)) throw viewLinkFail("shape");
   // Объект это или чужая строка, случайно давшаяся распаковать: тот же вопрос,
   // что задаёт файлу `looksLikeProject`.
   if (
@@ -733,23 +623,14 @@ export async function viewLinkRead(linkText, opts = {}) {
   ) {
     throw viewLinkFail("shape");
   }
-  const warnings = [];
-  // Таблица адресов: доказательство, а не догадка. Сошлось — сценарий нашёл
-  // своё устройство; не сошлось — страница скажет об этом, а не будет делать
-  // вид, что дом цел.
-  if (Array.isArray(payload.aids)) {
-    const table = deviceAids(project);
-    project.marks.forEach((item, at) => {
-      const was = payload.aids[at];
-      if (!item || typeof was !== "number" || was === 0) return;
-      const now = table.get(item.id);
-      if (now !== was) warnings.push({ code: "addressMoved", markId: item.id, was, now: now === undefined ? 0 : now });
-    });
-  }
   return {
     project,
     madeAt: typeof payload.at === "string" ? payload.at : "",
     version,
-    warnings,
+    // Замечаний у чтения больше не бывает: прежде здесь сверялась таблица
+    // адресов хаба (`addressMoved`), а адрес — номер метки, и переехать он без
+    // номера не может. Поле остаётся дверью: страница просмотра читает его
+    // списком и скажет о новом замечании, не меняя своего кода.
+    warnings: [],
   };
 }

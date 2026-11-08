@@ -17,7 +17,6 @@ import {
   VIEW_LINK_DROPPED,
   VIEW_LINK_PARAM,
   VIEW_LINK_VERSION,
-  viewLinkAids,
   viewLinkPack,
   viewLinkRead,
   viewLinkStrip,
@@ -53,7 +52,7 @@ function legacyProject(name) {
   return JSON.parse(readFileSync(new URL("./" + name, import.meta.url), "utf8"));
 }
 
-/** Нагрузка ссылки, прочитанная мимо модуля: версия, дата, таблицы и объект. */
+/** Нагрузка ссылки, прочитанная мимо модуля: версия, дата и объект. */
 function payloadOf(linkText) {
   const dot = linkText.indexOf(".");
   const head = linkText.slice(0, dot);
@@ -68,7 +67,8 @@ function scriptedHouse() {
     kind: "logic",
     name: "Свет по движению",
     // Адрес хаба записан рукой — ровно тот случай, из-за которого в нагрузке
-    // едет таблица адресов.
+    // прежде ехала таблица адресов (таск 04 связи меток и вещей: адрес стал
+    // номером метки, и таблице нечего доказывать).
     source: "// шапка\ninfo = { name: \"x\" };\nfunction trigger() {\n  return Device.get(508131500);\n}\n",
     origin: "js",
     fileName: "MotionLight.js",
@@ -132,16 +132,16 @@ test("круговой прогон на объекте со сценариям�
   assert.deepStrictEqual(read.project, viewLinkStrip(project));
 });
 
-test("идентификаторы возвращаются своими, а в нагрузке лежат по одному разу", async () => {
+test("идентификаторы возвращаются своими, а таблиц прежних номеров в нагрузке нет", async () => {
   const project = legacyProject("legacy-openings-project.json");
   const markId = project.marks[0].id;
   const packed = await viewLinkPack(project, codec);
   const { payload } = payloadOf(packed.text);
-  // Объект нагрузки идентификаторов не несёт вовсе — они в таблице, и каждый
-  // один раз: на этом и экономится длина адреса.
-  const body = JSON.stringify(payload.p);
-  assert.equal(body.includes(markId), false, "короткий id в объекте нагрузки");
-  assert.equal(payload.ids.filter((item) => item === markId).length, 1, "оригинал в таблице один раз");
+  // Нагрузка — это версия, дата и объект, и больше ничего: id в объекте —
+  // номера, переписывать их короткими и вести таблицу оригиналов (`ids`,
+  // `mark`) или таблицу адресов хаба (`aids`) незачем.
+  assert.deepStrictEqual(Object.keys(payload).sort(), ["at", "p", "v"]);
+  assert.equal(JSON.stringify(payload.p).includes(markId), true, "id уехал из объекта нагрузки");
   const read = await viewLinkRead(packed.text, codec);
   assert.equal(read.project.marks[0].id, markId);
   assert.deepStrictEqual(
@@ -154,14 +154,17 @@ test("идентификаторы возвращаются своими, а в 
   assert.equal(read.project.openings[0].wallId, project.openings[0].wallId);
 });
 
-test("короткий id не путается со значением, начинающимся тем же знаком", async () => {
+test("значение, похожее на идентификатор, остаётся значением", async () => {
+  // Подстановки по таблице больше нет вовсе, и место установки, записанное
+  // номером соседней сущности или знаком прежнего короткого id, уезжает и
+  // возвращается словом в тексте.
   const project = legacyProject("legacy-openings-project.json");
   const first = project.marks[0].id;
-  project.marks[0] = { ...project.marks[0], location: "~1", original: "~~0" };
+  project.marks[0] = { ...project.marks[0], location: "~1", original: String(project.marks[1].id) };
   const packed = await viewLinkPack(project, codec);
   const read = await viewLinkRead(packed.text, codec);
   assert.equal(read.project.marks[0].location, "~1");
-  assert.equal(read.project.marks[0].original, "~~0");
+  assert.equal(read.project.marks[0].original, String(project.marks[1].id));
   assert.equal(read.project.marks[0].id, first);
 });
 
@@ -171,13 +174,10 @@ test("адреса хаба после прогона те же", async () => {
   const read = await viewLinkRead(packed.text, codec);
   assert.deepStrictEqual([...deviceAids(read.project)], [...deviceAids(project)]);
   assert.deepStrictEqual(read.warnings, []);
-  // Таблица адресов действительно уехала в нагрузку — и в порядке меток.
+  // Доказывать это таблицей больше нечем и незачем: адрес — номер метки, и
+  // пока номер в нагрузке тот же, адрес переехать не может.
   const { payload } = payloadOf(packed.text);
-  const table = viewLinkAids(project);
-  assert.deepStrictEqual(
-    payload.aids,
-    project.marks.map((mark) => table[mark.id]),
-  );
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, "aids"), false);
   // Дом собирается из прочитанного объекта теми же адресами и теми же
   // сервисами: проверка не про таблицу, а про то, что сценарий нашёл устройство.
   const was = buildHomeSpec(project);
@@ -191,12 +191,6 @@ test("адреса хаба после прогона те же", async () => {
     now.logicBindings.map((item) => [item.markId, item.service, item.options]),
     was.logicBindings.map((item) => [item.markId, item.service, item.options]),
   );
-});
-
-test("объекту без сценариев таблица адресов в нагрузку не кладётся", async () => {
-  const packed = await viewLinkPack(legacyProject("legacy-views-project.json"), codec);
-  const { payload } = payloadOf(packed.text);
-  assert.equal(Object.prototype.hasOwnProperty.call(payload, "aids"), false);
 });
 
 test("в ссылку не едут приёмка, оборудование и фотоподложка", async () => {
@@ -425,14 +419,42 @@ test("нагрузка несёт версию формата и дату выг
 test("нагрузка чужой версии отказывает понятно", async () => {
   const project = legacyProject("legacy-project.json");
   const packed = await viewLinkPack(project, codec);
-  const foreign = "2." + packed.text.slice(packed.text.indexOf(".") + 1);
+  const foreign = "3." + packed.text.slice(packed.text.indexOf(".") + 1);
   await assert.rejects(
     () => viewLinkRead(foreign, codec),
     (error) => {
       assert.equal(error.code, VIEW_LINK_BROKEN);
       assert.equal(error.reason, "version");
-      assert.equal(error.version, 2);
+      assert.equal(error.version, 3);
       assert.ok(error.message.includes("более новой версией"), error.message);
+      return true;
+    },
+  );
+});
+
+test("ссылка первой версии отвергается по версии, а не читается объектом с короткими id", async () => {
+  // Нагрузка прежней сборки: знак-метка, таблица оригиналов и короткие id в
+  // объекте. Подстановки больше нет, и без отказа по версии такой объект
+  // прочитался бы с идентификаторами вида «~0» — то есть молча испорченным.
+  const payload = {
+    v: 1,
+    at: "2026-11-08T07:30:00.000Z",
+    mark: "~",
+    ids: ["проект", "схема", "тип", "метка"],
+    p: {
+      id: "~0",
+      markTypes: [{ id: "~2", code: "С" }],
+      schemes: [{ id: "~1" }],
+      marks: [{ id: "~3", schemeId: "~1", typeId: "~2" }],
+    },
+  };
+  const link = "1." + brotliCompressSync(Buffer.from(JSON.stringify(payload), "utf8")).toString("base64url");
+  await assert.rejects(
+    () => viewLinkRead(link, codec),
+    (error) => {
+      assert.equal(error.code, VIEW_LINK_BROKEN);
+      assert.equal(error.reason, "version");
+      assert.equal(error.version, 1);
       return true;
     },
   );

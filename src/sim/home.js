@@ -3,11 +3,26 @@
 // модуль идёт и в бандл движка (Worker), поэтому всё, что он отдаёт, —
 // структурно клонируемые данные.
 //
-// **Адреса.** `aid` — чистая функция от `mark.id` (FNV-1a по строке id в
-// диапазон 100000000…999999999): он не хранится и поэтому не меняется ни между
-// сеансами, ни после сохранения в файл, ни после слияния папки, ни после
-// приёмки файла (`adoptLoadedProject` переприсваивает только `project.id`).
-// Совпадение у двух меток объекта разводится пробой по порядку `markId`.
+// **Адреса.** `aid` — **номер метки** (`mark.id`; таск 04 связи меток и вещей,
+// G10). Идентификатор сущности объекта стал коротким номером, уникальным по
+// всем видам сразу (`idNumberOf`, `nextId` в `model.js`), и адрес читается из
+// него, а не считается хэшем от uuid. Храниться он от этого не начал (ADR 012)
+// и поэтому не меняется ни между сеансами, ни после сохранения в файл, ни
+// после слияния папки, ни после приёмки файла (`adoptLoadedProject`
+// переприсваивает только `project.id`). Разводить совпадения больше нечего:
+// номера уникальны по условию, а адрес стал читаться как в настоящем хабе
+// (`1.13.15`).
+//
+// Цена названа вслух и принята заказчиком: адрес, вписанный числом прямо в
+// текст его сценария, после перенумерации указывает в пустоту. Дом при этом
+// идёт — `charByAddress` отвечает «нет такой характеристики», исключение
+// сценария ловит `guard`, и в журнале стоит `hubError` со строкой исходника;
+// остальные сценарии работают.
+//
+// Метка, чей id не номер (разметка до перенумерации, собранный руками объект),
+// адреса не имеет вовсе: `deviceAid` отвечает `null`, и аксессуара у такой
+// метки нет. Обе трубы открытия нумеруют объект прежде, чем дом его увидит.
+//
 // `sid` и `cid` идут подряд с 13 внутри аксессуара: сервис получает номер,
 // следом номера получают его характеристики — как в ScenarioSimulator
 // (`IdAllocator`, база 13). Они меняются только вместе с профилем.
@@ -15,6 +30,7 @@ import {
   deviceFollowers,
   findMark,
   findOpening,
+  idNumberOf,
   labelOf,
   logicBindingsOf,
   markControlsByChannel,
@@ -32,54 +48,53 @@ import {
 } from "../model.js";
 import { simServiceCharMeta, simServiceMeta } from "./catalog.js";
 
-export const DEVICE_AID_MIN = 100000000;
-export const DEVICE_AID_MAX = 999999999;
 // Первый номер сервиса и характеристики внутри аксессуара (как в Sprut).
 export const DEVICE_ID_START = 13;
 // Как далеко датчик открытия ищет свою дверь, если его не привязали рукой.
 export const DEVICE_DOOR_REACH_MM = 600;
 
-const DEVICE_AID_SPAN = DEVICE_AID_MAX - DEVICE_AID_MIN + 1;
-const DEVICE_TEXT = new TextEncoder();
-
 /**
- * Адрес аксессуара метки — чистая функция от `mark.id`: одно и то же число в
- * любом вызове, на любой машине, после любой упаковки. Без разведения
- * совпадений — их разводит `deviceAids` по всему объекту.
+ * Адрес аксессуара метки — её номер: `"17"` → `17`. Не номер (uuid прежней
+ * разметки, встроенный ключ, мусор) — `null`: адреса у такой метки нет, и
+ * аксессуара тоже.
+ *
+ * Числом, а не строкой: `aid` в хабе — число, и так его ждут и разбор адреса
+ * сценария (`hubApi.charByAddress`), и окно «Аксессуар».
  */
 export function deviceAid(markId) {
-  let hash = 0x811c9dc5;
-  for (const byte of DEVICE_TEXT.encode(String(markId))) {
-    hash ^= byte;
-    hash = Math.imul(hash, 0x01000193) >>> 0;
-  }
-  return DEVICE_AID_MIN + (hash % DEVICE_AID_SPAN);
+  return idNumberOf(markId);
 }
 
 /**
- * Адреса всех меток объекта: `Map<markId, aid>`, различные. Совпавшие
- * разводятся пробой вверх по кольцу в порядке `markId` — тем, у кого id
- * меньше, достаётся исходный адрес. Счёт идёт по всем меткам, а не только по
- * устройствам: заведённый у соседа профиль не сдвигает чужой адрес.
+ * Адреса всех меток объекта: `Map<markId, aid>`. Карта целиком нужна тем, кто
+ * ищет метку **по адресу** (подсказка в сценарии, окно «Аксессуар», перевод
+ * профилей); свой адрес берут у `deviceAid`, а не отсюда. Метка без номера в
+ * карту не попадает — адреса у неё нет.
  */
 export function deviceAids(project) {
-  return new Map(deviceHomeCache(project).aids());
+  const marks = project && Array.isArray(project.marks) ? project.marks : [];
+  const aids = new Map();
+  for (const mark of marks) {
+    const aid = deviceAid(mark && mark.id);
+    if (aid !== null && !aids.has(mark.id)) aids.set(mark.id, aid);
+  }
+  return aids;
 }
 
 // Кэш чтения по ссылке на объект (ревью ветки, F1): объект неизменяем — каждая
 // правка даёт новый, — поэтому всё, что прочитано из одного объекта, верно для
-// него навсегда. Без кэша `markAccessory` на каждый вызов сортировал адреса
-// всех меток, а мини-план зовёт его на каждую видимую метку: 105 мс на щелчок в
-// доме из 500 устройств. `WeakMap` отпускает старые объекты сам.
+// него навсегда. Собранный аксессуар стоит обхода профиля и словаря сервисов, а
+// мини-план зовёт `markAccessory` на каждую видимую метку. `WeakMap` отпускает
+// старые объекты сам. Адреса в кэше больше не лежат: номер читается из id
+// самой метки и обхода объекта не стоит.
 const DEVICE_HOME_CACHE = new WeakMap();
-const DEVICE_HOME_NONE = { aids: () => new Map(), accessories: new Map() };
+const DEVICE_HOME_NONE = { accessories: new Map() };
 
 function deviceHomeCache(project) {
   if (!project || typeof project !== "object") return DEVICE_HOME_NONE;
   let cached = DEVICE_HOME_CACHE.get(project);
   if (!cached) {
-    let aids = null;
-    cached = { aids: () => aids || (aids = deviceAidsOf(project)), accessories: new Map() };
+    cached = { accessories: new Map() };
     DEVICE_HOME_CACHE.set(project, cached);
   }
   return cached;
@@ -98,23 +113,6 @@ function deviceFrozen(accessory) {
   Object.freeze(accessory.services);
   Object.freeze(accessory.params);
   return Object.freeze(accessory);
-}
-
-function deviceAidsOf(project) {
-  const ids = (project && Array.isArray(project.marks) ? project.marks : [])
-    .map((mark) => mark.id)
-    .filter((id) => typeof id === "string")
-    .sort();
-  const taken = new Set();
-  const aids = new Map();
-  for (const id of ids) {
-    if (aids.has(id)) continue;
-    let aid = deviceAid(id);
-    while (taken.has(aid)) aid = aid === DEVICE_AID_MAX ? DEVICE_AID_MIN : aid + 1;
-    taken.add(aid);
-    aids.set(id, aid);
-  }
-  return aids;
 }
 
 /**
@@ -138,7 +136,10 @@ export function deviceIdsOf(services) {
 
 function deviceAccessory(project, mark, aid) {
   const profile = markDeviceOf(project, mark.id);
-  if (!profile) return null;
+  // Нет номера — нет адреса, а аксессуар без адреса сценарию не назвать:
+  // `hubApi` такую запись всё равно пропускает (`Number.isFinite(aid)`), и
+  // честнее не делать вид, что устройство в доме есть.
+  if (!profile || !Number.isInteger(aid)) return null;
   const ids = deviceIdsOf(profile.services);
   const services = profile.services.map((service, index) => {
     const sid = ids[index].sid;
@@ -191,7 +192,7 @@ export function markAccessory(project, markId) {
   const cache = deviceHomeCache(project);
   if (cache.accessories.has(markId)) return cache.accessories.get(markId);
   const mark = project ? findMark(project, markId) : null;
-  const accessory = !mark || markIsComment(mark) ? null : deviceFrozen(deviceAccessory(project, mark, cache.aids().get(mark.id) || deviceAid(mark.id)));
+  const accessory = !mark || markIsComment(mark) ? null : deviceFrozen(deviceAccessory(project, mark, deviceAid(mark.id)));
   if (project && typeof project === "object") cache.accessories.set(markId, accessory);
   return accessory;
 }
@@ -215,13 +216,12 @@ export function deviceKeyIndex(accessory, channel = 1) {
 /** Аксессуары всех меток-устройств объекта, в порядке объекта. */
 export function homeAccessories(project) {
   if (!project || !Array.isArray(project.marks)) return [];
-  const aids = deviceHomeCache(project).aids();
   const followers = deviceFollowers(project);
   const out = [];
   for (const mark of project.marks) {
     // Ведомая метка своего аксессуара не имеет: четыре Т1 для сценария — одна.
     if (markIsComment(mark) || followers.has(mark.id)) continue;
-    const accessory = deviceAccessory(project, mark, aids.get(mark.id) || deviceAid(mark.id));
+    const accessory = deviceAccessory(project, mark, deviceAid(mark.id));
     if (accessory) out.push(accessory);
   }
   return out;

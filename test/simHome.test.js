@@ -18,11 +18,8 @@ import {
   setPlanScale,
 } from "../src/model.js";
 import {
-  DEVICE_AID_MAX,
-  DEVICE_AID_MIN,
   buildHomeSpec,
   deviceAid,
-  deviceAids,
   deviceKeyIndex,
   homeAccessories,
   markAccessory,
@@ -52,44 +49,11 @@ function put(box, name, code, at) {
 }
 
 // ——— адрес аксессуара ————————————————————————————————————————————————————
-
-test("aid — FNV-1a 32 по строке id в диапазоне 100000000…999999999", () => {
-  // Контрольные значения FNV-1a 32 (опорные векторы алгоритма): «a» —
-  // 0xe40c292c, «foobar» — 0xbf9cf968, пустая строка — смещение 0x811c9dc5.
-  assert.equal(deviceAid("a"), DEVICE_AID_MIN + (0xe40c292c % 900000000));
-  assert.equal(deviceAid("foobar"), DEVICE_AID_MIN + (0xbf9cf968 % 900000000));
-  assert.equal(deviceAid(""), DEVICE_AID_MIN + (0x811c9dc5 % 900000000));
-  assert.equal(deviceAid("a"), 326002220);
-  for (const id of ["a", "foobar", crypto.randomUUID(), crypto.randomUUID()]) {
-    const aid = deviceAid(id);
-    assert.ok(Number.isInteger(aid) && aid >= DEVICE_AID_MIN && aid <= DEVICE_AID_MAX, String(aid));
-    assert.equal(deviceAid(id), aid, "адрес разный в двух вызовах");
-  }
-});
-
-test("совпавшие адреса двух меток объекта разводятся пробой по порядку markId", () => {
-  // Ищем пару id с одним адресом — по дням рождения хватает десятков тысяч.
-  const seen = new Map();
-  let pair = null;
-  for (let index = 0; !pair; index += 1) {
-    const id = "метка-" + index;
-    const aid = deviceAid(id);
-    if (seen.has(aid)) pair = [seen.get(aid), id];
-    else seen.set(aid, id);
-  }
-  const box = put(put(house(), "first", "Т", { x: 0.2, y: 0.2 }), "second", "Т", { x: 0.4, y: 0.2 });
-  const [low, high] = [...pair].sort();
-  const ids = [box.marks.first, box.marks.second];
-  const project = {
-    ...box.project,
-    // Метка с большим id стоит первой: порядок объекта значения не имеет.
-    marks: box.project.marks.map((mark) => ({ ...mark, id: mark.id === ids[0] ? high : low })),
-  };
-  const aids = deviceAids(project);
-  assert.equal(aids.get(low), deviceAid(low), "меньший id теряет свой адрес");
-  assert.equal(aids.get(high), deviceAid(low) + 1, "больший id не получил следующий свободный");
-  assert.notEqual(markAccessory(project, low).aid, markAccessory(project, high).aid);
-});
+//
+// Адрес — номер метки (таск 04 связи меток и вещей): хэш FNV-1a, девятизначный
+// диапазон и разведение совпадений ушли вместе со своими тестами, а сам адрес
+// проверяет `test/deviceAidNumber.test.js`. Здесь остаётся то, что от адреса
+// требовалось всегда: он не меняется ни после файла, ни после приёмки.
 
 test("адреса различны у меток объекта и не меняются после упаковки и приёмки файла", async () => {
   const box = house();
