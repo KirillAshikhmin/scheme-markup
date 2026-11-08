@@ -19304,16 +19304,23 @@ if (at < 0) return key;
 const head = key.slice(0, at + 1);
 const tail = key.slice(at + 1);
 let touched = false;
-const moved = tail
-.split(/([,+#])/)
-.map((piece) => {
+const move = (piece) => {
 const next = all.get(piece);
 if (next === undefined) return piece;
 touched = true;
 return next;
-})
-.join("");
-return touched ? head + moved : key;
+};
+const segments = tail.split("#").map((segment) => {
+for (const mark of [",", "+"]) {
+if (!segment.includes(mark)) continue;
+const pieces = segment.split(mark);
+const moved = pieces.map(move);
+if (pieces.every((piece) => all.has(piece))) moved.sort();
+return moved.join(mark);
+}
+return move(segment);
+});
+return touched ? head + segments.join("#") : key;
 }
 function idsMigrate(project) {
 if (!project || typeof project !== "object") return { project, changed: false, renumbered: 0 };
@@ -21991,6 +21998,9 @@ if (bindingsChanged) out.logicBindings = logicBindings;
 return { project: out, changed: true, switches, conditioners };
 }
 const MIGRATE_THING_KEYS = Object.freeze({ ТВ: "tv", ПОС: "towelDryer", ВЫТ: "hood" });
+function migrateThingKey(type) {
+return type ? MIGRATE_THING_KEYS[String(type.code || "").trim().toUpperCase()] : undefined;
+}
 function migrateThingSize(value, fallback) {
 const number = Number(value);
 return Number.isFinite(number) && number > 0 ? Math.round(number) : fallback;
@@ -22037,7 +22047,7 @@ const mark = findMark(next, markId);
 if (!mark || markIsComment(mark) || markObjectId(mark) !== null) continue;
 if (mark.kind !== "point" || !Array.isArray(mark.points) || mark.points.length !== 1) continue;
 const type = findType(next, mark.typeId);
-const key = type ? MIGRATE_THING_KEYS[String(type.code || "").trim()] : undefined;
+const key = migrateThingKey(type);
 if (!key) continue;
 const atMm = planFractionToMm(next, mark.schemeId, mark.points[0]);
 const defaults = objectCatalogDefaults(key);

@@ -23,7 +23,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  DICTIONARY_PROBLEM_CODES,
   ID_COUNTER_KEY,
+  acceptedProblems,
   addLogicBinding,
   addMark,
   addScenario,
@@ -31,10 +33,15 @@ import {
   createProject,
   idNumberOf,
   labelOf,
+  problemAccepted,
+  validate,
 } from "../src/model.js";
 import { packProject, unpackProject } from "../src/projectFile.js";
 import { projectsMigrateStored } from "../src/panels/projects.js";
-import { deviceAid } from "../src/sim/home.js";
+import { buildHomeSpec, deviceAid, homeAccessories } from "../src/sim/home.js";
+import { createSimEngine } from "../src/sim/engine.js";
+import { simRecorder } from "./fixtures/simHome.js";
+import { strings } from "../src/strings.js";
 import { legacyIdsBefore } from "./fixtures/legacyIds.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -251,4 +258,73 @@ test("G11: адрес аксессуара в опциях привязки пе
   }
   // Прежний девятизначный адрес не остался нигде.
   assert.equal(JSON.stringify(stored).includes(legacy.address), false, "прежний адрес остался в объекте");
+});
+
+// ——— дом прежнего объекта после открытия не пуст ——————————————————————————
+
+// Это сторож на ту самую поломку, которую видел заказчик: адрес аксессуара —
+// номер метки (ADR 012 + таск 04), у метки прежней разметки номера нет, и
+// необорудованный дом встречал его строкой «В объекте нет устройств —
+// поставьте метки или задайте профиль типу». Нумерует объект открытие, и тест
+// стоит на **каждой** трубе: забудь её одна — и объект из базы браузера
+// открывался бы без дома, а из файла с домом.
+function homeStart(project) {
+  const recorder = simRecorder();
+  const engine = createSimEngine({ emit: recorder.emit });
+  engine.load(buildHomeSpec(project));
+  engine.setClock({ simMs: Date.UTC(2026, 9, 22, 12, 0, 0) });
+  engine.start();
+  return { codes: recorder.log().map((entry) => entry.code), accessories: homeAccessories(project).length };
+}
+
+test("G11: дом объекта прежней сборки после открытия не пуст — у каждой трубы", async () => {
+  const legacy = JSON.parse(read("legacy-project.json"));
+
+  // Как было до открытия: ни одного адреса, дом пуст и говорит об этом. Строка
+  // та самая, которую видел заказчик, — поэтому она в тесте названа.
+  const before = homeStart(legacy);
+  assert.equal(before.accessories, 0, "у объекта поры uuid адресов быть не должно");
+  assert.ok(before.codes.includes("empty"), "дом объекта поры uuid обязан жаловаться на пустоту");
+  assert.match(strings.sim.journal.empty, /нет устройств/);
+
+  const stored = projectsMigrateStored(legacy);
+  const fromFile = (await unpackProject(await packProject(legacy, new Map()))).project;
+  for (const [name, project] of [["база браузера", stored], ["файл", fromFile]]) {
+    const after = homeStart(project);
+    assert.ok(after.accessories > 0, name + ": дом открытого объекта пуст");
+    assert.equal(after.codes.includes("empty"), false, name + ": дом жалуется на пустоту после открытия");
+    assert.ok(after.codes.includes("started"), name + ": дом не запустился");
+    // И у каждой метки с аксессуаром есть адрес — он же её номер.
+    for (const accessory of homeAccessories(project)) {
+      assert.equal(accessory.aid, deviceAid(accessory.markId), name + ": адрес аксессуара не номер метки");
+      assert.ok(accessory.aid > 0, name + ": адрес не выдан");
+    }
+  }
+});
+
+// ——— ответ «так и задумано» переживает перенумерацию ——————————————————————
+
+test("G11: принятые жёлтые строки после открытия остаются принятыми", async () => {
+  const legacy = JSON.parse(read("legacy-views-project.json"));
+  const open = (project) =>
+    validate(project).filter((problem) => DICTIONARY_PROBLEM_CODES.includes(problem.code) && !problemAccepted(project, problem.key));
+  const accepted = acceptedProblems(legacy).filter((record) => DICTIONARY_PROBLEM_CODES.includes(record.code));
+  assert.ok(accepted.length > 0, "фикстура без принятых строк справочника ничего не проверяет");
+
+  const was = open(legacy).length;
+  const stored = projectsMigrateStored(legacy);
+  const fromFile = (await unpackProject(await packProject(legacy, new Map()))).project;
+  for (const [name, project] of [["база браузера", stored], ["файл", fromFile]]) {
+    // Ни одной закрытой строки заново: ключ принятия собран из
+    // **отсортированных** номеров, и миграция складывает его тем же порядком.
+    assert.equal(open(project).length, was, name + ": вернулись уже закрытые жёлтые строки");
+    // И ни одной записи-сироты: у каждой принятой строки справочника есть
+    // вопрос, на который она отвечает.
+    const keys = new Set(validate(project).map((problem) => problem.key));
+    const orphans = acceptedProblems(project).filter(
+      (record) => DICTIONARY_PROBLEM_CODES.includes(record.code) && !keys.has(record.key),
+    );
+    assert.deepEqual(orphans, [], name + ": в списке принятых завелась запись-сирота");
+    assert.equal(acceptedProblems(project).length, acceptedProblems(legacy).length, name + ": список принятых поехал");
+  }
 });

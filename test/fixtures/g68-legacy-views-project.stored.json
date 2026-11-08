@@ -1386,7 +1386,7 @@
   ],
   "accepted": [
     {
-      "key": "sharedShape:circle-cross#47,23,25,21,36,38,22",
+      "key": "sharedShape:circle-cross#21,22,23,25,36,38,47",
       "code": "sharedShape",
       "kind": "warning",
       "label": "Знак «Круг с крестом» носят несколько типов: Т, С, ПК, ПС, ППл, ЛЮ, Бр",
@@ -1400,7 +1400,7 @@
       "at": "2026-10-21T15:52:57.669Z"
     },
     {
-      "key": "sharedShape:square-cross#60,40,51",
+      "key": "sharedShape:square-cross#40,51,60",
       "code": "sharedShape",
       "kind": "warning",
       "label": "Знак «Квадрат с крестом» носят несколько типов: ПП, ВП, ЩС",
@@ -1421,21 +1421,21 @@
       "at": "2026-10-21T15:52:57.669Z"
     },
     {
-      "key": "closeColors:16+10",
+      "key": "closeColors:10+16",
       "code": "closeColors",
       "kind": "warning",
       "label": "Цвета категорий «Выключатели» и «Электроприборы» похожи — 23,7",
       "at": "2026-10-21T15:52:57.669Z"
     },
     {
-      "key": "closeColors:15+12",
+      "key": "closeColors:12+15",
       "code": "closeColors",
       "kind": "warning",
       "label": "Цвета категорий «Климат» и «Карнизы» похожи — 26,3",
       "at": "2026-10-21T15:52:57.669Z"
     },
     {
-      "key": "closeColors:20+14",
+      "key": "closeColors:14+20",
       "code": "closeColors",
       "kind": "warning",
       "label": "Цвета категорий «Домофон» и «Сантехника» похожи — 27,4",

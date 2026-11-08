@@ -10899,22 +10899,43 @@ function idsMovedTree(value, moves) {
 // `closeColors:кат+кат`). Разбирается по разделителям, и переписывается только
 // то, что в точности равно прежнему номеру: имя знака и имя изображения стоят
 // в тех же строках и трогать их нельзя.
+//
+// **Список номеров пересортировывается, а не подставляется на прежние места.**
+// Составной признак набора собран из **отсортированных** идентификаторов
+// (`sharedShapeSubject`, `closeColorsSubject`), и порядок в нём — часть ключа:
+// `validate` на перенумерованном объекте сложит номера заново и получит другую
+// строку. Подставь номера на прежние места — и ключ принятия перестанет
+// совпадать с ключом вопроса: человек получит заново все жёлтые строки, на
+// которые уже ответил (на объектах заказчика — 23 из 91), а в списке принятых
+// останется столько же записей-сирот. Сортировка здесь та же, что там:
+// `sort()` по строкам.
 function idsMovedKey(key, all) {
   const at = String(key == null ? "" : key).indexOf(":");
   if (at < 0) return key;
   const head = key.slice(0, at + 1);
   const tail = key.slice(at + 1);
   let touched = false;
-  const moved = tail
-    .split(/([,+#])/)
-    .map((piece) => {
-      const next = all.get(piece);
-      if (next === undefined) return piece;
-      touched = true;
-      return next;
-    })
-    .join("");
-  return touched ? head + moved : key;
+  const move = (piece) => {
+    const next = all.get(piece);
+    if (next === undefined) return piece;
+    touched = true;
+    return next;
+  };
+  // Куски через `#` стоят каждый на своём месте (знак, имя изображения, номер),
+  // а внутри куска через `,` или `+` лежит список идентификаторов — он и
+  // сортируется, и только если он **целиком** из них: в чужой строке порядок
+  // может значить своё.
+  const segments = tail.split("#").map((segment) => {
+    for (const mark of [",", "+"]) {
+      if (!segment.includes(mark)) continue;
+      const pieces = segment.split(mark);
+      const moved = pieces.map(move);
+      if (pieces.every((piece) => all.has(piece))) moved.sort();
+      return moved.join(mark);
+    }
+    return move(segment);
+  });
+  return touched ? head + segments.join("#") : key;
 }
 
 /**

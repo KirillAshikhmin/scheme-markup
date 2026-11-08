@@ -219,6 +219,29 @@ test("G01: вещь того же вида, уже стоящая под мет�
   assert.notEqual(markObjectId(findMark(built.project, box.markId)), far.schemeObject.id);
 });
 
+test("G01: код типа узнаётся без учёта регистра — «Пос» это ПОС", () => {
+  // В модели коды уникальны без учёта регистра (`validate` сравнивает
+  // `code.toUpperCase()`), и у заказчика полотенцесушитель назван «Пос»: с
+  // учётом регистра его метка не переводилась бы, хотя вещь рядом нарисована.
+  const box = scene("ПОС");
+  const renamed = {
+    ...box.project,
+    markTypes: box.project.markTypes.map((type) => (type.code === "ПОС" ? { ...type, code: "Пос", name: "Полотенцесушитель" } : type)),
+  };
+  const after = migrateThingMarks(renamed);
+  assert.equal(after.changed, true, "метка с кодом «Пос» не переведена");
+  const object = findSchemeObject(after.project, markObjectId(findMark(after.project, box.markId)));
+  assert.equal(object.catalogKey, "towelDryer");
+
+  // А переименованное **имя** типа по-прежнему ни на что не влияет: узнаётся
+  // только код, и чужой код вещи не получает.
+  const alien = {
+    ...box.project,
+    markTypes: box.project.markTypes.map((type) => (type.code === "ПОС" ? { ...type, code: "СУШ" } : type)),
+  };
+  assert.equal(migrateThingMarks(alien).changed, false, "метка с чужим кодом переведена догадкой по имени");
+});
+
 test("G01: без моста мм ↔ доли вещь не выдумывается", () => {
   // У схемы нет ни калибровки, ни привязки начала координат: доли плана в
   // миллиметры не переводятся, и места для вещи не существует.

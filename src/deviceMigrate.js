@@ -500,6 +500,15 @@ export function migrateDevices(project) {
 // под телевизором.
 const MIGRATE_THING_KEYS = Object.freeze({ ТВ: "tv", ПОС: "towelDryer", ВЫТ: "hood" });
 
+// Код типа сверяется **без учёта регистра** — так его сравнивает и сама модель
+// (`validate`: коды уникальны по `code.toUpperCase()`). У заказчика
+// полотенцесушитель назван «Пос», и с учётом регистра его метка не переводилась
+// бы, хотя вещь `towelDryer` рядом уже нарисована. Переименованное **имя** типа
+// по-прежнему ни на что не влияет: узнаётся только код.
+function migrateThingKey(type) {
+  return type ? MIGRATE_THING_KEYS[String(type.code || "").trim().toUpperCase()] : undefined;
+}
+
 // Габарит метки — в габарит вещи, с переводом осей. У метки `length` идёт вдоль
 // поверхности, `depth` — от неё, `width` — вверх, а `heightAboveFloor` — это
 // **середина** прибора; у вещи это `widthMm` × `depthMm` × `heightMm` и
@@ -577,7 +586,7 @@ export function migrateThingMarks(project) {
     if (!mark || markIsComment(mark) || markObjectId(mark) !== null) continue;
     if (mark.kind !== "point" || !Array.isArray(mark.points) || mark.points.length !== 1) continue;
     const type = findType(next, mark.typeId);
-    const key = type ? MIGRATE_THING_KEYS[String(type.code || "").trim()] : undefined;
+    const key = migrateThingKey(type);
     if (!key) continue;
     const atMm = planFractionToMm(next, mark.schemeId, mark.points[0]);
     const defaults = objectCatalogDefaults(key);
