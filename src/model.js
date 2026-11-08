@@ -6278,6 +6278,29 @@ export function planFractionToMm(project, schemeId, point) {
   return { x: Math.round((back.x / perMeter) * 1000), y: Math.round((back.y / perMeter) * 1000) };
 }
 
+/**
+ * **Сдвиг**, а не точка: вектор в долях плана — в целые миллиметры чертежа,
+ * или `null`, если моста нет. Нужен там, где рука ведёт знак по плану, а
+ * переезжает вещь в миллиметрах (`moveMarkPlace`).
+ *
+ * Считается разностью двух переводов, а не своей арифметикой из `perMeter` и
+ * `turn`: перевод один на всю сборку, и формула сдвига обязана быть той же
+ * самой, иначе поворот плана или смена калибровки развели бы точку и вектор.
+ * Отсчёт идёт от начала координат — там перевод даёт ровно (0, 0), — поэтому
+ * округление до миллиметра случается один раз, на самом векторе.
+ */
+export function planShiftToMm(project, schemeId, shift) {
+  const origin = planOriginOf(project, schemeId);
+  if (!origin || !shift || !Number.isFinite(Number(shift.x)) || !Number.isFinite(Number(shift.y))) return null;
+  const from = planFractionToMm(project, schemeId, origin.at);
+  const to = planFractionToMm(project, schemeId, {
+    x: origin.at.x + Number(shift.x),
+    y: origin.at.y + Number(shift.y),
+  });
+  if (!from || !to) return null;
+  return { x: to.x - from.x, y: to.y - from.y };
+}
+
 // ——— чертёж: стены —————————————————————————————————————————————————————
 //
 // **Стена — один отрезок, а не полилиния.** Решение объяснено развёрнуто,
@@ -7841,6 +7864,32 @@ function schemeObjectMirrorField(shape, mirror) {
   return shape !== "polyline" && mirror === true ? { mirror: true } : {};
 }
 
+/**
+ * **Переставить вещь** на вектор в целых миллиметрах: `{project, schemeObject}`.
+ *
+ * Одна дверь на оба жеста — ручной перенос в «Чертеже» и перенос знака
+ * связанного прибора по плану (`moveMarkPlace`, таск 252). Прежде арифметика
+ * жила в самой мастерской, и второй жест завёл бы её копию: у прямоугольника
+ * едет записанная середина, у полосы — все её вершины.
+ *
+ * **Поворот и отражение не трогаются** — вещь переставили, а не повернули. То
+ * же про «К стене»: это команда руки (`workshopWallTurnDeg`), а не хранимая
+ * привязка, и переносу о ней знать нечего. Правило одно на все переносы, и
+ * второго не заводить.
+ */
+export function moveSchemeObject(project, objectId, deltaMm) {
+  const object = findSchemeObject(project, objectId);
+  if (!object) throw modelError("schemeObjectNotFound");
+  const dx = Math.round(Number(deltaMm && deltaMm.x) || 0);
+  const dy = Math.round(Number(deltaMm && deltaMm.y) || 0);
+  if (dx === 0 && dy === 0) return { project, schemeObject: object };
+  const patch =
+    object.shape === "polyline"
+      ? { pointsMm: (object.pointsMm || []).map((point) => ({ x: Number(point.x) + dx, y: Number(point.y) + dy })) }
+      : { atMm: { x: Number(object.atMm.x) + dx, y: Number(object.atMm.y) + dy } };
+  return updateSchemeObject(project, objectId, patch);
+}
+
 export function deleteSchemeObject(project, objectId) {
   const object = findSchemeObject(project, objectId);
   if (!object) throw modelError("schemeObjectNotFound");
@@ -8145,6 +8194,79 @@ function schemeObjectSpansMm(object, corners) {
     length += Math.hypot(corners[index].x - corners[index - 1].x, corners[index].y - corners[index - 1].y);
   }
   return { widthMm: Math.round(length), depthMm: Number(object.depthMm) };
+}
+
+// ——— кто держит место знака, и кого везёт рука (G390, таск 252) ———————————
+//
+// Слова заказчика после сборки связи: «"тащишь метку — едет вещь" - сделай».
+//
+// Правило вышло **одно**, и оно уже было написано резолвером: **едет тот, чьё
+// место знак на плане и держит.** `markPlace` отвечает на это двумя полями —
+// `from` и `bridged`, — и из них следует всё остальное без единого «если»:
+//
+//   — связанная точечная метка на калиброванной схеме: знак нарисован на
+//     вещи, значит рука везёт **вещь**, а `mark.points` не переписывается
+//     никогда (ADR 032: иначе место начало бы зависеть от того, кого тащили
+//     последним, а после «Отвязать» метка прыгала бы туда, куда её тащили);
+//   — **нет моста мм ↔ доли** (нет калибровки или нет привязки чертежа к
+//     плану): вещь на плане не рисуется вовсе, а знак стоит на своей точке —
+//     её и везёт рука, молча и как у несвязанной метки. Отказывать здесь было
+//     бы неправдой: человек тащит то, что видит;
+//   — **линия и блок многих точек**: форму провела рука, и резолвер не сводит
+//     её к середине вещи — значит и везутся её точки. Габарит, угол и высоту
+//     такая метка по-прежнему берёт у вещи;
+//   — метка без связи — как была.
+//
+// Отсюда же вторая половина: **привязка метки к стене и помещение** — тоже
+// следствие места знака, и обе автоматики `canvasCommit` спрашивают его здесь,
+// а не сырую `mark.points` (прежде сдвинутая вещь уезжала, а привязка стояла,
+// и развёртка показывала прибор в стороне от плана).
+
+/**
+ * Что держит место знака метки на плане: `{object, points}`.
+ *
+ * `object` — вещь, если место знака даёт она; `null` — место держит сама
+ * метка. `points` — доли плана, где знак нарисован: при `object` это точка
+ * вещи, иначе **тот же массив** `mark.points` по ссылке, поэтому читатель
+ * узнаёт «ничего не изменилось» равенством и копии не делает.
+ *
+ * Своей арифметики не заводит и заводить нельзя: ответ целиком из `markPlace`.
+ */
+export function markPlaceHolder(project, mark) {
+  const own = mark && Array.isArray(mark.points) ? mark.points : [];
+  if (!mark || markObjectId(mark) === null) return { object: null, points: own };
+  const place = markPlace(project, mark);
+  if (place.from !== "object" || !place.bridged || !place.object) return { object: null, points: own };
+  return { object: place.object, points: place.points };
+}
+
+/**
+ * **Сдвинуть прибор по плану** на вектор в долях: `{project, moved}`, где
+ * `moved` — `"object"` (поехала вещь), `"mark"` (поехали точки метки) или
+ * `null` (ехать было некому).
+ *
+ * Одна дверь на весь жест переноса, и решает она по `markPlaceHolder`: у
+ * связанного прибора правится **вещь** в миллиметрах, у всех прочих — точки
+ * метки в долях, ровно как правились всегда. Блок из этого складывается сам:
+ * холст зовёт дверь на каждую свою метку одним и тем же вектором, связанная
+ * везёт свою вещь, соседи — свои точки, и всё это одним шагом истории.
+ *
+ * Сдвиг переводится в миллиметры **один раз на метку** (`planShiftToMm`), от
+ * снимка «до»: при ведении руки кадр считается заново от того же снимка, и
+ * округление до миллиметра не накапливается.
+ */
+export function moveMarkPlace(project, markId, shift) {
+  const mark = requireMark(project, markId);
+  const held = markPlaceHolder(project, mark);
+  if (!held.object) {
+    const points = held.points.map((point) => ({ x: point.x + Number(shift.x), y: point.y + Number(shift.y) }));
+    return { project: updateMark(project, markId, { points }).project, moved: "mark" };
+  }
+  // Мост обязан быть: его наличие и есть `bridged` у резолвера. Но проверка
+  // стоит, потому что молчаливый `NaN` в миллиметрах уехал бы в объект.
+  const deltaMm = planShiftToMm(project, mark.schemeId, shift);
+  if (!deltaMm) return { project, moved: null };
+  return { project: moveSchemeObject(project, held.object.id, deltaMm).project, moved: "object" };
 }
 
 // ——— вещь становится устройством (R02.1–R02.3, история 7в) ————————————————
@@ -9252,8 +9374,15 @@ export function markWallBindable(mark) {
 
 // Точки метки в миллиметрах чертежа — или пусто, если моста нет (ADR 008:
 // нужны и калибровка, и привязка чертежа к плану).
+//
+// Берутся **там, где знак на плане и нарисован** (`markPlaceHolder`): у
+// связанного прибора место держит вещь, и привязка к стене обязана быть
+// следствием этого места. Прежде здесь читалась сырая `mark.points`, и
+// сдвинутая вещь уезжала, а привязка оставалась на прежнем метре стены — план
+// и развёртка показывали один прибор в двух местах. У метки без связи ответ
+// равен прежнему до миллиметра: тот же массив, тот же перевод.
 function markPointsMm(project, mark) {
-  const points = Array.isArray(mark.points) ? mark.points : [];
+  const points = markPlaceHolder(project, mark).points;
   const out = [];
   for (const point of points) {
     const at = planFractionToMm(project, mark.schemeId, point);
@@ -10849,7 +10978,12 @@ export function applyRoomOutlines(project, schemeId) {
   const marks = project.marks.map((mark) => {
     if (markRoomManual(mark)) return mark;
     if (schemeId && mark.schemeId !== schemeId) return mark;
-    const point = Array.isArray(mark.points) && mark.points.length > 0 ? mark.points[0] : null;
+    // Точка — там, где знак нарисован (`markPlaceHolder`): у связанного
+    // прибора место держит вещь, и помещение — такое же следствие места, как
+    // привязка к стене. Увёз человек телевизор в спальню — в спальне он и
+    // числится. У метки без связи ответ прежний до поля.
+    const shown = markPlaceHolder(project, mark).points;
+    const point = shown.length > 0 ? shown[0] : null;
     // Метка на стене — помещения своей стороны (`roomAtPlace`): выключатель у
     // двери стоит в толще стены, вне контуров, и оставался без помещения.
     const roomId = point ? roomAtPlace(project, mark.schemeId, point) : null;

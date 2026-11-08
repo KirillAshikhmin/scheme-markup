@@ -7280,6 +7280,7 @@ objectDeviceDrop: "убрано устройство у вещи",
 addLine: "линия",
 move: "перемещение метки",
 moveBlock: "перенос блока",
+moveDevice: "перенос прибора",
 guideAdd: "направляющая",
 guideMove: "перенос направляющей",
 guideRemove: "снятие направляющей",
@@ -8563,7 +8564,6 @@ linkMiss: "Здесь нет вещи чертежа — щёлкните по �
 made: "Вещь «{name}» стала устройством: {label}. Ctrl+Z отменит",
 dropped: "У вещи «{name}» убрано устройство {label}. Ctrl+Z отменит",
 noDevice: "У вещи нет устройства",
-moveLinked: "Метка {label} стоит на вещи «{name}»: двигайте вещь на «Чертеже» или сперва «Отвязать»",
 pairLabel: "{label} · {name}",
 },
 markSizes: {
@@ -16868,6 +16868,17 @@ const px = { x: (Number(point.x) - origin.at.x) * width, y: (Number(point.y) - o
 const back = turnVector(px, (360 - origin.turn) % 360);
 return { x: Math.round((back.x / perMeter) * 1000), y: Math.round((back.y / perMeter) * 1000) };
 }
+function planShiftToMm(project, schemeId, shift) {
+const origin = planOriginOf(project, schemeId);
+if (!origin || !shift || !Number.isFinite(Number(shift.x)) || !Number.isFinite(Number(shift.y))) return null;
+const from = planFractionToMm(project, schemeId, origin.at);
+const to = planFractionToMm(project, schemeId, {
+x: origin.at.x + Number(shift.x),
+y: origin.at.y + Number(shift.y),
+});
+if (!from || !to) return null;
+return { x: to.x - from.x, y: to.y - from.y };
+}
 function wallsOf(project) {
 return project && Array.isArray(project.walls) ? project.walls : [];
 }
@@ -17656,6 +17667,18 @@ return { project: withProject(project, { schemeObjects }), schemeObject: next };
 function schemeObjectMirrorField(shape, mirror) {
 return shape !== "polyline" && mirror === true ? { mirror: true } : {};
 }
+function moveSchemeObject(project, objectId, deltaMm) {
+const object = findSchemeObject(project, objectId);
+if (!object) throw modelError("schemeObjectNotFound");
+const dx = Math.round(Number(deltaMm && deltaMm.x) || 0);
+const dy = Math.round(Number(deltaMm && deltaMm.y) || 0);
+if (dx === 0 && dy === 0) return { project, schemeObject: object };
+const patch =
+object.shape === "polyline"
+? { pointsMm: (object.pointsMm || []).map((point) => ({ x: Number(point.x) + dx, y: Number(point.y) + dy })) }
+: { atMm: { x: Number(object.atMm.x) + dx, y: Number(object.atMm.y) + dy } };
+return updateSchemeObject(project, objectId, patch);
+}
 function deleteSchemeObject(project, objectId) {
 const object = findSchemeObject(project, objectId);
 if (!object) throw modelError("schemeObjectNotFound");
@@ -17784,6 +17807,24 @@ for (let index = 1; index < corners.length; index += 1) {
 length += Math.hypot(corners[index].x - corners[index - 1].x, corners[index].y - corners[index - 1].y);
 }
 return { widthMm: Math.round(length), depthMm: Number(object.depthMm) };
+}
+function markPlaceHolder(project, mark) {
+const own = mark && Array.isArray(mark.points) ? mark.points : [];
+if (!mark || markObjectId(mark) === null) return { object: null, points: own };
+const place = markPlace(project, mark);
+if (place.from !== "object" || !place.bridged || !place.object) return { object: null, points: own };
+return { object: place.object, points: place.points };
+}
+function moveMarkPlace(project, markId, shift) {
+const mark = requireMark(project, markId);
+const held = markPlaceHolder(project, mark);
+if (!held.object) {
+const points = held.points.map((point) => ({ x: point.x + Number(shift.x), y: point.y + Number(shift.y) }));
+return { project: updateMark(project, markId, { points }).project, moved: "mark" };
+}
+const deltaMm = planShiftToMm(project, mark.schemeId, shift);
+if (!deltaMm) return { project, moved: null };
+return { project: moveSchemeObject(project, held.object.id, deltaMm).project, moved: "object" };
 }
 function objectDeviceMake(project, objectId, typeId) {
 const object = findSchemeObject(project, objectId);
@@ -18363,7 +18404,7 @@ if (!mark) return false;
 return !markIsComment(mark);
 }
 function markPointsMm(project, mark) {
-const points = Array.isArray(mark.points) ? mark.points : [];
+const points = markPlaceHolder(project, mark).points;
 const out = [];
 for (const point of points) {
 const at = planFractionToMm(project, mark.schemeId, point);
@@ -19229,7 +19270,8 @@ const changed = [];
 const marks = project.marks.map((mark) => {
 if (markRoomManual(mark)) return mark;
 if (schemeId && mark.schemeId !== schemeId) return mark;
-const point = Array.isArray(mark.points) && mark.points.length > 0 ? mark.points[0] : null;
+const shown = markPlaceHolder(project, mark).points;
+const point = shown.length > 0 ? shown[0] : null;
 const roomId = point ? roomAtPlace(project, mark.schemeId, point) : null;
 if ((mark.roomId || null) === roomId) return mark;
 changed.push(mark.id);
@@ -25850,9 +25892,9 @@ project.marks.filter((mark) => mark.schemeId === scheme.id && markVisible(projec
 }
 function visibleMark(project, mark) {
 if (markObjectId(mark) === null) return mark;
-const place = markPlace(project, mark);
-if (place.from !== "object" || !place.bridged || place.points === mark.points) return mark;
-return { ...mark, points: place.points };
+const held = markPlaceHolder(project, mark);
+if (!held.object || held.points === mark.points) return mark;
+return { ...mark, points: held.points };
 }
 const MARK_STACK_REACH_RATIO = 1;
 const MARK_STACK_STEP_RATIO = 3;
@@ -53233,8 +53275,8 @@ const guides = canvasSchemeGuides(state, scheme);
 if (guides.length === 0) return plan;
 return snapToSchemeGuides(guides, plan, scheme, canvasViewOf(state), { free: Boolean(free) }).point;
 }
-function canvasNearestVertex(mark, point, scheme, view) {
-const points = (mark && mark.points) || [];
+function canvasNearestVertex(project, mark, point, scheme, view) {
+const points = markPlaceHolder(project, mark).points;
 let best = 0;
 let gap = Infinity;
 points.forEach((item, index) => {
@@ -54293,7 +54335,7 @@ markId: pick.markId,
 groupId: pick.groupId || null,
 commentPoint: canvasDragsCommentPoint(state.project, pick.markId, pick.part),
 moving: canvasMoveIds(state.project, pick.markId, pick.groupId || null, false),
-anchor: canvasNearestVertex(mark, point, scheme, view),
+anchor: canvasNearestVertex(state.project, mark, point, scheme, view),
 before: state.project,
 selectId: pick.markId,
 };
@@ -54561,7 +54603,7 @@ markId: hit.markId,
 groupId: hit.groupId,
 commentPoint: canvasDragsCommentPoint(state.project, hit.markId, hit.part),
 moving: kind === "mark" ? canvasMoveIds(state.project, hit.markId, hit.groupId, canvasDragSolo(event)) : null,
-anchor: canvasNearestVertex(findMark(state.project, hit.markId), point, scheme, view),
+anchor: canvasNearestVertex(state.project, findMark(state.project, hit.markId), point, scheme, view),
 start: point,
 before: state.project,
 moved: false,
@@ -54622,33 +54664,13 @@ const ids = blockMembers(project, group.markIds).map((mark) => mark.id);
 if (!ids.includes(markId)) ids.push(markId);
 return ids.length > 1 ? ids : [markId];
 }
-function canvasMoveLinkedId(project, ids) {
-for (const id of ids || []) {
-const mark = findMark(project, id);
-if (mark && visibleMark(project, mark) !== mark) return id;
-}
-return null;
-}
 function canvasMoveMarks(project, ids, shift) {
-if (canvasMoveLinkedId(project, ids)) return project;
 let next = project;
 for (const id of ids || []) {
-const mark = findMark(next, id);
-if (!mark) continue;
-const points = mark.points.map((point) => ({ x: point.x + shift.x, y: point.y + shift.y }));
-next = updateMark(next, id, { points }).project;
+if (!findMark(next, id)) continue;
+next = moveMarkPlace(next, id, shift).project;
 }
 return next;
-}
-function canvasSayLinkedMove(project, ids) {
-const markId = canvasMoveLinkedId(project, ids);
-const mark = markId ? findMark(project, markId) : null;
-const object = mark ? findSchemeObject(project, markObjectId(mark)) : null;
-if (!object || !canvasApi) return;
-canvasApi.notify(
-text("markObject.moveLinked", { label: labelOf(project, markId), name: schemeObjectNameOf(project, object) }),
-"info",
-);
 }
 function canvasDragsCommentPoint(project, markId, part) {
 if (!markId || part === "label") return false;
@@ -54669,10 +54691,11 @@ return updateMark(project, markId, { points, labelOffset }).project;
 }
 function canvasMoveStepLabel(project, drag) {
 if (!drag) return strings.history.move;
-const comment = drag.markId ? markIsComment(findMark(project, drag.markId)) : false;
-if (drag.kind === "label") return comment ? strings.history.moveCommentPlate : strings.history.moveLabel;
+const mark = drag.markId ? findMark(project, drag.markId) : null;
+if (drag.kind === "label") return markIsComment(mark) ? strings.history.moveCommentPlate : strings.history.moveLabel;
 if (drag.commentPoint) return strings.history.moveCommentPoint;
-return (drag.moving || []).length > 1 ? strings.history.moveBlock : strings.history.move;
+if ((drag.moving || []).length > 1) return strings.history.moveBlock;
+return markPlaceHolder(project, mark).object ? strings.history.moveDevice : strings.history.move;
 }
 function canvasDragTo(point, free) {
 const state = canvasState();
@@ -54713,7 +54736,8 @@ const holder = canvasDrag.groupId && target ? target.markIds[0] : canvasDrag.mar
 canvasPreview = updateMark(before, holder, { labelOffset: offset }).project;
 } else {
 const mark = findMark(before, canvasDrag.markId);
-const shifted = mark.points.map((item) => ({ x: item.x + dx, y: item.y + dy }));
+const shown = markPlaceHolder(before, mark).points;
+const shifted = shown.map((item) => ({ x: item.x + dx, y: item.y + dy }));
 const anchor = shifted[canvasDrag.anchor] || shifted[0];
 const snapped = canvasGuideSnap(anchor, free);
 const fix = { x: snapped.x - anchor.x, y: snapped.y - anchor.y };
@@ -54840,8 +54864,7 @@ if ((drag.kind === "mark" || drag.kind === "label") && canvasPreview) {
 const label = canvasMoveStepLabel(drag.before, drag);
 const after = canvasPreview;
 canvasPreview = null;
-if (after === drag.before) canvasSayLinkedMove(drag.before, drag.moving || [drag.markId]);
-else canvasCommit(drag.before, after, label, { selection: [drag.markId] });
+if (after !== drag.before) canvasCommit(drag.before, after, label, { selection: [drag.markId] });
 if (drag.kind === "mark") canvasOfferLink(drag.markId);
 }
 if (drag.kind === "pathVertex" && canvasPreview) {
@@ -74002,11 +74025,7 @@ drag.deltaMm = workshopMoveDeltaMm(drag.anchorMm, drag.startMm, mmOf(event), vie
 redraw();
 }
 function movedObject(object, deltaMm) {
-const patch =
-object.shape === "polyline"
-? { pointsMm: (object.pointsMm || []).map((point) => ({ x: point.x + deltaMm.x, y: point.y + deltaMm.y })) }
-: { atMm: { x: object.atMm.x + deltaMm.x, y: object.atMm.y + deltaMm.y } };
-return updateSchemeObject(project(), object.id, patch).project;
+return moveSchemeObject(project(), object.id, deltaMm).project;
 }
 function applyObjectHandle(current) {
 const object = findSchemeObject(project(), current.id);

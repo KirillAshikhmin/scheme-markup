@@ -236,7 +236,7 @@ test("перенос группы — один шаг истории, а не п
   // Внутри переноса нет ни цикла, ни второй команды модели: объект «после»
   // собирает `canvasMoveMarks` одним проходом.
   const moveBody = bodyOf("export function canvasMoveMarks(");
-  assert.ok(moveBody.includes("updateMark("), "перенос перестал ходить в модель");
+  assert.ok(moveBody.includes("moveMarkPlace("), "перенос перестал ходить в модель");
   assert.ok(!withoutComments(bodyOf("function canvasDragTo(")).includes("for (const id of"), "цикл по меткам вернулся в ведение");
 });
 

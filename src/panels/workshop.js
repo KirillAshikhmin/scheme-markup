@@ -149,6 +149,7 @@ import {
   setWallHeight,
   setWallGlass,
   setWallPaint,
+  moveSchemeObject,
   splitWall,
   updateOpening,
   updateSchemeObject,
@@ -4256,13 +4257,11 @@ function createWorkshop({ api, hosts }) {
 
   // Объект едет целиком: у прямоугольника двигается середина, у полосы — все
   // её вершины. Поворот при этом не трогается — вещь переставили, а не
-  // повернули.
+  // повернули. Арифметика живёт в модели (`moveSchemeObject`): тем же сдвигом
+  // и тем же правилом вещь возит знак связанного прибора на плане (таск 252),
+  // и двух ответов на «как переставить вещь» в сборке быть не должно.
   function movedObject(object, deltaMm) {
-    const patch =
-      object.shape === "polyline"
-        ? { pointsMm: (object.pointsMm || []).map((point) => ({ x: point.x + deltaMm.x, y: point.y + deltaMm.y })) }
-        : { atMm: { x: object.atMm.x + deltaMm.x, y: object.atMm.y + deltaMm.y } };
-    return updateSchemeObject(project(), object.id, patch).project;
+    return moveSchemeObject(project(), object.id, deltaMm).project;
   }
 
   /**

@@ -35,7 +35,7 @@ import {
   markIsComment,
   markLabelLeader,
   markObjectId,
-  markPlace,
+  markPlaceHolder,
   markPointer,
   marksInDrawOrder,
   listedTypes,
@@ -2672,9 +2672,12 @@ export function visibleMarks(project, scheme, filter) {
  */
 export function visibleMark(project, mark) {
   if (markObjectId(mark) === null) return mark;
-  const place = markPlace(project, mark);
-  if (place.from !== "object" || !place.bridged || place.points === mark.points) return mark;
-  return { ...mark, points: place.points };
+  // Кто держит место знака — одна дверь модели (таск 252): её же спрашивают
+  // перенос знака рукой и автопривязки к стене и помещению. Второго ответа на
+  // «где знак нарисован» в сборке быть не должно.
+  const held = markPlaceHolder(project, mark);
+  if (!held.object || held.points === mark.points) return mark;
+  return { ...mark, points: held.points };
 }
 
 // ——— стопка совпавших меток ———————————————————————————————————————————

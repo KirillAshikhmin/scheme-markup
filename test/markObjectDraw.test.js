@@ -22,7 +22,7 @@ import {
 } from "../src/model.js";
 import { drawScheme, hitHandle, hitTest, planToScreen, visibleMark, visibleMarks } from "../src/render.js";
 import { volumeMarks } from "../src/volume.js";
-import { canvasBlockFromPx, canvasMoveIds, canvasMoveLinkedId, canvasMoveMarks } from "../src/canvas.js";
+import { canvasBlockFromPx } from "../src/canvas.js";
 
 function scene() {
   const added = addScheme(createProject({ name: "Связь" }), { name: "1 этаж", imageId: "plan-1", width: 1200, height: 800 });
@@ -175,23 +175,6 @@ test("ручки «+» связанной метки стоят у знака, �
   assert.equal(visibleMark(base.project, free), free, "метка без связи вернулась копией");
 });
 
-// Перенос связанной метки был шагом истории, который ничего не менял: знак
-// стоит на вещи и не двигается ни на пиксель, а записанная точка молча уезжала
-// — и после «Отвязать» метка прыгала туда, куда её тащили.
-test("перенос связанной метки её точку не увозит, и менять в объекте нечего", () => {
-  const base = scene();
-  const linked = setMarkObject(base.project, base.mark.id, base.object.id).project;
-  const after = canvasMoveMarks(linked, [base.mark.id], { x: 0.1, y: 0.1 });
-  assert.equal(after, linked, "записанная точка связанной метки уехала молча");
-  assert.deepEqual(findMark(after, base.mark.id).points, [{ x: 0.1, y: 0.1 }]);
-
-  // Без связи перенос работает как работал.
-  const free = canvasMoveMarks(base.project, [base.mark.id], { x: 0.1, y: 0.1 });
-  assert.notEqual(free, base.project, "метка без связи перестала ездить");
-  const moved = findMark(free, base.mark.id).points[0];
-  assert.ok(Math.abs(moved.x - 0.2) < 1e-12 && Math.abs(moved.y - 0.2) < 1e-12, JSON.stringify(moved));
-});
-
 // Ручка «+» нарисована у знака и ловится у знака, а новая метка блока вставала
 // у **записанной** точки: сразу после миграции в 849 мм от ручки, а после
 // сдвига вещи — в 2214 мм. Смещение знака передаётся модели тем же `fromPx`,
@@ -225,36 +208,4 @@ test("ручка «+» связанной метки ставит новую м�
   // считалось (G68).
   const free = { ...state, project: base.project };
   assert.equal(canvasBlockFromPx(free, scheme, base.mark.id), null, "несвязанной метке завелось смещение");
-});
-
-// Перенос блока, в котором одна метка связана с вещью, молча рвал блок:
-// соседи ехали, связанная стояла, шаг истории писался, слова не говорилось.
-test("блок со связанной меткой не едет по частям, и держащая метка названа", () => {
-  const base = scene();
-  const linked = setMarkObject(base.project, base.mark.id, base.object.id).project;
-  const schemeId = base.schemeId;
-  const typeId = findMark(linked, base.mark.id).typeId;
-  // Вторая метка того же блока: её собираем ручкой «+», как это делает холст.
-  const added = addToGroup(linked, base.mark.id, "right", { step: 24 });
-  const project = added.project;
-  const ids = canvasMoveIds(project, base.mark.id, added.group.id, false);
-  assert.equal(ids.length, 2, "пример не тот: блок не собрался");
-  assert.equal(typeof schemeId, "string");
-  assert.equal(typeof typeId, "string");
-
-  // Везти нельзя — и держит жест именно связанная метка.
-  assert.equal(canvasMoveLinkedId(project, ids), base.mark.id);
-  const after = canvasMoveMarks(project, ids, { x: 0.1, y: 0.1 });
-  assert.equal(after, project, "блок поехал по частям — связанная осталась, соседи уехали");
-
-  // Блок без связанной метки едет целиком, как ездил.
-  const plain = setMarkObject(project, base.mark.id, null).project;
-  assert.equal(canvasMoveLinkedId(plain, ids), null);
-  const moved = canvasMoveMarks(plain, ids, { x: 0.1, y: 0.1 });
-  assert.notEqual(moved, plain);
-  for (const id of ids) {
-    const was = findMark(plain, id).points[0];
-    const now = findMark(moved, id).points[0];
-    assert.ok(Math.abs(now.x - (was.x + 0.1)) < 1e-12 && Math.abs(now.y - (was.y + 0.1)) < 1e-12, "метка блока уехала не на тот сдвиг");
-  }
 });
