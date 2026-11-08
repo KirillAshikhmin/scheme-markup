@@ -15,6 +15,7 @@ import {
   createProject,
   findMark,
   findType,
+  idNumberOf,
   markDeviceOf,
   markDeviceOwn,
   markDeviceProfile,
@@ -24,7 +25,7 @@ import {
 } from "../src/model.js";
 import { LAYOUT_ABILITIES } from "../src/app.js";
 import { strings, text } from "../src/strings.js";
-import { deviceAids, markAccessory } from "../src/sim/home.js";
+import { markAccessory } from "../src/sim/home.js";
 import {
   deviceDraftAddService,
   deviceDraftChar,
@@ -330,7 +331,9 @@ test("окно метки пишет aid аксессуара и sid каждо�
   const markId = marks["ВВ"];
   const typeId = findMark(project, markId).typeId;
   const aid = deviceMarkAid(project, markId);
-  assert.equal(aid, deviceAids(project).get(markId));
+  // Адрес — номер метки, и спрашивается он у `idNumberOf` (G392: своей
+  // двери у адреса нет).
+  assert.equal(aid, idNumberOf(markId));
   assert.equal(aid, markAccessory(project, markId).aid, "aid окна и дома разошлись");
   const model = deviceWindowModel(deviceDraftOf(markDeviceProfile(project, markId)), 2, { aid });
   assert.equal(model.aid, aid);

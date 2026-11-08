@@ -16,6 +16,7 @@ import {
   equipmentTypesInOrder,
   equipmentUsage,
   findRoom,
+  blockLabelOf,
   labelOf,
   styleOf,
   setMarkControls,
@@ -563,7 +564,7 @@ test("длинный код виден в колонке «Обозначени�
   );
   assert.deepEqual(group.rows.map((row) => row.cells[0]), ["ПОДСВЕТКА1", "ПОДСВЕТКА2", "ПОДСВЕТКА3"]);
   // Подпись блока на плане заказчик не трогал: она одна и свёрнута в диапазон.
-  assert.equal(labelOf(box.project, block.group.id), "ПОДСВЕТКА1–3");
+  assert.equal(blockLabelOf(box.project, block.group.id), "ПОДСВЕТКА1–3");
 });
 
 // ——— двухуровневая разбивка: помещение, внутри — категории или типы ————

@@ -26,6 +26,7 @@ import {
   deleteLogicBinding,
   deviceFollowers,
   findLogicBinding,
+  findMark,
   findScenario,
   labelOf,
   logicBindingsOf,
@@ -33,7 +34,7 @@ import {
   updateLogicBinding,
   updateScenario,
 } from "../model.js";
-import { deviceAids, homeAccessories } from "../sim/home.js";
+import { homeAccessories } from "../sim/home.js";
 import { hubCompatWarnings, hubFits, hubScriptCompile, hubScriptInfoName, hubScriptRead } from "../sim/hubApi.js";
 import { simOptionForms, simScenarios, simWatch } from "../simulation.js";
 import { strings, text } from "../strings.js";
@@ -381,11 +382,11 @@ export function scenarioScriptSetOptions(project, bindingId, patch) {
 export function scenarioScriptFieldMarks(project, field) {
   const out = new Map();
   if (!project || !field || field.formType !== "list" || !Array.isArray(field.values)) return out;
-  const byAid = new Map();
-  for (const [markId, aid] of deviceAids(project)) byAid.set(String(aid), markId);
   field.values.forEach((item, index) => {
     const match = /^(\d+)\.\d+(?:\.\d+)?$/.exec(String(item && item.value !== null && item.value !== undefined ? item.value : ""));
-    const markId = match ? byAid.get(match[1]) : null;
+    // Адрес аксессуара — это и есть номер метки (G392), поэтому «метка по
+    // адресу» — просто поиск метки по её id; карты адресов для этого не нужно.
+    const markId = match && findMark(project, match[1]) ? match[1] : null;
     if (!markId) return;
     if (!out.has(markId)) out.set(markId, []);
     out.get(markId).push({ index, label: item.label });

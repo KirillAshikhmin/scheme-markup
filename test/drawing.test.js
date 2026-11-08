@@ -23,7 +23,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   DRAWING_MM_MAX,
-  FORMAT_VERSION_IDS,
+  FORMAT_VERSION_KIND_IDS,
   OPENING_HINGES,
   OPENING_KINDS,
   OPENING_SWINGS,
@@ -810,7 +810,7 @@ test("G68: объект прежней сборки доезжает через 
   const strip = (value) => JSON.stringify({ ...value, formatVersion: null, markTypes: null }, null, 2);
   const same = legacyIdsRestored(legacyProject(), loaded);
   assert.equal(strip(same), strip(JSON.parse(LEGACY_TEXT)), "в объекте без чертежа завелись новые поля");
-  assert.equal(loaded.formatVersion, FORMAT_VERSION_IDS, "файл сохраняется нынешней версией формата");
+  assert.equal(loaded.formatVersion, FORMAT_VERSION_KIND_IDS, "файл сохраняется нынешней версией формата");
   same.markTypes.forEach((type, index) => {
     const was = JSON.parse(LEGACY_TEXT).markTypes[index];
     const added = Object.keys(type).filter((key) => !Object.prototype.hasOwnProperty.call(was, key));

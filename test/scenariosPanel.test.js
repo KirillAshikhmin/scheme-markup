@@ -246,7 +246,20 @@ test("свои заготовки: сохранить, переименоват�
   const other = scenariosFromTemplate(project, list[0]);
   const scenario = findScenario(other.project, other.scenarioId);
   assert.equal(scenario.name, "Мой свет");
-  assert.equal(JSON.stringify(scenario).includes(marks.ДД1), false);
+  // Места пусты — и спрашивается это **полем** `markId`, а не поиском номера в
+  // тексте записи: со своим счётчиком у каждого вида (ADR 038) номер метки —
+  // однозначное число, и подстрока «3» нашлась бы в любом номере сервиса.
+  const markRefs = (value, out = []) => {
+    if (Array.isArray(value)) for (const item of value) markRefs(item, out);
+    else if (value && typeof value === "object") {
+      for (const [key, item] of Object.entries(value)) {
+        if (key === "markId" && typeof item === "string") out.push(item);
+        else markRefs(item, out);
+      }
+    }
+    return out;
+  };
+  assert.equal(markRefs(scenario).includes(marks.ДД1), false, "место заготовки приехало с чужой меткой");
   assert.ok(scenarioIssues(other.project, scenario).some((item) => item.code === "incomplete"));
   list = scenariosTemplatesRemove(list, list[0].id);
   assert.deepEqual(list, []);

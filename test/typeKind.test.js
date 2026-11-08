@@ -20,6 +20,7 @@ import {
   catalogOffer,
   closeTypeKindReview,
   createProject,
+  blockLabelOf,
   labelOf,
   migrateTypeKinds,
   styleOf,
@@ -32,7 +33,7 @@ import {
 } from "../src/model.js";
 import { typeIconPlan, typeSignPlan } from "../src/render.js";
 import { pickerGroupsOfKind } from "../src/panels/typePicker.js";
-import { FORMAT_VERSION_IDS, unpackProject, writeZip } from "../src/projectFile.js";
+import { FORMAT_VERSION_KIND_IDS, unpackProject, writeZip } from "../src/projectFile.js";
 
 import { legacyIdsRestored } from "./fixtures/legacyIds.js";
 const LINE = [
@@ -224,7 +225,7 @@ test("объект прежней версии формата открывает
   // перенумерация — чистое переименование и ничего больше.
   const restored = legacyIdsRestored(old, opened);
 
-  assert.equal(opened.formatVersion, FORMAT_VERSION_IDS);
+  assert.equal(opened.formatVersion, FORMAT_VERSION_KIND_IDS);
   // Ни одна метка: ни точка, ни вершина линии, ни вид, ни смещение подписи.
   assert.deepEqual(restored.marks, old.marks);
   // Ни один номер и ни один счётчик.
@@ -235,7 +236,7 @@ test("объект прежней версии формата открывает
   );
   // Ни одна подпись — ни у метки, ни у блока.
   for (const mark of old.marks) assert.equal(labelOf(restored, mark.id), labelOf(old, mark.id));
-  for (const group of old.groups) assert.equal(labelOf(restored, group.id), labelOf(old, group.id));
+  for (const group of old.groups) assert.equal(blockLabelOf(restored, group.id), blockLabelOf(old, group.id));
   // Ни одно начертание и ни одна фигура.
   for (const type of old.markTypes) assert.deepEqual(styleOf(restored, type.id), styleOf(old, type.id));
   // Справочник целиком тот же, кроме дописанного вида.

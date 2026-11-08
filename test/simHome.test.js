@@ -11,6 +11,7 @@ import {
   addScheme,
   addWall,
   createProject,
+  idNumberOf,
   planMmToFraction,
   setMarkControls,
   setMarkDevice,
@@ -19,7 +20,6 @@ import {
 } from "../src/model.js";
 import {
   buildHomeSpec,
-  deviceAid,
   deviceKeyIndex,
   homeAccessories,
   markAccessory,
@@ -51,7 +51,8 @@ function put(box, name, code, at) {
 // ——— адрес аксессуара ————————————————————————————————————————————————————
 //
 // Адрес — номер метки (таск 04 связи меток и вещей): хэш FNV-1a, девятизначный
-// диапазон и разведение совпадений ушли вместе со своими тестами, а сам адрес
+// диапазон и разведение совпадений ушли вместе со своими тестами, а своей двери
+// у адреса больше нет вовсе (G392) — номер читает `model.idNumberOf`, и правило
 // проверяет `test/deviceAidNumber.test.js`. Здесь остаётся то, что от адреса
 // требовалось всегда: он не меняется ни после файла, ни после приёмки.
 
@@ -72,7 +73,7 @@ test("адреса различны у меток объекта и не мен�
 test("аксессуар выключателя (G11): «Выключатель» на канал, затем кнопки; sid и cid подряд с 13, номер клавиши — константа", () => {
   const box = put(house(), "switch", "ВВ", { x: 0.5, y: 0.5 });
   const accessory = markAccessory(box.project, box.marks.switch);
-  assert.equal(accessory.aid, deviceAid(box.marks.switch));
+  assert.equal(accessory.aid, idNumberOf(box.marks.switch));
   assert.equal(accessory.kind, "switchRelay");
   assert.equal(accessory.label, "ВВ1");
   assert.deepEqual(

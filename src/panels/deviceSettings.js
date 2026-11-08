@@ -38,6 +38,7 @@ import {
   deviceExpand,
   findMark,
   findType,
+  idNumberOf,
   labelOf,
   markDeviceLeader,
   markDeviceOwn,
@@ -47,7 +48,7 @@ import {
   typeChannels,
   typeDeviceOf,
 } from "../model.js";
-import { deviceAids, deviceIdsOf } from "../sim/home.js";
+import { deviceIdsOf } from "../sim/home.js";
 import { uiBadLine, uiButton, uiCheckRow, uiEl, uiMarkBad, uiModal } from "./ui.js";
 
 // Тип сервиса-клавиши: отметка «отвязана» есть только у него.
@@ -273,13 +274,14 @@ export function deviceTypeField(project, typeId) {
 }
 
 /**
- * Идентификатор аксессуара метки (`aid`, G12) — тот же, что у дома
- * (`deviceAids`: совпадения разведены по всему объекту); `null` — нет метки.
+ * Идентификатор аксессуара метки (`aid`, G12) — её номер, тот же, что у дома;
+ * `null` — нет метки, метка-плашка или id не номер. Своей двери у адреса нет
+ * (G392): номер читает `model.idNumberOf`.
  */
 export function deviceMarkAid(project, markId) {
   const mark = findMark(project, markId);
   if (!mark || markIsComment(mark)) return null;
-  return deviceAids(project).get(markId) ?? null;
+  return idNumberOf(mark.id);
 }
 
 // Идентификаторы сервисов черновика (G12): по строке окна — список `sid`

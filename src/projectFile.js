@@ -6,6 +6,7 @@ import { migrateDevices, migrateThingMarks, thingMarksMigrated } from "./deviceM
 import {
   FORMAT_VERSION,
   FORMAT_VERSION_IDS,
+  FORMAT_VERSION_KIND_IDS,
   FORMAT_VERSION_MAX,
   fillTypeSizes,
   idsMigrate,
@@ -17,8 +18,10 @@ import {
 } from "./model.js";
 
 // `FORMAT_VERSION` — историческая пятёрка (объект без сценариев прежней
-// сборки); `FORMAT_VERSION_IDS` — версия, которой пишет эта сборка (ADR 030).
-export { FORMAT_VERSION, FORMAT_VERSION_IDS };
+// сборки); `FORMAT_VERSION_IDS` — восьмёрка, объект с общим счётчиком номеров
+// (ADR 030); `FORMAT_VERSION_KIND_IDS` — версия, которой пишет эта сборка:
+// счётчик у каждого вида (ADR 038).
+export { FORMAT_VERSION, FORMAT_VERSION_IDS, FORMAT_VERSION_KIND_IDS };
 
 export const PROJECT_ENTRY = "project.json";
 export const SCHEMES_DIR = "schemes/";

@@ -17,6 +17,7 @@ import {
   blockStepPx,
   createProject,
   findMark,
+  blockLabelOf,
   labelOf,
 } from "../src/model.js";
 import { packProject, unpackProject } from "../src/projectFile.js";
@@ -200,7 +201,7 @@ test("уже размеченный блок не двигается: шаг м�
   // Подпись блока свёрнута в диапазон (D29) — и это единственное, что в старом
   // объекте читается иначе: метки, номера и точки те же, сама разметка не
   // тронута, свёртка живёт в подписи.
-  assert.equal(labelOf(opened, id("group-1")), "Р1–3");
+  assert.equal(blockLabelOf(opened, id("group-1")), "Р1–3");
   // Своя величина знака у старого объекта осталась своей.
   assert.equal(opened.view.markSize, 10);
 

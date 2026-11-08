@@ -39,7 +39,7 @@ import {
   updateType,
   validate,
 } from "../src/model.js";
-import { packProject, unpackProject, FORMAT_VERSION_IDS } from "../src/projectFile.js";
+import { packProject, unpackProject, FORMAT_VERSION_KIND_IDS } from "../src/projectFile.js";
 import {
   objectViewByName,
   objectViewFamily,
@@ -250,7 +250,7 @@ test("G68: старый объект доезжает через файл без
   // (ADR 030), и перенумерация обязана быть **чистым** переименованием.
   const strip = (value) => JSON.stringify({ ...value, formatVersion: null }, null, 2);
   assert.equal(strip(legacyIdsRestored(legacy(), loaded)), strip(legacy()), "открытие старого объекта что-то в нём поправило");
-  assert.equal(loaded.formatVersion, FORMAT_VERSION_IDS);
+  assert.equal(loaded.formatVersion, FORMAT_VERSION_KIND_IDS);
   // Ни у одного типа не появилось ни `view`, ни `icon` — в отличие от размеров
   // (D28), которые миграция и правда проставляет. Разница названа вслух:
   // размер у типа без размеров — это ноль сведений, а изображение решает

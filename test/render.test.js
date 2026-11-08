@@ -28,6 +28,7 @@ import {
   addToGroup,
   addType,
   updateMark,
+  blockLabelOf,
   labelOf,
   typesInOrder,
 } from "../src/model.js";
@@ -265,7 +266,7 @@ test("у блока одна подпись на всех, у одиночных
   const targets = renderInternals.labelTargets(alone.project, scheme, null);
   assert.equal(targets.length, 2, "три метки блока дают одну подпись плюс одиночная");
   assert.equal(targets.filter((item) => item.markIds).length, 1, "одна цель — группа");
-  assert.equal(labelOf(alone.project, targets.find((item) => item.markIds).id), "Р1–3");
+  assert.equal(blockLabelOf(alone.project, targets.find((item) => item.markIds).id), "Р1–3");
 });
 
 test("смещение подписи блока берётся у первой метки, своё у группы важнее", () => {
@@ -295,7 +296,7 @@ test("подпись смешанного блока: ведёт первая п
 
   // Блок начат с розетки, а подпись читается «В1, Р1»: ведёт её выключатель,
   // его цветом подпись и красится — иначе красная подпись начиналась бы с «В».
-  assert.equal(labelOf(mixed, group.id), "В1, Р1");
+  assert.equal(blockLabelOf(mixed, group.id), "В1, Р1");
   assert.equal(labelLead(mixed, group).typeId, switchType);
 
   // Лист розеток: выключатель скрыт фильтром, значит и в подписи его нет,

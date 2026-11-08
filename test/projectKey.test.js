@@ -50,9 +50,13 @@ function oldBuild(source) {
   oldBuildTag += 1;
   const copy = keyless(source);
   const tag = "u" + oldBuildTag + "-";
+  // Таблица замен названа по видам: номер свой у каждого вида (ADR 038), и
+  // одна таблица на все виды увезла бы помещение 5 вместе с меткой 5.
   const was = new Map();
   for (const entity of ["categories", "markTypes", "rooms", "schemes", "marks", "groups", "equipmentTypes"]) {
-    for (const item of copy[entity] || []) was.set(item.id, tag + item.id);
+    const table = new Map();
+    for (const item of copy[entity] || []) table.set(item.id, tag + item.id);
+    if (table.size > 0) was.set(entity, table);
   }
   return idsReplace(copy, was).project;
 }

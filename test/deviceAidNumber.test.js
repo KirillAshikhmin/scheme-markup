@@ -1,12 +1,22 @@
 // Адрес аксессуара — номер метки (таск 04 сборки «связь метки и вещи»;
-// истории 24 и 28, G10 и G12; `interfaces.md`, раздел 7).
+// истории 24 и 28, G10 и G12; `interfaces.md`, раздел 7), и **своей двери у
+// него нет** (таск 251, требование G392).
 //
 // Раньше `aid` был хэшем FNV-1a от `mark.id` в девятизначном диапазоне, а
 // совпадения разводились пробой по порядку id. Идентификатор сущности стал
-// коротким номером, уникальным по всем видам сразу, и адрес читается прямо из
-// него: разводить нечего, а адреса стали читаться как в настоящем хабе
-// (`118.13.14`). Нумерация сервисов и характеристик внутри аксессуара не
-// менялась — она идёт с 13, как в Sprut (ADR 012).
+// коротким номером, и адрес стал читаться прямо из него: разводить нечего, а
+// адреса стали читаться как в настоящем хабе (`118.13.14`). Следом ушли и две
+// двери, `deviceAid`/`deviceAids`, — слова заказчика: «Он же не нужен теперь
+// можно использовать идентификатор», «убирай».
+//
+// **Ушли имена, а не правило**, и проверяется здесь именно правило: id, который
+// не десятичная строка (uuid прежней разметки, встроенный ключ справочника,
+// мусор), адреса не имеет, и аксессуара у такой метки нет. Держит его
+// `model.idNumberOf` — голый `Number(mark.id)` не годится: он принял бы `17`
+// там, где идентификатором считается только `"17"` (D01, ADR 035), и два
+// аксессуара одного адреса хаб молча потерял бы (`byAid` в `hubApi`).
+// Нумерация сервисов и характеристик внутри аксессуара не менялась — она идёт
+// с 13, как в Sprut (ADR 012).
 //
 // Цена названа в спецификации и принята заказчиком: адрес, вписанный числом в
 // опцию привязки или в текст сценария, после перенумерации указывает в
@@ -15,7 +25,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildHomeSpec, deviceAid, deviceAids, homeAccessories, markAccessory } from "../src/sim/home.js";
+import { idNumberOf } from "../src/model.js";
+import { buildHomeSpec, homeAccessories, markAccessory } from "../src/sim/home.js";
 import { text } from "../src/strings.js";
 import { simHouse } from "./fixtures/simHome.js";
 import { hubHome } from "./fixtures/sprut/hubHome.js";
@@ -33,35 +44,39 @@ test("адрес аксессуара — сам номер метки, а не 
   }
   // Девятизначных адресов больше нет: номера объекта-фикстуры — трёхзначные.
   assert.ok(Math.max(...accessories.map((item) => item.aid)) < 1000, "адрес вне номеров объекта");
-  assert.equal(deviceAid("17"), 17);
+  assert.equal(idNumberOf("17"), 17);
   // Число адреса не даёт вовсе: id в объекте — десятичная строка и ничто
   // другое (D01). Прими здесь и число — `17` с `"17"` дали бы один адрес, а
   // второй аксессуар того же адреса хаб молча потерял бы.
-  assert.equal(deviceAid(17), null);
+  assert.equal(idNumberOf(17), null);
 });
 
 test("метка без номера адреса не имеет, и аксессуара у неё нет", () => {
   for (const id of ["", "0017", "17px", "comment", crypto.randomUUID()]) {
-    assert.equal(deviceAid(id), null, "номером принят " + JSON.stringify(id));
+    assert.equal(idNumberOf(id), null, "номером принят " + JSON.stringify(id));
   }
   const box = simHouse();
   const legacy = box.marks["С1"];
   const project = { ...box.project, marks: box.project.marks.map((mark) => (mark.id === legacy ? { ...mark, id: "ламп-1" } : mark)) };
   assert.equal(markAccessory(project, "ламп-1"), null, "у метки без номера завёлся аксессуар");
-  assert.equal(deviceAids(project).has("ламп-1"), false, "метка без номера попала в карту адресов");
+  // Дом такую метку не считает устройством — то, что прежде говорила карта
+  // адресов: аксессуара в доме нет ни одного на этот id.
+  assert.equal(
+    buildHomeSpec(project).accessories.some((item) => item.markId === "ламп-1"),
+    false,
+    "метка без номера попала в дом аксессуаром",
+  );
   // Остальной дом от этого не теряется.
   assert.equal(homeAccessories(project).length, homeAccessories(box.project).length - 1);
 });
 
-test("адреса меток объекта различны, и карта адресов — номера этих меток", () => {
+test("адреса меток объекта различны и равны их номерам", () => {
   const box = simHouse();
-  const aids = deviceAids(box.project);
-  assert.equal(aids.size, box.project.marks.length, "в карте не все метки");
-  assert.deepStrictEqual(
-    [...aids],
-    box.project.marks.map((mark) => [mark.id, Number(mark.id)]),
-  );
-  assert.equal(new Set(aids.values()).size, aids.size, "два адреса совпали");
+  const aids = box.project.marks.map((mark) => [mark.id, idNumberOf(mark.id)]);
+  assert.equal(aids.length, box.project.marks.length, "сверка пропустила метки");
+  assert.deepStrictEqual(aids, box.project.marks.map((mark) => [mark.id, Number(mark.id)]));
+  assert.equal(new Set(aids.map(([, aid]) => aid)).size, aids.length, "два адреса совпали");
+  assert.deepEqual(aids.filter(([, aid]) => aid === null), [], "у метки объекта нет адреса");
 });
 
 // ——— сервисы и характеристики не тронуты ————————————————————————————

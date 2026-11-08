@@ -537,7 +537,7 @@ for (const [name, print] of LEGACY) {
     for (const key of ['"device"', '"scenarios"', '"logicBindings"']) {
       assert.ok(!packed.includes(key), "в файл прежнего объекта дописано " + key);
     }
-    assert.equal(restored.formatVersion, 8);
+    assert.equal(restored.formatVersion, 9);
 
     // Профили при этом видны — выведенными по коду.
     for (const project of [restored, stored]) {

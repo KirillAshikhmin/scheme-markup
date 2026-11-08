@@ -85,11 +85,11 @@ async function jsonOf(project) {
 
 // ——— версия формата ————————————————————————————————————————————————————————
 
-test("версия файла: 7 — ступень ссылки на библиотеку, у пронумерованного объекта — 8", async () => {
+test("версия файла: 7 — ступень ссылки на библиотеку, у пронумерованного по видам объекта — 9", async () => {
   assert.equal(FORMAT_VERSION, 5);
   assert.equal(FORMAT_VERSION_SCENARIOS, 6);
   assert.equal(FORMAT_VERSION_LIB, 7);
-  assert.equal(FORMAT_VERSION_MAX, 8);
+  assert.equal(FORMAT_VERSION_MAX, 9);
 
   const source = sprutSource("HideIfTurnOn.js");
   const lib = library([{ key: "HideIfTurnOn", name: "Скрыть при включении", source }]);
@@ -104,28 +104,29 @@ test("версия файла: 7 — ступень ссылки на библи
   // Ссылки больше нет — версия возвращается на 5: её считает содержимое, а не
   // отметка в поле.
   assert.equal(projectFormatVersion(legacyIdsBefore(deleteScenario(pinned.project, made.ids[0]).project)), 5);
-  // А объект этой сборки пронумерован, и версия у него одна — восьмая (ADR 030).
-  assert.equal(projectFormatVersion(pinned.project), 8);
+  // А объект этой сборки пронумерован по видам, и версия у него одна — девятая
+  // (ADR 038).
+  assert.equal(projectFormatVersion(pinned.project), 9);
 
   const written = await jsonOf(pinned.project);
-  assert.equal(written.formatVersion, 8, "файл пишется версией 8");
+  assert.equal(written.formatVersion, 9, "файл пишется версией 9");
   assert.equal(written.scenarios[0].source, undefined, "текста скрипта в файле больше нет");
   assert.ok(JSON.stringify(written).length < JSON.stringify(await jsonOf(made.project)).length - source.length / 2, "файл стал короче");
 });
 
-test("файл версии 8 читается, версии 9 — честный отказ futureVersion", async () => {
+test("файл версии 9 читается, версии 10 — честный отказ futureVersion", async () => {
   const source = sprutSource("MotionLightAutomation.js");
   const lib = library([{ key: "MotionLightAutomation", name: "Свет по движению", source }]);
   const made = logicProject([{ name: "Свет по движению", source }]);
   const pinned = migrateScenarioLib(made.project, lib.door).project;
   const text = JSON.stringify(await jsonOf(pinned), null, 2);
 
-  const eight = await unpackProject(await writeZip([{ name: PROJECT_ENTRY, data: text }]));
-  assert.equal(eight.project.formatVersion, 8);
-  assert.deepEqual(scenarioLibOf(eight.project.scenarios[0]), scenarioLibOf(pinned.scenarios[0]));
+  const nine = await unpackProject(await writeZip([{ name: PROJECT_ENTRY, data: text }]));
+  assert.equal(nine.project.formatVersion, 9);
+  assert.deepEqual(scenarioLibOf(nine.project.scenarios[0]), scenarioLibOf(pinned.scenarios[0]));
 
-  const nine = await writeZip([{ name: PROJECT_ENTRY, data: text.replace('"formatVersion": 8', '"formatVersion": 9') }]);
-  await assert.rejects(unpackProject(nine), (error) => error.code === "futureVersion" && error.message.includes("9"));
+  const ten = await writeZip([{ name: PROJECT_ENTRY, data: text.replace('"formatVersion": 9', '"formatVersion": 10') }]);
+  await assert.rejects(unpackProject(ten), (error) => error.code === "futureVersion" && error.message.includes("10"));
 });
 
 // ——— только побайтовое совпадение ———————————————————————————————————————————
@@ -270,7 +271,7 @@ test("упаковано = распаковано: ссылка, привязк�
   const restored = (await unpackProject(blob)).project;
   assert.deepEqual(restored.scenarios, project.scenarios, "сценарии вернулись поле в поле");
   assert.deepEqual(restored.logicBindings, project.logicBindings);
-  assert.equal(restored.formatVersion, 8);
+  assert.equal(restored.formatVersion, 9);
 });
 
 test("unpackProject отдаёт writtenAt из writer.json, а битую отметку не выдумывает", async () => {

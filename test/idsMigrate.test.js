@@ -1,5 +1,5 @@
-// Перенумерация на открытии объекта: номера вместо uuid в **обеих** трубах
-// (требования G11, G11.1; ADR 030).
+// Перенумерация на открытии объекта: номера вместо uuid, **свой счётчик у
+// каждого вида**, в **обеих** трубах (требования G11, G11.1, G391; ADR 030, 038).
 //
 // Чем этот файл отличается от `markIds.test.js`: тот проверяет саму дверь
 // `idsMigrate` на собранном руками объекте, а этот — **открытие готового
@@ -24,21 +24,24 @@ import { fileURLToPath } from "node:url";
 
 import {
   DICTIONARY_PROBLEM_CODES,
-  ID_COUNTER_KEY,
+  ID_COUNTER_SHARED_KEY,
+  ID_OWNER_KEYS,
   acceptedProblems,
   addLogicBinding,
   addMark,
   addScenario,
   addScheme,
   createProject,
+  idCounterKey,
   idNumberOf,
+  idsReplace,
   labelOf,
   problemAccepted,
   validate,
 } from "../src/model.js";
 import { packProject, unpackProject } from "../src/projectFile.js";
 import { projectsMigrateStored } from "../src/panels/projects.js";
-import { buildHomeSpec, deviceAid, homeAccessories } from "../src/sim/home.js";
+import { buildHomeSpec, homeAccessories } from "../src/sim/home.js";
 import { createSimEngine } from "../src/sim/engine.js";
 import { simRecorder } from "./fixtures/simHome.js";
 import { strings } from "../src/strings.js";
@@ -103,7 +106,8 @@ const LEGACY = [
 // `mark.id` в диапазон 100000000…999999999, совпадения разведены пробой вверх
 // по кольцу в порядке id. Рецепт взят из прежнего `src/sim/home.js`
 // (`deviceAid`/`deviceAidsOf` до таска 04), а не из нынешнего кода: иначе тест
-// сверял бы миграцию с нею самой.
+// сверял бы миграцию с нею самой. Нынешний адрес — просто номер метки, своей
+// двери у него нет вовсе (G392).
 function legacyAids(project) {
   const text = new TextEncoder();
   const MIN = 100000000;
@@ -165,9 +169,31 @@ for (const name of LEGACY) {
         const known = project.markTypes.some((type) => type.id === mark.typeId) || mark.typeId === "comment";
         assert.ok(known, "метка осталась без типа");
       }
-      // Счётчик доведён до последнего выданного номера.
-      const top = Math.max(...COLLECTIONS.flatMap((key) => (project[key] || []).map((item) => idNumberOf(item.id) || 0)));
-      assert.equal(project.counters[ID_COUNTER_KEY], top, "счётчик номеров отстал от выданного");
+      // Счётчик **каждого вида** доведён до последнего выданного номера, а
+      // общего счётчика не осталось ни одного (ADR 038).
+      assert.equal(
+        Object.prototype.hasOwnProperty.call(project.counters, ID_COUNTER_SHARED_KEY),
+        false,
+        "в открытом объекте остался общий счётчик",
+      );
+      for (const collection of ID_OWNER_KEYS) {
+        const list = collection === "guides"
+          ? project.schemes.flatMap((scheme) => scheme.guides || [])
+          : project[collection] || [];
+        if (list.length === 0) continue;
+        const top = Math.max(...list.map((item) => idNumberOf(item.id) || 0));
+        assert.equal(
+          Number(project.counters[idCounterKey(collection)]) || 0,
+          top,
+          collection + ": счётчик вида отстал от выданного номера",
+        );
+        // Вид нумерован со своей единицы и подряд — справочник меток не касается.
+        assert.deepEqual(
+          list.map((item) => item.id),
+          list.map((item, index) => String(index + 1)),
+          collection + ": вид нумерован не с единицы",
+        );
+      }
       // Ключи хранилищ, общих для всех объектов, целы (G08.1).
       assert.equal(project.id, legacy.id, "перенумерация тронула ключ объекта");
       assert.equal(project.key, legacy.key, "перенумерация тронула постоянный ключ");
@@ -243,7 +269,8 @@ test("G11: адрес аксессуара в опциях привязки пе
 
   for (const project of [fromFile, stored]) {
     const sensor = project.marks.find((mark) => labelOf(project, mark.id) === legacy.sensorLabel);
-    const aid = deviceAid(sensor.id);
+    // Адрес аксессуара — номер метки, своей двери у него нет (G392).
+    const aid = idNumberOf(sensor.id);
     assert.ok(aid !== null, "у датчика после открытия нет адреса");
     const options = project.logicBindings[0].options;
     assert.equal(options.motion1, aid + ".13.15", "адрес характеристики датчика указывает в пустоту");
@@ -296,7 +323,7 @@ test("G11: дом объекта прежней сборки после откр
     assert.ok(after.codes.includes("started"), name + ": дом не запустился");
     // И у каждой метки с аксессуаром есть адрес — он же её номер.
     for (const accessory of homeAccessories(project)) {
-      assert.equal(accessory.aid, deviceAid(accessory.markId), name + ": адрес аксессуара не номер метки");
+      assert.equal(accessory.aid, idNumberOf(accessory.markId), name + ": адрес аксессуара не номер метки");
       assert.ok(accessory.aid > 0, name + ": адрес не выдан");
     }
   }
@@ -327,4 +354,185 @@ test("G11: принятые жёлтые строки после открыти�
     assert.deepEqual(orphans, [], name + ": в списке принятых завелась запись-сирота");
     assert.equal(acceptedProblems(project).length, acceptedProblems(legacy).length, name + ": список принятых поехал");
   }
+});
+
+// ——— второй вход: объект формата 8 с общими номерами (G391, ADR 038) ————————
+//
+// Прод-сборка уже выложена, и объекты формата 8 у заказчика есть: номера там
+// раздавал **один** счётчик на весь объект, справочник съедал первую сотню, а
+// `aid` метки был её номером под этим общим счётчиком — 117, 118, … Опции
+// привязок логики несут эти адреса живыми ссылками, и перенумерация по видам
+// обязана переселить их **второй раз**: с общего номера на свой.
+//
+// Объект формата 8 собирается здесь по правилу прежней сборки (номера подряд,
+// коллекция за коллекцией, затем `counters["#id"]`), а не берётся у нынешнего
+// кода: иначе тест сверял бы миграцию с нею самой.
+const SHARED_ORDER = [
+  "marks",
+  "groups",
+  "outlines",
+  "schemes",
+  "rooms",
+  "categories",
+  "markTypes",
+  "walls",
+  "openings",
+  "schemeObjects",
+  "schemeObjectKinds",
+  "equipmentTypes",
+  "equipment",
+  "placements",
+  "scenarios",
+  "logicBindings",
+];
+
+function sharedNumbers(project) {
+  let last = 0;
+  const moves = new Map();
+  for (const collection of SHARED_ORDER) {
+    const table = new Map();
+    for (const item of project[collection] || []) {
+      last += 1;
+      table.set(item.id, String(last));
+    }
+    if (table.size > 0) moves.set(collection, table);
+  }
+  const guides = new Map();
+  for (const scheme of project.schemes || []) {
+    for (const guide of scheme.guides || []) {
+      last += 1;
+      guides.set(guide.id, String(last));
+    }
+  }
+  if (guides.size > 0) moves.set("guides", guides);
+  const numbered = idsReplace(project, moves).project;
+  return {
+    project: { ...numbered, counters: { ...numbered.counters, [ID_COUNTER_SHARED_KEY]: last }, formatVersion: 8 },
+    moves,
+  };
+}
+
+// Объект формата 8 с живым адресом датчика в опциях привязки.
+//
+// **Метка поставлена уже после открытия прод-сборкой** — и это не причуда
+// примера, а единственный случай, в котором адрес вообще меняется. Прежняя
+// перенумерация шла коллекция за коллекцией и метки нумеровала первыми, поэтому
+// у объекта, который прод-сборка только открыла, метки и так стоят на 1…N:
+// номера по видам совпадут с ними номер в номер, и переселять адреса будет
+// нечего. А вот метка, поставленная **после** открытия, получила номер из
+// общего счётчика — за справочником, за стенами, за сценариями, — и у неё адрес
+// переезжает по-настоящему. Так у заказчика и вышло: он открыл объекты прод-
+// сборкой и продолжил разметку.
+function sharedWithAddress() {
+  const legacy = legacyWithAddress();
+  // Сперва номера под общим счётчиком — как их выдала прод-сборка.
+  const shared = sharedNumbers(legacyIdsBefore(legacy.project));
+  const last = Number(shared.project.counters[ID_COUNTER_SHARED_KEY]);
+  const sensor = shared.project.marks.find((mark) => labelOf(shared.project, mark.id) === legacy.sensorLabel);
+  // Метка, поставленная после открытия: номер из общего счётчика, за всем
+  // прежним.
+  const was = String(last + 1);
+  const moved = idsReplace(shared.project, { marks: { [sensor.id]: was } }).project;
+  return {
+    project: {
+      ...moved,
+      counters: { ...moved.counters, [ID_COUNTER_SHARED_KEY]: last + 1 },
+      // И адреса в опциях — под этим же общим номером: прод-сборка выбрала их
+      // сама, человек их не вписывал.
+      logicBindings: moved.logicBindings.map((binding) => ({
+        ...binding,
+        options: { ...binding.options, motion1: was + ".13.15", excludeAccessoriesId: was },
+      })),
+    },
+    sharedAid: was,
+    sensorLabel: legacy.sensorLabel,
+  };
+}
+
+test("G391: объект формата 8 перенумеровывается по видам обеими трубами, адреса переезжают второй раз", async () => {
+  const shared = sharedWithAddress();
+  // Пример тот: справочник сдвинут общим счётчиком, а метка, поставленная после
+  // открытия, стоит на номере за всем прежним — и её адрес в опциях такой же.
+  assert.ok(
+    idNumberOf(shared.project.markTypes[0].id) > shared.project.marks.length,
+    "пример не тот: справочник не сдвинут общим счётчиком",
+  );
+  assert.ok(
+    idNumberOf(shared.sharedAid) > shared.project.markTypes.length,
+    "пример не тот: метка не стоит на номере из общего счётчика",
+  );
+  assert.equal(shared.project.logicBindings[0].options.motion1, shared.sharedAid + ".13.15");
+
+  const fromFile = (await unpackProject(await packProject(shared.project, new Map()))).project;
+  const stored = projectsMigrateStored(shared.project);
+  assert.equal(stable(fromFile), stable(stored), "файл и база открыли объект формата 8 по-разному");
+
+  for (const [name, project] of [["база браузера", stored], ["файл", fromFile]]) {
+    // Метки стали 1…N, справочник — со своей единицы.
+    assert.deepEqual(
+      project.marks.map((mark) => mark.id).slice().sort((a, b) => Number(a) - Number(b)),
+      project.marks.map((mark, index) => String(index + 1)),
+      name + ": метки формата 8 не стали 1…N",
+    );
+    assert.equal(project.markTypes[0].id, "1", name + ": справочник остался на номерах меток");
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(project.counters, ID_COUNTER_SHARED_KEY),
+      false,
+      name + ": общий счётчик остался в объекте",
+    );
+    // Адрес переехал на **живую** метку — ни одного в пустоту.
+    const sensor = project.marks.find((mark) => labelOf(project, mark.id) === shared.sensorLabel);
+    const aid = idNumberOf(sensor.id);
+    const options = project.logicBindings[0].options;
+    assert.equal(options.motion1, aid + ".13.15", name + ": адрес характеристики указывает в пустоту");
+    assert.equal(options.excludeAccessoriesId, String(aid), name + ": адрес аксессуара не переехал");
+    assert.notEqual(options.excludeAccessoriesId, shared.sharedAid, name + ": адрес остался прежним");
+    // Прочие опции целы.
+    assert.equal(options.offDelaySeconds, 5);
+    assert.equal(options.name, "Коридор");
+    // Прежний общий номер в опциях не остался.
+    assert.equal(
+      JSON.stringify(project.logicBindings).includes(shared.sharedAid + ".13.15"),
+      false,
+      name + ": прежний адрес остался в опциях",
+    );
+    assert.equal(project.formatVersion, 9, name + ": версия формата осталась восьмой");
+  }
+
+  // Третий вход: уже перенумерованный по видам объект не меняется ни на байт —
+  // и это проверяется у **обеих** труб.
+  assert.equal(projectsMigrateStored(stored), stored, "второе открытие из базы переписало объект");
+  const twice = (await unpackProject(await packProject(stored, new Map()))).project;
+  assert.equal(stable(twice), stable(stored), "второе открытие файла переписало объект");
+});
+
+// ——— ссылка на объект ходит туда и обратно (G391) —————————————————————————
+
+test("G391: объект, прошедший ссылку, не перенумеровывается заново — счётчики видов в нагрузке", async () => {
+  const { gzipSync, gunzipSync } = await import("node:zlib");
+  const { viewLinkPack, viewLinkRead } = await import("../src/viewLink.js");
+  const codec = {
+    compress: async (bytes) => new Uint8Array(gzipSync(bytes)),
+    decompress: async (bytes) => new Uint8Array(gunzipSync(bytes)),
+  };
+  const shared = sharedWithAddress();
+  const opened = projectsMigrateStored(shared.project);
+  const packed = await viewLinkPack(opened, codec);
+  const read = await viewLinkRead(packed.text, codec);
+
+  // Счётчики видов доехали — а значит открытие ссылки объект не перенумерует:
+  // именно на этом стоит идемпотентность (ADR 038).
+  for (const collection of ID_OWNER_KEYS) {
+    const key = idCounterKey(collection);
+    if (!Object.prototype.hasOwnProperty.call(opened.counters, key)) continue;
+    assert.equal(read.project.counters[key], opened.counters[key], collection + ": счётчик вида не доехал ссылкой");
+  }
+  assert.deepEqual(
+    read.project.marks.map((mark) => mark.id),
+    opened.marks.map((mark) => mark.id),
+    "номера меток в ссылке поехали",
+  );
+  assert.deepEqual(read.project.logicBindings, opened.logicBindings, "привязки в ссылке поехали");
+  const again = projectsMigrateStored(read.project);
+  assert.equal(again, read.project, "объект из ссылки перенумеровался заново");
 });

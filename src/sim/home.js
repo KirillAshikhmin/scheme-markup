@@ -20,7 +20,7 @@
 // остальные сценарии работают.
 //
 // Метка, чей id не номер (разметка до перенумерации, собранный руками объект),
-// адреса не имеет вовсе: `deviceAid` отвечает `null`, и аксессуара у такой
+// адреса не имеет вовсе: `idNumberOf` отвечает `null`, и аксессуара у такой
 // метки нет. Обе трубы открытия нумеруют объект прежде, чем дом его увидит.
 //
 // `sid` и `cid` идут подряд с 13 внутри аксессуара: сервис получает номер,
@@ -53,36 +53,20 @@ export const DEVICE_ID_START = 13;
 // Как далеко датчик открытия ищет свою дверь, если его не привязали рукой.
 export const DEVICE_DOOR_REACH_MM = 600;
 
-/**
- * Адрес аксессуара метки — её номер: `"17"` → `17`. Не номер (uuid прежней
- * разметки, встроенный ключ, мусор) — `null`: адреса у такой метки нет, и
- * аксессуара тоже.
- *
- * **Только строка.** Идентификатор в объекте — десятичная строка и ничто
- * другое (D01, таск 01): прими здесь ещё и число — и `17` с `"17"` дали бы
- * один адрес, а второй аксессуар того же адреса хаб молча потерял бы
- * (`byAid` в `hubApi`). Отвечает адрес **числом**: `aid` в хабе — число, и
- * так его ждут и разбор адреса сценария, и окно «Аксессуар».
- */
-export function deviceAid(markId) {
-  return typeof markId === "string" ? idNumberOf(markId) : null;
-}
-
-/**
- * Адреса всех меток объекта: `Map<markId, aid>`. Карта целиком нужна тем, кто
- * ищет метку **по адресу** (подсказка в сценарии, окно «Аксессуар», перевод
- * профилей); свой адрес берут у `deviceAid`, а не отсюда. Метка без номера в
- * карту не попадает — адреса у неё нет.
- */
-export function deviceAids(project) {
-  const marks = project && Array.isArray(project.marks) ? project.marks : [];
-  const aids = new Map();
-  for (const mark of marks) {
-    const aid = deviceAid(mark && mark.id);
-    if (aid !== null && !aids.has(mark.id)) aids.set(mark.id, aid);
-  }
-  return aids;
-}
+// **Своей двери у адреса аксессуара нет** (требование G392). Были две —
+// `deviceAid(markId)` и `deviceAids(project)`, — и обе сводились к одному:
+// «номер метки числом». Слова заказчика: «Он же не нужен теперь можно
+// использовать идентификатор», «убирай».
+//
+// Правило при этом осталось в силе и живёт в `model.idNumberOf`: метка, чей id
+// не десятичная строка (uuid прежней разметки, встроенный ключ справочника,
+// мусор), адреса не имеет, и аксессуара у такой метки нет. Голого
+// `Number(mark.id)` здесь быть не должно — он принял бы `17` там, где
+// идентификатором считается только `"17"` (D01, ADR 035), и два аксессуара
+// одного адреса хаб молча потерял бы (`byAid` в `hubApi`).
+//
+// Карта «адрес → метка» тоже не нужна: адрес — это и есть номер метки, и
+// поиск по адресу стал поиском метки по её id (`findMark`).
 
 // Кэш чтения по ссылке на объект (ревью ветки, F1): объект неизменяем — каждая
 // правка даёт новый, — поэтому всё, что прочитано из одного объекта, верно для
@@ -195,7 +179,7 @@ export function markAccessory(project, markId) {
   const cache = deviceHomeCache(project);
   if (cache.accessories.has(markId)) return cache.accessories.get(markId);
   const mark = project ? findMark(project, markId) : null;
-  const accessory = !mark || markIsComment(mark) ? null : deviceFrozen(deviceAccessory(project, mark, deviceAid(mark.id)));
+  const accessory = !mark || markIsComment(mark) ? null : deviceFrozen(deviceAccessory(project, mark, idNumberOf(mark.id)));
   if (project && typeof project === "object") cache.accessories.set(markId, accessory);
   return accessory;
 }
@@ -224,7 +208,7 @@ export function homeAccessories(project) {
   for (const mark of project.marks) {
     // Ведомая метка своего аксессуара не имеет: четыре Т1 для сценария — одна.
     if (markIsComment(mark) || followers.has(mark.id)) continue;
-    const accessory = deviceAccessory(project, mark, deviceAid(mark.id));
+    const accessory = deviceAccessory(project, mark, idNumberOf(mark.id));
     if (accessory) out.push(accessory);
   }
   return out;

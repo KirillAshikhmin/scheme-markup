@@ -223,33 +223,34 @@ test("версия файла: лестница 5 и 6 — у объекта д�
   assert.equal(projectFormatVersion(uuids(withScenario.project)), 6);
   // Пустые списки — всё равно объект без сценариев.
   assert.equal(projectFormatVersion({ ...uuids(box.project), scenarios: [], logicBindings: [] }), 5);
-  // А объект этой сборки пронумерован, и версия у него одна — восьмая (ADR 030).
-  assert.equal(projectFormatVersion(box.project), 8);
-  assert.equal(projectFormatVersion(withScenario.project), 8);
-  assert.equal(projectFormatVersion(deleteScenario(withScenario.project, withScenario.scenario.id).project), 8);
+  // А объект этой сборки пронумерован по видам, и версия у него одна — девятая
+  // (ADR 038).
+  assert.equal(projectFormatVersion(box.project), 9);
+  assert.equal(projectFormatVersion(withScenario.project), 9);
+  assert.equal(projectFormatVersion(deleteScenario(withScenario.project, withScenario.scenario.id).project), 9);
 
   const plain = await projectText(box.project);
-  assert.equal(JSON.parse(plain.text).formatVersion, 8, "пронумерованный объект пишется версией 8");
+  assert.equal(JSON.parse(plain.text).formatVersion, 9, "пронумерованный объект пишется версией 9");
   const rich = await projectText(withScenario.project);
-  assert.equal(JSON.parse(rich.text).formatVersion, 8, "объект со сценарием пишется версией 8");
+  assert.equal(JSON.parse(rich.text).formatVersion, 9, "объект со сценарием пишется версией 9");
   // Прежняя сборка принимала версии не выше 5: такой файл она честно отвергнет
   // «файлом из более новой версии», а не потеряет сценарии и адреса слиянием.
   assert.ok(JSON.parse(rich.text).formatVersion > 5);
 });
 
-test("файл версии 8 читается, версии 9 — честный отказ futureVersion", async () => {
+test("файл версии 9 читается, версии 10 — честный отказ futureVersion", async () => {
   const box = house();
   const project = addScenario(box.project, motionLight(box)).project;
   const text = (await projectText(project)).text;
-  assert.match(text, /"formatVersion": 8/);
-  const eight = await unpackProject(await writeZip([{ name: PROJECT_ENTRY, data: text }]));
-  assert.equal(eight.project.formatVersion, 8);
-  assert.equal(scenariosOf(eight.project).length, 1);
+  assert.match(text, /"formatVersion": 9/);
+  const nine = await unpackProject(await writeZip([{ name: PROJECT_ENTRY, data: text }]));
+  assert.equal(nine.project.formatVersion, 9);
+  assert.equal(scenariosOf(nine.project).length, 1);
 
-  // Версия 8 — номера вместо uuid (ADR 030), последняя из читаемых; из
+  // Версия 9 — свой счётчик у каждого вида (ADR 038), последняя из читаемых; из
   // будущего теперь всё, что выше неё.
-  const nine = await writeZip([{ name: PROJECT_ENTRY, data: text.replace('"formatVersion": 8', '"formatVersion": 9') }]);
-  await assert.rejects(unpackProject(nine), (error) => error.code === "futureVersion" && error.message.includes("9"));
+  const ten = await writeZip([{ name: PROJECT_ENTRY, data: text.replace('"formatVersion": 9', '"formatVersion": 10') }]);
+  await assert.rejects(unpackProject(ten), (error) => error.code === "futureVersion" && error.message.includes("10"));
 });
 
 test("упаковано = распаковано: сценарии, привязки, профили типов и свои настройки меток", async () => {

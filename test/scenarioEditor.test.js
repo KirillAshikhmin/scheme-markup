@@ -452,7 +452,7 @@ test("вложенное «Если» в «Иначе» и в задержке �
   // ДО1 закрыт (CONTACT_DETECTED) — условие «= Закрыто» по умолчанию (первое значение) истинно
   assert.equal(lamp(), false);
   // Объект этой сборки пронумерован, и версия формата у него восьмая (ADR 030).
-  assert.equal(projectFormatVersion(addScenario(box.project, scenario).project), 8);
+  assert.equal(projectFormatVersion(addScenario(box.project, scenario).project), 9);
 });
 
 // ——— строки ———————————————————————————————————————————————————————

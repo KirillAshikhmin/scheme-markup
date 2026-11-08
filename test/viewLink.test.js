@@ -21,8 +21,8 @@ import {
   viewLinkRead,
   viewLinkStrip,
 } from "../src/viewLink.js";
-import { addLogicBinding, addScenario, findGroup, markControlLinks, planFractionToMm, updateMark } from "../src/model.js";
-import { buildHomeSpec, deviceAids } from "../src/sim/home.js";
+import { addLogicBinding, addScenario, findGroup, idNumberOf, markControlLinks, planFractionToMm, updateMark } from "../src/model.js";
+import { buildHomeSpec } from "../src/sim/home.js";
 import { simHouse } from "./fixtures/simHome.js";
 
 const squeeze = promisify(brotliCompress);
@@ -172,7 +172,10 @@ test("адреса хаба после прогона те же", async () => {
   const { project } = scriptedHouse();
   const packed = await viewLinkPack(project, codec);
   const read = await viewLinkRead(packed.text, codec);
-  assert.deepStrictEqual([...deviceAids(read.project)], [...deviceAids(project)]);
+  // Адрес аксессуара — номер метки (G392), поэтому сверяются номера меток:
+  // своей двери у адреса больше нет, а правило то же.
+  const aidsOf = (one) => one.marks.map((mark) => [mark.id, idNumberOf(mark.id)]);
+  assert.deepStrictEqual(aidsOf(read.project), aidsOf(project));
   assert.deepStrictEqual(read.warnings, []);
   // Доказывать это таблицей больше нечем и незачем: адрес — номер метки, и
   // пока номер в нагрузке тот же, адрес переехать не может.

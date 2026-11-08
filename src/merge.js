@@ -842,8 +842,8 @@ function mergeReferences(merged, report, sources, winner) {
 /**
  * **Один номер у двух разных сущностей.**
  *
- * Номера сущностей раздаёт счётчик объекта (`model.nextId`), а счётчик у двух
- * разошедшихся копий **один**: поставив каждый свою метку, напарники получают
+ * Номера сущностей раздают счётчики объекта (`model.nextId`), а счётчики у двух
+ * разошедшихся копий **одни**: поставив каждый свою метку, напарники получают
  * один и тот же номер. Сложи такие копии по `id` — и метка одного из них молча
  * исчезнет, слившись с чужой. Это самая дорогая из возможных потерь: «вернуть
  * лишнюю метку — минута работы, восстановить потерянную — некому», и правило
@@ -854,11 +854,18 @@ function mergeReferences(merged, report, sources, winner) {
  * обе сущности заведены после расхождения. Есть у предка — это одна сущность,
  * правленная с двух сторон, и о ней говорит обычное правило спора.
  *
- * **Номер ищется сразу по всем коллекциям, а не внутри своей.** Номера
- * уникальны по всем видам сущностей сразу (так заведён счётчик объекта), и
- * `idsReplace` — одна таблица переездов на все коллекции. Ищи столкновение
- * внутри коллекции — и наша метка 110 доживёт до итога рядом с их стеной 110,
- * а следующий переезд номера 110 увёз бы на один номер обеих.
+ * **Номер ищется внутри своего вида** (ADR 038). Счётчик у каждого вида свой,
+ * и метка 110 рядом со стеной 110 — обычное состояние объекта, а не
+ * столкновение: разведи их — и слияние переставляло бы номера на каждом
+ * обмене файлами, без всякой на то причины. Спорят только две метки 110, и
+ * переезд тоже идёт в своём виде: номер берётся у счётчика меток, а таблица
+ * переездов отдаётся `idsReplace` названной по виду.
+ *
+ * До таска 251 номер был уникален по всем видам сразу, и правило было
+ * обратным — «искать сразу по всем коллекциям». Перепутать два правила значит
+ * либо потерять сущность (искали в своём виде при общем счётчике), либо
+ * двигать номера впустую (ищем по всем видам при своих счётчиках); какое из них
+ * верно, говорит версия формата объекта, а её ставит открытие.
  *
  * **Предка нет — номер всё равно разводится.** Без предка «оба завели» и «оба
  * правили» выглядят одинаково, и переезд превратит одну правленную сущность в
@@ -900,38 +907,45 @@ function mergeReferences(merged, report, sources, winner) {
  * о нём слияние говорит вслух.
  */
 function mergeIdClash(ours, theirs, base, winner) {
-  // Одна таблица на все коллекции — такая же, как у `idsReplace`: номер
-  // уникален по всем видам сразу, и метка 110 спорит со стеной 110.
-  const mine = new Map();
-  const known = new Set();
+  // Таблица на каждый вид: номера свои у каждого вида, и спорят только
+  // однородные сущности.
+  const clashed = new Map();
   for (const entity of MERGE_ENTITIES) {
+    const mine = new Map();
     for (const item of mergeList(ours, entity)) {
       if (item && typeof item.id === "string") mine.set(item.id, item);
     }
+    const known = new Set();
     for (const item of mergeList(base, entity)) {
       if (item && typeof item.id === "string") known.add(item.id);
     }
-  }
-  const clashed = new Set();
-  for (const entity of MERGE_ENTITIES) {
+    const found = [];
     for (const item of mergeList(theirs, entity)) {
       if (!item || typeof item.id !== "string" || known.has(item.id)) continue;
       const twin = mine.get(item.id);
       if (!twin || mergeSame(twin, item)) continue;
-      clashed.add(item.id);
+      if (!found.includes(item.id)) found.push(item.id);
     }
+    if (found.length > 0) clashed.set(entity, found);
   }
   if (clashed.size === 0) return { ours, theirs, reissued: [] };
   // Переезжает проигравший спор: обе стороны считают это из одной пары и
   // приходят к одному ответу.
   const moving = winner === "theirs" ? ours : theirs;
   const other = winner === "theirs" ? theirs : ours;
-  const ids = [...clashed];
-  // Счётчик берётся по обеим сторонам, иначе новый номер встал бы на занятый.
-  const fresh = nextIds({ ...moving, counters: mergeCounters(moving, other) }, ids.length);
-  const replacements = new Map(ids.map((id, at) => [id, fresh.ids[at]]));
-  const moved = idsReplace(fresh.project, replacements);
-  const reissued = ids.map((id, at) => ({ side: winner === "theirs" ? "ours" : "theirs", was: id, now: fresh.ids[at] }));
+  const side = winner === "theirs" ? "ours" : "theirs";
+  // Счётчики берутся по обеим сторонам, иначе новый номер встал бы на занятый
+  // у напарника.
+  let project = { ...moving, counters: mergeCounters(moving, other) };
+  const moves = new Map();
+  const reissued = [];
+  for (const [entity, ids] of clashed) {
+    const fresh = nextIds(project, entity, ids.length);
+    project = fresh.project;
+    moves.set(entity, new Map(ids.map((id, at) => [id, fresh.ids[at]])));
+    ids.forEach((id, at) => reissued.push({ side, entity, was: id, now: fresh.ids[at] }));
+  }
+  const moved = idsReplace(project, moves);
   return winner === "theirs"
     ? { ours: moved.project, theirs, reissued }
     : { ours, theirs: moved.project, reissued };
@@ -1046,10 +1060,11 @@ export function mergeProjects(ours, theirs, base, options = {}) {
     changes: report.changes,
     conflicts: report.conflicts,
     renumbered: report.renumbered,
-    // Переехавшие номера сущностей: `[{side, was, now}]`. Человеку они не
-    // показываются — номер сущности он не видит, — но тому, кто держит
-    // состояние по `markId` (выделение, живое состояние дома), нужно знать, что
-    // ключ сменился.
+    // Переехавшие номера сущностей: `[{side, entity, was, now}]`. Вид назван:
+    // номер свой у каждого вида (ADR 038), и `was: "110"` без вида не говорит,
+    // чей ключ сменился. Человеку они не показываются — номер сущности он не
+    // видит, — но тому, кто держит состояние по `markId` (выделение, живое
+    // состояние дома), нужно знать, что ключ сменился.
     reissued: report.reissued,
     counts,
   };

@@ -37,6 +37,7 @@ import {
   findGroup,
   findMark,
   joinToBlock,
+  blockLabelOf,
   labelOf,
   leaveBlock,
   markDeviceLeader,
@@ -124,7 +125,7 @@ test("две метки без блока образуют новый блок, 
   assert.equal(placesOf(result.project), places, "метка сдвинулась — это и есть запрет требования");
   // Подпись блока — перечисление, и собирает её та же `blockLabelParts`.
   assert.equal(blockLabel(result.project, result.group.markIds), "В1, Р1");
-  assert.equal(labelOf(result.project, result.group.id), "В1, Р1");
+  assert.equal(blockLabelOf(result.project, result.group.id), "В1, Р1");
   assert.deepEqual(blockProblems(result.project), [], "у собранного блока нашлись находки");
 });
 

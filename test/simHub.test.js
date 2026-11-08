@@ -625,7 +625,9 @@ test("Hub API: аксессуар, сервисы, характеристики,
       "  keys: k.getServices(HS.StatelessProgrammableSwitch).map(function (x) { return x.getName(); }),",
       "  rooms: Hub.getRooms().map(function (r) { return r.getName() + ':' + r.getAccessories().length; }),",
       "  byCid: Hub.getCharacteristic(" + light.aid + ", " + light.services[0].chars[0].cid + ").getType(),",
-      "  missing: Hub.getAccessory(1) === null && a.getService(HS.Switch) === null,",
+      // Номер заведомо свободный: со своим счётчиком у каждого вида (ADR 038)
+      // метки нумеруются с единицы, и аксессуар 1 в доме-фикстуре есть.
+      "  missing: Hub.getAccessory(999999) === null && a.getService(HS.Switch) === null,",
       "};",
     ].join("\n"),
   ).value;

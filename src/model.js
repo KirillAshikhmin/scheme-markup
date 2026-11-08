@@ -93,7 +93,32 @@ export const FORMAT_VERSION_LIB = 7;
 //     «файл сделан более новой версией» лучше тихой потери.
 export const FORMAT_VERSION_IDS = 8;
 
-export const FORMAT_VERSION_MAX = 8;
+// 9 — **свой счётчик у каждого вида** (таск 251, G391; ADR 038). Номера формата
+//     8 раздавал один счётчик на весь объект, и справочник съедал первую сотню:
+//     на новом объекте первая метка была №117. Заказчик: «у каждого свои
+//     идентификаторы. У типов свои, у меток свои, у помещений свои, и все
+//     инкремент. Справочник не должен пересекаться с готовыми митками, это же
+//     бред». Теперь счётчик свой у каждого вида (`idCounterKey`), и метки на
+//     любом объекте — 1…N.
+//
+//     Почему версия, а не доопределение восьмёрки: номер перестал быть
+//     уникальным между видами, и сборка формата 8 **портит** такой объект тихо.
+//     Её `idsMigrate` видит номер, занятый дважды (метка 5 и помещение 5),
+//     считает объект непронумерованным и перенумеровывает его своим общим
+//     счётчиком — адреса аксессуаров уезжают второй раз; хуже того, общая
+//     таблица переездов у неё выбрасывает все номера, занятые дважды, и ключи
+//     принятых предупреждений не переписываются вовсе — человек получает заново
+//     весь список жёлтых строк, на которые уже ответил (на объектах заказчика
+//     это 5…62 записи). Честный отказ «файл сделан более новой версией» дешевле.
+//
+//     Признак девятки — **счётчики по видам в самом объекте**
+//     (`idsNumberedByKind`): объект формата 8 несёт один `"#id"` и ни одного
+//     `"#marks"`. Отсюда же тождество, на котором стоит идемпотентность: файл
+//     версии 9 всегда несёт свои счётчики, а значит второе открытие его не
+//     перенумерует.
+export const FORMAT_VERSION_KIND_IDS = 9;
+
+export const FORMAT_VERSION_MAX = 9;
 
 // Условные обозначения, которые предлагает сетка выбора. Их различают на
 // чёрно-белой распечатке в размере метки, поэтому семейства разведены контуром,
@@ -1032,29 +1057,57 @@ function newStorageId() {
   return globalThis.crypto.randomUUID();
 }
 
-// ——— номера вместо uuid (G08–G11) ————————————————————————————————————————
+// ——— номера вместо uuid, у каждого вида свой счётчик (G08–G11, G391) ————————
 //
 // Слова заказчика: «Давай переделаем метки на инкремент, начиная с 1, вместо
 // UUID. При чем он постоянно увеличивается». И следом, на вопрос «у чего» —
 // «Всё, у чего есть id», «Свой у каждого объекта».
 //
+// И поправка (таск 251, G391), когда он прочёл в отчёте, что на новом объекте
+// первая метка получает №117, потому что встроенный справочник съедает первую
+// сотню номеров общего счётчика:
+//
+//     «в смысле я так сказал? у каждого свои идентификаторы. У типов свои, у
+//     меток свои, у помещений свои, и все инкремент. Справочник не должен
+//     пересекаться с готовыми митками, это же бред».
+//
 // ——— что получилось ———
 //
 // Счётчик живёт **в объекте**, в том же `project.counters`, где уже лежат
-// счётчики номеров меток по коду типа, под ключом `ID_COUNTER_KEY`. Ключ не
-// может столкнуться с кодом типа: код — это только буквы (`normalizeCode`), а
-// здесь решётка.
+// счётчики номеров меток по коду типа, и **свой у каждого вида**: ключ — это
+// решётка и имя коллекции (`"#marks"`, `"#rooms"`, дверь `idCounterKey`). С
+// кодом типа такой ключ столкнуться не может: код — это только буквы
+// (`normalizeCode`), а здесь решётка. Прежний **общий** счётчик (`"#id"`,
+// формат 8) остался надгробием `ID_COUNTER_SHARED_KEY`: по его одиночеству
+// узнаётся объект, который надо перенумеровать ещё раз, и перенумерация этот
+// ключ убирает.
 //
-// Номера **уникальны по всем видам сразу** — как uuid сегодня. Это не
-// аккуратность ради аккуратности: ссылка на сущность в этом объекте — просто
-// значение поля (`mark.roomId`, `opening.wallId`), и раздели мы нумерацию по
-// коллекциям, номер 3 значил бы и комнату, и стену, и ошибка в поле перестала
-// бы быть видимой — она стала бы правдоподобной.
+// На новом объекте метка — №1, и двести типов справочника её не касаются.
 //
 // Счётчик **только растёт**: номер удалённой сущности никому больше не
-// достаётся (G09). Дыры в номерах — то же сознательное решение, что у номеров
-// меток (ADR 003): распечатка с «Р14» не должна протухать от того, что кто-то
-// удалил Р13.
+// достаётся (G09) — внутри своего вида. Дыры в номерах — то же сознательное
+// решение, что у номеров меток (ADR 003): распечатка с «Р14» не должна
+// протухать от того, что кто-то удалил Р13.
+//
+// ——— чем это оплачено ———
+//
+// **Номер больше не уникален между видами**: 3 — это и помещение, и стена, и
+// метка. Прежде уникальность была страховкой: ссылка, попавшая не в ту
+// коллекцию, приводила в пустоту и была видна. Теперь она **правдоподобна**, и
+// держит всё одно правило: **вид названного числа назван, а не угадан**.
+// Названия живут в трёх таблицах и больше нигде:
+//
+//   — `ID_OWNERS` — поле ссылки → коллекция, на которую оно смотрит;
+//   — `idsRewrite` — ссылки непростой формы, каждая поимённо («чем управляет»,
+//     дверь аксессуара, дерево блоков сценария, адреса в опциях привязок);
+//   — `ID_KEY_SUBJECTS` — ключи принятых предупреждений: код проблемы → вид
+//     каждого сегмента ключа.
+//
+// Таблицы переездов **без вида** в сборке не осталось ни одной: прежняя общая
+// (`all`) снята вместе с общим счётчиком, а `idsReplace` принимает замены
+// только названными по коллекциям. Код проблемы, которого нет в
+// `ID_KEY_SUBJECTS`, не переписывается вовсе — промолчать дешевле, чем увезти
+// ответ человека на чужой вопрос.
 //
 // ——— почему номер — строка, а не число ———
 //
@@ -1076,7 +1129,25 @@ function newStorageId() {
 //
 // Поэтому номер — десятичная строка. Само число отдаёт `idNumberOf`, и адрес
 // аксессуара читается из него (`deviceAid`), а не из хэша.
-export const ID_COUNTER_KEY = "#id";
+
+/**
+ * Ключ счётчика вида в `project.counters`: `"marks"` → `"#marks"`.
+ *
+ * Единственная дверь: своего склеивания решётки с именем не заводить — ключ
+ * счётчика и имя коллекции расходятся молча, а разойдясь, дают выдачу номера
+ * поверх занятого.
+ */
+export function idCounterKey(collection) {
+  return "#" + collection;
+}
+
+/**
+ * **Надгробие общего счётчика** (формат 8, ADR 030): один `"#id"` на весь
+ * объект. Нужен ровно для одного — узнать объект, который нумеровался общим
+ * счётчиком, и перенумеровать его по видам; перенумерация ключ убирает.
+ * Выдавать по нему номера нельзя: вид у числа тогда снова станет догадкой.
+ */
+export const ID_COUNTER_SHARED_KEY = "#id";
 
 /**
  * Номер идентификатора числом: `"17"` → `17`. `null` — это не номер, а uuid
@@ -1084,55 +1155,75 @@ export const ID_COUNTER_KEY = "#id";
  *
  * Единственная дверь к числу: своего `Number(id)` не заводить — он принял бы и
  * `" 17 "`, и `"17px"`, и `"1e3"`.
+ *
+ * **Только десятичная строка. Число идентификатором не считается** (D01,
+ * ADR 035; требование G392, когда дверь адреса аксессуара была снята в пользу
+ * этой). Это не придирка к типу: прими здесь ещё и число — и `17` с `"17"`
+ * дали бы один адрес аксессуара, а второй аксессуар того же адреса хаб молча
+ * потерял бы (`byAid` в `hubApi`). Число в чужом JSON (руками собранный файл)
+ * не принимается как id и отправляет объект на перенумерацию — там он и
+ * получит честную десятичную строку.
  */
 export function idNumberOf(id) {
-  if (typeof id === "number") return Number.isInteger(id) && id > 0 ? id : null;
   if (typeof id !== "string" || !/^[1-9][0-9]*$/.test(id)) return null;
   const value = Number(id);
   return Number.isSafeInteger(value) ? value : null;
 }
 
-// Самый большой номер, который в объекте уже занят. Нужен ровно для одного:
-// счётчик мог потеряться (объект собран руками, пришёл из ссылки без
-// `counters`, слит из двух), и выдавать поверх занятого номера нельзя — это
-// сшивка двух разных сущностей в одну, самая дорогая из возможных поломок.
-// Правило то же, что у номеров меток (`nextNumber` смотрит на `highestNumber`).
+// Самые большие номера, уже занятые в объекте, — **по видам**: `Map<вид,
+// номер>`. Нужны ровно для одного: счётчик мог потеряться (объект собран
+// руками, пришёл из ссылки без `counters`, слит из двух), и выдавать поверх
+// занятого номера нельзя — это сшивка двух разных сущностей в одну, самая
+// дорогая из возможных поломок. Правило то же, что у номеров меток
+// (`nextNumber` смотрит на `highestNumber`).
 //
 // Снимок помнится на объект (`WeakMap`): каждая правка даёт новый объект, и
 // обход всех коллекций идёт раз на правку, а не раз на сущность.
 const ID_FLOOR_CACHE = new WeakMap();
+const ID_FLOORS_NONE = new Map();
 
-function idFloor(project) {
-  if (!project || typeof project !== "object") return 0;
+function idFloors(project) {
+  if (!project || typeof project !== "object") return ID_FLOORS_NONE;
   const known = ID_FLOOR_CACHE.get(project);
   if (known !== undefined) return known;
-  let top = 0;
-  const see = (value) => {
+  const floors = new Map();
+  const see = (collection, value) => {
     const number = idNumberOf(value);
-    if (number !== null && number > top) top = number;
+    if (number === null) return;
+    if (number > (floors.get(collection) || 0)) floors.set(collection, number);
   };
   for (const owner of ID_OWNERS) {
     for (const item of idOwnList(project, owner)) {
-      see(item && item.id);
-      if (owner.nested) for (const child of idNestedList(item, owner)) see(child && child.id);
+      for (const [collection, entity] of idOwnPairs(item, owner)) see(collection, entity && entity.id);
     }
   }
-  ID_FLOOR_CACHE.set(project, top);
-  return top;
+  ID_FLOOR_CACHE.set(project, floors);
+  return floors;
+}
+
+/** Хоть одна сущность объекта пронумерована — то есть он прошёл перенумерацию. */
+function idsAnyNumbered(project) {
+  for (const floor of idFloors(project).values()) if (floor > 0) return true;
+  return false;
 }
 
 // Касса номеров на одну правку: копия `counters`, из которой берут номера, и
 // она же едет в патч. Так устроена и выдача номеров меток в `addMark` — две
 // метки одной правки обязаны получить два разных номера, а счётчик обязан
 // доехать до объекта один раз.
+//
+// `next(collection)` — вид называет вызывающий, и это не формальность:
+// промахнись он видом, метка получила бы номер из счётчика стен и встала бы
+// поверх живой метки.
 function idMint(project) {
   const counters = { ...(project && project.counters ? project.counters : {}) };
-  const floor = idFloor(project);
+  const floors = idFloors(project);
   return {
     counters,
-    next() {
-      const value = Math.max(Number(counters[ID_COUNTER_KEY]) || 0, floor) + 1;
-      counters[ID_COUNTER_KEY] = value;
+    next(collection) {
+      const key = idCounterKey(collection);
+      const value = Math.max(Number(counters[key]) || 0, floors.get(collection) || 0) + 1;
+      counters[key] = value;
       return String(value);
     },
   };
@@ -1145,12 +1236,16 @@ function idMint(project) {
 // сборке быть не должно: разойдись они — перенумерация переписала бы не все
 // ссылки, а это молча испорченный объект, самая дорогая из поломок.
 //
-// `key` — коллекция верхнего уровня. `refs` — поля сущности, где лежит ссылка:
-// **имя поля → коллекция, на которую оно смотрит**. Коллекция названа, а не
-// угадывается по значению, и это главное: номера уникальны по всем видам, но
-// отвечать «чей это номер» догадкой нельзя. `lists` — то же, но поле держит
-// список ссылок. `nested` — сущности **внутри** сущности со своими
-// идентификаторами (направляющие схемы).
+// `key` — коллекция верхнего уровня и **имя её числового пространства**: по
+// нему считается счётчик (`idCounterKey`) и занятый номер (`idFloors`). `refs`
+// — поля сущности, где лежит ссылка: **имя поля → коллекция, на которую оно
+// смотрит**. Коллекция названа, а не угадывается по значению, и это главное:
+// номера внутри вида свои, 3 — это и помещение, и стена, и отвечать «чей это
+// номер» догадкой нельзя. `lists` — то же, но поле держит список ссылок.
+// `nested` — поле сущности со вложенными сущностями, у которых свой
+// идентификатор (направляющие схемы); `nestedKey` — их **своё** числовое
+// пространство: направляющая и схема номер не делят, и таблицы переездов у них
+// тоже две.
 //
 // Чего в таблице нет и почему:
 //   — `project.id`, `project.key`, `scheme.imageId` — ключи в хранилищах
@@ -1181,7 +1276,7 @@ const ID_OWNERS = [
   },
   { key: "groups", refs: { schemeId: "schemes" }, lists: { markIds: "marks" } },
   { key: "outlines", refs: { schemeId: "schemes", roomId: "rooms" } },
-  { key: "schemes", nested: "guides" },
+  { key: "schemes", nested: "guides", nestedKey: "guides" },
   { key: "rooms" },
   { key: "categories" },
   { key: "markTypes", refs: { categoryId: "categories" } },
@@ -1200,6 +1295,16 @@ const ID_OWNERS = [
   { key: "logicBindings", refs: { scenarioId: "scenarios", markId: "marks" } },
 ];
 
+/**
+ * Все числовые пространства объекта: коллекции и вложенные в них виды. У
+ * каждого свой счётчик, и список здесь — **один на сборку**: тесты счётчиков
+ * берут двери отсюда, а не ведут свой перечень руками (прежний такой перечень
+ * отстал на двенадцать коллекций и был зелёным при нарушенном правиле).
+ */
+export const ID_OWNER_KEYS = Object.freeze(
+  ID_OWNERS.flatMap((owner) => (owner.nestedKey ? [owner.key, owner.nestedKey] : [owner.key])),
+);
+
 function idOwnList(project, owner) {
   const list = project[owner.key];
   return Array.isArray(list) ? list : [];
@@ -1210,42 +1315,55 @@ function idNestedList(item, owner) {
   return Array.isArray(list) ? list : [];
 }
 
+// Сущности одной записи коллекции вместе со **именем их вида**: сама запись и
+// вложенные в неё. Один обход на все три читателя таблицы (`idFloors`,
+// `idsNumberedByKind`, `idsMigrate`) — чтобы «вид назван» значило одно и то же
+// во всех трёх.
+function idOwnPairs(item, owner) {
+  const pairs = [[owner.key, item]];
+  if (owner.nested) for (const child of idNestedList(item, owner)) pairs.push([owner.nestedKey, child]);
+  return pairs;
+}
+
 // Касса для **шаблона** — справочника, который живёт вне объекта (стартовый
 // набор, сохранённая заготовка). Счётчика у него нет и быть не может: он не
-// объект. Номера здесь свои, с единицы, и уникальны внутри одного вызова; попав
-// в объект, они раздаются заново его счётчиком (`createProject` → `idsMigrate`).
+// объект. Номера здесь свои, с единицы **у каждого вида**, и уникальны внутри
+// одного вызова; попав в объект, они раздаются заново его счётчиками
+// (`createProject` → `idsMigrate`).
 function templateMint() {
-  let last = 0;
-  return () => {
-    last += 1;
-    return String(last);
+  const last = new Map();
+  return (collection) => {
+    const value = (last.get(collection) || 0) + 1;
+    last.set(collection, value);
+    return String(value);
   };
 }
 
 /**
- * Следующий номер объекта: `{project, id}`. Счётчик в объекте сдвинут, номер
- * больше никому не достанется.
+ * Следующий номер **названного вида**: `{project, id}`. Счётчик этого вида в
+ * объекте сдвинут, номер больше никому в этом виде не достанется.
  *
  * Дверь для того, кто заводит сущность **вне модели** (и для тестов): внутри
  * модели номера берёт касса `idMint`, чтобы одна правка двигала счётчик один
- * раз.
+ * раз. `collection` — имя из `ID_OWNER_KEYS`, и назвать его обязан вызывающий:
+ * номера свои у каждого вида, и угадывать вид по значению нельзя.
  */
-export function nextId(project) {
+export function nextId(project, collection) {
   const mint = idMint(project);
-  const id = mint.next();
+  const id = mint.next(collection);
   return { project: { ...project, counters: mint.counters }, id };
 }
 
 /**
- * То же пачкой: `{project, ids}` на `count` сущностей — **одна** правка
- * счётчика на всех. Поштучный `nextId` в цикле дал бы те же номера, но
- * столько же промежуточных объектов.
+ * То же пачкой: `{project, ids}` на `count` сущностей **одного вида** — и
+ * **одна** правка счётчика на всех. Поштучный `nextId` в цикле дал бы те же
+ * номера, но столько же промежуточных объектов.
  */
-export function nextIds(project, count) {
+export function nextIds(project, collection, count) {
   const want = Number.isFinite(Number(count)) ? Math.max(0, Math.floor(Number(count))) : 0;
   const mint = idMint(project);
   const ids = [];
-  for (let index = 0; index < want; index += 1) ids.push(mint.next());
+  for (let index = 0; index < want; index += 1) ids.push(mint.next(collection));
   return { project: { ...project, counters: mint.counters }, ids };
 }
 
@@ -1274,7 +1392,7 @@ export function defaultTemplate() {
   // `project.counters` у него нет, — поэтому номера здесь свои, с единицы, и
   // `createProject` раздаёт их заново своей кассой (`idsMigrate`).
   const mint = templateMint();
-  const categoryIds = new Map(TEMPLATE_CATEGORIES.map((category) => [category.key, mint()]));
+  const categoryIds = new Map(TEMPLATE_CATEGORIES.map((category) => [category.key, mint("categories")]));
   const categories = TEMPLATE_CATEGORIES.map((category, index) => ({
     id: categoryIds.get(category.key),
     name: category.name,
@@ -1284,7 +1402,7 @@ export function defaultTemplate() {
     order: index,
   }));
   const markTypes = TEMPLATE_TYPES.map((type, index) => ({
-    id: mint(),
+    id: mint("markTypes"),
     categoryId: categoryIds.get(type.category),
     code: type.code,
     name: type.name,
@@ -1329,9 +1447,10 @@ export function createProject(template) {
   const stamp = nowIso();
   const project = {
     // Версия, которой пишет эта сборка: сущности нового объекта пронумерованы
-    // с рождения (ADR 030), и прежняя сборка посчитала бы адреса аксессуаров
-    // по-своему. Та же версия выходит и из `projectFormatVersion`.
-    formatVersion: FORMAT_VERSION_IDS,
+    // с рождения, и каждый вид своим счётчиком (ADR 030, ADR 038), а прежняя
+    // сборка посчитала бы адреса аксессуаров по-своему. Та же версия выходит и
+    // из `projectFormatVersion`.
+    formatVersion: FORMAT_VERSION_KIND_IDS,
     // Номер объекту **не положен**: его `id` и `key` — ключи в хранилищах
     // браузера, общих для всех объектов, и два объекта с номером 1 затёрли бы
     // друг друга (G08.1). То же у `scheme.imageId`: это ключ подложки в общем
@@ -1395,7 +1514,7 @@ export function createProject(template) {
   // Нумерация идёт **до** этого: ключ принятия складывается из идентификаторов
   // типов и категорий, и принять их под номерами шаблона значило бы записать в
   // объект ответы на вопросы о сущностях, которых в нём уже нет. Заодно у
-  // нового объекта сразу стоит счётчик номеров (`ID_COUNTER_KEY`): справочник
+  // нового объекта сразу стоят счётчики видов (`idCounterKey`): справочник
   // пришёл из шаблона со своей нумерацией, и в объекте она раздаётся заново.
   return acceptFromDictionary(idsMigrate(project).project, new Set());
 }
@@ -1679,7 +1798,7 @@ export function resizeSchemePlan(project, schemeId, { width, height } = {}) {
 export function addScheme(project, { name, imageId = null, width = 0, height = 0 } = {}) {
   const mint = idMint(project);
   const scheme = {
-    id: mint.next(),
+    id: mint.next("schemes"),
     name: String(name || "").trim() || strings.project.defaultSchemeName,
     imageId,
     width,
@@ -2349,19 +2468,19 @@ export function addMark(project, { schemeId, typeId, kind = "point", points, blo
     for (const point of vertices) {
       const number = nextNumber(project, counters, type.code);
       counters[type.code] = number;
-      created.push(makeMark({ id: mint.next(), schemeId, typeId, kind, points: [point], number }));
+      created.push(makeMark({ id: mint.next("marks"), schemeId, typeId, kind, points: [point], number }));
     }
   } else {
     const number = nextNumber(project, counters, type.code);
     counters[type.code] = number;
-    created.push(makeMark({ id: mint.next(), schemeId, typeId, kind, points: vertices, number }));
+    created.push(makeMark({ id: mint.next("marks"), schemeId, typeId, kind, points: vertices, number }));
   }
 
   let groups = project.groups;
   let group = null;
   if (created.length > 1) {
     group = {
-      id: mint.next(),
+      id: mint.next("groups"),
       schemeId,
       markIds: created.map((mark) => mark.id),
       labelOffset: null,
@@ -2379,12 +2498,26 @@ export function addMark(project, { schemeId, typeId, kind = "point", points, blo
 
 // ——— обозначения —————————————————————————————————————————————————————
 
-export function labelOf(project, id) {
-  const mark = findMark(project, id);
-  if (mark) return markLabel(project, mark);
-  const group = findGroup(project, id);
-  if (group) return blockLabel(project, group.markIds);
-  return "";
+/**
+ * Обозначение **метки**: код типа и номер («Р1»). Нет такой метки — пустая
+ * строка.
+ *
+ * До таска 251 эта дверь принимала и метку, и блок: номер был уникален по всем
+ * видам, и «найдём метку, а не нашли — поищем группу» было ответом, а не
+ * догадкой. Со своим счётчиком у каждого вида (ADR 038) метка 1 и группа 1
+ * живут в объекте одновременно, и такой поиск отвечал бы обозначением метки на
+ * вопрос о блоке: подпись блока «В1–3» превращалась в «В1». Поэтому дверей две,
+ * и вид называет вызывающий — `blockLabelOf` для блока.
+ */
+export function labelOf(project, markId) {
+  const mark = findMark(project, markId);
+  return mark ? markLabel(project, mark) : "";
+}
+
+/** Обозначение **блока** по номеру его группы: «В1–3», «В1, Р1». */
+export function blockLabelOf(project, groupId) {
+  const group = findGroup(project, groupId);
+  return group ? blockLabel(project, group.markIds) : "";
 }
 
 function markLabel(project, mark) {
@@ -2836,7 +2969,7 @@ export function addToGroup(project, markId, side, options = {}) {
   const number = nextNumber(project, counters, type.code);
   counters[type.code] = number;
   const created = makeMark({
-    id: mint.next(),
+    id: mint.next("marks"),
     schemeId: mark.schemeId,
     typeId: type.id,
     kind: "point",
@@ -2854,7 +2987,7 @@ export function addToGroup(project, markId, side, options = {}) {
     );
     group = groups.find((item) => item.id === group.id);
   } else {
-    group = { id: mint.next(), schemeId: mark.schemeId, markIds: [markId, created.id], labelOffset: null };
+    group = { id: mint.next("groups"), schemeId: mark.schemeId, markIds: [markId, created.id], labelOffset: null };
     created.groupId = group.id;
     groups = [...groups, group];
     marks = marks.map((item) => (item.id === markId ? { ...item, groupId: group.id } : item));
@@ -2930,7 +3063,7 @@ export function joinToBlock(project, markId, otherId) {
   const host = theirs || ours;
   if (!host) {
     const mint = idMint(project);
-    const group = { id: mint.next(), schemeId: other.schemeId, markIds: [other.id, mark.id], labelOffset: null };
+    const group = { id: mint.next("groups"), schemeId: other.schemeId, markIds: [other.id, mark.id], labelOffset: null };
     const joined = new Set(group.markIds);
     const marks = project.marks.map((item) => (joined.has(item.id) ? { ...item, groupId: group.id } : item));
     return {
@@ -4436,7 +4569,7 @@ export function addType(
 ) {
   const mint = idMint(project);
   const type = {
-    id: mint.next(),
+    id: mint.next("markTypes"),
     categoryId,
     code: normalizeCode(code, project),
     name: normalizeName(name),
@@ -4536,7 +4669,7 @@ export function deleteType(project, typeId) {
 export function addCategory(project, { name, color, shape, lineStyle = null } = {}) {
   const mint = idMint(project);
   const category = {
-    id: mint.next(),
+    id: mint.next("categories"),
     name: normalizeName(name),
     color: String(color || FALLBACK_COLOR),
     shape: checkShape(shape, { allowNull: false }),
@@ -5364,7 +5497,7 @@ export function addRoom(project, room) {
   const name = normalizeName(typeof room === "string" ? room : room && room.name);
   const wanted = typeof room === "object" && room ? room.color : null;
   const mint = idMint(project);
-  const created = { id: mint.next(), name, color: normalizeColor(wanted, nextRoomColor(project)) };
+  const created = { id: mint.next("rooms"), name, color: normalizeColor(wanted, nextRoomColor(project)) };
   return {
     project: withProject(project, { rooms: [...project.rooms, created], counters: mint.counters }),
     room: created,
@@ -5584,7 +5717,7 @@ export function addOutline(project, { schemeId, roomId, points } = {}) {
   // смещение и нулевой угол — это и есть прежняя подпись в центре контура.
   const mint = idMint(project);
   const outline = {
-    id: mint.next(),
+    id: mint.next("outlines"),
     schemeId,
     roomId,
     points: normalizeOutlinePoints(points),
@@ -5709,7 +5842,7 @@ export function setSchemeGuides(project, schemeId, guides) {
     if (!guide || !GUIDE_AXES.includes(guide.axis)) throw modelError("guideAxisUnknown");
     const at = clampFraction(Number(guide.at));
     if (!Number.isFinite(at)) throw modelError("guideAtInvalid");
-    return { id: guide.id || mint.next(), axis: guide.axis, at };
+    return { id: guide.id || mint.next("guides"), axis: guide.axis, at };
   });
   const same =
     before.length === list.length &&
@@ -5722,7 +5855,7 @@ export function addSchemeGuide(project, schemeId, { axis, at } = {}) {
   requireScheme(project, schemeId);
   if (!GUIDE_AXES.includes(axis)) throw modelError("guideAxisUnknown");
   const mint = idMint(project);
-  const guide = { id: mint.next(), axis, at: clampFraction(Number(at)) };
+  const guide = { id: mint.next("guides"), axis, at: clampFraction(Number(at)) };
   if (!Number.isFinite(guide.at)) throw modelError("guideAtInvalid");
   return {
     project: withGuides(project, schemeId, [...schemeGuides(project, schemeId), guide], mint.counters),
@@ -6243,7 +6376,7 @@ export function addWall(project, { schemeId, aMm, bMm, thicknessMm } = {}) {
   const b = drawingPointMm(bMm);
   if (a.x === b.x && a.y === b.y) throw modelError("wallPointsSame");
   const mint = idMint(project);
-  const wall = { id: mint.next(), schemeId, aMm: a, bMm: b, thicknessMm: wallThicknessMm(thicknessMm) };
+  const wall = { id: mint.next("walls"), schemeId, aMm: a, bMm: b, thicknessMm: wallThicknessMm(thicknessMm) };
   return {
     project: withProject(project, { walls: [...wallsOf(project), wall], counters: mint.counters }),
     wall,
@@ -7245,7 +7378,7 @@ export function addOpening(
   if (height === null) throw modelError("drawingMmNotPositive");
   const mint = idMint(project);
   const opening = {
-    id: mint.next(),
+    id: mint.next("openings"),
     wallId,
     kind,
     atMm: drawingOffsetMm(atMm),
@@ -7365,7 +7498,7 @@ const TEMPLATE_SCHEME_OBJECT_KINDS = [
 export function schemeObjectKindTemplate() {
   const mint = templateMint();
   return TEMPLATE_SCHEME_OBJECT_KINDS.map((key, index) => ({
-    id: mint(),
+    id: mint("schemeObjectKinds"),
     name: strings.schemeObjectKinds[key] || key,
     order: index,
   }));
@@ -7474,7 +7607,7 @@ export function ensureSchemeObjectKinds(project) {
   // его кассы, иначе справочник видов занял бы номера, которые касса потом
   // выдала бы метке.
   const mint = idMint(project);
-  const schemeObjectKinds = schemeObjectKindTemplate().map((item) => ({ ...item, id: mint.next() }));
+  const schemeObjectKinds = schemeObjectKindTemplate().map((item) => ({ ...item, id: mint.next("schemeObjectKinds") }));
   return {
     project: withProject(project, { schemeObjectKinds, counters: mint.counters }),
     added: true,
@@ -7483,7 +7616,7 @@ export function ensureSchemeObjectKinds(project) {
 
 export function addSchemeObjectKind(project, { name } = {}) {
   const mint = idMint(project);
-  const item = { id: mint.next(), name: normalizeName(name), order: schemeObjectKindsOf(project).length };
+  const item = { id: mint.next("schemeObjectKinds"), name: normalizeName(name), order: schemeObjectKindsOf(project).length };
   return {
     project: withProject(project, {
       schemeObjectKinds: [...schemeObjectKindsOf(project), item],
@@ -7626,7 +7759,7 @@ export function addSchemeObject(
   if (!SCHEME_OBJECT_SHAPES.includes(shape)) throw modelError("schemeObjectShapeUnknown");
   const mint = idMint(project);
   const object = {
-    id: mint.next(),
+    id: mint.next("schemeObjects"),
     schemeId,
     ...(catalogKey ? { catalogKey } : { kindId }),
     shape,
@@ -8831,7 +8964,7 @@ export function splitWall(project, wallId, atMm) {
   };
   const first = { ...wall, bMm: point };
   const mint = idMint(project);
-  const second = { ...wall, id: mint.next(), aMm: point };
+  const second = { ...wall, id: mint.next("walls"), aMm: point };
   const firstLength = wallLengthMm(first);
   const secondLength = wallLengthMm(second);
   // Отступы — от начала своего куска; округление точки деления сдвигает длины
@@ -9990,7 +10123,7 @@ export function wallElevation(project, wallId, side = "left", cut = null) {
       // одну отметку высоты на всех. Решает это отрисовка — здесь только
       // ключ и общая подпись, которую иначе пришлось бы собирать второй раз.
       groupId: mark.groupId || null,
-      groupLabel: mark.groupId ? labelOf(project, mark.groupId) : "",
+      groupLabel: mark.groupId ? blockLabelOf(project, mark.groupId) : "",
     });
   }
   marks.sort((first, second) => first.fromMm - second.fromMm);
@@ -10916,93 +11049,205 @@ function idsMovedTree(value, moves) {
 
 // Ключ принятого предупреждения: `код:о чём`. «О чём» — либо сам
 // идентификатор, либо составной признак набора (`sharedShape:круг#тип,тип`,
-// `closeColors:кат+кат`). Разбирается по разделителям, и переписывается только
-// то, что в точности равно прежнему номеру: имя знака и имя изображения стоят
-// в тех же строках и трогать их нельзя.
+// `closeColors:кат+кат`).
 //
-// **Список номеров пересортировывается, а не подставляется на прежние места.**
-// Составной признак набора собран из **отсортированных** идентификаторов
-// (`sharedShapeSubject`, `closeColorsSubject`), и порядок в нём — часть ключа:
-// `validate` на перенумерованном объекте сложит номера заново и получит другую
-// строку. Подставь номера на прежние места — и ключ принятия перестанет
-// совпадать с ключом вопроса: человек получит заново все жёлтые строки, на
-// которые уже ответил (на объектах заказчика — 23 из 91), а в списке принятых
-// останется столько же записей-сирот. Сортировка здесь та же, что там:
-// `sort()` по строкам.
-// **Ключи, у которых кусок после `#` — не идентификатор.** У повтора номера там
-// стоит **видимый номер метки** (`repeatedNumber:<typeId>#<номер>`), и переносит
-// его своя дверь: `renumberAccepted` при смыкании и `renumberAcceptedRepeats`
-// при слиянии. Подставь его наравне с идентификатором — и переезд сущности с
-// тем же номером увезёт ответ на чужое обозначение: на объекте заказчика в 592
-// метки переезд сущности 16 превратил `repeatedNumber:741#16` в `…#5000`, ответ
-// повис сиротой, а на настоящем номере жёлтая строка задалась заново.
+// **Это единственное место объекта, где вид числа не записан рядом с ним.**
+// Ключ — строка, собранная `problem()` из кода проблемы и её предмета, и
+// понять, помещение там или тип, можно только по коду. Пока номера были
+// уникальны по всем видам, здесь хватало одной таблицы переездов на весь
+// объект; со своим счётчиком у каждого вида такой таблицы не существует —
+// номер 5 в ключе значил бы и метку, и помещение, и ответ человека уехал бы на
+// чужой вопрос. Поэтому вид назван: `ID_KEY_SUBJECTS` — код проблемы →
+// **сегменты** его ключа (через `#`) с видом каждого.
 //
-// Остальные составные ключи здесь не названы потому, что у них после `#` стоит
-// либо список идентификаторов (`sharedShape:круг#тип,тип`), либо имя
-// изображения (`typeViewOffer:<typeId>#<вид>`) — с номером оно не совпадает.
-const ID_KEY_PLAIN_TAIL = Object.freeze(new Set(["repeatedNumber:"]));
+// Код, которого в таблице нет, не переписывается **вовсе**: промолчать дешевле,
+// чем угадать. Цена названа вслух — завёл кто-то новую проверку и забыл строку
+// в таблице, и ответ «так и задумано» на её вопрос перенумерацию не переживёт;
+// держит это тест (`test/markIds.test.js`: каждый код `strings.problems` обязан
+// быть назван здесь).
+//
+// `null` в сегменте — он не идентификатор: имя знака (`sharedShape:круг#…`),
+// имя изображения (`typeViewOffer:<typeId>#<вид>`) и **видимый номер метки**
+// (`repeatedNumber:<typeId>#<номер>`). Последний особенно: переносят его свои
+// двери — `renumberAccepted` при смыкании и `renumberAcceptedRepeats` при
+// слиянии, — а подставь его наравне с идентификатором, и переезд сущности с тем
+// же номером увезёт ответ на чужое обозначение (на объекте заказчика в 592
+// метки переезд сущности 16 превращал `repeatedNumber:741#16` в `…#5000`).
+//
+// `{of, by}` в сегменте — список идентификаторов одного вида через
+// разделитель. Он **пересортировывается**, а не подставляется на прежние места:
+// признак набора собран из отсортированных идентификаторов
+// (`sharedShapeSubject`, `closeColorsSubject`), и порядок в нём — часть ключа.
+// Подставь номера на прежние места — и ключ принятия перестанет совпадать с
+// ключом вопроса: человек получит заново все жёлтые строки, на которые уже
+// ответил (на объектах заказчика — 23 из 91), а в списке принятых останется
+// столько же записей-сирот. Сортировка здесь та же, что там: `sort()` по
+// строкам.
+const ID_KEY_SUBJECTS = Object.freeze({
+  // Метка: её обозначение, точки, связи, попадание в проём.
+  markWithoutType: ["marks"],
+  markWithoutScheme: ["marks"],
+  markWithoutRoom: ["marks"],
+  emptyPoints: ["marks"],
+  shortLine: ["marks"],
+  commentEmpty: ["marks"],
+  controlsMissing: ["marks"],
+  controlsChannelMissing: ["marks"],
+  controlsChannelBeyond: ["marks"],
+  markInOpening: ["marks"],
+  // Тип справочника.
+  duplicateCode: ["markTypes"],
+  typeWithoutCategory: ["markTypes"],
+  counterBehind: ["markTypes"],
+  typeKindMixed: ["markTypes"],
+  // Приём заказчика: три светильника под одним обозначением. Второй сегмент —
+  // видимый номер метки, не идентификатор.
+  repeatedNumber: ["markTypes", null],
+  // Знак, под которым сидит несколько типов: сам знак, затем список типов.
+  sharedShape: [null, { of: "markTypes", by: "," }],
+  // Пара категорий похожего цвета.
+  closeColors: [{ of: "categories", by: "+" }],
+  // Тип и предложенное ему изображение.
+  typeViewOffer: ["markTypes", null],
+  // Схема: чертёж без калибровки или без привязки, этаж без точки привязки.
+  drawingNotPlaced: ["schemes"],
+  drawingNoScale: ["schemes"],
+  schemeAnchorMissing: ["schemes"],
+  // Контур помещения.
+  outlineWithoutScheme: ["outlines"],
+  outlineWithoutRoom: ["outlines"],
+  shortOutline: ["outlines"],
+  // Размещённая единица оборудования.
+  placementWithoutEquipment: ["placements"],
+  placementWithoutMark: ["placements"],
+  placementLinkMissing: ["placements"],
+  // Блок меток.
+  smallGroup: ["groups"],
+  groupAcrossSchemes: ["groups"],
+  // Сценарий.
+  scenarioDeviceMissing: ["scenarios"],
+  scenarioServiceMissing: ["scenarios"],
+});
 
-function idsMovedKey(key, all) {
+/**
+ * Коды проблем, у которых вид сегментов ключа назван. Перечень отдан наружу
+ * ради теста полноты: новая проверка `validate` обязана попасть в таблицу,
+ * иначе ответы «так и задумано» на её вопрос не переживут перенумерацию.
+ */
+export const ID_KEY_PROBLEM_CODES = Object.freeze(Object.keys(ID_KEY_SUBJECTS));
+
+function idsMovedKey(key, maps) {
   const at = String(key == null ? "" : key).indexOf(":");
   if (at < 0) return key;
-  const head = key.slice(0, at + 1);
-  const tail = key.slice(at + 1);
-  const plainTail = ID_KEY_PLAIN_TAIL.has(head);
+  const code = key.slice(0, at);
+  const segments = ID_KEY_SUBJECTS[code];
+  if (!segments) return key;
   let touched = false;
-  const move = (piece) => {
-    const next = all.get(piece);
-    if (next === undefined) return piece;
-    touched = true;
-    return next;
-  };
-  // Куски через `#` стоят каждый на своём месте (знак, имя изображения, номер),
-  // а внутри куска через `,` или `+` лежит список идентификаторов — он и
-  // сортируется, и только если он **целиком** из них: в чужой строке порядок
-  // может значить своё.
-  const segments = tail.split("#").map((segment, index) => {
-    if (plainTail && index > 0) return segment;
-    for (const mark of [",", "+"]) {
-      if (!segment.includes(mark)) continue;
-      const pieces = segment.split(mark);
-      const moved = pieces.map(move);
-      if (pieces.every((piece) => all.has(piece))) moved.sort();
-      return moved.join(mark);
-    }
-    return move(segment);
-  });
-  return touched ? head + segments.join("#") : key;
+  const moved = key
+    .slice(at + 1)
+    .split("#")
+    .map((segment, index) => {
+      const spec = segments[index];
+      const collection = typeof spec === "string" ? spec : spec && spec.of;
+      const map = collection ? maps.get(collection) : null;
+      if (!map) return segment;
+      const move = (piece) => {
+        const next = map.get(piece);
+        if (next === undefined) return piece;
+        touched = true;
+        return next;
+      };
+      if (typeof spec === "string") return move(segment);
+      const pieces = segment.split(spec.by).map(move);
+      pieces.sort();
+      return pieces.join(spec.by);
+    });
+  return touched ? code + ":" + moved.join("#") : key;
 }
 
 /**
- * **Номера вместо uuid: перенумеровать объект целиком** (G08, G11).
+ * **Объект пронумерован по видам?** — то есть именно так, как нумерует эта
+ * сборка (ADR 038): у каждой сущности номер, номера не повторяются **внутри
+ * своего вида**, и у каждого непустого вида в объекте стоит свой счётчик.
+ *
+ * Счётчик в этом вопросе — не придирка к аккуратности, а **единственный
+ * признак**, которым объект формата 8 отличается от объекта формата 9. У
+ * восьмёрки номера тоже стоят у всех и тоже уникальны внутри вида (они были
+ * уникальны по всем видам сразу), и отличить её по самим номерам нечем:
+ * «метки начинаются с 117» — примета, а не доказательство. А вот счётчики
+ * разные: у восьмёрки один общий `"#id"`, у девятки — `"#marks"`, `"#rooms"` и
+ * так далее.
+ *
+ * Отсюда и тождество, на котором стоит идемпотентность открытия: перенумерация
+ * всегда пишет счётчики по видам, значит её итог этот вопрос проходит, значит
+ * второе открытие объект не трогает. И обратное: объект, у которого счётчиков
+ * нет, перенумеровывается — доказать, что его номера раздавались по видам,
+ * нечем, а поверить на слово значит оставить справочник сидеть на номерах
+ * меток.
+ */
+function idsNumberedByKind(project) {
+  if (!project || typeof project !== "object") return false;
+  const counters = project.counters && typeof project.counters === "object" ? project.counters : {};
+  const seen = new Map();
+  for (const owner of ID_OWNERS) {
+    for (const item of idOwnList(project, owner)) {
+      for (const [collection, entity] of idOwnPairs(item, owner)) {
+        const number = idNumberOf(entity && entity.id);
+        if (number === null) return false;
+        let taken = seen.get(collection);
+        if (!taken) {
+          taken = new Set();
+          seen.set(collection, taken);
+        }
+        if (taken.has(number)) return false;
+        taken.add(number);
+      }
+    }
+  }
+  // Ни одной сущности — отвечать «пронумерован» не за что: такой объект
+  // читается прежней лестницей версий, как читался (`projectFormatVersion`).
+  if (seen.size === 0) return false;
+  for (const collection of seen.keys()) {
+    if (!(Number(counters[idCounterKey(collection)]) > 0)) return false;
+  }
+  return true;
+}
+
+/**
+ * **Перенумеровать объект целиком — по видам** (G08, G11, G391).
  *
  * Слова заказчика: «Давай переделаем метки на инкремент, начиная с 1, вместо
  * UUID… Идентификаторы меток мигрируй. Понимаю риск, что в сценариях оно
- * сломается».
+ * сломается». И поправка таска 251: «у каждого свои идентификаторы. У типов
+ * свои, у меток свои, у помещений свои, и все инкремент».
+ *
+ * **Три входа, и все обязаны работать:**
+ *
+ *   1. объект поры uuid (формат ≤ 7) — нумеруется сразу по видам, минуя общий
+ *      счётчик, которого в сборке больше нет;
+ *   2. объект формата 8 с **общими** номерами — перенумеровывается по видам, и
+ *      все ссылки с адресами переезжают второй раз: прежний адрес метки — её
+ *      прежний номер, новый — её номер в своём виде (`idsAidMoves`);
+ *   3. объект, уже пронумерованный по видам, — возвращается **тем же** по
+ *      ссылке (`idsNumberedByKind`), и второе открытие его не переписывает.
  *
  * Переписываются **все** идентификаторы и **каждая** ссылка на них: таблица
- * `ID_OWNERS` плюс четыре ссылки непростой формы — «чем управляет»
+ * `ID_OWNERS` плюс пять ссылок непростой формы — «чем управляет»
  * (`mark.controls`, где элемент бывает и строкой, и `{id, channel}`), дверь
- * аксессуара (`mark.device.doorId`), дерево блоков сценария и ключи принятых
- * предупреждений. Пропущенное место — это не «почти перенумеровали», это
- * объект, у которого розетка управляет чужим светильником.
+ * аксессуара (`mark.device.doorId`), дерево блоков сценария, ключи принятых
+ * предупреждений (`ID_KEY_SUBJECTS`) и адреса аксессуаров в опциях привязок
+ * логики. Пропущенное место — это не «почти перенумеровали», это объект, у
+ * которого розетка управляет чужим светильником.
  *
  * **Не переписываются** `project.id`, `project.key` и `scheme.imageId`: это
  * ключи в хранилищах браузера, общих для **всех** объектов (G08.1). Два
  * объекта с номером 1 затёрли бы друг друга, а картинки — чужие подложки.
  *
  * **Ссылка в никуда остаётся ссылкой в никуда.** Значение, которого нет среди
- * прежних идентификаторов, не трогается вовсе — иначе битая ссылка могла бы
- * случайно совпасть с чьим-то новым номером и ожить чужой. По этой же причине
- * цел встроенный тип комментария (`COMMENT_TYPE_ID`): его в коллекциях нет, и
- * `mark.typeId: "comment"` проходит насквозь.
- *
- * **Идемпотентна** (G11.1): объект, где у каждой сущности уже свой номер,
- * возвращается **тем же** по ссылке, и второе открытие его не переписывает.
- * Перенумерация начинается, когда номера нет хоть у одной сущности или когда
- * один номер занят дважды (так бывает у шаблона, собранного вне объекта: там
- * нумерация своя). Тогда номера получают **все** — и те, у кого они уже были:
- * раздавать поверх занятых значило бы сшить две сущности в одну.
+ * прежних идентификаторов **своего вида**, не трогается вовсе — иначе битая
+ * ссылка могла бы случайно совпасть с чьим-то новым номером и ожить чужой. По
+ * этой же причине цел встроенный тип комментария (`COMMENT_TYPE_ID`): его в
+ * коллекциях нет, и `mark.typeId: "comment"` проходит насквозь.
  *
  * **Цена, принятая заказчиком:** адрес аксессуара считается из номера метки, и
  * адреса, вписанные числами прямо в текст его JS-сценариев, после
@@ -11014,65 +11259,58 @@ function idsMovedKey(key, all) {
  */
 export function idsMigrate(project) {
   if (!project || typeof project !== "object") return { project, changed: false, renumbered: 0 };
-  // Нужна ли перенумерация: номер не у всех или один номер занят дважды.
-  const seen = new Set();
-  let need = false;
-  for (const owner of ID_OWNERS) {
-    for (const item of idOwnList(project, owner)) {
-      for (const entity of [item, ...idNestedList(item, owner)]) {
-        const number = idNumberOf(entity && entity.id);
-        if (number === null || seen.has(number)) need = true;
-        else seen.add(number);
-      }
+  if (idsNumberedByKind(project)) {
+    // Нумеровать нечего — осталось довести счётчики видов до занятых номеров,
+    // если какой-то отстал (объект из ссылки, слитый из двух). Не отстал ни
+    // один — **тот же** объект: ни правки, ни шага истории эта тишина не стоит.
+    let counters = null;
+    for (const [collection, floor] of idFloors(project)) {
+      const key = idCounterKey(collection);
+      if ((Number(project.counters[key]) || 0) >= floor) continue;
+      if (!counters) counters = { ...project.counters };
+      counters[key] = floor;
     }
-  }
-  if (!need) {
-    // Нумеровать нечего — осталось довести счётчик до занятого номера, если он
-    // отстал (объект из ссылки, собранный руками, слитый из двух). Не отстал —
-    // **тот же** объект: ни правки, ни шага истории эта тишина не стоит.
-    const floor = idFloor(project);
-    const counter = Number(project.counters && project.counters[ID_COUNTER_KEY]) || 0;
-    if (counter >= floor) return { project, changed: false, renumbered: 0 };
-    return {
-      project: { ...project, counters: { ...project.counters, [ID_COUNTER_KEY]: floor } },
-      changed: true,
-      renumbered: 0,
-    };
+    if (!counters) return { project, changed: false, renumbered: 0 };
+    return { project: { ...project, counters }, changed: true, renumbered: 0 };
   }
 
-  // Номера выдаются с единицы: прежние номера не сохраняются ни одного, и
-  // метки — первой коллекцией в таблице — получают 1…N подряд.
-  let last = 0;
-  const next = () => {
-    last += 1;
-    return String(last);
-  };
+  // Номера выдаются с единицы **в каждом виде**: прежние не сохраняются ни
+  // одного, и метки получают 1…N подряд независимо от того, сколько типов в
+  // справочнике.
+  const mints = new Map();
   const maps = new Map();
-  const all = new Map();
-  const twice = new Set();
+  let renumbered = 0;
   for (const owner of ID_OWNERS) {
-    const map = new Map();
-    maps.set(owner.key, map);
     for (const item of idOwnList(project, owner)) {
-      for (const entity of [item, ...idNestedList(item, owner)]) {
+      for (const [collection, entity] of idOwnPairs(item, owner)) {
         const was = entity && entity.id;
-        if (was == null || was === "" || map.has(was)) continue;
-        const fresh = next();
-        map.set(was, fresh);
-        // Общая таблица — для ключей принятых предупреждений, где коллекция по
-        // значению не названа. Номер, занятый в двух коллекциях (так бывает
-        // только у объекта, собранного руками), в общую таблицу не идёт:
-        // угадывать, чей он, нельзя.
-        if (all.has(was)) twice.add(was);
-        all.set(was, fresh);
+        if (was == null || was === "") continue;
+        let map = maps.get(collection);
+        if (!map) {
+          map = new Map();
+          maps.set(collection, map);
+        }
+        if (map.has(was)) continue;
+        const fresh = (mints.get(collection) || 0) + 1;
+        mints.set(collection, fresh);
+        map.set(was, String(fresh));
+        renumbered += 1;
       }
     }
   }
-  for (const was of twice) all.delete(was);
+  // Нумеровать было нечего вовсе (пустой объект, собранный руками): правкой
+  // это не является.
+  if (renumbered === 0) return { project, changed: false, renumbered: 0 };
 
-  const patch = idsRewrite(project, maps, all, idsAidMoves(project, maps.get("marks")));
-  patch.counters = { ...project.counters, [ID_COUNTER_KEY]: last };
-  return { project: { ...project, ...patch }, changed: true, renumbered: last };
+  const patch = idsRewrite(project, maps, idsAidMoves(project, maps.get("marks")));
+  const counters = { ...project.counters };
+  // Общий счётчик — надгробие (ADR 030): он отвечал за все виды сразу, и
+  // оставить его значило бы хранить в объекте число, по которому ничего не
+  // выдаётся, да ещё и путающее сборку в вопросе «какой это формат».
+  delete counters[ID_COUNTER_SHARED_KEY];
+  for (const [collection, last] of mints) counters[idCounterKey(collection)] = last;
+  patch.counters = counters;
+  return { project: { ...project, ...patch }, changed: true, renumbered };
 }
 
 // ——— адрес аксессуара в опциях привязки логики ——————————————————————————
@@ -11137,13 +11375,22 @@ function idsLegacyAids(project) {
 /**
  * Переезд адресов: `Map<было, стало>` строками, по переезду **меток**.
  *
- * Собирается отдельно от таблиц идентификаторов, а не берётся из них, и это не
- * лишний проход: номер уникален по всем видам, но `aid` — номер **метки**, и
- * переезд стены с номера 17 не вправе задеть адрес `17.13.15`.
+ * Берётся из таблицы переездов **меток** и ниоткуда больше: `aid` — номер
+ * метки, и переезд стены с номера 17 не вправе задеть адрес `17.13.15`. Со
+ * своим счётчиком у каждого вида это стало не осторожностью, а условием: стена
+ * 17 в объекте есть почти всегда.
  *
- * Прежний адрес метки — её номер, если он у неё был, и хэш прежней сборки,
- * если id был uuid. Новый — всегда номер: не номер (такого в итоге
- * перенумерации не бывает) — адреса у метки нет, и переселять нечего.
+ * **Прежний адрес метки считается двумя рецептами, и оба — надгробия:**
+ *
+ *   — был у метки **номер** (объект формата 8, общий счётчик) — адресом был сам
+ *     этот номер: 117, 118, … Так адреса стоят в объектах заказчика, которые
+ *     он уже открывал прод-сборкой;
+ *   — был **uuid** (формат ≤ 7) — адресом был хэш `idsLegacyAid`.
+ *
+ * Новый адрес — всегда номер метки в своём виде. Поэтому у объекта формата 8
+ * адреса в опциях привязок переезжают **второй раз** — с общего номера на свой;
+ * заказчик их не вписывал руками, их выбрала сборка, и переселить их обязана
+ * она же.
  */
 function idsAidMoves(project, markMoves) {
   const moves = new Map();
@@ -11178,20 +11425,20 @@ function idsMovedAddress(value, aids) {
 }
 
 /**
- * **Движок перенумерации: один проход по объекту, одна таблица.** Отдаёт патч —
- * только те коллекции, которые есть у объекта (пустых полей старому объекту не
- * дописывается, G68).
+ * **Движок перенумерации: один проход по объекту, таблица на каждый вид.**
+ * Отдаёт патч — только те коллекции, которые есть у объекта (пустых полей
+ * старому объекту не дописывается, G68).
  *
- * `maps` — `Map<коллекция, Map<было, стало>>` из таблицы `ID_OWNERS`; `all` —
- * та же замена без разбора по коллекциям, для ключей принятых предупреждений;
+ * `maps` — `Map<вид, Map<было, стало>>`, где вид назван по таблице `ID_OWNERS`;
  * `aids` — переезд адресов аксессуаров для опций привязок логики
- * (`idsAidMoves`).
+ * (`idsAidMoves`). Таблицы «без вида» здесь нет и быть не может: номера свои у
+ * каждого вида, и одна общая таблица увезла бы помещение 5 вместе с меткой 5.
  *
  * Двух таких проходов в сборке быть не должно: `idsMigrate` зовёт его на весь
  * объект, `idsReplace` — на поимённо названные номера, и переписывают они
  * одно и то же место.
  */
-function idsRewrite(project, maps, all, aids) {
+function idsRewrite(project, maps, aids) {
   const moveBy = (collection, value) => {
     const map = maps.get(collection);
     const moved = map ? map.get(value) : undefined;
@@ -11214,7 +11461,7 @@ function idsRewrite(project, maps, all, aids) {
       if (owner.nested && Array.isArray(item[owner.nested])) {
         fresh[owner.nested] = item[owner.nested].map((child) => ({
           ...child,
-          id: moveBy(owner.key, child.id),
+          id: moveBy(owner.nestedKey, child.id),
         }));
       }
       return fresh;
@@ -11272,11 +11519,12 @@ function idsRewrite(project, maps, all, aids) {
 
   // Принятые предупреждения: ответ «так и задумано» привязан к ключу, а в ключе
   // стоят идентификаторы. Не перепиши их — и человек получил бы заново весь
-  // список вопросов, на которые уже ответил.
+  // список вопросов, на которые уже ответил. Вид каждого сегмента ключа назван
+  // кодом проблемы (`ID_KEY_SUBJECTS`): по значению его теперь не угадать.
   const accepted = acceptedOf(project);
-  if (accepted.length > 0 && all.size > 0) {
+  if (accepted.length > 0 && maps.size > 0) {
     patch.accepted = accepted.map((record) => {
-      const key = idsMovedKey(record.key, all);
+      const key = idsMovedKey(record.key, maps);
       return key === record.key ? record : { ...record, key };
     });
   }
@@ -11286,9 +11534,9 @@ function idsRewrite(project, maps, all, aids) {
 /**
  * **Переселить названные номера внутри объекта**: `{project, changed}`.
  *
- * Дверь для слияния. Два участника работают от **одного** счётчика, и, поставив
- * каждый свою метку, оба получают один номер: уникальность номеров держится
- * счётчиком объекта, а счётчик у разошедшихся копий один. Сложи такие копии по
+ * Дверь для слияния. Два участника работают от **одних** счётчиков, и, поставив
+ * каждый свою метку, оба получают один номер: уникальность номера держится
+ * счётчиком объекта, а счётчики у разошедшихся копий одни. Сложи такие копии по
  * `id` — и метка напарника молча исчезнет, слившись с нашей. Поэтому одна из
  * двух сущностей переезжает на свободный номер, и переезжает **со всеми**
  * ссылками на себя: тем же проходом, которым нумерует `idsMigrate`.
@@ -11297,21 +11545,28 @@ function idsRewrite(project, maps, all, aids) {
  * идёт молча и в отчёт слияния не попадает — в отличие от **номера метки**,
  * который виден и о котором слияние говорит вслух.
  *
- * `replacements` — `Map<было, стало>` или обычный объект. Нечего переселять —
- * **тот же** объект по ссылке.
+ * `moves` — замены, **названные по видам**: `{marks: {было: стало}, rooms: …}`
+ * или `Map<вид, Map<было, стало>>`. Вид называет вызывающий, и это не
+ * формальность: со своим счётчиком у каждого вида (ADR 038) помещение 5 и метка
+ * 5 в объекте живут одновременно, и одна таблица на все виды увезла бы обоих.
+ * Вид, которого нет в `ID_OWNER_KEYS`, не спрашивается ни разу — такая замена
+ * просто не случится.
+ *
+ * Нечего переселять — **тот же** объект по ссылке.
  */
-export function idsReplace(project, replacements) {
+export function idsReplace(project, moves) {
   if (!project || typeof project !== "object") return { project, changed: false };
-  const all = replacements instanceof Map ? new Map(replacements) : new Map(Object.entries(replacements || {}));
-  for (const [was, now] of all) if (was === now || now == null) all.delete(was);
-  if (all.size === 0) return { project, changed: false };
-  // Номер уникален по всем видам сразу, поэтому разбор по коллекциям здесь не
-  // нужен: одна и та же таблица отвечает каждой. Адреса аксессуаров — разбор
-  // нужен: `aid` — номер метки, и переезд стены с того же номера адресов не
-  // касается.
-  const maps = new Map(ID_OWNERS.map((owner) => [owner.key, all]));
+  const source = moves instanceof Map ? moves.entries() : Object.entries(moves || {});
+  const maps = new Map();
+  for (const [collection, table] of source) {
+    const pairs = table instanceof Map ? [...table] : Object.entries(table || {});
+    const map = new Map();
+    for (const [was, now] of pairs) if (was !== now && now != null) map.set(was, now);
+    if (map.size > 0) maps.set(collection, map);
+  }
+  if (maps.size === 0) return { project, changed: false };
   return {
-    project: { ...project, ...idsRewrite(project, maps, all, idsAidMoves(project, all)) },
+    project: { ...project, ...idsRewrite(project, maps, idsAidMoves(project, maps.get("marks"))) },
     changed: true,
   };
 }
@@ -11508,7 +11763,7 @@ const TEMPLATE_EQUIPMENT_TYPES = [
 export function equipmentTypeTemplate() {
   const mint = templateMint();
   return TEMPLATE_EQUIPMENT_TYPES.map((key, index) => ({
-    id: mint(),
+    id: mint("equipmentTypes"),
     name: strings.equipmentTypes[key] || key,
     order: index,
   }));
@@ -11534,7 +11789,7 @@ export function findEquipmentType(project, typeId) {
 
 export function addEquipmentType(project, { name } = {}) {
   const mint = idMint(project);
-  const item = { id: mint.next(), name: normalizeName(name), order: equipmentTypesOf(project).length };
+  const item = { id: mint.next("equipmentTypes"), name: normalizeName(name), order: equipmentTypesOf(project).length };
   return {
     project: withProject(project, {
       equipmentTypes: [...equipmentTypesOf(project), item],
@@ -11624,7 +11879,7 @@ function equipmentTypeRef(project, value) {
 export function addEquipment(project, { name, vendor, code, typeId } = {}) {
   const mint = idMint(project);
   const item = {
-    id: mint.next(),
+    id: mint.next("equipment"),
     name: normalizeName(name),
     vendor: equipmentText(vendor),
     code: equipmentText(code),
@@ -11783,7 +12038,7 @@ export function addPlacement(project, { equipmentId, markId, links } = {}) {
   if (markIsComment(mark)) throw modelError("commentNoEquipment");
   const mint = idMint(project);
   const placement = {
-    id: mint.next(),
+    id: mint.next("placements"),
     equipmentId,
     markId,
     links: placementLinks(project, links, markId),
@@ -11989,7 +12244,7 @@ export function addScenario(project, scenario = {}) {
   if (!SCENARIO_KINDS.includes(source.kind)) throw modelError("scenarioKindUnknown");
   const list = scenariosList(project);
   const mint = idMint(project);
-  const id = typeof source.id === "string" && source.id && !findScenario(project, source.id) ? source.id : mint.next();
+  const id = typeof source.id === "string" && source.id && !findScenario(project, source.id) ? source.id : mint.next("scenarios");
   const base = {
     id,
     kind: source.kind,
@@ -12082,7 +12337,7 @@ function logicBindingChecked(project, binding) {
 export function addLogicBinding(project, { scenarioId, markId, service = 0, options = {}, active = true } = {}) {
   const mint = idMint(project);
   const binding = logicBindingChecked(project, {
-    id: mint.next(),
+    id: mint.next("logicBindings"),
     scenarioId,
     markId,
     service,
@@ -12129,22 +12384,27 @@ function dropLogicBindings(project, removed) {
 }
 
 /**
- * Версия формата файла по содержимому: `FORMAT_VERSION_IDS` (8) — у объекта,
- * где сущности пронумерованы (`idsMigrate`, ADR 030); `FORMAT_VERSION_LIB` (7)
- * — где хотя бы один сценарий стоит на ссылке в библиотеку (`scenario.lib`);
+ * Версия формата файла по содержимому: `FORMAT_VERSION_KIND_IDS` (9) — у
+ * объекта, где у каждого вида свой счётчик (`idsNumberedByKind`, ADR 038);
+ * `FORMAT_VERSION_IDS` (8) — где сущности пронумерованы одним общим счётчиком
+ * (`idsMigrate` прежней сборки, ADR 030); `FORMAT_VERSION_LIB` (7) — где хотя
+ * бы один сценарий стоит на ссылке в библиотеку (`scenario.lib`);
  * `FORMAT_VERSION_SCENARIOS` (6) — где есть сценарий или привязка логики;
  * иначе `FORMAT_VERSION` (5).
  *
- * Лестница ниже восьмёрки осталась не для красоты: объект **до** перенумерации
- * (файл прежней сборки, объект, собранный руками в тесте) читается прежней
- * сборкой ровно так, как читался, и врать ему восьмёркой нельзя. Но всякий
- * объект, прошедший открытие, пронумерован целиком — и поэтому эта сборка
- * пишет восьмёрку всегда.
+ * Лестница ниже девятки осталась не для красоты: ею читается объект, которого
+ * нынешняя перенумерация ещё не касалась, — файл прежней сборки (восьмёрка со
+ * своими живыми адресами) и объект, собранный руками в тесте. Врать такому
+ * объекту девяткой нельзя: прежняя сборка прочла бы его верно. Но всякий
+ * объект, прошедший открытие, пронумерован по видам целиком — и поэтому эта
+ * сборка пишет девятку всегда.
  */
 export function projectFormatVersion(project) {
-  // Номер хоть у одной сущности — значит объект прошёл перенумерацию: она
-  // нумерует **всё или ничего**, и половинчатого объекта не бывает.
-  if (idFloor(project) > 0) return FORMAT_VERSION_IDS;
+  // Счётчики по видам — признак нынешней нумерации; один общий номер хоть у
+  // одной сущности — признак прежней (она нумеровала **всё или ничего**, и
+  // половинчатого объекта не бывает).
+  if (idsNumberedByKind(project)) return FORMAT_VERSION_KIND_IDS;
+  if (idsAnyNumbered(project)) return FORMAT_VERSION_IDS;
   const list = scenariosList(project);
   if (list.some((item) => scenarioLibOf(item))) return FORMAT_VERSION_LIB;
   return list.length > 0 || logicBindingsList(project).length > 0 ? FORMAT_VERSION_SCENARIOS : FORMAT_VERSION;

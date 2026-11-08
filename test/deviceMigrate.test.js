@@ -8,10 +8,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { addLogicBinding, addScenario, markDeviceOf, setMarkDevice, typeDeviceOf } from "../src/model.js";
+import { addLogicBinding, addScenario, idNumberOf, markDeviceOf, setMarkDevice, typeDeviceOf } from "../src/model.js";
 import { MIGRATE_CONDITIONER_LEGACY, migrateDevices } from "../src/deviceMigrate.js";
 import { createSimEngine } from "../src/sim/engine.js";
-import { buildHomeSpec, deviceAids, deviceIdsOf } from "../src/sim/home.js";
+import { buildHomeSpec, deviceIdsOf } from "../src/sim/home.js";
 import { deviceWindowModel } from "../src/panels/deviceSettings.js";
 import { simHouse, simLink, simRecorder } from "./fixtures/simHome.js";
 
@@ -49,7 +49,8 @@ test("выключатель без реле: «Выключатель» на к
   ]).project;
   const logic = addScenario(project, { kind: "logic", name: "Кнопка", source: "info = {name: 'Кнопка'};\nfunction trigger(){}" });
   project = logic.project;
-  const aid = deviceAids(project).get(В2);
+  // Адрес аксессуара — номер метки (G392): своей двери у него нет.
+  const aid = idNumberOf(В2);
   const keySid = deviceIdsOf(markDeviceOf(project, В2).services)[0].sid;
   const bound = addLogicBinding(project, { scenarioId: logic.scenario.id, markId: В2, service: 0, options: { key: aid + "." + keySid } });
   project = bound.project;
@@ -152,7 +153,7 @@ test("кондиционер со своими сервисами: термос�
   assert.equal(markDeviceOf(project, К1).services[0].type, "HeaterCooler");
   const logic = addScenario(project, { kind: "logic", name: "Датчик", source: "info = {name: 'Датчик'};\nfunction trigger(){}" });
   project = logic.project;
-  const aid = deviceAids(project).get(К1);
+  const aid = idNumberOf(К1);
   const old = deviceIdsOf(markDeviceOf(project, К1).services)[0];
   // Опция — «Текущая температура» кондиционера (второй характеристикой нагревателя).
   project = addLogicBinding(project, {

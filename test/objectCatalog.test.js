@@ -893,7 +893,7 @@ test("G68: файл прежней сборки переживает круг «
   const project = legacyProject();
   const file = await packProject(project, new Map());
   const { project: loaded } = await unpackProject(file);
-  assert.equal(loaded.formatVersion, 8, "файл сохраняется нынешней версией формата");
+  assert.equal(loaded.formatVersion, 9, "файл сохраняется нынешней версией формата");
   const same = legacyIdsRestored(project, loaded);
   assert.deepEqual(same.schemeObjectKinds, project.schemeObjectKinds, "справочник видов поехал");
   assert.deepEqual(same.schemeObjects, project.schemeObjects, "у вещей чертежа появилось или пропало поле");

@@ -39,6 +39,7 @@ import {
   findScheme,
   markControls,
   labelCounts,
+  blockLabelOf,
   labelOf,
   markByCode,
   MARK_DIMENSION_FIELDS,
@@ -515,19 +516,23 @@ test("телевизор и полотенцесушитель стоят мет
 
 test("новый объект создаётся из стартового справочника и пуст по меткам", () => {
   const project = createProject();
-  // Версия 8: сущности нового объекта пронумерованы с рождения (ADR 030), и
-  // прежняя сборка посчитала бы адреса аксессуаров по-своему.
-  assert.equal(project.formatVersion, 8);
+  // Версия 9: сущности нового объекта пронумерованы с рождения, и каждый вид
+  // своим счётчиком (ADR 030, ADR 038), а прежняя сборка посчитала бы адреса
+  // аксессуаров по-своему.
+  assert.equal(project.formatVersion, 9);
   assert.equal(project.categories.length, 12);
   assert.equal(project.markTypes.length, 56);
   assert.deepEqual(project.marks, []);
   assert.deepEqual(project.groups, []);
-  // Счётчик номеров сущностей (G08) у нового объекта уже стоит: справочник
+  // Счётчики номеров сущностей (G08, G391) у нового объекта уже стоят — свой у
+  // каждого вида, и только у тех видов, в которых что-то есть: справочник
   // пришёл из шаблона со своей нумерацией, и в объекте номера раздаются
-  // заново. Счётчиков номеров **меток** по коду типа при этом нет ни одного —
-  // меток в объекте нет.
-  assert.deepEqual(Object.keys(project.counters), ["#id"]);
-  assert.equal(project.counters["#id"], project.categories.length + project.markTypes.length + project.equipmentTypes.length);
+  // заново. Общего счётчика `"#id"` больше нет ни одного (ADR 038), а счётчиков
+  // номеров **меток** по коду типа нет потому, что меток в объекте нет.
+  assert.deepEqual(Object.keys(project.counters).sort(), ["#categories", "#equipmentTypes", "#markTypes"]);
+  assert.equal(project.counters["#categories"], project.categories.length);
+  assert.equal(project.counters["#markTypes"], project.markTypes.length);
+  assert.equal(project.counters["#equipmentTypes"], project.equipmentTypes.length);
   assert.ok(project.id);
   assert.ok(project.name);
   const light = project.categories.find((c) => c.name === "Свет");
@@ -665,7 +670,7 @@ test("блок «каждая своя»: три точки дают три ме
   assert.ok(step.marks.every((m) => m.groupId === step.group.id));
   // Три подряд сворачиваются в диапазон (D29): у каждой метки обозначение
   // своё, а подпись блока — короткая.
-  assert.equal(labelOf(step.project, step.group.id), "В1–3");
+  assert.equal(blockLabelOf(step.project, step.group.id), "В1–3");
 });
 
 test("блок «одна метка на блок»: один номер и несколько точек", () => {
@@ -698,13 +703,13 @@ test("соседняя точка блока встаёт рядом по выб
   const right = addToGroup(step.project, step.mark.id, "right");
   assert.equal(right.project.marks.length, 2);
   assert.deepEqual(right.mark.points[0], { x: 0.5 + BLOCK_STEP_PX / 1000, y: 0.5 });
-  assert.equal(labelOf(right.project, right.group.id), "В1В2");
+  assert.equal(blockLabelOf(right.project, right.group.id), "В1В2");
 
   const up = addToGroup(right.project, right.mark.id, "up");
   assert.deepEqual(up.mark.points[0], { x: 0.5 + BLOCK_STEP_PX / 1000, y: 0.5 - BLOCK_STEP_PX / 2000 });
   assert.equal(findGroup(up.project, right.group.id).markIds.length, 3);
   // Пара склеена слитно, третья метка сворачивает подпись в диапазон (D29).
-  assert.equal(labelOf(up.project, right.group.id), "В1–3");
+  assert.equal(blockLabelOf(up.project, right.group.id), "В1–3");
 });
 
 test("разрыв в номерах внутри группы рвёт подпись запятой", () => {
@@ -720,7 +725,7 @@ test("разрыв в номерах внутри группы рвёт подп
     ],
   });
   const after = deleteMark(step.project, step.marks[1].id).project;
-  assert.equal(labelOf(after, step.group.id), "В1, В3");
+  assert.equal(blockLabelOf(after, step.group.id), "В1, В3");
 });
 
 test("compactNumbers показывает замены и не применяет их молча", () => {
@@ -817,7 +822,7 @@ test("разнородная группа перечисляется через 
     ],
   });
   const mixed = changeMarkType(block.project, block.marks[1].id, typeId(base, "Р")).project;
-  assert.equal(labelOf(mixed, block.group.id), "В1, В3, Р1");
+  assert.equal(blockLabelOf(mixed, block.group.id), "В1, В3, Р1");
 });
 
 test("код типа — от одной до шестнадцати букв и не повторяется", () => {
@@ -983,10 +988,18 @@ test("удаление схемы уносит её метки и группы, 
 test("номера справочника уникальны внутри объекта, а между объектами совпадают нарочно", () => {
   const first = createProject();
   const second = createProject();
+  // **Внутри своего вида** номер не повторяется ни разу, и каждый вид считает с
+  // единицы (G391, ADR 038): категории 1…12, типы 1…56. Пересечение между
+  // видами — обычное состояние объекта: слова заказчика «метка №5 и помещение
+  // №5 будут жить в одном объекте — это же нормально. И мы же не только по
+  // идентификатору определяем что имеется ввиду, а по объекту целиком».
+  for (const list of [first.categories, first.markTypes, first.equipmentTypes]) {
+    const own = list.map((item) => item.id);
+    assert.equal(new Set(own).size, own.length, "один номер занят дважды в своём виде");
+    assert.deepEqual(own.slice().sort((a, b) => Number(a) - Number(b)), own, "вид нумерован не подряд");
+    assert.equal(own[0], "1", "вид начал нумерацию не с единицы");
+  }
   const ids = [...first.categories.map((c) => c.id), ...first.markTypes.map((t) => t.id)];
-  // **Внутри объекта** номер не повторяется ни разу: номера уникальны по всем
-  // видам сразу, и ссылка на число не может попасть не в ту коллекцию.
-  assert.equal(new Set(ids).size, first.categories.length + first.markTypes.length);
   assert.deepEqual(ids, ids.filter((id) => /^[1-9][0-9]*$/.test(id)), "в номерах остался не номер");
 
   // **Между объектами они совпадают, и это решение, а не промах** (G08,
@@ -1121,7 +1134,7 @@ test("«+» ставит метку выбранного типа: в блоке
   assert.equal(labelOf(socket.project, socket.mark.id), "Р1");
   assert.equal(socket.project.counters["В"], 1);
   assert.equal(socket.project.counters["Р"], 1);
-  assert.equal(labelOf(socket.project, socket.group.id), "В1, Р1");
+  assert.equal(blockLabelOf(socket.project, socket.group.id), "В1, Р1");
   assert.deepEqual(findGroup(socket.project, socket.group.id).markIds, [step.mark.id, socket.mark.id]);
   assert.equal(findMark(socket.project, socket.mark.id).groupId, socket.group.id);
   assert.equal(findMark(socket.project, socket.mark.id).schemeId, first.id);
@@ -1133,12 +1146,12 @@ test("«+» ставит метку выбранного типа: в блоке
   const second = addToGroup(socket.project, socket.mark.id, "right", { typeId: typeId(base, "Р") });
   assert.equal(labelOf(second.project, second.mark.id), "Р2");
   assert.equal(second.project.counters["В"], 1);
-  assert.equal(labelOf(second.project, socket.group.id), "В1, Р1Р2");
+  assert.equal(blockLabelOf(second.project, socket.group.id), "В1, Р1Р2");
 
   // Удаление одной метки смешанного блока соседей не трогает, а распад блока
   // до одной метки распускает группу и возвращает метке собственную подпись.
   const withoutFirst = deleteMark(second.project, socket.mark.id).project;
-  assert.equal(labelOf(withoutFirst, socket.group.id), "В1, Р2");
+  assert.equal(blockLabelOf(withoutFirst, socket.group.id), "В1, Р2");
   const alone = deleteMark(withoutFirst, second.mark.id).project;
   assert.deepEqual(alone.groups, []);
   assert.equal(findMark(alone, step.mark.id).groupId, null);
@@ -1162,7 +1175,7 @@ test("режим блока берётся у типа ставящейся ме
   assert.equal(more.project.marks.length, 2);
   assert.equal(findMark(more.project, socket.mark.id).points.length, 2);
   assert.equal(more.project.counters["Р"], 1);
-  assert.equal(labelOf(more.project, socket.group.id), "В1, Р1");
+  assert.equal(blockLabelOf(more.project, socket.group.id), "В1, Р1");
 
   // «+» у выключателя с активной розеткой находит розетку блока, а не соседку.
   const fromSwitch = addToGroup(more.project, step.mark.id, "down", { typeId: typeId(base, "Р") });
@@ -1174,7 +1187,7 @@ test("режим блока берётся у типа ставящейся ме
   assert.equal(back.project.marks.length, 3);
   assert.equal(labelOf(back.project, back.mark.id), "В2");
   assert.equal(findMark(back.project, socket.mark.id).points.length, 3);
-  assert.equal(labelOf(back.project, socket.group.id), "В1В2, Р1");
+  assert.equal(blockLabelOf(back.project, socket.group.id), "В1В2, Р1");
 });
 
 // ——— ручной номер ————————————————————————————————————————————————————
@@ -1419,16 +1432,16 @@ test("подпись блока называет обозначение один
       { x: 0.3, y: 0.3 },
     ],
   });
-  assert.equal(labelOf(step.project, step.group.id), "Т1–3");
+  assert.equal(blockLabelOf(step.project, step.group.id), "Т1–3");
 
   let project = setMarkNumber(step.project, step.marks[1].id, 1).project; // Т1 Т1 Т3
-  assert.equal(labelOf(project, step.group.id), "Т1, Т3");
+  assert.equal(blockLabelOf(project, step.group.id), "Т1, Т3");
 
   project = setMarkNumber(project, step.marks[2].id, 2).project; // Т1 Т1 Т2
-  assert.equal(labelOf(project, step.group.id), "Т1Т2");
+  assert.equal(blockLabelOf(project, step.group.id), "Т1Т2");
 
   project = setMarkNumber(project, step.marks[2].id, 1).project; // Т1 Т1 Т1
-  assert.equal(labelOf(project, step.group.id), "Т1");
+  assert.equal(blockLabelOf(project, step.group.id), "Т1");
 });
 
 // Смена типа — дорогая операция по ADR 003: она всегда выдаёт новый номер по
@@ -1476,10 +1489,10 @@ test("длинный код даёт обозначение целиком, а �
     ],
   });
   // подряд идущие сворачиваются в диапазон, а не склеиваются в «ПОДСВЕТКА2ПОДСВЕТКА3ПОДСВЕТКА4»
-  assert.equal(labelOf(block.project, block.group.id), "ПОДСВЕТКА2–4");
+  assert.equal(blockLabelOf(block.project, block.group.id), "ПОДСВЕТКА2–4");
 
   const gapped = deleteMark(block.project, block.marks[1].id).project;
-  assert.equal(labelOf(gapped, block.group.id), "ПОДСВЕТКА2, ПОДСВЕТКА4");
+  assert.equal(blockLabelOf(gapped, block.group.id), "ПОДСВЕТКА2, ПОДСВЕТКА4");
 });
 
 test("короткий код сворачивается тем же диапазоном, что и длинный", () => {
@@ -1498,11 +1511,11 @@ test("короткий код сворачивается тем же диапа�
     ],
   });
   // Запись диапазона одна на любой код: слева код, справа только номер (D29).
-  assert.equal(labelOf(block.project, block.group.id), "В1–3");
+  assert.equal(blockLabelOf(block.project, block.group.id), "В1–3");
 
   // порядок в подписи блока — по справочнику: «Свет» идёт раньше «Выключателей»
   const mixed = changeMarkType(block.project, block.marks[2].id, withLong.type.id).project;
-  assert.equal(labelOf(mixed, block.group.id), "ЛЕНТА1, В1В2");
+  assert.equal(blockLabelOf(mixed, block.group.id), "ЛЕНТА1, В1В2");
 });
 
 test("переименование короткого кода в длинный переносит счётчик и подписи", () => {

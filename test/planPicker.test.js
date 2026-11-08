@@ -12,9 +12,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { addLogicBinding, addMark, addScenario, addScheme, createProject, findLogicBinding, findScheme, idsMigrate } from "../src/model.js";
+import { addLogicBinding, addMark, addScenario, addScheme, createProject, findLogicBinding, findScheme, idNumberOf, idsMigrate } from "../src/model.js";
 import { fitView, planToScreen, visibleMarks } from "../src/render.js";
-import { deviceAids } from "../src/sim/home.js";
+
 import {
   PLAN_NAV_DRAG_SLOP_PX,
   PLAN_NAV_PAN_STEP_PX,
@@ -114,7 +114,8 @@ test("выбор на поле: ближайшая к руке метка из �
 
 test("поле опций со списком устройств узнаётся по адресам хаба: aid.sid и aid.sid.cid → метка", () => {
   const box = simHouse();
-  const aids = deviceAids(box.project);
+  // Адрес аксессуара — номер метки (G392), и карты адресов для этого нет.
+  const aids = new Map(box.project.marks.map((mark) => [mark.id, idNumberOf(mark.id)]));
   const sensor = box.marks["ДТВ1"];
   const lamp = box.marks["С1"];
   const field = {
@@ -167,7 +168,11 @@ test("на объекте с метками №1…№100 список конс�
     numbered.marks.map((mark, index) => String(index + 1)),
     "пример не тот: метки получили не 1…100",
   );
-  assert.equal(deviceAids(numbered).size, 100, "пример не тот: у меток нет адресов");
+  assert.equal(
+    numbered.marks.filter((mark) => idNumberOf(mark.id) !== null).length,
+    100,
+    "пример не тот: у меток нет адресов",
+  );
 
   const constants = {
     formType: "list",

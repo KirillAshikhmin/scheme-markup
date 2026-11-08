@@ -1,5 +1,5 @@
 {
-  "formatVersion": 8,
+  "formatVersion": 9,
   "id": "bc37a403-34f8-4562-8570-2cda00423993",
   "key": "d4e98d28-ca51-4ed4-8c86-e8106871d2ac",
   "name": "Старый объект",
@@ -7,7 +7,7 @@
   "updatedAt": "2026-02-10T09:40:00+03:00",
   "categories": [
     {
-      "id": "9",
+      "id": "1",
       "name": "Свет",
       "color": "#1F6FEB",
       "shape": "circle-cross",
@@ -15,7 +15,7 @@
       "order": 0
     },
     {
-      "id": "10",
+      "id": "2",
       "name": "Выключатели",
       "color": "#2DA44E",
       "shape": "circle",
@@ -23,7 +23,7 @@
       "order": 1
     },
     {
-      "id": "11",
+      "id": "3",
       "name": "Розетки",
       "color": "#D1242F",
       "shape": "square",
@@ -31,7 +31,7 @@
       "order": 2
     },
     {
-      "id": "12",
+      "id": "4",
       "name": "Климат",
       "color": "#E36209",
       "shape": "triangle",
@@ -39,7 +39,7 @@
       "order": 3
     },
     {
-      "id": "13",
+      "id": "5",
       "name": "Сетевое оборудование",
       "color": "#8250DF",
       "shape": "star",
@@ -47,7 +47,7 @@
       "order": 4
     },
     {
-      "id": "14",
+      "id": "6",
       "name": "Домофон",
       "color": "#D901C4",
       "shape": "triangle-down",
@@ -55,7 +55,7 @@
       "order": 5
     },
     {
-      "id": "15",
+      "id": "7",
       "name": "Карнизы",
       "color": "#9d4c01",
       "shape": "diamond",
@@ -63,7 +63,7 @@
       "order": 6
     },
     {
-      "id": "16",
+      "id": "8",
       "name": "Электроприборы",
       "color": "#1DAB1D",
       "shape": "square-bolt",
@@ -71,7 +71,7 @@
       "order": 7
     },
     {
-      "id": "17",
+      "id": "9",
       "name": "Кинотеатр",
       "color": "#001BDD",
       "shape": "square-wave",
@@ -79,7 +79,7 @@
       "order": 8
     },
     {
-      "id": "18",
+      "id": "10",
       "name": "Датчики",
       "color": "#164E63",
       "shape": "circle-ring",
@@ -87,7 +87,7 @@
       "order": 9
     },
     {
-      "id": "19",
+      "id": "11",
       "name": "Щит",
       "color": "#6E4B1F",
       "shape": "square-bolt",
@@ -95,7 +95,7 @@
       "order": 10
     },
     {
-      "id": "20",
+      "id": "12",
       "name": "Сантехника",
       "color": "#E80098",
       "shape": "drop-dot",
@@ -109,8 +109,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "21",
-      "categoryId": "9",
+      "id": "1",
+      "categoryId": "1",
       "code": "Т",
       "name": "Точечный светильник",
       "lineStyle": null,
@@ -126,8 +126,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "22",
-      "categoryId": "9",
+      "id": "2",
+      "categoryId": "1",
       "code": "С",
       "name": "Светильник",
       "lineStyle": null,
@@ -143,8 +143,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "23",
-      "categoryId": "9",
+      "id": "3",
+      "categoryId": "1",
       "code": "ПК",
       "name": "Подсветка кровати",
       "lineStyle": null,
@@ -160,8 +160,8 @@
       "blockMode": "each",
       "kind": "line",
       "channels": 1,
-      "id": "24",
-      "categoryId": "9",
+      "id": "4",
+      "categoryId": "1",
       "code": "ТР",
       "name": "Трек",
       "lineStyle": "double",
@@ -177,8 +177,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "25",
-      "categoryId": "9",
+      "id": "5",
+      "categoryId": "1",
       "code": "ПС",
       "name": "Подсветка",
       "lineStyle": null,
@@ -194,8 +194,8 @@
       "blockMode": "each",
       "kind": "line",
       "channels": 1,
-      "id": "26",
-      "categoryId": "9",
+      "id": "6",
+      "categoryId": "1",
       "code": "Л",
       "name": "Лента",
       "lineStyle": null,
@@ -211,8 +211,8 @@
       "blockMode": "each",
       "kind": "line",
       "channels": 1,
-      "id": "27",
-      "categoryId": "9",
+      "id": "7",
+      "categoryId": "1",
       "code": "ПШ",
       "name": "Подсветка шкафа",
       "lineStyle": "dashed",
@@ -228,8 +228,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "28",
-      "categoryId": "10",
+      "id": "8",
+      "categoryId": "2",
       "code": "В",
       "name": "Выключатель",
       "lineStyle": null,
@@ -246,8 +246,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 2,
-      "id": "29",
-      "categoryId": "10",
+      "id": "9",
+      "categoryId": "2",
       "code": "ВВ",
       "name": "Выключатель двойной",
       "lineStyle": null,
@@ -264,8 +264,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "30",
-      "categoryId": "11",
+      "id": "10",
+      "categoryId": "3",
       "code": "Р",
       "name": "Розетка",
       "lineStyle": null,
@@ -282,8 +282,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "31",
-      "categoryId": "12",
+      "id": "11",
+      "categoryId": "4",
       "code": "Б",
       "name": "Бризер",
       "lineStyle": null,
@@ -300,8 +300,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "32",
-      "categoryId": "12",
+      "id": "12",
+      "categoryId": "4",
       "code": "К",
       "name": "Кондиционер",
       "lineStyle": null,
@@ -318,8 +318,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "33",
-      "categoryId": "13",
+      "id": "13",
+      "categoryId": "5",
       "code": "W",
       "name": "WiFi точка",
       "lineStyle": null,
@@ -336,8 +336,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "34",
-      "categoryId": "14",
+      "id": "14",
+      "categoryId": "6",
       "code": "Д",
       "name": "Домофон",
       "lineStyle": null,
@@ -354,8 +354,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "35",
-      "categoryId": "15",
+      "id": "15",
+      "categoryId": "7",
       "code": "КШ",
       "name": "Карниз штор",
       "lineStyle": null,
@@ -372,8 +372,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "36",
-      "categoryId": "9",
+      "id": "16",
+      "categoryId": "1",
       "code": "ППл",
       "name": "Подсветка пола",
       "lineStyle": null,
@@ -390,8 +390,8 @@
       "blockMode": "each",
       "kind": "line",
       "channels": 1,
-      "id": "37",
-      "categoryId": "9",
+      "id": "17",
+      "categoryId": "1",
       "code": "ПКШ",
       "name": "Подсветка карниза штор",
       "lineStyle": "wave",
@@ -408,8 +408,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "38",
-      "categoryId": "9",
+      "id": "18",
+      "categoryId": "1",
       "code": "ЛЮ",
       "name": "Люстра",
       "lineStyle": null,
@@ -425,8 +425,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "39",
-      "categoryId": "10",
+      "id": "19",
+      "categoryId": "2",
       "code": "П",
       "name": "Переключатель",
       "lineStyle": null,
@@ -443,8 +443,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 2,
-      "id": "40",
-      "categoryId": "10",
+      "id": "20",
+      "categoryId": "2",
       "code": "ПП",
       "name": "Переключатель двойной",
       "lineStyle": null,
@@ -461,8 +461,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "41",
-      "categoryId": "9",
+      "id": "21",
+      "categoryId": "1",
       "code": "Н",
       "name": "Ночник",
       "lineStyle": null,
@@ -479,8 +479,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "42",
-      "categoryId": "11",
+      "id": "22",
+      "categoryId": "3",
       "code": "РC",
       "name": "Розетка 380",
       "lineStyle": null,
@@ -497,8 +497,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "43",
-      "categoryId": "18",
+      "id": "23",
+      "categoryId": "10",
       "code": "ДП",
       "name": "Датчик присутствия",
       "lineStyle": null,
@@ -515,8 +515,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "44",
-      "categoryId": "16",
+      "id": "24",
+      "categoryId": "8",
       "code": "СУШ",
       "name": "Сушилка Электрическая",
       "lineStyle": null,
@@ -533,8 +533,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "45",
-      "categoryId": "19",
+      "id": "25",
+      "categoryId": "11",
       "code": "Щ",
       "name": "Электрощит",
       "lineStyle": null,
@@ -551,8 +551,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "46",
-      "categoryId": "12",
+      "id": "26",
+      "categoryId": "4",
       "code": "ВЫТ",
       "name": "Вытяжка",
       "lineStyle": null,
@@ -569,8 +569,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "47",
-      "categoryId": "9",
+      "id": "27",
+      "categoryId": "1",
       "code": "Бр",
       "name": "Бра",
       "lineStyle": null,
@@ -587,8 +587,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "48",
-      "categoryId": "16",
+      "id": "28",
+      "categoryId": "8",
       "code": "ДЭП",
       "name": "Дверца в мебели с эл приводом",
       "lineStyle": null,
@@ -605,8 +605,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "49",
-      "categoryId": "13",
+      "id": "29",
+      "categoryId": "5",
       "code": "ПУ",
       "name": "Панель Управления",
       "lineStyle": null,
@@ -623,8 +623,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "50",
-      "categoryId": "12",
+      "id": "30",
+      "categoryId": "4",
       "code": "ОВ",
       "name": "Осушитель",
       "lineStyle": null,
@@ -641,8 +641,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "51",
-      "categoryId": "13",
+      "id": "31",
+      "categoryId": "5",
       "code": "ВП",
       "name": "Витая пара Интер",
       "lineStyle": null,
@@ -659,8 +659,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "52",
-      "categoryId": "17",
+      "id": "32",
+      "categoryId": "9",
       "code": "РЕС",
       "name": "Ресивер",
       "lineStyle": null,
@@ -677,8 +677,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "53",
-      "categoryId": "17",
+      "id": "33",
+      "categoryId": "9",
       "code": "ПРО",
       "name": "Проектор",
       "lineStyle": null,
@@ -695,8 +695,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "54",
-      "categoryId": "13",
+      "id": "34",
+      "categoryId": "5",
       "code": "УК",
       "name": "Умная Колонка",
       "lineStyle": null,
@@ -713,8 +713,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "55",
-      "categoryId": "9",
+      "id": "35",
+      "categoryId": "1",
       "code": "ЛВ",
       "name": "Лента вертикальная",
       "lineStyle": null,
@@ -731,8 +731,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 3,
-      "id": "56",
-      "categoryId": "10",
+      "id": "36",
+      "categoryId": "2",
       "code": "ВВВ",
       "name": "Выключатель тройной",
       "lineStyle": null,
@@ -749,8 +749,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "57",
-      "categoryId": "18",
+      "id": "37",
+      "categoryId": "10",
       "code": "ДД",
       "name": "Датчик движения",
       "lineStyle": null,
@@ -767,8 +767,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "58",
-      "categoryId": "18",
+      "id": "38",
+      "categoryId": "10",
       "code": "ДО",
       "name": "Датчик открытия",
       "lineStyle": null,
@@ -785,8 +785,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "59",
-      "categoryId": "18",
+      "id": "39",
+      "categoryId": "10",
       "code": "ДПр",
       "name": "Датчик протечки",
       "lineStyle": null,
@@ -803,8 +803,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "60",
-      "categoryId": "19",
+      "id": "40",
+      "categoryId": "11",
       "code": "ЩС",
       "name": "Слаботочный щит",
       "lineStyle": null,
@@ -821,8 +821,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "61",
-      "categoryId": "16",
+      "id": "41",
+      "categoryId": "8",
       "code": "РП",
       "name": "Робот пылесос",
       "lineStyle": null,
@@ -839,8 +839,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "62",
-      "categoryId": "20",
+      "id": "42",
+      "categoryId": "12",
       "code": "ВР",
       "name": "Водорозетка",
       "lineStyle": null,
@@ -857,8 +857,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "63",
-      "categoryId": "20",
+      "id": "43",
+      "categoryId": "12",
       "code": "КН",
       "name": "Выход канализации",
       "lineStyle": null,
@@ -875,8 +875,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "64",
-      "categoryId": "20",
+      "id": "44",
+      "categoryId": "12",
       "code": "КВ",
       "name": "Кран воды с электроприводом",
       "lineStyle": null,
@@ -893,8 +893,8 @@
       "blockMode": "each",
       "kind": "line",
       "channels": 1,
-      "id": "65",
-      "categoryId": "9",
+      "id": "45",
+      "categoryId": "1",
       "code": "ПЛ",
       "name": "Подсветка лестницы",
       "lineStyle": "meander",
@@ -911,8 +911,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "66",
-      "categoryId": "9",
+      "id": "46",
+      "categoryId": "1",
       "code": "ПЗ",
       "name": "Подсветка зеркала",
       "lineStyle": null,
@@ -929,8 +929,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "67",
-      "categoryId": "16",
+      "id": "47",
+      "categoryId": "8",
       "code": "КАМ",
       "name": "Камера",
       "lineStyle": null,
@@ -947,8 +947,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "68",
-      "categoryId": "12",
+      "id": "48",
+      "categoryId": "4",
       "code": "ВЕНТ",
       "name": "Вентиляция",
       "lineStyle": null,
@@ -965,8 +965,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "69",
-      "categoryId": "10",
+      "id": "49",
+      "categoryId": "2",
       "code": "МВ",
       "name": "Мастер-выключатель",
       "lineStyle": null,
@@ -983,8 +983,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "70",
-      "categoryId": "17",
+      "id": "50",
+      "categoryId": "9",
       "code": "ТВ",
       "name": "Телевизор",
       "lineStyle": null,
@@ -1001,8 +1001,8 @@
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
-      "id": "71",
-      "categoryId": "20",
+      "id": "51",
+      "categoryId": "12",
       "code": "ПОС",
       "name": "Полотенцесушитель",
       "lineStyle": null,
@@ -1017,14 +1017,14 @@
   ],
   "rooms": [
     {
-      "id": "8",
+      "id": "1",
       "name": "Комната",
       "color": "#0F766E"
     }
   ],
   "schemes": [
     {
-      "id": "7",
+      "id": "1",
       "name": "1 этаж",
       "imageId": "img-1",
       "width": 1200,
@@ -1035,8 +1035,8 @@
   "marks": [
     {
       "id": "1",
-      "schemeId": "7",
-      "typeId": "38",
+      "schemeId": "1",
+      "typeId": "18",
       "number": 1,
       "kind": "point",
       "points": [
@@ -1059,8 +1059,8 @@
     },
     {
       "id": "2",
-      "schemeId": "7",
-      "typeId": "41",
+      "schemeId": "1",
+      "typeId": "21",
       "number": 1,
       "kind": "point",
       "points": [
@@ -1083,8 +1083,8 @@
     },
     {
       "id": "3",
-      "schemeId": "7",
-      "typeId": "40",
+      "schemeId": "1",
+      "typeId": "20",
       "number": 1,
       "kind": "point",
       "points": [
@@ -1107,8 +1107,8 @@
     },
     {
       "id": "4",
-      "schemeId": "7",
-      "typeId": "63",
+      "schemeId": "1",
+      "typeId": "43",
       "number": 1,
       "kind": "point",
       "points": [
@@ -1131,8 +1131,8 @@
     },
     {
       "id": "5",
-      "schemeId": "7",
-      "typeId": "66",
+      "schemeId": "1",
+      "typeId": "46",
       "number": 1,
       "kind": "point",
       "points": [
@@ -1155,8 +1155,8 @@
     },
     {
       "id": "6",
-      "schemeId": "7",
-      "typeId": "21",
+      "schemeId": "1",
+      "typeId": "1",
       "number": 1,
       "kind": "point",
       "points": [
@@ -1184,265 +1184,265 @@
   "placements": [],
   "equipmentTypes": [
     {
-      "id": "72",
+      "id": "1",
       "name": "Светильник точечный",
       "order": 0
     },
     {
-      "id": "73",
+      "id": "2",
       "name": "Светильник",
       "order": 1
     },
     {
-      "id": "74",
+      "id": "3",
       "name": "Светодиодная лента",
       "order": 2
     },
     {
-      "id": "75",
+      "id": "4",
       "name": "Трековый светильник",
       "order": 3
     },
     {
-      "id": "76",
+      "id": "5",
       "name": "Выключатель",
       "order": 4
     },
     {
-      "id": "77",
+      "id": "6",
       "name": "Розетка",
       "order": 5
     },
     {
-      "id": "78",
+      "id": "7",
       "name": "Бризер",
       "order": 6
     },
     {
-      "id": "79",
+      "id": "8",
       "name": "Кондиционер",
       "order": 7
     },
     {
-      "id": "80",
+      "id": "9",
       "name": "Точка доступа WiFi",
       "order": 8
     },
     {
-      "id": "81",
+      "id": "10",
       "name": "Розетка RJ45",
       "order": 9
     },
     {
-      "id": "82",
+      "id": "11",
       "name": "Датчик движения",
       "order": 10
     },
     {
-      "id": "83",
+      "id": "12",
       "name": "Датчик открытия",
       "order": 11
     },
     {
-      "id": "84",
+      "id": "13",
       "name": "Датчик протечки",
       "order": 12
     },
     {
-      "id": "85",
+      "id": "14",
       "name": "Датчик дыма",
       "order": 13
     },
     {
-      "id": "86",
+      "id": "15",
       "name": "Датчик температуры и влажности",
       "order": 14
     },
     {
-      "id": "87",
+      "id": "16",
       "name": "Кран с электроприводом",
       "order": 15
     },
     {
-      "id": "88",
+      "id": "17",
       "name": "Реле 1 канал",
       "order": 16
     },
     {
-      "id": "89",
+      "id": "18",
       "name": "Реле 2 канала",
       "order": 17
     },
     {
-      "id": "90",
+      "id": "19",
       "name": "Реле 3 канала",
       "order": 18
     },
     {
-      "id": "91",
+      "id": "20",
       "name": "Реле 4 канала",
       "order": 19
     },
     {
-      "id": "92",
+      "id": "21",
       "name": "Диммер",
       "order": 20
     },
     {
-      "id": "93",
+      "id": "22",
       "name": "Контроллер одноцветной ленты",
       "order": 21
     },
     {
-      "id": "94",
+      "id": "23",
       "name": "Контроллер ленты RGB",
       "order": 22
     },
     {
-      "id": "95",
+      "id": "24",
       "name": "Контроллер ленты RGBW",
       "order": 23
     },
     {
-      "id": "96",
+      "id": "25",
       "name": "Контроллер ленты CCT",
       "order": 24
     },
     {
-      "id": "97",
+      "id": "26",
       "name": "Блок питания",
       "order": 25
     },
     {
-      "id": "98",
+      "id": "27",
       "name": "Беспроводная кнопка",
       "order": 26
     },
     {
-      "id": "99",
+      "id": "28",
       "name": "Сценарная панель",
       "order": 27
     },
     {
-      "id": "100",
+      "id": "29",
       "name": "Шлюз Zigbee или Z-Wave",
       "order": 28
     },
     {
-      "id": "101",
+      "id": "30",
       "name": "Контроллер умного дома",
       "order": 29
     },
     {
-      "id": "102",
+      "id": "31",
       "name": "Встраиваемый модуль",
       "order": 30
     },
     {
-      "id": "103",
+      "id": "32",
       "name": "Привод штор",
       "order": 31
     },
     {
-      "id": "104",
+      "id": "33",
       "name": "Термостат",
       "order": 32
     },
     {
-      "id": "105",
+      "id": "34",
       "name": "ИК-передатчик",
       "order": 33
     },
     {
-      "id": "106",
+      "id": "35",
       "name": "Коммутатор",
       "order": 34
     },
     {
-      "id": "107",
+      "id": "36",
       "name": "Роутер",
       "order": 35
     },
     {
-      "id": "108",
+      "id": "37",
       "name": "Автоматический выключатель",
       "order": 36
     },
     {
-      "id": "109",
+      "id": "38",
       "name": "УЗО или дифавтомат",
       "order": 37
     },
     {
-      "id": "110",
+      "id": "39",
       "name": "Контактор",
       "order": 38
     },
     {
-      "id": "111",
+      "id": "40",
       "name": "Щит (корпус)",
       "order": 39
     }
   ],
   "accepted": [
     {
-      "key": "sharedShape:circle-cross#21,22,23,25,36,38,47",
+      "key": "sharedShape:circle-cross#1,16,18,2,27,3,5",
       "code": "sharedShape",
       "kind": "warning",
       "label": "Знак «Круг с крестом» носят несколько типов: Т, С, ПК, ПС, ППл, ЛЮ, Бр",
       "at": "2026-10-21T15:52:57.669Z"
     },
     {
-      "key": "sharedShape:circle-drain#41,63",
+      "key": "sharedShape:circle-drain#21,43",
       "code": "sharedShape",
       "kind": "warning",
       "label": "Знак «Круг со стрелкой вниз» носят несколько типов: Н, КН",
       "at": "2026-10-21T15:52:57.669Z"
     },
     {
-      "key": "sharedShape:square-cross#40,51,60",
+      "key": "sharedShape:square-cross#20,31,40",
       "code": "sharedShape",
       "kind": "warning",
       "label": "Знак «Квадрат с крестом» носят несколько типов: ПП, ВП, ЩС",
       "at": "2026-10-21T15:52:57.669Z"
     },
     {
-      "key": "sharedShape:drop-dot#50,62",
+      "key": "sharedShape:drop-dot#30,42",
       "code": "sharedShape",
       "kind": "warning",
       "label": "Знак «Капля с точкой» носят несколько типов: ОВ, ВР",
       "at": "2026-10-21T15:52:57.669Z"
     },
     {
-      "key": "sharedShape:square-bolt#44,48",
+      "key": "sharedShape:square-bolt#24,28",
       "code": "sharedShape",
       "kind": "warning",
       "label": "Знак «Квадрат с молнией» носят несколько типов: СУШ, ДЭП",
       "at": "2026-10-21T15:52:57.669Z"
     },
     {
-      "key": "closeColors:10+16",
+      "key": "closeColors:2+8",
       "code": "closeColors",
       "kind": "warning",
       "label": "Цвета категорий «Выключатели» и «Электроприборы» похожи — 23,7",
       "at": "2026-10-21T15:52:57.669Z"
     },
     {
-      "key": "closeColors:12+15",
+      "key": "closeColors:4+7",
       "code": "closeColors",
       "kind": "warning",
       "label": "Цвета категорий «Климат» и «Карнизы» похожи — 26,3",
       "at": "2026-10-21T15:52:57.669Z"
     },
     {
-      "key": "closeColors:14+20",
+      "key": "closeColors:12+6",
       "code": "closeColors",
       "kind": "warning",
       "label": "Цвета категорий «Домофон» и «Сантехника» похожи — 27,4",
       "at": "2026-10-21T15:52:57.669Z"
     },
     {
-      "key": "closeColors:15+19",
+      "key": "closeColors:11+7",
       "code": "closeColors",
       "kind": "warning",
       "label": "Цвета категорий «Карнизы» и «Щит» похожи — 28,9",
@@ -1456,7 +1456,12 @@
     "КН": 1,
     "ПЗ": 1,
     "Т": 1,
-    "#id": 111
+    "#marks": 6,
+    "#schemes": 1,
+    "#rooms": 1,
+    "#categories": 12,
+    "#markTypes": 51,
+    "#equipmentTypes": 40
   },
   "view": {
     "markSize": 16,

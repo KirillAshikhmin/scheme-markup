@@ -262,10 +262,14 @@ test("без общего предка два разных прибора под
   assert.equal(new Set(ids).size, ids.length, "в итоге два прибора с одним номером");
 });
 
-// Номера уникальны **по всем видам сразу**, и `idsReplace` — одна таблица
-// переездов на все коллекции. Столкновение, найденное только внутри своей
-// коллекции, оставляет номер занятым дважды.
-test("номер столкнулся у метки и у стены — столкновение всё равно разведено", () => {
+// Номер свой у каждого вида (ADR 038), и пересечение между видами — обычное
+// состояние объекта: метка 5 и стена 5 живут рядом, и это не столкновение.
+// Слова заказчика: «метка №5 и помещение №5 будут жить в одном объекте — это же
+// нормально. И мы же не только по идентификатору определяем что имеется ввиду, а
+// по объекту целиком». До таска 251 правило было обратным, и слияние разводило
+// такую пару; разводи его теперь — и номера переставлялись бы на каждом обмене
+// файлами впустую.
+test("номер метки совпал с номером стены — это не столкновение, и никто не переезжает", () => {
   const { project: base, schemeId } = ancestor();
   const typeId = base.markTypes[0].id;
   const mine = addMark(base, { schemeId, typeId, points: [{ x: 0.1, y: 0.1 }] });
@@ -275,16 +279,54 @@ test("номер столкнулся у метки и у стены — сто�
     bMm: { x: 3000, y: 0 },
     thicknessMm: 100,
   });
-  assert.equal(mine.mark.id, alien.wall.id, "пример не тот: номера разошлись сами");
+  // Пример устроен так, что числа совпали: у предка стен нет вовсе, и первая
+  // стена берёт 1, а метка — свой номер из счётчика меток. Подгонять нечего,
+  // сверка ниже этого и требует.
+  const wallsOf = (project) => project.walls || [];
   const ours = stamp(mine.project, "2026-09-17T10:00:00.000Z");
   const theirs = stamp(alien.project, "2026-09-17T10:05:00.000Z");
 
   const merged = mergeProjects(ours, theirs, base);
   assert.equal(merged.project.marks.length, 3, "наша метка пропала");
-  assert.equal((merged.project.walls || []).length, 1, "их стена пропала");
-  assert.equal(merged.reissued.length, 1, "столкновение между коллекциями не найдено");
-  const ids = [...merged.project.marks, ...(merged.project.walls || [])].map((item) => item.id);
-  assert.equal(new Set(ids).size, ids.length, "метка и стена остались под одним номером");
+  assert.equal(wallsOf(merged.project).length, 1, "их стена пропала");
+  assert.equal(merged.reissued.length, 0, "номер переехал без причины: вид у числа назван");
+  assert.ok(
+    merged.project.marks.some((mark) => mark.id === mine.mark.id),
+    "наша метка сменила номер",
+  );
+  assert.equal(wallsOf(merged.project)[0].id, alien.wall.id, "их стена сменила номер");
+});
+
+// А вот столкновение **внутри вида** разводится, и каждый вид берёт свободный
+// номер у своего счётчика: разведи их одной таблицей — и помещение уехало бы
+// на номер, занятый меткой.
+test("столкнулись метка с меткой и помещение с помещением — развелись оба, каждый в своём виде", () => {
+  const { project: base, schemeId } = ancestor();
+  const typeId = base.markTypes[0].id;
+  const mineMark = addMark(base, { schemeId, typeId, points: [{ x: 0.1, y: 0.1 }] });
+  const mine = addRoom(mineMark.project, { name: "Наша комната" });
+  const alienMark = addMark(copyOf(base), { schemeId, typeId, points: [{ x: 0.9, y: 0.9 }] });
+  const alien = addRoom(alienMark.project, { name: "Их комната" });
+  assert.equal(mineMark.mark.id, alienMark.mark.id, "пример не тот: номера меток разошлись сами");
+  assert.equal(mine.room.id, alien.room.id, "пример не тот: номера помещений разошлись сами");
+  const ours = stamp(mine.project, "2026-09-17T10:00:00.000Z");
+  const theirs = stamp(alien.project, "2026-09-17T10:05:00.000Z");
+
+  const merged = mergeProjects(ours, theirs, base);
+  assert.equal(merged.project.marks.length, 4, "метка пропала, слившись с чужой");
+  assert.equal(merged.project.rooms.length, base.rooms.length + 2, "помещение пропало, слившись с чужим");
+  // Переезд назван видом: `was: "5"` без вида не говорит, чей ключ сменился.
+  assert.deepEqual(
+    [...new Set(merged.reissued.map((item) => item.entity))].sort(),
+    ["marks", "rooms"],
+    "развёлся не каждый вид",
+  );
+  const unique = (list) => assert.equal(new Set(list.map((item) => item.id)).size, list.length);
+  unique(merged.project.marks);
+  unique(merged.project.rooms);
+  // Имена целы у обеих сторон — переезд номера сущность не подменяет.
+  const names = merged.project.rooms.map((room) => room.name);
+  assert.ok(names.includes("Наша комната") && names.includes("Их комната"), "комната потеряла имя");
 });
 
 test("чужой файл не сливается, а свой узнаётся", () => {

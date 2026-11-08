@@ -32,6 +32,7 @@ import {
   findMark,
   findType,
   findWall,
+  idNumberOf,
   markDeviceLeader,
   markDeviceOf,
   markIsComment,
@@ -49,7 +50,7 @@ import {
 } from "./model.js";
 import { objectCatalogDefaults } from "./objectCatalog.js";
 import { simServiceMeta } from "./sim/catalog.js";
-import { deviceAids, deviceIdsOf } from "./sim/home.js";
+import { deviceIdsOf } from "./sim/home.js";
 
 const MIGRATE_SWITCH_OLD = "switch";
 const MIGRATE_SWITCH_NEW = "switchRelay";
@@ -390,7 +391,6 @@ export function migrateDevices(project) {
   const rewritten = typesChanged || marksChanged ? { ...project, markTypes, marks } : project;
 
   // ——— сопоставление «до» и «после» ———
-  const aids = deviceAids(rewritten);
   const plans = new Map();
   const addresses = new Map();
   let switches = 0;
@@ -411,8 +411,9 @@ export function migrateDevices(project) {
     // виду при каждом чтении, и второй проход сдвинул бы адреса ещё раз.
     if (kind === "conditionerKind") continue;
     const lead = markDeviceLeader(rewritten, markId) || markId;
-    const aid = aids.get(lead);
-    if (aid === undefined) continue;
+    // Адрес аксессуара — номер ведущей метки (G392: своей двери у адреса нет).
+    const aid = idNumberOf(lead);
+    if (aid === null) continue;
     for (const [from, to] of migrateAddresses(aid, old, now, index, charOf)) if (from !== to) addresses.set(from, to);
   }
 
