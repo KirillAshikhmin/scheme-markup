@@ -327,7 +327,7 @@ test("без сети и без кэша обещание отклоняется
   await assert.rejects(answer, /Failed to fetch/);
 });
 
-test("установка кладёт страницу и её файлы, и один недоставшийся файл не уносит офлайн", async () => {
+test("установка кладёт обе страницы и их файлы, и один недоставшийся файл не уносит офлайн", async () => {
   const env = await startWorker({
     respond: async (url) => (url.endsWith(FONT) ? new Response("нет", { status: 500 }) : pageResponse()),
   });
@@ -337,7 +337,37 @@ test("установка кладёт страницу и её файлы, и о
   assert.equal(env.skipped, true, "новая сборка не ждёт закрытия вкладок");
   const cache = env.stores.get(env.cacheName);
   const keys = (await cache.keys()).map((request) => request.url);
-  assert.deepEqual(keys, [ORIGIN], "страница в кэше, а отказ по шрифту офлайн не унёс");
+  assert.deepEqual(keys, [ORIGIN, ORIGIN + "view.html"], "обе страницы в кэше, а отказ по шрифту офлайн не унёс");
+});
+
+// Имя кэша считается по **обеим** страницам, и `activate` сносит все прочие
+// имена: после каждой выкладки офлайн-копия начинается с нуля. Пока установка
+// клала только «Разметку», копия просмотра не появлялась на первом заходе
+// вовсе (свой запрос заказчика скрипт ещё не перехватывает — он активируется
+// после загрузки) и пропадала после каждой выкладки. Заказчик по ссылке — это
+// как раз первый заход (ревью ветки, F1).
+test("после выкладки офлайн-копия просмотра восстанавливается установкой, как у главной", async () => {
+  const VIEW_URL = ORIGIN + "view.html";
+  const VIEW_HTML = "<html>просмотр</html>";
+  const respond = async (url) => (url.split("?")[0] === VIEW_URL ? new Response(VIEW_HTML, { status: 200 }) : pageResponse());
+  const env = await startWorker({ respond });
+  // Прежняя сборка оставила свой кэш — его снесёт активация.
+  await env.caches.open("scheme-markup-prezhnee");
+  const install = [];
+  env.listeners.get("install")({ waitUntil: (promise) => install.push(promise) });
+  await Promise.all(install);
+  const activate = [];
+  env.listeners.get("activate")({ waitUntil: (promise) => activate.push(promise) });
+  await Promise.all(activate);
+  assert.deepEqual(env.deleted, ["scheme-markup-prezhnee"]);
+
+  // Сети нет, второго захода при сети не было — и просмотр открывается.
+  const offline = await startWorker({ respond: () => Promise.reject(new TypeError("Failed to fetch")) });
+  offline.stores.set(env.cacheName, env.stores.get(env.cacheName));
+  const { answer } = sendFetch(offline, navigation(VIEW_URL));
+  assert.equal(await (await answer).text(), VIEW_HTML);
+  const main = sendFetch(offline, navigation(ORIGIN));
+  assert.equal(await (await main.answer).text(), PAGE_HTML, "у главной офлайн-копия как была");
 });
 
 test("активация сносит чужие имена кэша и забирает открытые вкладки", async () => {

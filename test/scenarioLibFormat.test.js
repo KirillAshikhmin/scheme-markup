@@ -147,6 +147,28 @@ test("исходник, отличающийся от библиотечного
   assert.equal(second.source, mine, "свой скрипт остался текстом байт в байт");
 });
 
+test("миграция не копирует прежний `lib` поверх новой ссылки", () => {
+  // Запись не из этой сборки: текст есть, а `lib` негодный — отпечатком модель
+  // его не принимает. До ремонта ветки (F1) обход ключей ставил новую ссылку на
+  // место `source`, а следующий ключ `lib` затирал её прежним значением: объект
+  // оставался и без текста, и со ссылкой в никуда.
+  const source = sprutSource("HideIfTurnOn.js");
+  const lib = library([{ key: "HideIfTurnOn", name: "Скрыть при включении", source }]);
+  const made = logicProject([{ name: "Скрыть при включении", source }]);
+  const broken = { name: "Скрыть при включении", version: "1.0", hash: "h1" };
+  const project = {
+    ...made.project,
+    scenarios: made.project.scenarios.map((item) => ({ ...item, lib: broken })),
+  };
+  assert.equal(scenarioLibOf(project.scenarios[0]), null, "негодная ссылка ссылкой не считается");
+
+  const pinned = migrateScenarioLib(project, lib.door);
+  assert.equal(pinned.changed, true);
+  const now = findScenario(pinned.project, made.ids[0]);
+  assert.equal(scenarioLibOf(now).hash, scenarioLibHash(source), "ссылка — та, которую дал реестр");
+  assert.equal(now.source, undefined, "текст снят против принятой ссылки");
+});
+
 test("без реестра и у блочного сценария миграция отдаёт тот же объект, второй проход — тоже", () => {
   const source = sprutSource("HideIfTurnOn.js");
   const lib = library([{ key: "HideIfTurnOn", name: "Скрыть при включении", source }]);

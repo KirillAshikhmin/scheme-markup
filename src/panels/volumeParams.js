@@ -564,9 +564,14 @@ export function volumeFloorOptionLabel(option) {
  * строка есть всегда: почему «все этажи» недоступны, что встало в стопку,
  * какой план на номер не попал.
  */
-export function volumeFloorsNote(plan, all) {
+export function volumeFloorsNote(plan, all, opts = {}) {
   if (!plan) return "";
   if (!plan.can) {
+    // Все три причины зовут к карандашу в строке списка схем и к свойствам
+    // схемы — туда, куда заказчику ходить нечем (умение `editHints`, ревью
+    // ветки F1). Пункт у него и так недоступен, а объяснение адресовано не
+    // ему: оно про объект, который ещё чертят.
+    if (opts.hints === false) return "";
     if (plan.why === "noFloor") return strings.volume.floorsNoOwn;
     if (plan.why === "one") return strings.volume.floorsOne;
     return strings.volume.floorsNone;
@@ -635,6 +640,10 @@ export function createVolumeParamsFields(options) {
   // затем, что стенд и тесты зовут ряды без этажей вовсе.
   const floors = options.floors || (() => null);
   const goFloor = options.goFloor || (() => {});
+  // Говорить ли слова, обращённые к тому, кто объект правит (умение
+  // `editHints`). Двери нет — говорим: ряды зовут и стенд, и тесты, и они про
+  // «Разметку» (ревью ветки, F1).
+  const hints = () => (options.hints ? options.hints() !== false : true);
   const box = uiEl("div", {
     class: "tools volume__params" + (options.window === true ? " volume__params--window" : ""),
   });
@@ -662,7 +671,7 @@ export function createVolumeParamsFields(options) {
           [
             uiButton(strings.volume.floorsAll, {
               class: "ui-btn" + (stacked ? " is-on" : ""),
-              title: plan && plan.can ? strings.volume.floorsAllHint : volumeFloorsNote(plan, false),
+              title: plan && plan.can ? strings.volume.floorsAllHint : volumeFloorsNote(plan, false, { hints: hints() }),
               attrs: {
                 "aria-pressed": stacked ? "true" : "false",
                 ...(plan && plan.can ? {} : { disabled: "" }),
@@ -692,7 +701,7 @@ export function createVolumeParamsFields(options) {
         // Строка под списком этажей — **состояние, а не описание**: что встало в
         // стопку и почему «все этажи» недоступны. Молчания здесь быть не может
         // ни в одном случае (таск 202), поэтому в подсказку она не уходит.
-        uiEl("p", { class: "tools__note", text: volumeFloorsNote(plan, stacked) }),
+        uiEl("p", { class: "tools__note", text: volumeFloorsNote(plan, stacked, { hints: hints() }) }),
         // «Снять крышу» стоит здесь, а не рядом с фоном: это про **дом**, а не
         // про картинку за окном, и спрашивают её там же, где выбирают, какой
         // этаж показывать.

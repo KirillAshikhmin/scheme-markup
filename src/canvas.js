@@ -13,6 +13,7 @@ import {
   ELEVATION_GROW_SETTING,
   ELEVATION_VIEWS_SETTING,
   appAllows,
+  appKind,
   PANEL_IDS,
   registerPanel,
   reportAppError,
@@ -565,7 +566,14 @@ export function canvasHintText(state) {
   // Линейка — поверх всего остального и раньше вопроса о правке: рука занята
   // отрезком, про метки рассказывать нечего, а работает она и в просмотре.
   if (state.measuring) return strings.measure.hintPlan;
-  if (!canvasEditAllowed(state)) return canvasSimLocked(state) ? strings.sim.bar.editLocked : strings.mobile.viewOnly;
+  if (!canvasEditAllowed(state)) {
+    // Обе эти строки — ответ тому, кто собирался править: «остановите дом,
+    // чтобы править» и «правка на компьютере». В окне заказчика им места нет
+    // (ревью ветки, F1): править он не собирался, и обещать ему правку на
+    // другом устройстве страница просмотра не может.
+    if (!appAllows("editHints", state)) return null;
+    return canvasSimLocked(state) ? strings.sim.bar.editLocked : strings.mobile.viewOnly;
+  }
   // Правка ломаной — это режим руки, и подсказка обязана сказать, что сейчас
   // делает двойной клик: он здесь занят вершинами, а не выделением.
   if (state.editPathId && state.project) {
@@ -5397,7 +5405,16 @@ function canvasWallMiddleY(state) {
  * `canvasSummaryLines`, а здесь только руки и перерисовка.
  */
 function mountCanvasSummary(host, api) {
-  const plate = createFieldPlate({ side: "right", setting: CANVAS_SUMMARY_SETTING });
+  // На странице просмотра сводка заведена **сложенной** (ревью ветки, F1), как
+  // и сводка «Объёма»: «Подложка 1200 × 800 точек», «Помещений 3 · стен
+  // чертежа 1» — перепись чертежа в точках и штуках, её читает тот, кто объект
+  // собирает. Знак «i» на месте: заказчику, которому интересно, хватает одного
+  // нажатия.
+  const plate = createFieldPlate({
+    side: "right",
+    setting: CANVAS_SUMMARY_SETTING,
+    collapsed: appKind() === "view",
+  });
   host.append(plate.node);
   const render = () => {
     const state = api.getState();

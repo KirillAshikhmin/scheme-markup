@@ -160,7 +160,7 @@ import {
 import { createFpsMeter, fpsMeterOn } from "../fpsMeter.js";
 import { markCardModel, markCardParts } from "./markCard.js";
 import { deviceCardView, deviceClickPlan, deviceLiveKinds, devicePresserOf } from "./deviceCard.js";
-import { openSimCommands } from "./simBar.js";
+import { openSimCommands, simBarControls } from "./simBar.js";
 import { markAccessory } from "../sim/home.js";
 import {
   SIM_STATE_SETTING,
@@ -832,6 +832,25 @@ export function volumeTouchLikely() {
 }
 
 /**
+ * Мыши у устройства нет вовсе: грубое указание и наведения не бывает
+ * (`hover: none`) — телефон и планшет. В отличие от `volumeTouchLikely` это не
+ * догадка о том, чем **сейчас** трогают поле, а мерка самого устройства, и
+ * первое касание её не отменяет.
+ *
+ * Нужна подсказке (ревью ветки, F1): обещать на телефоне захват курсора и
+ * клавиши нельзя ни до первого касания, ни после случайного события мыши —
+ * воспользоваться этим там нечем.
+ */
+export function volumeTouchOnly() {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
+  try {
+    return window.matchMedia("(hover: none) and (pointer: coarse)").matches;
+  } catch (error) {
+    return false;
+  }
+}
+
+/**
  * Сколько неразмещённых меток окно называет по имени, прежде чем сказать «и
  * ещё». Мера не своя: это та же строка под тем же полем, что и перечень
  * нарисованных запасным габаритом, и живёт она в одном месте
@@ -963,17 +982,23 @@ export function volumeHintText(state) {
   // мешает, и строки про это по-прежнему нужны.
   const parts = [];
   if (state.measuring) parts.push(strings.measure.hintVolume);
-  parts.push(state.view === "person" ? strings.volume.hintPerson : strings.volume.hintAround);
+  // Клавиши и мышь — только там, где они есть (ревью ветки, F1). Пальцем про
+  // них рассказывать нечем: ни W A S D, ни колеса, ни «клик по полу» на
+  // телефоне нет, а всё, что делает палец, говорит одна строка `hintTouch` —
+  // ход джойстиком, взгляд свайпом, кнопки, щипок в обзоре, смена вида. До
+  // ремонта ветки подсказка начиналась с мыши и клавиш и на телефоне:
+  // 1 200 знаков, из которых больше половины не про его руки.
+  if (!state.touching) parts.push(state.view === "person" ? strings.volume.hintPerson : strings.volume.hintAround);
   // Подсказка **меняется по виду**, а не дописывается (правило таска 192,
   // G292): человеку в первом лице не пишут про полёт, летящему в обзоре — про
   // прыжок, а снявший столкновения не должен читать «сквозь стены нельзя».
   if (state.view === "person") {
-    parts.push(strings.volume.hintStance);
+    if (!state.touching) parts.push(strings.volume.hintStance);
     parts.push(state.ghost ? strings.volume.hintGhost : strings.volume.hintWalls);
     // Пальцем миникарта уходит из левого нижнего угла наверх — угол занял
     // джойстик взгляда (правка после сборки сценариев).
     parts.push(state.touching ? strings.volume.hintMinimapTouch : strings.volume.hintMinimap);
-  } else {
+  } else if (!state.touching) {
     // Про отметку «Проходить сквозь стены» в обзоре не говорится вовсе: там
     // сквозь стены летают всегда, и галка ничего не меняет (таск 200, G304).
     parts.push(strings.volume.hintAroundFly);
@@ -995,7 +1020,10 @@ export function volumeHintText(state) {
   parts.push(volumeSheerLine(state.sheers, state.openSheers || new Set(), state.aimedSheer, state.touching));
   // Про этажи — последней: лестница под рукой есть далеко не всегда, а когда
   // есть, это самое новое в строке. Там же и возврат (G216).
-  parts.push(volumeFloorAction(state.stair, state.floors, state.back).hint);
+  // `hints` — говорить ли слова, обращённые к тому, кто объект правит (умение
+  // `editHints`): «этаж задаётся карандашом в строке списка схем» — не к
+  // заказчику.
+  parts.push(volumeFloorAction(state.stair, state.floors, state.back, { hints: state.hints }).hint);
   return parts.filter((part) => part !== "").join(" ");
 }
 
@@ -1054,11 +1082,15 @@ export function volumeFloorWord(key, at = false) {
  * к точке прихода — и человек, отошедший на три шага, снова в тупике, ровно в
  * том, который чинят.
  */
-export function volumeFloorAction(stair, options, back) {
+export function volumeFloorAction(stair, options, back, opts = {}) {
   if (stair) {
     const what = volumeFloorWord(stair.key);
     if (!options || options.length === 0) {
-      return { kind: "none", label: "", title: "", hint: text("volume.stairNoFloors", { what }) };
+      // «Этаж задаётся в свойствах схемы — карандаш в строке списка схем» —
+      // ответ тому, кто объект чертит. Карандаша у заказчика нет, и звать его
+      // к нему нельзя (ревью ветки, F1): строки просто нет.
+      const hint = opts.hints === false ? "" : text("volume.stairNoFloors", { what });
+      return { kind: "none", label: "", title: "", hint };
     }
     return {
       kind: "stair",
@@ -1121,8 +1153,17 @@ export function volumeStackLine(scene, plan) {
   });
 }
 
-/** Строки про то, чего в сцене не хватает. Порядок — порядок важности. */
-export function volumeNotes(scene) {
+/**
+ * Строки про то, чего в сцене не хватает. Порядок — порядок важности.
+ *
+ * `opts.hints === false` — страница, где объект не правят (умение `editHints`):
+ * строк нет вовсе. Все три отвечают тому, кто чертит: «обведите комнаты»,
+ * «задайте высоту в мастерской чертежа», «нужны масштаб плана и привязка
+ * начала координат». У заказчика ни мастерской, ни калибровки нет, а объект он
+ * видит таким, каким его отдали (ревью ветки, F1).
+ */
+export function volumeNotes(scene, opts = {}) {
+  if (opts.hints === false) return [];
   const lines = [];
   for (const note of scene.notes || []) {
     if (note === "noRooms") lines.push(strings.volume.noRooms);
@@ -1307,6 +1348,22 @@ function createVolume({ api, hosts }) {
     const scheme = findScheme(state.project, id);
     return scheme ? visibleMarks(state.project, scheme, state.filter) : [];
   };
+  /**
+   * Говорить ли слова, обращённые к тому, кто объект **правит** (умение
+   * `editHints`, ревью ветки F1): «обведите комнаты», «задайте высоту в
+   * мастерской чертежа», «этаж задаётся карандашом в строке списка схем»,
+   * перечень неразмещённых меток и нарисованных запасным габаритом.
+   *
+   * У заказчика их нет: чинить ему нечем, а объект он видит таким, каким его
+   * отдали. Вопрос один на всё поле — второго правила здесь не заводится.
+   */
+  const hintsOn = () => appAllows("editHints", getState());
+  /**
+   * Показывать ли «Выполнить команду» над полем. Правило одно с полосой дома
+   * (`simBarControls`): это пульт инженера — набор условия «Команда» руками, —
+   * и у заказчика его нет ни там, ни здесь (R06.2, ревью ветки F1).
+   */
+  const commandShown = (on) => simBarControls({ kind: appKind(), running: on }).command;
   // Раскрытые двери (G207). Живут **в сеансе окна**: закрыл дверь в объёме — в
   // файл не попадает ничего (G68), и объект после прогулки байт в байт тот же.
   // Поэтому это и не поле проёма, а аргумент сборки сцены.
@@ -1827,7 +1884,16 @@ function createVolume({ api, hosts }) {
   // Подсказка по управлению — плашка **слева** со знаком «?» (G228): правило
   // одно на все три режима, и кирпич у них общий (`panels/plate.js`). Справа
   // стоит сводка, а ещё правее — кнопка полноэкранного показа.
-  const hintPlate = createFieldPlate({ side: "left", setting: VOLUME_HINT_SETTING });
+  // Подсказка поля: на странице просмотра заведена **сложенной** (ревью ветки,
+  // F1). Она про руки — клавиши, захват мыши, двери, — и инженеру нужна с
+  // первого кадра, а заказчику сперва нужен его дом: развёрнутой она занимала
+  // на телефоне две трети экрана и накрывала строки просмотра. Знак «?» на
+  // месте, одно нажатие — и она его, как у всех.
+  const hintPlate = createFieldPlate({
+    side: "left",
+    setting: VOLUME_HINT_SETTING,
+    collapsed: appKind() === "view",
+  });
   // ——— параметры объёма: ряды в колонке, окно там, где колонки нет ————————
   //
   // Доводы у поля одни на оба места, поэтому и собираются они здесь, рядом:
@@ -1851,6 +1917,10 @@ function createVolume({ api, hosts }) {
     // Помещения объекта для раздела «Климат помещений» (правка после сборки
     // сценариев): имя и ключ, по порядку списка помещений.
     rooms: () => roomsInOrder(getState().project).map((room) => ({ id: room.id, name: String(room.name || "") })),
+    // Слова о правке (умение `editHints`): почему «все этажи» недоступны,
+    // объясняется ссылкой на карандаш в строке списка схем — у заказчика его
+    // нет, и строки у него нет тоже (ревью ветки, F1).
+    hints: () => appAllows("editHints", getState()),
   };
   // Ряды в левой колонке (таск 231, G349) — главное место: обычная раскладка
   // показывает их, и кнопки в углу поля при ней нет вовсе.
@@ -2002,7 +2072,15 @@ function createVolume({ api, hosts }) {
   // был единственным местом, где написано, где человек оказался после
   // лестницы. Окна нет — осталась первая строка плашки.
   const titleNode = uiEl("p", { class: "volume__title" });
-  const summaryPlate = createFieldPlate({ side: "right", setting: VOLUME_SUMMARY_SETTING });
+  // Сводка на странице просмотра тоже заведена **сложенной** (ревью ветки, F1):
+  // «Стен 4 · проёмов 5 · помещений 0 · меток 2» — перепись чертежа, её читает
+  // тот, кто объект собирает. Знак «i» на месте, и заказчик, которому
+  // интересно, разворачивает её одним нажатием.
+  const summaryPlate = createFieldPlate({
+    side: "right",
+    setting: VOLUME_SUMMARY_SETTING,
+    collapsed: appKind() === "view",
+  });
   // Нечего показывать — плашка посреди поля, а не строчка в углу: это главное,
   // что человек должен прочесть, войдя в режим без чертежа.
   const emptyNote = uiEl("p", { class: "screen-empty", attrs: { hidden: "hidden" } });
@@ -3451,7 +3529,7 @@ function createVolume({ api, hosts }) {
       homeWas = on;
       if (on) homeArrive();
       else homeLeave();
-      commandRow.hidden = !on;
+      commandRow.hidden = !commandShown(on);
       syncCard();
       syncHint();
     }
@@ -4574,7 +4652,7 @@ function createVolume({ api, hosts }) {
 
   /** Что сейчас делает кнопка этажей и о чём говорит подсказка. */
   function floorAction() {
-    return volumeFloorAction(stairHere(), floorOptions(), backFloor());
+    return volumeFloorAction(stairHere(), floorOptions(), backFloor(), { hints: hintsOn() });
   }
 
   /**
@@ -5127,21 +5205,25 @@ function createVolume({ api, hosts }) {
       // Стопка этажей (таск 202): числа выше — про тот этаж, на котором
       // человек стоит, и промолчать о том, что в кадре их несколько, нельзя.
       volumeStackLine(scene, floorPlan(getState())),
-      ...volumeNotes(scene),
+      ...volumeNotes(scene, { hints: hintsOn() }),
     ]
       .filter((part) => part !== "")
       .join(" ");
-    missing.textContent = volumeUnplacedLine(scene.unplaced);
-    missing.title = volumeUnplacedTitle(scene.unplaced);
-    missing.hidden = scene.unplaced.length === 0;
-    const spare = scene.spare || [];
+    // «Не размещены: …» и строка про запасной габарит — это «в объекте не
+    // хватает числа, допиши его». У заказчика они молчат (умение `editHints`,
+    // ревью ветки F1): дописывать ему нечем, а сводка про объект, не про руки.
+    const notes = hintsOn();
+    missing.textContent = notes ? volumeUnplacedLine(scene.unplaced) : "";
+    missing.title = notes ? volumeUnplacedTitle(scene.unplaced) : "";
+    missing.hidden = !notes || scene.unplaced.length === 0;
+    const spare = notes ? scene.spare || [] : [];
     // Та же строка, что под развёрткой (`markSpare.js`, G230): в сводке место
     // под абзац есть, поэтому с хвостом — откуда числа и что сделать.
     spareLine.textContent = markSpareLine(spare, { why: true });
     spareLine.title = markSpareTitle(spare);
     spareLine.hidden = spare.length === 0;
     summaryPlate.update([titleNode, where, meta, missing, spareLine], {
-      alert: scene.unplaced.length > 0 || spare.length > 0,
+      alert: notes && (scene.unplaced.length > 0 || spare.length > 0),
     });
   }
 
@@ -5153,11 +5235,14 @@ function createVolume({ api, hosts }) {
     const value = volumeHintText({
       empty: scene.empty,
       view,
-      touching,
+      // Пальцем — если им трогают поле **или** у устройства мыши нет вовсе:
+      // на телефоне рассказывать про захват курсора и клавиши нечем, и
+      // случайное событие мыши этого не меняет (ревью ветки, F1).
+      touching: touching || volumeTouchOnly(),
       locked,
       // Пальцем прицел стоит ради «Действия», а не идёт за курсором: строка
       // про курсор ему ни к чему (таск 09 сценариев).
-      aim: !aimNode.hidden && !touching,
+      aim: !aimNode.hidden && !touching && !volumeTouchOnly(),
       doors: scene.doors,
       windows: scene.windows,
       open: openDoors,
@@ -5176,6 +5261,9 @@ function createVolume({ api, hosts }) {
       home: homeOn(),
       // Линейка включена (таск 237): щелчок ставит концы отрезка.
       measuring: measuring(),
+      // Слова о правке (умение `editHints`): «этаж задаётся карандашом в
+      // строке списка схем» — не к заказчику (ревью ветки, F1).
+      hints: hintsOn(),
     });
     // Подсказка в полном экране не уходит, а **складывается в свой знак**
     // (таск 166, G246). Она единственная из спрятанного говорит про руки:
@@ -5234,7 +5322,10 @@ function createVolume({ api, hosts }) {
     viewButton.title = switcher.title;
     viewButton.setAttribute("aria-label", switcher.title);
     doorsButton.hidden = !touching || scene.empty || (scene.doors || []).length === 0;
-    shotButton.hidden = scene.empty;
+    // «Снимок» — выгрузка, а выгрузок на странице просмотра нет вовсе («Вне
+    // рамок» спецификации): умение `exportFiles` в белый список просмотра не
+    // входит, и кнопка гаснет им, а не вторым условием (ревью ветки, F1).
+    shotButton.hidden = scene.empty || !appAllows("exportFiles", getState());
     // Режим без своего содержимого (таск 153): чертежа нет — поле показывает
     // задник и плашку посреди экрана. Кнопка режима при этом не гаснет: режим
     // доступен всегда, и сказать, чего не хватает, обязано само поле.
@@ -5253,7 +5344,7 @@ function createVolume({ api, hosts }) {
     syncParamsHome();
     // «Выполнить команду» — пока дом идёт; карточка — по оснастке поля, которая
     // только что могла появиться или уйти (таск 09 сценариев, G21).
-    commandRow.hidden = !homeOn();
+    commandRow.hidden = !commandShown(homeOn());
     placeCard();
   }
 
@@ -5582,6 +5673,36 @@ function mountVolumeScreen(host, api) {
     placeholder();
   };
 
+  /**
+   * Запустить дом, пока поверхности ещё нет (R06, R14i; ревью ветки F1).
+   *
+   * Правило запуска одно на сборку — `volumeHomeStarts`, — но зовёт его сама
+   * поверхность, а собирается она **по первому входу в «Объём»**. На странице
+   * просмотра этого мало: режим помнится в браузере (G07), и человек, закрывший
+   * страницу на «Схеме», возвращался в неё с остановленным домом и кнопкой
+   * «Запустить дом» — которую заказчик нажимать не должен вовсе.
+   *
+   * Поэтому запуск живёт и здесь: панель смонтирована всегда. Поверхность есть
+   * — молчим: она спросит то же правило сама, и «Разметка» ничего не замечает
+   * (там дом идёт только в «Объёме», а входя в него, она как раз и собирает
+   * поверхность).
+   */
+  const homeStart = () => {
+    if (volumeSurface || !getState().project) return;
+    Promise.resolve(volumeParamsReady())
+      .then(() => {
+        if (volumeSurface || !getState().project) return;
+        const start = volumeHomeStarts({
+          simulation: volumeParamsRead().simulation === true,
+          screen: screenMode(),
+          kind: appKind(),
+          running: simRunning(),
+        });
+        if (start) simStart();
+      })
+      .catch(() => {});
+  };
+
   subscribe((state, changed) => {
     // Откуда пришли (G276). Считается **здесь**, а не в самой поверхности:
     // поверхности может ещё не быть вовсе — в первый раз её собирает этот же
@@ -5591,10 +5712,14 @@ function mountVolumeScreen(host, api) {
       volumeScreenBefore = volumeScreenNow;
       volumeScreenNow = state.screen;
     }
-    if ("screen" in changed || "schemeId" in changed || "project" in changed) build();
+    if ("screen" in changed || "schemeId" in changed || "project" in changed) {
+      build();
+      homeStart();
+    }
   });
   volumeScreenNow = getState().screen;
   build();
+  homeStart();
 }
 
 registerPanel(PANEL_IDS.screenVolume, mountVolumeScreen);

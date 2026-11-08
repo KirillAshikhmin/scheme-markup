@@ -49,6 +49,12 @@
 // а не применяют: id остаются своими, адреса остаются своими, а длина ссылки —
 // то, чем за это заплачено (ADR 021).
 
+// Ссылку на библиотечный скрипт принимает **модель** и только она
+// (`scenarioLibOf`: отпечаток — 64 знака SHA-256, иначе ссылки нет). Своей
+// проверки здесь не заводится: разойдись они, упаковка снимала бы текст против
+// ссылки, которой в объекте не существует, — и заказчик остался бы без
+// сценария вовсе (ревью ветки, F1).
+import { scenarioLibOf } from "./model.js";
 import { strings, text } from "./strings.js";
 // Адреса хаба считает дом — второго счёта здесь не заводится: иначе таблица в
 // нагрузке и таблица в доме разошлись бы на первой же правке `deviceAid`.
@@ -62,11 +68,32 @@ export const VIEW_LINK_PARAM = "o";
 export const VIEW_LINK_BROKEN = "viewLinkBroken";
 /** Разделы объекта, которые в ссылку не едут (G10, G15). */
 export const VIEW_LINK_DROPPED = Object.freeze(["accepted", "equipmentTypes", "equipment", "placements"]);
-// Коллекции, по которым объект узнаётся объектом (`projectFile.looksLikeProject`):
-// они остаются в нагрузке даже пустыми. Пустое поле вообще-то убирается, но эти
-// четыре — удостоверение: без них объект, у которого ещё нет ни одной метки, не
-// открылся бы ни файлом, ни ссылкой («данные не похожи на объект»).
-const VIEW_LINK_KEPT = Object.freeze(["categories", "markTypes", "schemes", "marks"]);
+// Коллекции, которые есть у **любого** объекта, и потому остаются в нагрузке
+// даже пустыми. Пустое поле вообще-то убирается, но здесь «нет поля» и «поле
+// пустое» — разные состояния, и это не теория:
+//
+//   — `categories`, `markTypes`, `schemes`, `marks` — удостоверение объекта
+//     (`projectFile.looksLikeProject`): без них объект, у которого ещё нет ни
+//     одной метки, не открылся бы ни файлом, ни ссылкой;
+//   — `rooms`, `outlines`, `groups`, `counters` дописывает обе трубы открытия
+//     (`projectFile.migrateProject`, `projectsMigrateStored`), и читатели ходят
+//     в них без оглядки: `project.rooms.map` в фильтрах, `project.groups.find`
+//     в сцене «Объёма», `project.counters[code]` в нумерации. Объект, пришедший
+//     ссылкой, обязан нести те же коллекции, что объект из файла, — иначе дом
+//     без групп или без помещений не открывается вовсе (ревью ветки, F1).
+//
+// `counters` — объект, остальные — списки: пустые значения у них разные, и
+// восстанавливается то, что стояло в объекте.
+const VIEW_LINK_KEPT = Object.freeze([
+  "categories",
+  "markTypes",
+  "schemes",
+  "marks",
+  "rooms",
+  "outlines",
+  "groups",
+  "counters",
+]);
 
 // Знаков после точки. Шестой знак доли плана — пять сотых миллиметра на плане
 // в сто метров (`test/viewLink.test.js` держит это числом).
@@ -387,7 +414,10 @@ function viewLinkScenarios(list, options) {
   let inlined = 0;
   const scenarios = list.map((scenario) => {
     if (!scenario || typeof scenario !== "object") return scenario;
-    const lib = scenario.lib && typeof scenario.lib === "object" ? scenario.lib : viewLinkLibRef(scenario.source, index);
+    // Ссылка — только та, которую приняла модель: и та, что уже стоит в записи,
+    // и та, которую подсказал реестр. Запись, несущая текст и негодный `lib`,
+    // уезжает текстом — иначе он выбрасывался бы в пользу ссылки в никуда.
+    const lib = scenarioLibOf(scenario) || scenarioLibOf({ lib: viewLinkLibRef(scenario.source, index) });
     if (lib) {
       linked += 1;
       // Исходник библиотечного сценария в нагрузке не нужен: страница скачает
@@ -441,7 +471,14 @@ function viewLinkStripped(project, opts = {}) {
     inlined = done.inlined;
   }
   const cleaned = viewLinkClean(next);
-  for (const key of VIEW_LINK_KEPT) if (Array.isArray(next[key]) && !Array.isArray(cleaned[key])) cleaned[key] = [];
+  // Пустая коллекция возвращается на место такой, какой была: список списком,
+  // карта картой. Чего в объекте не было, не дописывается — догадку показывают,
+  // а не применяют (G68).
+  for (const key of VIEW_LINK_KEPT) {
+    if (cleaned[key] !== undefined) continue;
+    if (Array.isArray(next[key])) cleaned[key] = [];
+    else if (next[key] && typeof next[key] === "object") cleaned[key] = {};
+  }
   return { project: cleaned, scenarios: { linked, inlined } };
 }
 

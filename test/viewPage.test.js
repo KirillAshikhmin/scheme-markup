@@ -26,6 +26,11 @@ import {
   viewManifestJson,
 } from "../build.js";
 import { APP_KINDS, LAYOUT_ABILITIES, VIEW_ABILITIES, appAllows } from "../src/app.js";
+import { canvasHintText } from "../src/canvas.js";
+import { addScheme, createProject, setSchemeFloor } from "../src/model.js";
+import { schemesRowMeta } from "../src/panels/schemes.js";
+import { volumeFloorAction, volumeNotes } from "../src/panels/volume.js";
+import { volumeFloorsNote } from "../src/panels/volumeParams.js";
 import { STORE_DB_NAME, storeDatabaseName, storeNamespace, storeUse } from "../src/store.js";
 import { strings, text } from "../src/strings.js";
 
@@ -118,6 +123,60 @@ test("в просмотре нечем править: белый список �
     assert.ok(ability in LAYOUT_ABILITIES, ability + ": умения нет в таблице раскладок");
   }
   assert.deepEqual([...APP_KINDS], ["edit", "view"]);
+});
+
+// ——— слова и кнопки инженера (ревью ветки, F1) ——————————————————————————
+
+test("слова о правке гасит умение, а не правка текстов по одному", () => {
+  // Умение есть в обеих раскладках «Разметки» (инженер читает их и с телефона,
+  // стоя на объекте) и нет в белом списке просмотра.
+  assert.deepEqual([...LAYOUT_ABILITIES.editHints], ["desktop", "mobile"]);
+  assert.ok(!VIEW_ABILITIES.includes("editHints"));
+  assert.equal(appAllows("editHints", { app: "edit", layout: "mobile" }), true);
+  assert.equal(appAllows("editHints", { app: "view", layout: "desktop" }), false);
+
+  const made = addScheme(createProject(), { name: "1 этаж", width: 1000, height: 500 });
+  const state = (app) => ({ project: made.project, schemeId: made.scheme.id, mode: "select", layout: "mobile", app });
+  // Плашка над планом: «Остановите дом, чтобы править» и «Правка на
+  // компьютере» — обе к инженеру.
+  assert.equal(canvasHintText(state("edit")), strings.mobile.viewOnly);
+  assert.equal(canvasHintText(state("view")), null);
+  assert.equal(canvasHintText({ ...state("view"), simRunning: true, screen: "scheme" }), null);
+
+  // Строка схемы: по ссылке подложки нет нарочно (G17).
+  assert.equal(schemesRowMeta(made.project, made.scheme.id), strings.schemes.noImage);
+  assert.equal(schemesRowMeta(made.project, made.scheme.id, { hints: false }), "");
+  const floored = setSchemeFloor(made.project, made.scheme.id, 2).project;
+  const meta = schemesRowMeta(floored, made.scheme.id, { hints: false });
+  assert.ok(!meta.includes(strings.schemes.noImage), "«План не загружен» у заказчика: " + meta);
+  assert.ok(meta.includes("2") && !/·\s*$/.test(meta), "этаж остался, хвостового разделителя нет: " + meta);
+
+  // Правая плашка «Объёма» и список этажей.
+  const notes = { notes: ["noRooms", "noHeight", "noBridge"], heightMm: 2700 };
+  assert.equal(volumeNotes(notes).length, 3);
+  assert.deepEqual(volumeNotes(notes, { hints: false }), []);
+  const stair = { objectId: "o1", key: "stairs" };
+  assert.ok(volumeFloorAction(stair, [], null).hint.length > 0);
+  assert.equal(volumeFloorAction(stair, [], null, { hints: false }).hint, "");
+  const plan = { can: false, why: "one", floors: [], doubles: [] };
+  assert.ok(volumeFloorsNote(plan, false).length > 0);
+  assert.equal(volumeFloorsNote(plan, false, { hints: false }), "");
+  for (const why of ["one", "noFloor", "none"]) {
+    assert.equal(volumeFloorsNote({ ...plan, why }, false, { hints: false }), "", why);
+  }
+});
+
+test("умение `editHints` спрашивают там, где стояли слова инженера", () => {
+  // Девять мест ревью: подсказка плана, список схем и его строка, список
+  // меток, правая плашка «Объёма» и список этажей. «Снимок» гасит `exportFiles`
+  // (выгрузок в просмотре нет вовсе), «Выполнить команду» и часы — одна дверь
+  // полосы дома (`simBarControls`).
+  const asks = (file, ability) =>
+    new RegExp('appAllows\\(\\s*"' + ability + '"').test(readFileSync(join(ROOT, file), "utf8"));
+  for (const file of ["src/canvas.js", "src/panels/schemes.js", "src/panels/marks.js", "src/panels/volume.js"]) {
+    assert.ok(asks(file, "editHints"), file + ": слова о правке не спрашивают умения");
+  }
+  assert.ok(asks("src/panels/volume.js", "exportFiles"), "«Снимок» не гасится умением выгрузок");
 });
 
 // ——— разметка второй страницы ——————————————————————————————————————————

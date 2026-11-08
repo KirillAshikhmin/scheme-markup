@@ -125,15 +125,22 @@ function libScriptFile(name) {
  * Записи прежнего реестра, чьи файлы лежат на месте, и список пропавших.
  * Запись без файла — тревога: объект, стоящий на этом отпечатке, останется без
  * текста, и узнать об этом надо здесь, а не от заказчика.
+ *
+ * Реестра нет вовсе — первая сборка, прежних записей не бывает. Реестр есть, но
+ * не читается — `broken`: считать это первой сборкой нельзя (ревью ветки, F1).
+ * Все прежние записи исчезли бы молча, а реестр — единственная дорога от
+ * ссылки готового объекта к тексту скрипта.
  */
 function libPrevious(out) {
   const kept = [];
   const lost = [];
+  const file = join(out, SCENARIO_LIB_INDEX);
+  if (!existsSync(file)) return { kept, lost };
   let data = null;
   try {
-    data = JSON.parse(readFileSync(join(out, SCENARIO_LIB_INDEX), "utf8"));
-  } catch {
-    return { kept, lost };
+    data = JSON.parse(readFileSync(file, "utf8"));
+  } catch (error) {
+    return { kept, lost, broken: String((error && error.message) || error) };
   }
   const scripts = data && Array.isArray(data.scripts) ? data.scripts : [];
   for (const entry of scripts) {
@@ -309,7 +316,9 @@ function libReadme(root, entries) {
  *
  * Ответ: `{ok, reason, root, out, written, kept, lost, removed, entries}`.
  * `kept` — записи прежних сборок, переехавшие в новый реестр; `lost` — записи,
- * чьих файлов в папке нет (ссылки на них уже не разрешить).
+ * чьих файлов в папке нет (ссылки на них уже не разрешить). Прежний реестр не
+ * разобрался — `{ok: false, reason: "brokenIndex", broken: <причина>}` и ни
+ * одной записи на диск.
  */
 export async function scenarioLibBuild({ root = SOURCE_DEFAULT, out = OUT_DEFAULT } = {}) {
   const collected = await scenarioLibCollect(root);
@@ -320,6 +329,22 @@ export async function scenarioLibBuild({ root = SOURCE_DEFAULT, out = OUT_DEFAUL
   const entries = collected.map((item) => item.entry);
   mkdirSync(out, { recursive: true });
   const previous = libPrevious(out);
+  // Прежний реестр не прочитан — дальше нельзя: не на что опереться, а
+  // переписать его нынешними записями значило бы выбросить прежние отпечатки.
+  if (previous.broken) {
+    return {
+      ok: false,
+      reason: "brokenIndex",
+      broken: previous.broken,
+      root: resolve(root),
+      out: resolve(out),
+      written: [],
+      kept: [],
+      lost: [],
+      removed: [],
+      entries: [],
+    };
+  }
   const fresh = new Set(entries.map((entry) => entry.hash));
   // Прежние записи переезжают как есть: имя и версия у отпечатка свои, и
   // переписывать их нынешними значило бы соврать о том, что лежит в файле.
@@ -357,7 +382,12 @@ export async function scenarioLibBuild({ root = SOURCE_DEFAULT, out = OUT_DEFAUL
 const runDirectly = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (runDirectly) {
   const result = await scenarioLibBuild({ root: process.argv[2] ? resolve(process.argv[2]) : SOURCE_DEFAULT });
-  if (!result.ok) {
+  if (result.reason === "brokenIndex") {
+    console.error("ТРЕВОГА: реестр " + SCENARIO_LIB_INDEX + " в " + result.out + " не читается: " + result.broken);
+    console.error("Прежние записи — единственная дорога от ссылки готового объекта к тексту скрипта.");
+    console.error("Библиотека не собрана, на диске ничего не тронуто. Верни реестр из git и пересобери.");
+    process.exitCode = 1;
+  } else if (!result.ok) {
     console.error("scenario-lib: нет папки " + result.root);
     console.error("Библиотека не собрана, в " + result.out + " ничего не тронуто.");
     console.error("Укажи папку Sprut.Hub_Tools аргументом: node tools/scenario-lib.mjs <папка>");

@@ -6280,6 +6280,15 @@ test("текст подсказки говорит про тот вид и то 
   const touch = volumeHintText({ ...base, touching: true });
   assert.ok(touch.includes(strings.volume.hintTouch), touch);
   assert.ok(!touch.includes(strings.volume.hintGrab) && !touch.includes(strings.volume.hintLocked), touch);
+  // Ни клавиш, ни колеса, ни «клика по полу» (ревью ветки, F1): на телефоне
+  // ими не воспользуешься, а подсказка обязана говорить то, что делают руки
+  // сейчас. Всё про палец — в одной `hintTouch`.
+  assert.ok(!touch.includes(strings.volume.hintPerson), touch);
+  assert.ok(!touch.includes(strings.volume.hintStance), touch);
+  const touchAround = volumeHintText({ ...base, view: "around", aim: false, touching: true });
+  assert.ok(!touchAround.includes(strings.volume.hintAround), touchAround);
+  assert.ok(!touchAround.includes(strings.volume.hintAroundFly), touchAround);
+  assert.ok(touchAround.includes(strings.volume.hintTouch), touchAround);
   // Двери и лестница дописываются теми же строками, что и прежде.
   const full = volumeHintText({ ...base, doors: ["d1"], stair: { objectId: "s" }, floors: [{ floor: 2 }] });
   assert.ok(full.includes(text("volume.stairNear", { what: strings.volume.stairWord })), full);

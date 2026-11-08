@@ -243,6 +243,13 @@ function libVersionRank(version) {
  *      правила безверсионному скрипту не пришло бы даже предложения обновить,
  *      и он остался бы на прежнем отпечатке навсегда.
  *
+ * Правило **над обоими**: есть у этого имени запись нынешней сборки — выбирать
+ * можно только среди таких записей, и ни среди каких других (ревью ветки, F1).
+ * Прежние записи живут в реестре вечно, и среди них бывает версия выше
+ * нынешней — откатили скрипт. Предложить её значило бы дважды соврать: файла
+ * того отпечатка в библиотеке может уже не быть, а объект, стоящий на
+ * нынешнем, носил бы предложение обновиться вечно.
+ *
  * Реестр, который о нынешней сборке не говорит (`current === null`), решает
  * одними версиями — как прежде.
  */
@@ -253,8 +260,12 @@ export function scenarioLibNewer(ref, index) {
   const hash = libHashOf(own);
   const map = index instanceof Map ? index : scenarioLibIndexRead(index);
   const rank = libVersionRank(own.version);
-  // Родня по имени, кроме того отпечатка, на котором объект стоит.
-  const kin = [...map.values()].filter((entry) => entry.name === name && entry.hash !== hash);
+  // Родня по имени: вся — чтобы узнать, есть ли у имени нынешняя сборка (в том
+  // числе тот отпечаток, на котором объект стоит).
+  const family = [...map.values()].filter((entry) => entry.name === name);
+  const said = family.some((entry) => entry.current === true);
+  // Кандидаты: нынешняя сборка, если о ней сказано, кроме своего отпечатка.
+  const kin = (said ? family.filter((entry) => entry.current === true) : family).filter((entry) => entry.hash !== hash);
   let best = null;
   if (rank >= 0) {
     for (const entry of kin) {
@@ -441,6 +452,11 @@ export async function scenarioLibResolve(project, opts) {
     if (!ref) return scenario;
     const source = libScripts.get(ref.hash);
     if (typeof source === "string") return { ...scenario, source };
+    // Текст записи, если он у неё есть: ссылка не разрешилась, а сценарий
+    // рабочий — обнулять его нечем (ревью ветки, F1). Своего текста у записи
+    // этой сборки не бывает (модель снимает одно другим), но файл, пришедший
+    // не отсюда, несёт оба поля.
+    if (typeof scenario.source === "string" && scenario.source !== "") return scenario;
     missing.push({
       id: String(scenario.id || ""),
       name: ref.name || (typeof scenario.name === "string" ? scenario.name : ""),

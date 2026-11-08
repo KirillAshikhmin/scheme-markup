@@ -102,16 +102,27 @@ export function simBarState(read) {
 }
 
 /**
- * Какие кнопки ряда запуска видны (R06.2): `{start, reset, command}`. На
+ * Что видно в полосе дома (R06.2): `{start, reset, command, clock}`. На
  * странице просмотра дом идёт, пока открыта страница, и заказчик не может ни
  * остановить его, ни сбросить: «Запустить» остаётся лишь запасом на случай,
  * когда дом не поднялся, а запущенному дому кнопки «Остановить» нет вовсе.
  * В «Разметке» всё как было. Единственное место, где дом гасят, — кнопка
  * `start` этой полосы.
+ *
+ * `command` и `clock` — пульт инженера, и у заказчика их нет (ревью ветки, F1):
+ * «Выполнить команду» — это набор условия «Команда» руками, а ряд часов
+ * («×60 — сутки за 24 мин», «+1 ч», «К следующему событию») повторяет то, что
+ * в просмотре крутят параметрами объёма — там же, где погода и климат. Правило
+ * одно на полосу и на кнопку над полем объёма: второго не заводится.
  */
 export function simBarControls({ kind, running }) {
   const view = kind === "view";
-  return { start: view ? !running : true, reset: !view && running === true, command: running === true };
+  return {
+    start: view ? !running : true,
+    reset: !view && running === true,
+    command: !view && running === true,
+    clock: !view && running === true,
+  };
 }
 
 /**
@@ -314,7 +325,10 @@ export function simBarMount(host, api) {
     start.hidden = !shown.start;
     reset.hidden = !shown.reset;
     command.hidden = !shown.command;
-    clock.hidden = !running;
+    clock.hidden = !shown.clock;
+    // Кнопка «Часы» раскрывает ряд часов: нет ряда — нет и кнопки, иначе на
+    // телефоне она не делала бы ничего (ревью ветки, F1).
+    more.hidden = !shown.clock;
     host.classList.toggle("is-running", running);
     host.classList.toggle("is-expanded", expanded);
     more.textContent = expanded ? strings.sim.bar.less : strings.sim.bar.more;

@@ -214,6 +214,29 @@ test("версия новее находится по имени, а числа 
   assert.equal(scenarioLibNewer({ name: MOTION_ENTRY.name, version: "", hash: MOTION_ENTRY.hash }, index), null);
 });
 
+test("«новее» не указывает на отпечаток прежней сборки, а нынешнюю версию не теребит", () => {
+  // Библиотека прирастает: записи прежних сборок живут в реестре вечно. Среди
+  // них бывает версия выше нынешней (откатили скрипт), и предложить её нельзя
+  // — её файла в библиотеке может уже не быть, а объект, стоящий на отпечатке
+  // нынешней сборки, носил бы предложение вечно (ревью ветки, F1).
+  const rolled = { ...MOTION_ENTRY, version: "1.5", hash: sha256(MOTION + "// откатили\n"), file: "m@rolled.js" };
+  const index = scenarioLibIndexRead(
+    JSON.stringify({ version: 1, scripts: [MOTION_ENTRY, rolled], current: [MOTION_ENTRY.hash] }),
+  );
+  assert.equal(
+    scenarioLibNewer({ name: MOTION_ENTRY.name, version: MOTION_ENTRY.version, hash: MOTION_ENTRY.hash }, index),
+    null,
+    "объект стоит на нынешней сборке — предлагать нечего",
+  );
+  // Нынешняя сборка с версией выше предлагается, как и раньше.
+  const next = { ...MOTION_ENTRY, version: "1.10", hash: sha256(MOTION + "// правка\n"), file: "m@next.js" };
+  const grown = scenarioLibIndexRead(
+    JSON.stringify({ version: 1, scripts: [MOTION_ENTRY, rolled, next], current: [next.hash] }),
+  );
+  const found = scenarioLibNewer({ name: MOTION_ENTRY.name, version: MOTION_ENTRY.version, hash: MOTION_ENTRY.hash }, grown);
+  assert.equal(found && found.hash, next.hash, "предложение — запись нынешней сборки");
+});
+
 // ——— разрешение перед домом (G25, G26) ——————————————————————————————————————
 
 test("разрешаются только скрипты открытого объекта, остальные файлы не трогаются", async () => {
@@ -271,6 +294,23 @@ test("скрипт не доехал: сценарий помечен, оста�
   assert.equal(second.active, false);
   // Доехавший сценарий работает как ни в чём не бывало.
   assert.equal(result.scenarios.find((scenario) => scenario.id === "s-motion").source, MOTION);
+});
+
+test("свой текст записи не выбрасывается, когда библиотечный скрипт не доехал", async () => {
+  // Запись не из этой сборки несёт и ссылку, и текст. Ссылка не разрешилась —
+  // значит дом берёт текст, который у записи есть: обнулить его значило бы
+  // погасить рабочий сценарий (ревью ветки, F1).
+  scenarioLibForget();
+  const gone = { name: "Мастер-выключатель", version: "1.0", hash: sha256("этого в библиотеке нет") };
+  const project = libProject({ second: gone });
+  project.scenarios[2] = { ...project.scenarios[2], source: SWITCH_GLOBAL };
+  const result = await scenarioLibResolve(project, { fetch: libNet(libFiles()).fetch, store: libStore() });
+
+  const second = result.scenarios.find((scenario) => scenario.id === "s-second");
+  assert.equal(second.source, SWITCH_GLOBAL, "текст записи цел");
+  assert.equal(second.libMissing, undefined, "сценарий работает — помечать его нечем");
+  assert.notEqual(second.active, false);
+  assert.deepEqual(result.missing, [], "сказать заказчику не о чем");
 });
 
 test("подменённый файл библиотечным не считается: отпечаток сверяется", async () => {
@@ -397,6 +437,26 @@ test("команда собирает папку и реестр, а повто�
   const after = new Map(readdirSync(out).map((name) => [name, read(join(out, name))]));
   assert.deepEqual([...after.keys()].sort(), [...before.keys()].sort());
   for (const [name, text] of before) assert.equal(after.get(name), text, "повторный запуск: " + name);
+});
+
+test("непрочитанный реестр — отказ сборки, и на диск ничего не ложится", async () => {
+  // Единственная дорога от ссылки готового объекта к тексту скрипта — реестр.
+  // Принять его за «первую сборку» значило бы молча потерять все прежние
+  // записи: ссылки готовых объектов перестали бы разрешаться (ревью ветки, F1).
+  const root = mkdtempSync(join(tmpdir(), "scenario-lib-src-"));
+  const out = mkdtempSync(join(tmpdir(), "scenario-lib-out-"));
+  mkdirSync(join(root, "MotionLightAutomation", "source"), { recursive: true });
+  writeFileSync(join(root, "MotionLightAutomation", "source", "MotionLightAutomation.js"), MOTION);
+  writeFileSync(join(out, SCENARIO_LIB_INDEX), '{"version": 1, "scripts": [обрезано');
+  const kept = read(join(out, SCENARIO_LIB_INDEX));
+
+  const result = await scenarioLibBuild({ root, out });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "brokenIndex");
+  assert.ok(String(result.broken || "").length > 0, "о причине сказано словами");
+  assert.deepEqual(result.written, []);
+  assert.deepEqual(readdirSync(out), [SCENARIO_LIB_INDEX], "ни одного нового файла");
+  assert.equal(read(join(out, SCENARIO_LIB_INDEX)), kept, "прежний реестр не тронут");
 });
 
 // ——— выкладка ———————————————————————————————————————————————————————————————

@@ -4820,6 +4820,22 @@ background: transparent;
 top: auto;
 bottom: 8px;
 }
+#app[data-app="view"][data-screen="volume"] .view-notes {
+top: calc(var(--canvas-corner-edge) + var(--canvas-corner-size) + var(--canvas-corner-gap));
+}
+#app[data-app="view"][data-screen="volume"] #canvas-area:has(.view-notes) .canvas-hint:not(.is-collapsed) {
+top: calc(
+var(--canvas-corner-edge) + var(--canvas-corner-size) + var(--canvas-corner-gap) + var(--view-notes-h, 0px)
+);
+}
+#app[data-app="view"][data-screen="volume"].is-mobile
+#canvas-area:has(.view-notes)
+.volume__stage:has(.canvas-hint:not(.canvas-hint--info):not(.is-collapsed))
+.volume__paramsBtn {
+top: calc(
+var(--canvas-corner-edge) + 2 * (var(--canvas-corner-size) + var(--canvas-corner-gap)) + var(--view-notes-h, 0px)
+);
+}
 .view-scn {
 display: flex;
 flex-direction: column;
@@ -19502,7 +19518,7 @@ changed = true;
 const next = {};
 for (const key of Object.keys(scenario)) {
 if (key === "source") next.lib = lib;
-else next[key] = scenario[key];
+else if (key !== "lib") next[key] = scenario[key];
 }
 return next;
 });
@@ -28371,7 +28387,9 @@ if (!name) return null;
 const hash = libHashOf(own);
 const map = index instanceof Map ? index : scenarioLibIndexRead(index);
 const rank = libVersionRank(own.version);
-const kin = [...map.values()].filter((entry) => entry.name === name && entry.hash !== hash);
+const family = [...map.values()].filter((entry) => entry.name === name);
+const said = family.some((entry) => entry.current === true);
+const kin = (said ? family.filter((entry) => entry.current === true) : family).filter((entry) => entry.hash !== hash);
 let best = null;
 if (rank >= 0) {
 for (const entry of kin) {
@@ -28514,6 +28532,7 @@ const ref = scenarioLibRef(scenario);
 if (!ref) return scenario;
 const source = libScripts.get(ref.hash);
 if (typeof source === "string") return { ...scenario, source };
+if (typeof scenario.source === "string" && scenario.source !== "") return scenario;
 missing.push({
 id: String(scenario.id || ""),
 name: ref.name || (typeof scenario.name === "string" ? scenario.name : ""),
@@ -43617,6 +43636,7 @@ if (!ref) return scenario;
 any = true;
 const source = libSources.get(ref.hash);
 if (typeof source === "string") return { ...scenario, source };
+if (typeof scenario.source === "string" && scenario.source !== "") return scenario;
 missing.push({
 id: String(scenario.id || ""),
 name: ref.name || simScenarioName(scenario, scenario.id),
@@ -44828,6 +44848,7 @@ editSchemes: ["desktop"],
 editRooms: ["desktop"],
 editProject: ["desktop"],
 dictionary: ["desktop"],
+editHints: ["desktop", "mobile"],
 viewSizes: ["desktop", "mobile"],
 };
 function layoutModeFor(view, override) {
@@ -46394,7 +46415,7 @@ return seen !== current;
 }
 const plateCollapsed = new Map();
 const plateSeen = new Map();
-function createFieldPlate({ side, setting }) {
+function createFieldPlate({ side, setting, collapsed: shutByDefault = false }) {
 const info = side === "right";
 const body = uiEl("div", { class: "canvas-hint__text" });
 const toggle = uiEl(
@@ -46455,12 +46476,15 @@ alert = Boolean(options.alert);
 node.hidden = Boolean(options.hidden) || text.trim() === "";
 render();
 }
+const first = !plateCollapsed.has(setting);
+if (first) plateCollapsed.set(setting, shutByDefault === true);
 render();
-if (!plateCollapsed.has(setting)) {
+if (first) {
 Promise.resolve(getSetting(setting))
 .then((saved) => {
-if (saved !== true || plateCollapsed.get(setting) === true) return;
-plateCollapsed.set(setting, true);
+if (saved !== true && saved !== false) return;
+if (plateCollapsed.get(setting) === saved) return;
+plateCollapsed.set(setting, saved);
 plateSeen.delete(setting);
 render();
 })
@@ -51379,7 +51403,10 @@ function canvasHintText(state) {
 if (!state || !state.schemeId) return null;
 if (!canvasOnScreen(state)) return null;
 if (state.measuring) return strings.measure.hintPlan;
-if (!canvasEditAllowed(state)) return canvasSimLocked(state) ? strings.sim.bar.editLocked : strings.mobile.viewOnly;
+if (!canvasEditAllowed(state)) {
+if (!appAllows("editHints", state)) return null;
+return canvasSimLocked(state) ? strings.sim.bar.editLocked : strings.mobile.viewOnly;
+}
 if (state.editPathId && state.project) {
 if (findMark(state.project, state.editPathId)) return strings.canvas.hintLineEdit;
 if (findOutline(state.project, state.editPathId)) return strings.canvas.hintOutlineEdit;
@@ -54290,7 +54317,11 @@ const b = bridge.toScreen(wall.bMm);
 return (a.y + b.y) / 2;
 }
 function mountCanvasSummary(host, api) {
-const plate = createFieldPlate({ side: "right", setting: CANVAS_SUMMARY_SETTING });
+const plate = createFieldPlate({
+side: "right",
+setting: CANVAS_SUMMARY_SETTING,
+collapsed: appKind() === "view",
+});
 host.append(plate.node);
 const render = () => {
 const state = api.getState();
@@ -57039,7 +57070,16 @@ const VIEW_LINK_VERSION = 1;
 const VIEW_LINK_PARAM = "o";
 const VIEW_LINK_BROKEN = "viewLinkBroken";
 const VIEW_LINK_DROPPED = Object.freeze(["accepted", "equipmentTypes", "equipment", "placements"]);
-const VIEW_LINK_KEPT = Object.freeze(["categories", "markTypes", "schemes", "marks"]);
+const VIEW_LINK_KEPT = Object.freeze([
+"categories",
+"markTypes",
+"schemes",
+"marks",
+"rooms",
+"outlines",
+"groups",
+"counters",
+]);
 const VIEW_LINK_DIGITS = 6;
 const VIEW_LINK_SCALE = 10 ** VIEW_LINK_DIGITS;
 const VIEW_LINK_ROUND_MAX = 1e9;
@@ -57256,7 +57296,7 @@ let linked = 0;
 let inlined = 0;
 const scenarios = list.map((scenario) => {
 if (!scenario || typeof scenario !== "object") return scenario;
-const lib = scenario.lib && typeof scenario.lib === "object" ? scenario.lib : viewLinkLibRef(scenario.source, index);
+const lib = scenarioLibOf(scenario) || scenarioLibOf({ lib: viewLinkLibRef(scenario.source, index) });
 if (lib) {
 linked += 1;
 const { source: dropped, ...rest } = scenario;
@@ -57294,7 +57334,11 @@ linked = done.linked;
 inlined = done.inlined;
 }
 const cleaned = viewLinkClean(next);
-for (const key of VIEW_LINK_KEPT) if (Array.isArray(next[key]) && !Array.isArray(cleaned[key])) cleaned[key] = [];
+for (const key of VIEW_LINK_KEPT) {
+if (cleaned[key] !== undefined) continue;
+if (Array.isArray(next[key])) cleaned[key] = [];
+else if (next[key] && typeof next[key] === "object") cleaned[key] = {};
+}
 return { project: cleaned, scenarios: { linked, inlined } };
 }
 function viewLinkWalkStrings(value, seen) {
@@ -61907,7 +61951,10 @@ host.hidden = !appAllows("markList", state);
 syncCompact(state);
 if (!state.project || !state.schemeId) {
 syncFilters(state, 0, 0);
-list.replaceChildren(uiEl("p", { class: "panel__empty", text: strings.panels.canvasEmpty }));
+const empty = appAllows("editHints", state)
+? [uiEl("p", { class: "panel__empty", text: strings.panels.canvasEmpty })]
+: [];
+list.replaceChildren(...empty);
 return;
 }
 const rows = filtersMarkRows(state.project, state.schemeId, state.filter);
@@ -64081,9 +64128,10 @@ return times.bySite ? text("volume.sunriseSite", where) : text("volume.sunrise",
 function volumeFloorOptionLabel(option) {
 return text("volume.stairOption", { floor: option.floor, name: option.name });
 }
-function volumeFloorsNote(plan, all) {
+function volumeFloorsNote(plan, all, opts = {}) {
 if (!plan) return "";
 if (!plan.can) {
+if (opts.hints === false) return "";
 if (plan.why === "noFloor") return strings.volume.floorsNoOwn;
 if (plan.why === "one") return strings.volume.floorsOne;
 return strings.volume.floorsNone;
@@ -64104,6 +64152,7 @@ function createVolumeParamsFields(options) {
 const { now, hour, times } = options;
 const floors = options.floors || (() => null);
 const goFloor = options.goFloor || (() => {});
+const hints = () => (options.hints ? options.hints() !== false : true);
 const box = uiEl("div", {
 class: "tools volume__params" + (options.window === true ? " volume__params--window" : ""),
 });
@@ -64126,7 +64175,7 @@ uiEl(
 [
 uiButton(strings.volume.floorsAll, {
 class: "ui-btn" + (stacked ? " is-on" : ""),
-title: plan && plan.can ? strings.volume.floorsAllHint : volumeFloorsNote(plan, false),
+title: plan && plan.can ? strings.volume.floorsAllHint : volumeFloorsNote(plan, false, { hints: hints() }),
 attrs: {
 "aria-pressed": stacked ? "true" : "false",
 ...(plan && plan.can ? {} : { disabled: "" }),
@@ -64148,7 +64197,7 @@ if (!option.current) goFloor(option);
 ),
 ],
 ),
-uiEl("p", { class: "tools__note", text: volumeFloorsNote(plan, stacked) }),
+uiEl("p", { class: "tools__note", text: volumeFloorsNote(plan, stacked, { hints: hints() }) }),
 checkRow(strings.volume.roofOff, chosen.roofOff, strings.volume.roofOffHint, (on) =>
 volumeParamsFlag("roofOff", on),
 ),
@@ -64617,7 +64666,12 @@ steps: SIM_BAR_STEPS.map((step) => ({ key: step.key, ms: step.ms })),
 }
 function simBarControls({ kind, running }) {
 const view = kind === "view";
-return { start: view ? !running : true, reset: !view && running === true, command: running === true };
+return {
+start: view ? !running : true,
+reset: !view && running === true,
+command: !view && running === true,
+clock: !view && running === true,
+};
 }
 function simBarKeyAction(event, ctx) {
 if (!event || !ctx) return null;
@@ -64787,7 +64841,8 @@ const shown = simBarControls({ kind: appKind(), running });
 start.hidden = !shown.start;
 reset.hidden = !shown.reset;
 command.hidden = !shown.command;
-clock.hidden = !running;
+clock.hidden = !shown.clock;
+more.hidden = !shown.clock;
 host.classList.toggle("is-running", running);
 host.classList.toggle("is-expanded", expanded);
 more.textContent = expanded ? strings.sim.bar.less : strings.sim.bar.more;
@@ -67983,6 +68038,14 @@ return window.matchMedia("(pointer: coarse)").matches;
 return false;
 }
 }
+function volumeTouchOnly() {
+if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
+try {
+return window.matchMedia("(hover: none) and (pointer: coarse)").matches;
+} catch (error) {
+return false;
+}
+}
 const VOLUME_UNPLACED_SHOWN = MARK_LIST_SHOWN;
 function volumeUnplacedReason(reason) {
 if (reason === VOLUME_MARK_NO_SIZE) return strings.volume.unplacedNoSize;
@@ -68034,12 +68097,12 @@ function volumeHintText(state) {
 if (state.empty) return strings.volume.emptyHint;
 const parts = [];
 if (state.measuring) parts.push(strings.measure.hintVolume);
-parts.push(state.view === "person" ? strings.volume.hintPerson : strings.volume.hintAround);
+if (!state.touching) parts.push(state.view === "person" ? strings.volume.hintPerson : strings.volume.hintAround);
 if (state.view === "person") {
-parts.push(strings.volume.hintStance);
+if (!state.touching) parts.push(strings.volume.hintStance);
 parts.push(state.ghost ? strings.volume.hintGhost : strings.volume.hintWalls);
 parts.push(state.touching ? strings.volume.hintMinimapTouch : strings.volume.hintMinimap);
-} else {
+} else if (!state.touching) {
 parts.push(strings.volume.hintAroundFly);
 }
 if (state.touching) parts.push(strings.volume.hintTouch);
@@ -68051,7 +68114,7 @@ if (state.home) parts.push(state.touching ? strings.volume.homeTouchHint : strin
 parts.push(volumeDoorLine(state.doors, state.open, state.aimedDoor, state.touching));
 parts.push(volumeWindowLine(state.windows, state.open, state.aimedDoor, state.touching));
 parts.push(volumeSheerLine(state.sheers, state.openSheers || new Set(), state.aimedSheer, state.touching));
-parts.push(volumeFloorAction(state.stair, state.floors, state.back).hint);
+parts.push(volumeFloorAction(state.stair, state.floors, state.back, { hints: state.hints }).hint);
 return parts.filter((part) => part !== "").join(" ");
 }
 function volumeFloorName(where) {
@@ -68065,11 +68128,12 @@ const lift = key === SCHEME_LIFT_KEY;
 if (at) return lift ? strings.volume.liftWordAt : strings.volume.stairWordAt;
 return lift ? strings.volume.liftWord : strings.volume.stairWord;
 }
-function volumeFloorAction(stair, options, back) {
+function volumeFloorAction(stair, options, back, opts = {}) {
 if (stair) {
 const what = volumeFloorWord(stair.key);
 if (!options || options.length === 0) {
-return { kind: "none", label: "", title: "", hint: text("volume.stairNoFloors", { what }) };
+const hint = opts.hints === false ? "" : text("volume.stairNoFloors", { what });
+return { kind: "none", label: "", title: "", hint };
 }
 return {
 kind: "stair",
@@ -68103,7 +68167,8 @@ numbers: plan.floors.map((item) => item.floor).join(", "),
 floor: plan.floor,
 });
 }
-function volumeNotes(scene) {
+function volumeNotes(scene, opts = {}) {
+if (opts.hints === false) return [];
 const lines = [];
 for (const note of scene.notes || []) {
 if (note === "noRooms") lines.push(strings.volume.noRooms);
@@ -68186,6 +68251,8 @@ const sceneMarks = (state, id = schemeId) => {
 const scheme = findScheme(state.project, id);
 return scheme ? visibleMarks(state.project, scheme, state.filter) : [];
 };
+const hintsOn = () => appAllows("editHints", getState());
+const commandShown = (on) => simBarControls({ kind: appKind(), running: on }).command;
 const openDoors = new Set();
 const openCurtains = new Set();
 let openRev = 1;
@@ -68397,7 +68464,11 @@ if (box.style.maxHeight !== most) box.style.maxHeight = most;
 const clockTime = air.timeLine;
 const clockNode = uiEl("div", { class: "volume__clock", attrs: { hidden: "hidden" } }, [clockTime, air.line, air.box]);
 let clockSaid = { value: null, line: null };
-const hintPlate = createFieldPlate({ side: "left", setting: VOLUME_HINT_SETTING });
+const hintPlate = createFieldPlate({
+side: "left",
+setting: VOLUME_HINT_SETTING,
+collapsed: appKind() === "view",
+});
 const paramsDoors = {
 now: () => Date.now(),
 hour: () => hourNow(),
@@ -68405,6 +68476,7 @@ times: () => dayTimes().times,
 floors: () => floorPlan(getState()),
 goFloor: (option) => setState({ schemeId: option.schemeId }),
 rooms: () => roomsInOrder(getState().project).map((room) => ({ id: room.id, name: String(room.name || "") })),
+hints: () => appAllows("editHints", getState()),
 };
 const paramsFields = createVolumeParamsFields(paramsDoors);
 const paramsButton = createVolumeParams(paramsDoors);
@@ -68496,7 +68568,11 @@ const meta = uiEl("p", { class: "volume__meta" });
 const missing = uiEl("p", { class: "volume__missing" });
 const spareLine = uiEl("p", { class: "volume__missing" });
 const titleNode = uiEl("p", { class: "volume__title" });
-const summaryPlate = createFieldPlate({ side: "right", setting: VOLUME_SUMMARY_SETTING });
+const summaryPlate = createFieldPlate({
+side: "right",
+setting: VOLUME_SUMMARY_SETTING,
+collapsed: appKind() === "view",
+});
 const emptyNote = uiEl("p", { class: "screen-empty", attrs: { hidden: "hidden" } });
 stage.append(summaryPlate.node, emptyNote);
 hosts.stage.replaceChildren(stage);
@@ -69333,7 +69409,7 @@ if (on !== homeWas) {
 homeWas = on;
 if (on) homeArrive();
 else homeLeave();
-commandRow.hidden = !on;
+commandRow.hidden = !commandShown(on);
 syncCard();
 syncHint();
 }
@@ -69964,7 +70040,7 @@ floor === null || floor === undefined ? strings.volume.floorNone : String(floor)
 syncHint();
 }
 function floorAction() {
-return volumeFloorAction(stairHere(), floorOptions(), backFloor());
+return volumeFloorAction(stairHere(), floorOptions(), backFloor(), { hints: hintsOn() });
 }
 function backFloor() {
 if (!cameFrom) return null;
@@ -70276,28 +70352,29 @@ rooms: scene.rooms.length,
 marks: scene.marks.length,
 }),
 volumeStackLine(scene, floorPlan(getState())),
-...volumeNotes(scene),
+...volumeNotes(scene, { hints: hintsOn() }),
 ]
 .filter((part) => part !== "")
 .join(" ");
-missing.textContent = volumeUnplacedLine(scene.unplaced);
-missing.title = volumeUnplacedTitle(scene.unplaced);
-missing.hidden = scene.unplaced.length === 0;
-const spare = scene.spare || [];
+const notes = hintsOn();
+missing.textContent = notes ? volumeUnplacedLine(scene.unplaced) : "";
+missing.title = notes ? volumeUnplacedTitle(scene.unplaced) : "";
+missing.hidden = !notes || scene.unplaced.length === 0;
+const spare = notes ? scene.spare || [] : [];
 spareLine.textContent = markSpareLine(spare, { why: true });
 spareLine.title = markSpareTitle(spare);
 spareLine.hidden = spare.length === 0;
 summaryPlate.update([titleNode, where, meta, missing, spareLine], {
-alert: scene.unplaced.length > 0 || spare.length > 0,
+alert: notes && (scene.unplaced.length > 0 || spare.length > 0),
 });
 }
 function syncHint() {
 const value = volumeHintText({
 empty: scene.empty,
 view,
-touching,
+touching: touching || volumeTouchOnly(),
 locked,
-aim: !aimNode.hidden && !touching,
+aim: !aimNode.hidden && !touching && !volumeTouchOnly(),
 doors: scene.doors,
 windows: scene.windows,
 open: openDoors,
@@ -70312,6 +70389,7 @@ keys: channelKeys(),
 ghost: ghosting(),
 home: homeOn(),
 measuring: measuring(),
+hints: hintsOn(),
 });
 hintPlate.fold(bare());
 hintPlate.update(value);
@@ -70340,7 +70418,7 @@ viewButton.replaceChildren(switcher.next === "person" ? uiIcon("viewPerson") : u
 viewButton.title = switcher.title;
 viewButton.setAttribute("aria-label", switcher.title);
 doorsButton.hidden = !touching || scene.empty || (scene.doors || []).length === 0;
-shotButton.hidden = scene.empty;
+shotButton.hidden = scene.empty || !appAllows("exportFiles", getState());
 emptyNote.hidden = !scene.empty;
 emptyNote.textContent = scene.empty ? strings.volume.empty : "";
 syncStanceWords();
@@ -70350,7 +70428,7 @@ syncWhere();
 syncStair();
 syncSelection();
 syncParamsHome();
-commandRow.hidden = !homeOn();
+commandRow.hidden = !commandShown(homeOn());
 placeCard();
 }
 function destroy() {
@@ -70547,15 +70625,34 @@ volumeSurface = createVolume({ api, hosts });
 }
 placeholder();
 };
+const homeStart = () => {
+if (volumeSurface || !getState().project) return;
+Promise.resolve(volumeParamsReady())
+.then(() => {
+if (volumeSurface || !getState().project) return;
+const start = volumeHomeStarts({
+simulation: volumeParamsRead().simulation === true,
+screen: screenMode(),
+kind: appKind(),
+running: simRunning(),
+});
+if (start) simStart();
+})
+.catch(() => {});
+};
 subscribe((state, changed) => {
 if ("screen" in changed && state.screen !== volumeScreenNow) {
 volumeScreenBefore = volumeScreenNow;
 volumeScreenNow = state.screen;
 }
-if ("screen" in changed || "schemeId" in changed || "project" in changed) build();
+if ("screen" in changed || "schemeId" in changed || "project" in changed) {
+build();
+homeStart();
+}
 });
 volumeScreenNow = getState().screen;
 build();
+homeStart();
 }
 registerPanel(PANEL_IDS.screenVolume, mountVolumeScreen);
 
@@ -73910,16 +74007,23 @@ turn: (origin.turn + normalizeTransform(transform).rotate) % 360,
 }
 return { project: next, pushed, scaleLost };
 }
-function schemesRowMeta(project, schemeId) {
+function schemesRowMeta(project, schemeId, opts = {}) {
 const scheme = findScheme(project, schemeId);
 if (!scheme) return "";
 const plan = scheme.imageId
 ? text("schemes.size", { width: scheme.width, height: scheme.height })
+: opts.hints === false
+? ""
 : strings.schemes.noImage;
 const floor = schemeFloorOf(project, schemeId);
 const anchored = Boolean(schemeAnchorOf(project, schemeId));
-if (floor === null) return anchored ? text("schemes.metaAnchor", { plan }) : plan;
-return text(anchored ? "schemes.metaFloorAnchor" : "schemes.metaFloor", { floor, plan });
+const meta =
+floor === null
+? anchored
+? text("schemes.metaAnchor", { plan })
+: plan
+: text(anchored ? "schemes.metaFloorAnchor" : "schemes.metaFloor", { floor, plan });
+return plan === "" ? meta.replace(/\s*·\s*$/, "") : meta;
 }
 function schemesAnchorView(anchor) {
 if (!anchor) return { set: false, label: strings.schemes.anchorNone };
@@ -74350,6 +74454,7 @@ function render() {
 const state = getState();
 const project = state.project;
 const editable = appAllows("editSchemes", state);
+const hints = appAllows("editHints", state);
 list.hidden = !appAllows("switchScheme", state);
 list.replaceChildren();
 addButton.disabled = !project;
@@ -74362,7 +74467,9 @@ hint.textContent = editable
 ? project
 ? strings.schemes.addHint
 : strings.projects.empty
-: strings.mobile.viewOnly;
+: hints
+? strings.mobile.viewOnly
+: "";
 return;
 }
 hint.textContent = "";
@@ -74372,7 +74479,7 @@ const marks = project.marks.filter((mark) => mark.schemeId === scheme.id).length
 const row = uiEl("div", {
 class: "scheme-row" + (scheme.id === state.schemeId ? " scheme-row--current" : ""),
 });
-const meta = schemesRowMeta(project, scheme.id);
+const meta = schemesRowMeta(project, scheme.id, { hints });
 row.append(
 uiEl("button", {
 class: "scheme-row__name",
@@ -75747,13 +75854,15 @@ registerPanel(PANEL_IDS.headerSizes, mountSizesButton);
 
 // src/panels/viewScenarios.js
 const VIEW_JOURNAL_SETTING = "viewJournalCollapsed";
-function viewScenariosRows(project, states) {
+function viewScenariosRows(project, states, libMissing = null) {
 if (!project) return [];
 const faults = new Map((states || []).filter((item) => item && item.fault).map((item) => [item.id, item.fault]));
-return scenariosListRows(project, {}, null, faults).map((row) => ({
+return scenariosListRows(project, { libMissing }, null, faults).map((row) => ({
 id: row.id,
 name: row.name,
 kind: row.kind,
+lib: row.lib,
+libMissing: row.libMissing,
 active: row.active,
 hung: row.hung,
 fault: row.fault || "",
@@ -75769,7 +75878,7 @@ setting: VIEW_JOURNAL_SETTING,
 collapsed: false,
 });
 function drawList() {
-const rows = viewScenariosRows(api.getState().project, simScenarios());
+const rows = viewScenariosRows(api.getState().project, simScenarios(), simLibraryMissing());
 if (rows.length === 0) {
 list.replaceChildren(uiEl("li", { class: "view-scn__empty", text: strings.view.scenariosEmpty }));
 return;
@@ -75791,6 +75900,18 @@ class: "view-scn__active" + (row.active ? "" : " is-off"),
 text: row.active ? strings.scenarios.list.active : "",
 title: strings.scenarios.list.activeReadOnly,
 }),
+...(row.libMissing
+? [
+uiEl("span", {
+class: "view-scn__fault",
+text: strings.scenarioLib.missing,
+title: text("scenarioLib.missingHint", {
+name: (row.lib && row.lib.name) || row.name,
+version: (row.lib && row.lib.version) || "",
+}),
+}),
+]
+: []),
 ...(row.fault ? [uiEl("span", { class: "view-scn__fault", text: row.fault })] : []),
 run,
 ]);
@@ -76037,7 +76158,8 @@ if (project && viewStartBare(project, state.schemeId)) {
 notes.push(uiEl("p", { class: "view-note view-note--bare", text: strings.view.schemeBare }));
 }
 const children = [];
-if (notes.length > 0) children.push(uiEl("div", { class: "view-notes" }, notes));
+const notesBox = notes.length > 0 ? uiEl("div", { class: "view-notes" }, notes) : null;
+if (notesBox) children.push(notesBox);
 if (!project && ready) {
 const open = uiButton(strings.view.open, {
 class: "ui-btn ui-btn--accent view-empty__open",
@@ -76054,6 +76176,13 @@ open,
 );
 }
 host.replaceChildren(...children);
+noteHeight(notesBox);
+}
+function noteHeight(box) {
+const root = typeof document !== "undefined" ? document.getElementById("app") : null;
+if (!root || !root.style) return;
+const height = box && box.getBoundingClientRect ? Math.ceil(box.getBoundingClientRect().height) : 0;
+root.style.setProperty("--view-notes-h", (height > 0 ? height + 4 : 0) + "px");
 }
 function busy(line) {
 const body = uiEl("p", { class: "modal__text", text: line });

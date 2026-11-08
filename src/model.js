@@ -10948,10 +10948,15 @@ export function migrateScenarioLib(project, library) {
     changed = true;
     // Текст уходит, ссылка остаётся: порядок полей записи сохраняется, а
     // `source` занимал в файле и в ссылке десятки килобайт на сценарий.
+    //
+    // Прежний `lib` в запись **не переносится**: сюда запись доходит только с
+    // непринятой ссылкой (принятую отсекает `scenarioLibOf` выше), и ляг она
+    // вторым проходом по ключам на место новой — объект остался бы и без
+    // текста, и со ссылкой в никуда (ревью ветки, F1).
     const next = {};
     for (const key of Object.keys(scenario)) {
       if (key === "source") next.lib = lib;
-      else next[key] = scenario[key];
+      else if (key !== "lib") next[key] = scenario[key];
     }
     return next;
   });

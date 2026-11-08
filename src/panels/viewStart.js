@@ -318,7 +318,8 @@ function mountViewStart(host, api) {
       notes.push(uiEl("p", { class: "view-note view-note--bare", text: strings.view.schemeBare }));
     }
     const children = [];
-    if (notes.length > 0) children.push(uiEl("div", { class: "view-notes" }, notes));
+    const notesBox = notes.length > 0 ? uiEl("div", { class: "view-notes" }, notes) : null;
+    if (notesBox) children.push(notesBox);
     if (!project && ready) {
       const open = uiButton(strings.view.open, {
         class: "ui-btn ui-btn--accent view-empty__open",
@@ -335,6 +336,24 @@ function mountViewStart(host, api) {
       );
     }
     host.replaceChildren(...children);
+    noteHeight(notesBox);
+  }
+
+  /**
+   * Высота строк просмотра — мерой `--view-notes-h` на корне страницы (ревью
+   * ветки, F1).
+   *
+   * Строки лежат **поверх поля**, и в «Объёме» его верхний ряд занят плашками
+   * и угловыми кнопками. Чтобы они не накрывали друг друга, плашки уходят под
+   * строки — а на сколько, знает только живая высота: своё число в стилях
+   * разъехалось бы с ними на второй строке или на переносе. Правила — в
+   * `panels/view.css`; здесь только мера.
+   */
+  function noteHeight(box) {
+    const root = typeof document !== "undefined" ? document.getElementById("app") : null;
+    if (!root || !root.style) return;
+    const height = box && box.getBoundingClientRect ? Math.ceil(box.getBoundingClientRect().height) : 0;
+    root.style.setProperty("--view-notes-h", (height > 0 ? height + 4 : 0) + "px");
   }
 
   // ——— открытие файла ———————————————————————————————————————————————

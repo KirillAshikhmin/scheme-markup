@@ -32,6 +32,17 @@ test("дом запускается по отметке: в «Разметке»
   assert.equal(volumeHomeStarts({ simulation: false, running: false, kind: "view", screen: "volume" }), false);
 });
 
+test("правило запуска спрашивает и панель режима — поверхности в «Схеме» ещё нет", () => {
+  // Поверхность «Объёма» собирается по первому входу в режим, а дом заказчика
+  // должен идти в любом (R06, R14i). Пока правило звала только поверхность,
+  // второй заход на «Схему» (G07 помнит режим) оставлял дом остановленным.
+  // Вида здесь нет — проверяется, что правило спрашивают из панели, которая
+  // смонтирована всегда; работу видно живым прогоном.
+  const source = readFileSync(join(ROOT, "src", "panels", "volume.js"), "utf8");
+  const mount = source.slice(source.indexOf("function mountVolumeScreen"));
+  assert.ok(mount.includes("volumeHomeStarts("), "mountVolumeScreen правило запуска не спрашивает");
+});
+
 test("гасит дом только кнопка полосы; единственное исключение — «Забыть объект», когда дому уже нечего показывать", () => {
   const callers = [];
   const dir = join(ROOT, "src", "panels");
@@ -42,15 +53,19 @@ test("гасит дом только кнопка полосы; единстве
   assert.deepEqual(callers.sort(), ["simBar.js", "viewStart.js"]);
 });
 
-test("полоса дома: у просмотра нет «Остановить» и «Сбросить дом», у «Разметки» они на месте", () => {
+test("полоса дома: у просмотра нет ни «Остановить» и «Сбросить», ни пульта с часами", () => {
   const view = simBarControls({ kind: "view", running: true });
   assert.equal(view.start, false, "запущенный дом заказчик не останавливает");
   assert.equal(view.reset, false);
-  assert.equal(view.command, true);
+  // «Выполнить команду» — набор условия «Команда» руками, а ряд часов («×60 —
+  // сутки за 24 мин», «+1 ч», «К следующему событию») заказчик крутит
+  // параметрами объёма, там же, где погоду и климат (R06.2, ревью ветки F1).
+  assert.equal(view.command, false);
+  assert.equal(view.clock, false);
   assert.equal(simBarControls({ kind: "view", running: false }).start, true, "не запущен — хотя бы «Запустить»");
   const edit = simBarControls({ kind: "edit", running: true });
-  assert.deepEqual([edit.start, edit.reset, edit.command], [true, true, true]);
-  assert.deepEqual(Object.values(simBarControls({ kind: "edit", running: false })), [true, false, false]);
+  assert.deepEqual([edit.start, edit.reset, edit.command, edit.clock], [true, true, true, true]);
+  assert.deepEqual(Object.values(simBarControls({ kind: "edit", running: false })), [true, false, false, false]);
 });
 
 function houseWithScenario() {
@@ -95,4 +110,25 @@ test("окно сценариев: имя, «Активный» только п�
   assert.equal(hung[0].active, false);
   assert.deepEqual(viewScenariosRows(null, []), []);
   assert.equal(typeof simScenarios, "function");
+});
+
+test("окно сценариев: сценарий с недоехавшим библиотечным скриптом помечен", () => {
+  // Скрипт лежит в библиотеке, а не в объекте, и мог не доехать (нет сети на
+  // первом открытии). Дом идёт без него, и заказчику об этом говорят — молчать
+  // здесь нельзя (G26).
+  const box = houseWithScenario();
+  const hash = "7b".repeat(32);
+  const added = addScenario(box.project, { kind: "logic", name: "Свет по движению", source: "" });
+  const project = {
+    ...added.project,
+    scenarios: added.project.scenarios.map((item) =>
+      item.id === added.scenario.id ? { ...item, lib: { name: "Свет по движению", version: "1.2", hash } } : item,
+    ),
+  };
+  const gone = [{ id: added.scenario.id, name: "Свет по движению", version: "1.2", hash }];
+  const row = viewScenariosRows(project, [], gone).find((item) => item.id === added.scenario.id);
+  assert.equal(row.libMissing, true);
+  assert.equal(row.lib && row.lib.version, "1.2", "версия у строки есть — ею подписана подсказка");
+  // Список недоехавших знает только дом: без него строка не помечена.
+  assert.equal(viewScenariosRows(project, []).find((item) => item.id === added.scenario.id).libMissing, false);
 });

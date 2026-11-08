@@ -1446,7 +1446,14 @@ function mountMarksPanel(host, api) {
     syncCompact(state);
     if (!state.project || !state.schemeId) {
       syncFilters(state, 0, 0);
-      list.replaceChildren(uiEl("p", { class: "panel__empty", text: strings.panels.canvasEmpty }));
+      // «Загрузите план схемы, чтобы начать разметку» — слово тому, кто
+      // размечает. У заказчика план грузить нечем, и о пустой странице ему
+      // говорит её середина (`strings.view.empty`), а не список меток: второй
+      // раз то же самое — шум (ревью ветки, F1).
+      const empty = appAllows("editHints", state)
+        ? [uiEl("p", { class: "panel__empty", text: strings.panels.canvasEmpty })]
+        : [];
+      list.replaceChildren(...empty);
       return;
     }
     // Порядок строк — только из фильтров, и никакой своей перестановки:

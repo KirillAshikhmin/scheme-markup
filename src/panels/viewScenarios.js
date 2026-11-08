@@ -10,8 +10,8 @@
 // объект он не трогает. Список берётся у той же `scenariosListRows`, что рисует
 // режим «Сценарии» в «Разметке», а журнал собирает тот же `simJournalMount`:
 // второй правды о сценариях в сборке быть не должно.
-import { simScenarioRun, simScenarios, simRunning, simWatch } from "../simulation.js";
-import { strings } from "../strings.js";
+import { simLibraryMissing, simScenarioRun, simScenarios, simRunning, simWatch } from "../simulation.js";
+import { strings, text } from "../strings.js";
 import { scenariosListRows } from "./scenarios.js";
 import { simJournalMount } from "./simJournal.js";
 import { uiButton, uiEl, uiModal } from "./ui.js";
@@ -20,17 +20,24 @@ import { uiButton, uiEl, uiModal } from "./ui.js";
 export const VIEW_JOURNAL_SETTING = "viewJournalCollapsed";
 
 /**
- * Строки списка: `[{id, name, kind, active, hung, fault}]` в порядке
- * выполнения. `states` — `simScenarios()` (`[{id, active, running, fault}]`):
- * зависший сценарий показан выключенным, как в режиме «Сценарии».
+ * Строки списка: `[{id, name, kind, lib, libMissing, active, hung, fault}]` в
+ * порядке выполнения. `states` — `simScenarios()` (`[{id, active, running,
+ * fault}]`): зависший сценарий показан выключенным, как в режиме «Сценарии».
+ *
+ * `libMissing` — `simLibraryMissing()`: отпечатки библиотечных скриптов,
+ * которые не доехали. Список знает только дом, и без него строка «скрипт не
+ * найден» не появилась бы вовсе — а молчать о неработающем сценарии нельзя
+ * (G26, ревью ветки F1).
  */
-export function viewScenariosRows(project, states) {
+export function viewScenariosRows(project, states, libMissing = null) {
   if (!project) return [];
   const faults = new Map((states || []).filter((item) => item && item.fault).map((item) => [item.id, item.fault]));
-  return scenariosListRows(project, {}, null, faults).map((row) => ({
+  return scenariosListRows(project, { libMissing }, null, faults).map((row) => ({
     id: row.id,
     name: row.name,
     kind: row.kind,
+    lib: row.lib,
+    libMissing: row.libMissing,
     active: row.active,
     hung: row.hung,
     fault: row.fault || "",
@@ -49,7 +56,7 @@ export function viewScenariosOpen(api) {
   });
 
   function drawList() {
-    const rows = viewScenariosRows(api.getState().project, simScenarios());
+    const rows = viewScenariosRows(api.getState().project, simScenarios(), simLibraryMissing());
     if (rows.length === 0) {
       list.replaceChildren(uiEl("li", { class: "view-scn__empty", text: strings.view.scenariosEmpty }));
       return;
@@ -72,6 +79,21 @@ export function viewScenariosOpen(api) {
             text: row.active ? strings.scenarios.list.active : "",
             title: strings.scenarios.list.activeReadOnly,
           }),
+          // «Скрипт не найден» — та же строка и та же подсказка, что в режиме
+          // «Сценарии» (`strings.scenarioLib.*`): дом идёт без этого сценария,
+          // и промолчать об этом нельзя (G26).
+          ...(row.libMissing
+            ? [
+                uiEl("span", {
+                  class: "view-scn__fault",
+                  text: strings.scenarioLib.missing,
+                  title: text("scenarioLib.missingHint", {
+                    name: (row.lib && row.lib.name) || row.name,
+                    version: (row.lib && row.lib.version) || "",
+                  }),
+                }),
+              ]
+            : []),
           ...(row.fault ? [uiEl("span", { class: "view-scn__fault", text: row.fault })] : []),
           run,
         ]);

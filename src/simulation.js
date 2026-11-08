@@ -583,6 +583,10 @@ export function createSimulation(options = {}) {
       any = true;
       const source = libSources.get(ref.hash);
       if (typeof source === "string") return { ...scenario, source };
+      // Свой текст у записи есть — дом берёт его: ссылка не разрешилась, а
+      // сценарий рабочий (ревью ветки, F1). Так бывает у файла не из этой
+      // сборки: модель снимает текст ссылкой, а ссылку текстом.
+      if (typeof scenario.source === "string" && scenario.source !== "") return scenario;
       // Помеченная запись: без текста и неактивная — как сценарий, выключенный
       // сторожем (`simHungScenario`). Дом её не исполняет и об этом знает.
       missing.push({

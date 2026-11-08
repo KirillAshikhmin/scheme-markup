@@ -22,7 +22,7 @@ import {
   viewLinkRead,
   viewLinkStrip,
 } from "../src/viewLink.js";
-import { addLogicBinding, addScenario, markControlLinks, planFractionToMm, updateMark } from "../src/model.js";
+import { addLogicBinding, addScenario, findGroup, markControlLinks, planFractionToMm, updateMark } from "../src/model.js";
 import { buildHomeSpec, deviceAids } from "../src/sim/home.js";
 import { simHouse } from "./fixtures/simHome.js";
 
@@ -32,6 +32,12 @@ const loosen = promisify(brotliDecompress);
 const compress = async (bytes) => new Uint8Array(await squeeze(bytes, { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } }));
 const decompress = async (bytes) => new Uint8Array(await loosen(bytes));
 const codec = { compress, decompress };
+
+// Отпечаток библиотечного скрипта — SHA-256 текста целиком, 64 знака в нижнем
+// регистре: короче его `model.scenarioLibOf` ссылкой не считает, и такая
+// запись обязана остаться со своим текстом (ревью ветки, F1).
+const LIB_HASH = "1f".repeat(32);
+const LIB_HASH_BAD = "h1";
 
 const LEGACY = [
   "legacy-project.json",
@@ -93,6 +99,30 @@ test("круговой прогон: прочитанный объект рав�
     assert.equal(read.version, VIEW_LINK_VERSION, name);
     assert.deepStrictEqual(read.warnings, [], name);
   }
+});
+
+test("пустые коллекции объекта возвращаются пустыми, а не пропадают", async () => {
+  // Объект из файла всегда несёт эти коллекции (`projectFile.migrateProject`
+  // их дописывает), и читатели модели ходят в них без оглядки: `rooms.map` в
+  // фильтрах, `groups.find` в сцене «Объёма». Выброси их из ссылки — и объект
+  // без групп или без помещений перестаёт открываться вовсе.
+  const project = {
+    ...legacyProject("legacy-project.json"),
+    rooms: [],
+    outlines: [],
+    groups: [],
+    counters: {},
+  };
+  const read = await viewLinkRead((await viewLinkPack(project, codec)).text, codec);
+  for (const key of ["categories", "markTypes", "schemes", "marks", "rooms", "outlines", "groups"]) {
+    assert.ok(Array.isArray(read.project[key]), key + ": массив, а не «нет поля»");
+  }
+  assert.ok(read.project.counters && typeof read.project.counters === "object", "counters: объект");
+  // Те самые два читателя, на которых падала живая страница.
+  assert.deepStrictEqual(read.project.rooms.map((room) => room.id), []);
+  assert.equal(findGroup(read.project, "нет такой группы"), null);
+  // Круговой прогон сверяется с `viewLinkStrip` — ответ у них один.
+  assert.deepStrictEqual(read.project, viewLinkStrip(project));
 });
 
 test("круговой прогон на объекте со сценариями и привязками", async () => {
@@ -317,20 +347,30 @@ test("исходники не стригутся, когда об этом ск�
 test("исходник уезжает ссылкой на библиотеку, когда реестр его узнаёт", async () => {
   const { project, globalId } = scriptedHouse();
   const source = project.scenarios.find((item) => item.id === globalId).source;
-  const index = new Map([["h1", { name: "Shared", version: "1.2.0", hash: "h1", source }]]);
+  const index = new Map([[LIB_HASH, { name: "Shared", version: "1.2.0", hash: LIB_HASH, source }]]);
   const packed = await viewLinkPack(project, { ...codec, libraryIndex: index });
   assert.equal(packed.stats.scenarios.linked, 1);
   assert.equal(packed.stats.scenarios.inlined, 1);
   const { payload } = payloadOf(packed.text);
   const scenario = payload.p.scenarios.find((item) => item.id !== undefined && item.name === "Общие имена");
-  assert.deepStrictEqual(scenario.lib, { name: "Shared", version: "1.2.0", hash: "h1" });
+  assert.deepStrictEqual(scenario.lib, { name: "Shared", version: "1.2.0", hash: LIB_HASH });
   assert.equal(Object.prototype.hasOwnProperty.call(scenario, "source"), false, "исходник не едет");
   const read = await viewLinkRead(packed.text, codec);
   assert.deepStrictEqual(read.project.scenarios.find((item) => item.id === globalId).lib, {
     name: "Shared",
     version: "1.2.0",
-    hash: "h1",
+    hash: LIB_HASH,
   });
+});
+
+test("реестр с негодным отпечатком исходника не снимает", async () => {
+  const { project, globalId } = scriptedHouse();
+  const source = project.scenarios.find((item) => item.id === globalId).source;
+  const index = new Map([[LIB_HASH_BAD, { name: "Shared", version: "1.2.0", hash: LIB_HASH_BAD, source }]]);
+  const packed = await viewLinkPack(project, { ...codec, libraryIndex: index, stripJs: false });
+  assert.equal(packed.stats.scenarios.linked, 0, "ссылкой считается только принятая модель отпечатка");
+  const read = await viewLinkRead(packed.text, codec);
+  assert.equal(read.project.scenarios.find((item) => item.id === globalId).source, source);
 });
 
 test("без реестра исходники едут текстом, а ссылка на библиотеку в объекте уважается", async () => {
@@ -338,7 +378,7 @@ test("без реестра исходники едут текстом, а сс�
   const withLib = {
     ...project,
     scenarios: project.scenarios.map((item) =>
-      item.id === globalId ? { ...item, lib: { name: "Shared", version: "1.2.0", hash: "h1" } } : item,
+      item.id === globalId ? { ...item, lib: { name: "Shared", version: "1.2.0", hash: LIB_HASH } } : item,
     ),
   };
   const packed = await viewLinkPack(withLib, codec);
@@ -347,6 +387,27 @@ test("без реестра исходники едут текстом, а сс�
   const { payload } = payloadOf(packed.text);
   const scenario = payload.p.scenarios.find((item) => item.name === "Общие имена");
   assert.equal(Object.prototype.hasOwnProperty.call(scenario, "source"), false);
+});
+
+test("запись с текстом и непринятой ссылкой остаётся с текстом", async () => {
+  // Отпечаток не 64 знака — значит ссылки нет (`model.scenarioLibOf`). Снять
+  // против такой ссылки текст означало бы отдать заказчику сценарий, которого
+  // нет ни в объекте, ни в библиотеке.
+  const { project, globalId } = scriptedHouse();
+  const source = project.scenarios.find((item) => item.id === globalId).source;
+  const withBroken = {
+    ...project,
+    scenarios: project.scenarios.map((item) =>
+      item.id === globalId ? { ...item, lib: { name: "Shared", version: "1.2.0", hash: LIB_HASH_BAD } } : item,
+    ),
+  };
+  const packed = await viewLinkPack(withBroken, { ...codec, stripJs: false });
+  assert.equal(packed.stats.scenarios.linked, 0, "кривой отпечаток ссылкой не считается");
+  assert.equal(packed.stats.scenarios.inlined, 2);
+  const read = await viewLinkRead(packed.text, codec);
+  const scenario = read.project.scenarios.find((item) => item.id === globalId);
+  assert.equal(scenario.source, source, "текст уехал целиком");
+  assert.deepStrictEqual(scenario.lib, { name: "Shared", version: "1.2.0", hash: LIB_HASH_BAD }, "запись не переписана");
 });
 
 test("нагрузка несёт версию формата и дату выгрузки", async () => {

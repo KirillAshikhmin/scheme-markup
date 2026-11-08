@@ -64,10 +64,20 @@ const plateSeen = new Map();
  * передаётся нарочно: правило «слева „?“, справа „i“» одно на сборку, и
  * позволить его перебить значило бы завести второй вид плашки.
  *
+ * `collapsed` — **умолчание** свёрнутости, пока человек её не трогал. Сложенной
+ * заводится подсказка «Объёма» на странице просмотра: это 1131 знак про
+ * клавиши, захват мыши и двери, и развёрнутой она занимала на телефоне
+ * две трети экрана, накрывая строки просмотра (ревью ветки, F1). Выбор
+ * человека старше умолчания: он живёт в настройках браузера и приезжает
+ * ответом хранилища.
+ *
  * Наружу уходят три двери: `node` — сама плашка, `update` — что в ней написано,
  * `fold` — просьба поля сложить её в знак, не трогая памяти человека.
  */
-export function createFieldPlate({ side, setting }) {
+// Умолчание зовётся внутри `shutByDefault`, а не `collapsed`: ниже объявлена
+// функция `collapsed()`, и одноимённый довод она бы собой затёрла (живой
+// прогон F1: подсказка просмотра оставалась развёрнутой, а ошибки не было).
+export function createFieldPlate({ side, setting, collapsed: shutByDefault = false }) {
   const info = side === "right";
   const body = uiEl("div", { class: "canvas-hint__text" });
   const toggle = uiEl(
@@ -158,15 +168,24 @@ export function createFieldPlate({ side, setting }) {
     render();
   }
 
+  // Умолчание ставится до первой отрисовки — иначе сложенная подсказка
+  // мигнула бы развёрнутой.
+  const first = !plateCollapsed.has(setting);
+  if (first) plateCollapsed.set(setting, shutByDefault === true);
   render();
-  // Настройка читается асинхронно, как у подсказки холста: плашка стартует
-  // развёрнутой и схлопывается, когда хранилище ответит. То, что человек успел
+  // Настройка читается асинхронно, как у подсказки холста: плашка стартует с
+  // умолчания и меняется, когда хранилище ответит. То, что человек успел
   // увидеть до ответа, прочитанным не считается — он на неё не смотрел.
-  if (!plateCollapsed.has(setting)) {
+  // Спрашивается она один раз за сеанс: выбор живёт в `plateCollapsed`, и
+  // пересобранная поверхность читает его оттуда.
+  if (first) {
     Promise.resolve(getSetting(setting))
       .then((saved) => {
-        if (saved !== true || plateCollapsed.get(setting) === true) return;
-        plateCollapsed.set(setting, true);
+        // Записано только «да» и «нет»; у сложенной по умолчанию плашки «нет»
+        // так же весомо, как «да» у развёрнутой: человек её разворачивал.
+        if (saved !== true && saved !== false) return;
+        if (plateCollapsed.get(setting) === saved) return;
+        plateCollapsed.set(setting, saved);
         plateSeen.delete(setting);
         render();
       })

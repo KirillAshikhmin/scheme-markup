@@ -220,17 +220,31 @@ export function applyPlanEdit(project, schemeId, { imageId, width, height, trans
  * есть, а у какого нет: окно свойств отвечает про одну схему, а разъезжается
  * дом из-за той, про которую забыли. Самих координат здесь нет — они в окне и
  * знаком на чертеже; в строке важно «есть или нет».
+ *
+ * `opts.hints === false` — страница, где объект не правят (умение `editHints`):
+ * «План не загружен» там не говорится. По ссылке фотоподложки нет **нарочно**
+ * (G17), и строка о незагруженном плане обещала бы заказчику потерю, которой
+ * нет (ревью ветки, F1). Остальное в строке — его же объект, и оно остаётся.
  */
-export function schemesRowMeta(project, schemeId) {
+export function schemesRowMeta(project, schemeId, opts = {}) {
   const scheme = findScheme(project, schemeId);
   if (!scheme) return "";
   const plan = scheme.imageId
     ? text("schemes.size", { width: scheme.width, height: scheme.height })
-    : strings.schemes.noImage;
+    : opts.hints === false
+      ? ""
+      : strings.schemes.noImage;
   const floor = schemeFloorOf(project, schemeId);
   const anchored = Boolean(schemeAnchorOf(project, schemeId));
-  if (floor === null) return anchored ? text("schemes.metaAnchor", { plan }) : plan;
-  return text(anchored ? "schemes.metaFloorAnchor" : "schemes.metaFloor", { floor, plan });
+  const meta =
+    floor === null
+      ? anchored
+        ? text("schemes.metaAnchor", { plan })
+        : plan
+      : text(anchored ? "schemes.metaFloorAnchor" : "schemes.metaFloor", { floor, plan });
+  // Пустое место плана не оставляет за собой разделителя: строка собрана
+  // шаблоном, и хвостовое «·» без него читалось бы как обрыв.
+  return plan === "" ? meta.replace(/\s*·\s*$/, "") : meta;
 }
 
 /**
@@ -802,6 +816,9 @@ function mountSchemesPanel(host, api) {
     const project = state.project;
     // Режим просмотра: схему выбирают, но не грузят, не правят и не удаляют.
     const editable = appAllows("editSchemes", state);
+    // Слова о правке: «правка на компьютере» и «План не загружен». У заказчика
+    // их нет вовсе (ревью ветки, F1).
+    const hints = appAllows("editHints", state);
     // Сам список — переключатель схем, и это своё умение (`switchScheme`):
     // выбрать схему можно и там, где её не правят.
     list.hidden = !appAllows("switchScheme", state);
@@ -817,7 +834,9 @@ function mountSchemesPanel(host, api) {
         ? project
           ? strings.schemes.addHint
           : strings.projects.empty
-        : strings.mobile.viewOnly;
+        : hints
+          ? strings.mobile.viewOnly
+          : "";
       return;
     }
     // Строки про обрезку и поворот здесь больше нет (G229): она объясняла
@@ -836,7 +855,7 @@ function mountSchemesPanel(host, api) {
       // Этаж и размеры плана стоят в узкой колонке рядом с рядом кнопок и при
       // длинном числе ужимаются многоточием — поэтому то же самое лежит в
       // подсказке.
-      const meta = schemesRowMeta(project, scheme.id);
+      const meta = schemesRowMeta(project, scheme.id, { hints });
       row.append(
         uiEl("button", {
           class: "scheme-row__name",
