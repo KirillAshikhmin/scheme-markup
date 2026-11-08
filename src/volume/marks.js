@@ -14,6 +14,7 @@ import {
   findWall,
   hexToRgb,
   labelOf,
+  markHanging,
   markIsComment,
   markObjectId,
   markPlace,
@@ -28,7 +29,7 @@ import {
   wallVectors,
 } from "../model.js";
 import { MODEL_CYL_SIDES } from "../objectModels/kit.js";
-import { objectLineModel, objectModelByKey, objectModelChannels } from "../objectModels/registry.js";
+import { objectLineModel, objectModelByKey, objectModelChannels, objectModelHanging } from "../objectModels/registry.js";
 import { objectViewByName, objectViewForShape } from "../objectViews/registry.js";
 import { VOLUME_LAYER_MARK } from "./measures.js";
 import { volumeClockwise, volumeFace, volumeFaceNormal, volumeLine } from "./faces.js";
@@ -1050,7 +1051,17 @@ export function volumeMarkPlacement(project, mark, where = [], seat = null) {
     // Клавиш у выключателя столько, сколько каналов у типа (таск 177, G274):
     // описание приходит по имени изображения, а число клавиш — у справочника.
     // Неклавишной модели это ничего не меняет, и отдаётся она той же ссылкой.
-    model: view ? objectModelChannels(objectModelByKey(view.name), typeChannels(project, mark.typeId)) : null,
+    //
+    // **Висячая люстра — тем же приёмом** (таск 256, G397): отметка у метки
+    // подменяет описание, оставляя изображение, габарит и знак на плане теми
+    // же. Метка без отметки получает ту же модель той же ссылкой, и кадр у
+    // неё грань в грань прежний (G68).
+    model: view
+      ? objectModelHanging(
+          objectModelChannels(objectModelByKey(view.name), typeChannels(project, mark.typeId)),
+          markHanging(project, mark),
+        )
+      : null,
   };
   // Высота ряда многорядной рамки старше записанной (таск 242): четыре
   // выключателя одной высоты, нарисованные 2 × 2, иначе легли бы в один ряд —
