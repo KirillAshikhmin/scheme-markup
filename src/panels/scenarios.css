@@ -220,6 +220,18 @@
   cursor: pointer;
 }
 
+/* Пометка «встроенный»: текст сценария живёт в библиотеке продукта. */
+.scn-row__lib {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  font-size: 11px;
+  white-space: nowrap;
+  opacity: 0.8;
+}
+
 .scn-row__issues {
   color: var(--danger);
   font-size: 12px;

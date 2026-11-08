@@ -73,6 +73,7 @@ export function viewScenariosOpen(api) {
         return uiEl("li", { class: "view-scn__row" + (row.active ? " is-active" : "") }, [
           uiEl("span", { class: "view-scn__name", text: row.name }),
           uiEl("span", { class: "scn-row__kind is-" + row.kind, text: strings.scenarios.list.kinds[row.kind] || "" }),
+          ...(row.lib ? [uiEl("span", { class: "scn-row__lib", title: strings.scenarioLib.builtinHint, text: strings.scenarioLib.builtin })] : []),
           // Показана, не переключается: это не кнопка.
           uiEl("span", {
             class: "view-scn__active" + (row.active ? "" : " is-off"),

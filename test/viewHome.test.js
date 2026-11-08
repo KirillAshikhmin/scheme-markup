@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { addScenario } from "../src/model.js";
 import { volumeHomeStarts } from "../src/panels/volume.js";
 import { simBarControls } from "../src/panels/simBar.js";
+import { strings } from "../src/strings.js";
 import { viewScenariosRows } from "../src/panels/viewScenarios.js";
 import { simAct, simJournalClear, simPress, simRunning, simScenarioRun, simScenarios, simStart, simStop, simSync } from "../src/simulation.js";
 import { simHouse } from "./fixtures/simHome.js";
@@ -131,4 +132,13 @@ test("окно сценариев: сценарий с недоехавшим б
   assert.equal(row.lib && row.lib.version, "1.2", "версия у строки есть — ею подписана подсказка");
   // Список недоехавших знает только дом: без него строка не помечена.
   assert.equal(viewScenariosRows(project, []).find((item) => item.id === added.scenario.id).libMissing, false);
+});
+
+test("пометка «встроенный»: слово в словаре, а у библиотечной строки есть lib, у своей нет", () => {
+  assert.equal(strings.scenarioLib.builtin, "встроенный");
+  assert.match(strings.scenarioLib.builtinHint, /библиотек/);
+  const box = houseWithScenario();
+  const added = addScenario(box.project, { kind: "logic", name: "Свой", source: "" });
+  const own = viewScenariosRows(added.project, []).find((item) => item.id === added.scenario.id);
+  assert.equal(Boolean(own.lib), false);
 });

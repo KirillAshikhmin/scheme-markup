@@ -600,6 +600,7 @@ function mountScenariosScreen(host, api) {
     const head = uiEl("div", { class: "scn-row__head" }, [
       uiEl("span", { class: "scn-row__name", text: row.name }),
       uiEl("span", { class: "scn-row__kind is-" + row.kind, text: strings.scenarios.list.kinds[row.kind] }),
+      ...(row.lib ? [uiEl("span", { class: "scn-row__lib", title: strings.scenarioLib.builtinHint, text: strings.scenarioLib.builtin })] : []),
     ]);
     const parts = [head, uiEl("p", { class: "scn-row__phrase", text: row.phrase }), activeLabel];
     if (row.fault) parts.push(uiEl("span", { class: "scn-row__fault", title: row.hung ? strings.scenarios.list.fault.hungHint : "", text: row.fault }));

@@ -3944,6 +3944,16 @@ gap: 5px;
 font-size: 12px;
 cursor: pointer;
 }
+.scn-row__lib {
+display: inline-block;
+margin-left: 6px;
+padding: 0 6px;
+border: 1px solid currentColor;
+border-radius: 8px;
+font-size: 11px;
+white-space: nowrap;
+opacity: 0.8;
+}
 .scn-row__issues {
 color: var(--danger);
 font-size: 12px;
@@ -9448,6 +9458,8 @@ keysMany: "{n} клавиш",
 summaryMore: "{head} + ещё {count}",
 },
 scenarioLib: {
+builtin: "встроенный",
+builtinHint: "Встроенный сценарий: его текст хранится в библиотеке продукта, а не в объекте",
 missing: "Скрипт не найден",
 missingHint: "Библиотечный скрипт «{name}» версии {version} не доехал: в доме этот сценарий не работает",
 offline: "Скрипты сценариев не скачались: нет сети. Откройте объект при сети — дальше они живут в кэше.",
@@ -65680,6 +65692,7 @@ uiEl("span", { text: strings.scenarios.list.active }),
 const head = uiEl("div", { class: "scn-row__head" }, [
 uiEl("span", { class: "scn-row__name", text: row.name }),
 uiEl("span", { class: "scn-row__kind is-" + row.kind, text: strings.scenarios.list.kinds[row.kind] }),
+...(row.lib ? [uiEl("span", { class: "scn-row__lib", title: strings.scenarioLib.builtinHint, text: strings.scenarioLib.builtin })] : []),
 ]);
 const parts = [head, uiEl("p", { class: "scn-row__phrase", text: row.phrase }), activeLabel];
 if (row.fault) parts.push(uiEl("span", { class: "scn-row__fault", title: row.hung ? strings.scenarios.list.fault.hungHint : "", text: row.fault }));
@@ -76019,6 +76032,7 @@ run.disabled = !running;
 return uiEl("li", { class: "view-scn__row" + (row.active ? " is-active" : "") }, [
 uiEl("span", { class: "view-scn__name", text: row.name }),
 uiEl("span", { class: "scn-row__kind is-" + row.kind, text: strings.scenarios.list.kinds[row.kind] || "" }),
+...(row.lib ? [uiEl("span", { class: "scn-row__lib", title: strings.scenarioLib.builtinHint, text: strings.scenarioLib.builtin })] : []),
 uiEl("span", {
 class: "view-scn__active" + (row.active ? "" : " is-off"),
 text: row.active ? strings.scenarios.list.active : "",
