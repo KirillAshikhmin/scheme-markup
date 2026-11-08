@@ -44,7 +44,7 @@ import {
   canvasEditAllowed,
   canvasEditCommentText,
   canvasLinkCandidates,
-  canvasLinkMarkObject,
+  canvasObjectJoining,
   canvasMarkOrder,
   canvasMarkOrderCan,
   canvasOnScreen,
@@ -55,7 +55,7 @@ import {
 import { planToScreen, typeIconPlan, typeSignIcon } from "../render.js";
 import { getSetting, setSetting } from "../store.js";
 import { strings, text } from "../strings.js";
-import { UI_SIGN, UI_SIGN_SMALL, uiButton, uiEl, uiIcon, uiIconButton, uiModal, uiSignCell } from "./ui.js";
+import { UI_SIGN, UI_SIGN_SMALL, uiButton, uiEl, uiIcon, uiIconButton, uiSignCell } from "./ui.js";
 import { deviceCardPart, deviceCardView, deviceLogicEntry, deviceLogicSection } from "./deviceCard.js";
 import { marksControllerIndex, marksLinkedText, marksLinkedTitle, marksRowModel } from "./marks.js";
 
@@ -380,7 +380,7 @@ export function markCardBlockRow(state, markId) {
   // Сколько в блоке живых меток: в блоке из двух выход одной распускает его
   // целиком, и подсказка обязана сказать это **до** нажатия.
   const members = group ? group.markIds.filter((id) => findMark(state.project, id)).length : 0;
-  const waiting = canvasBlockJoining(state, markId);
+  const waiting = canvasBlockJoining(state, markId) && !canvasObjectJoining(state, markId);
   const leaveHint = group
     ? members <= 2
       ? words.leaveLast
@@ -410,33 +410,6 @@ export function markCardBlockRow(state, markId) {
 }
 
 /**
- * Окно выбора вещи для связи: свободные вещи схемы метки. Выбор — одно
- * нажатие, отказ (Esc, «Отмена») не меняет ничего.
- */
-export function markCardOpenObjectPicker(state, markId) {
-  const candidates = canvasLinkCandidates(state.project, markId);
-  let modal = null;
-  const rows = candidates.map((object) =>
-    uiButton(schemeObjectNameOf(state.project, object), {
-      class: "ui-btn ui-btn--wide",
-      on: {
-        click: () => {
-          modal.close();
-          canvasLinkMarkObject(markId, object.id);
-        },
-      },
-    }),
-  );
-  modal = uiModal({
-    title: text("markCard.objectRow.title", { label: labelOf(state.project, markId) }),
-    body: uiEl("div", { class: "ui-fields" }, rows),
-    dismissable: true,
-    actions: [uiButton(strings.dialog.cancel, { class: "ui-btn", on: { click: () => modal.close() } })],
-  });
-  return modal;
-}
-
-/**
  * Ряд «Вещь»: «Связать с вещью» и «Отвязать» (R01, R01.1, R01.3).
  *
  * `null` — ряда нет: у комментария и в просмотре правок нет. Недоступная
@@ -450,16 +423,18 @@ export function markCardObjectRow(state, markId) {
   if (!mark || markIsComment(mark)) return null;
   const words = strings.markCard.objectRow;
   const linked = markObjectId(mark) !== null;
+  const waiting = canvasObjectJoining(state, markId);
   const candidates = canvasLinkCandidates(state.project, markId);
   const pickWhy = linked ? words.linkedAlready : candidates.length === 0 ? words.pickNone : "";
   const object = linked ? findSchemeObject(state.project, markObjectId(mark)) : null;
   return uiEl("div", { class: "mark-card__row mark-card__row--act" }, [
     uiEl("span", { class: "mark-card__name", text: words.label }),
     uiButton(words.pick, {
-      class: "ui-btn mark-card__order",
-      title: pickWhy || words.pickHint,
-      attrs: pickWhy ? { disabled: "disabled" } : {},
-      on: { click: () => markCardOpenObjectPicker(state, markId) },
+      class: "ui-btn mark-card__order" + (waiting ? " is-active" : ""),
+      title: pickWhy || (waiting ? words.pickWaiting : words.pickHint),
+      attrs: { ...(pickWhy ? { disabled: "disabled" } : {}), "aria-pressed": waiting ? "true" : "false" },
+      // Повторное нажатие зажёгшейся кнопки — отмена, как у блока.
+      on: { click: () => (waiting ? canvasStopBlockJoin() : canvasStartBlockJoin(markId, { object: true })) },
     }),
     uiButton(words.unlink, {
       class: "ui-btn mark-card__order",

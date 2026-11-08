@@ -449,7 +449,7 @@ export function canvasStartRoomTrace(roomId) {
  * состоянии не появляется: разойдись оно с выделением, карточка держала бы
  * кнопку одной метки, а блок собрался бы с другой.
  */
-export function canvasStartBlockJoin(markId) {
+export function canvasStartBlockJoin(markId, { object = false } = {}) {
   // Вторую метку показывают **на плане** — значит план и показываем (таск 153):
   // карточка метки стоит и над «Объёмом», и кнопку в ней однажды попросят туда.
   setScreen(SCREEN_DEFAULT);
@@ -458,7 +458,16 @@ export function canvasStartBlockJoin(markId) {
     selectedOutlineId: null,
     editPathId: null,
     mode: CANVAS_MODE_BLOCK_JOIN,
+    // Чего ждёт режим: вторую метку блока или вещь чертежа для связи (R01).
+    // Режим один и тот же — «третьего способа ждать щелчок» нет, — различает
+    // его эта сеансовая отметка; в объект она не попадает.
+    blockJoinWhat: object ? "object" : null,
   });
+}
+
+/** Ждёт ли режим щелчка по вещи чертежа (связать метку с вещью), а не второй метки блока. */
+export function canvasObjectJoining(state, markId) {
+  return canvasBlockJoining(state, markId) && state.blockJoinWhat === "object";
 }
 
 /**
@@ -479,7 +488,7 @@ export function canvasBlockJoining(state, markId) {
  * кнопка в её карточке — под рукой.
  */
 export function canvasStopBlockJoin() {
-  canvasApi.setState({ mode: "select" });
+  canvasApi.setState({ mode: "select", blockJoinWhat: null });
 }
 
 /**
@@ -619,6 +628,9 @@ export function canvasHintText(state) {
   // про постановку новых рассказывать сейчас нечего. Подсказка называет первую
   // метку — иначе, вернувшись к плану через минуту, человек не узнает, с какой
   // он начал.
+  if (state.mode === CANVAS_MODE_BLOCK_JOIN && state.blockJoinWhat === "object") {
+    return text("markObject.hintLink", { label: labelOf(state.project, state.selectedMarkIds[0]) });
+  }
   if (state.mode === CANVAS_MODE_BLOCK_JOIN) {
     return text("canvas.hintBlockJoin", { label: labelOf(state.project, state.selectedMarkIds[0]) });
   }
@@ -1236,6 +1248,7 @@ function canvasPaint() {
     // аргумента не получают, и их кадр не меняется (G68).
     ...(live ? { live, liveFx } : {}),
   });
+  canvasPaintLinkable(state, project, scheme, view);
   if (canvasHighlightPaint(project, scheme, view, now)) animate = true;
   if (animate) canvasRedraw();
   // Метка-призрак — **сразу за метками и до шкалы**: поставленная метка
@@ -2670,6 +2683,50 @@ function canvasRoomTraceClick(plan) {
  * метке, которую видно сверху (`marksInDrawOrder`), и второго правила
  * попадания в сборке нет.
  */
+/**
+ * Вещь чертежа под точкой плана (доли), считая только видимые на схеме вещи;
+ * из накрывающих — меньшая по площади. `null` — вещи нет или нет моста мм ↔ доли.
+ */
+export function canvasObjectAt(project, schemeId, plan, hidden = []) {
+  const at = planFractionToMm(project, schemeId, plan);
+  if (!at) return null;
+  let best = null;
+  let bestArea = Infinity;
+  for (const object of schemeObjectsOnScheme(project, schemeId)) {
+    if (hidden.includes(object.id)) continue;
+    if (object.shape === "polyline") continue;
+    if (!canvasInsideCorners(at, schemeObjectCorners(object))) continue;
+    const area = Number(object.widthMm) * Number(object.depthMm);
+    if (area < bestArea) {
+      best = object;
+      bestArea = area;
+    }
+  }
+  return best;
+}
+
+/**
+ * Щелчок в ожидании вещи для связи (R01). Непригодная вещь режима не снимает
+ * и называет причину словами (`markObjectCan`); промах — тоже словом.
+ */
+function canvasObjectJoinClick(plan) {
+  const state = canvasState();
+  const markId = state.selectedMarkIds[0];
+  if (!markId) return;
+  const object = canvasObjectAt(state.project, state.schemeId, plan, state.hiddenObjectIds || []);
+  if (!object) {
+    canvasApi.notify(strings.markObject.linkMiss);
+    return;
+  }
+  const can = canvasObjectLinkCan(state, markId, object.id);
+  if (!can.ok) {
+    canvasApi.notify(can.why);
+    return;
+  }
+  const done = canvasLinkMarkObject(markId, object.id);
+  if (done.ok) canvasStopBlockJoin();
+}
+
 function canvasBlockJoinClick(point, slack) {
   const state = canvasState();
   const scheme = canvasScheme(state);
@@ -3049,6 +3106,34 @@ function canvasMeasureHover(state, point, free) {
 }
 
 /** Отрезок мерки поверх кадра: экранные точки и подпись в метрах по масштабу. */
+// Пока ждут вещь для связи, подсвечиваются вещи, с которыми связать **можно**
+// (`markObjectCan`); остальные остаются как нарисованы, а причину по ним
+// называет щелчок.
+function canvasPaintLinkable(state, project, scheme, view) {
+  if (!canvasObjectJoining(state, state.selectedMarkIds[0])) return;
+  const hidden = state.hiddenObjectIds || [];
+  const ctx = canvasCtx;
+  ctx.save();
+  ctx.strokeStyle = "#0969da";
+  ctx.fillStyle = "rgba(9, 105, 218, 0.18)";
+  ctx.lineWidth = 2;
+  for (const object of canvasLinkCandidates(project, state.selectedMarkIds[0])) {
+    if (hidden.includes(object.id) || object.shape === "polyline") continue;
+    const corners = schemeObjectCorners(object).map((corner) => planMmToFraction(project, scheme.id, corner));
+    if (corners.some((corner) => !corner)) continue;
+    ctx.beginPath();
+    corners.forEach((corner, index) => {
+      const at = planToScreen(corner, scheme, view);
+      if (index === 0) ctx.moveTo(at.x, at.y);
+      else ctx.lineTo(at.x, at.y);
+    });
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function canvasPaintMeasure(state, scheme, view) {
   const ends = measureEnds("scheme", measureKeyOf(state));
   if (!ends) return;
@@ -4658,6 +4743,9 @@ function canvasPointerUp(event) {
       // об одной метке, и после переноса блока человек правит ту, за которую
       // взялся, а не получает пустую панель «выделено три».
       canvasCommit(drag.before, after, label, { selection: [drag.markId] });
+      // Метку перенесли на вещь — то же предложение связать, что и при
+      // постановке (R04.1): решает человек, отказ ничего не меняет.
+      if (drag.kind === "mark") canvasOfferLink(drag.markId);
     }
     if (drag.kind === "pathVertex" && canvasPreview) {
       const after = canvasPreview;
@@ -4732,7 +4820,8 @@ function canvasPointerUp(event) {
   // Метка ловится экранной точкой, а не долей плана: `hitTest` меряет попадание
   // глазом — знаком и подписью на экране, а не координатой под ними.
   if (drag.kind === "blockJoin") {
-    canvasBlockJoinClick(point, canvasHitSlack(false));
+    if (state.blockJoinWhat === "object") canvasObjectJoinClick(plan);
+    else canvasBlockJoinClick(point, canvasHitSlack(false));
     return;
   }
   if (drag.kind === "line") {
@@ -5271,7 +5360,10 @@ function mountCanvas(host, api) {
       canvasPinnedSaid = false;
       // Режим, у которого нет своей кнопки, говорит о себе сам — кто бы его ни
       // включил. См. `CANVAS_MODE_NOTES`.
-      const said = CANVAS_MODE_NOTES[state.mode];
+      const said =
+        state.mode === CANVAS_MODE_BLOCK_JOIN && state.blockJoinWhat === "object"
+          ? strings.markObject.modeLinkSaid
+          : CANVAS_MODE_NOTES[state.mode];
       if (said) canvasApi.notify(said);
     }
     // Место общее на три режима (D59): вернулись на план — встаём туда, где

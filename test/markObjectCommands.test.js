@@ -20,7 +20,15 @@ import {
   setPlanOrigin,
   setPlanScale,
 } from "../src/model.js";
-import { canvasLinkCandidates, canvasLinkOffer, canvasObjectLinkCan } from "../src/canvas.js";
+import {
+  CANVAS_MODE_BLOCK_JOIN,
+  canvasHintText,
+  canvasLinkCandidates,
+  canvasLinkOffer,
+  canvasObjectAt,
+  canvasObjectJoining,
+  canvasObjectLinkCan,
+} from "../src/canvas.js";
 import { markCardModel } from "../src/panels/markCard.js";
 import { strings } from "../src/strings.js";
 
@@ -171,4 +179,27 @@ test("команды связи пишут только через canvasCommit 
   }
   // Предложение при постановке метки идёт из постановки точки.
   assert.ok(bodyOf("function canvasPlacePoint(").includes("canvasOfferLink("), "постановка не предлагает связать");
+});
+
+test("ожидание вещи — готовый режим блока с отметкой; щелчок находит меньшую накрывающую вещь", () => {
+  const base = scene();
+  const small = thing(base);
+  const big = thing({ project: small.project, schemeId: base.schemeId }, { widthMm: 3000, depthMm: 2000 });
+  const mark = markAt(big.project, base.schemeId, "ТВ", { x: 0.7, y: 0.7 });
+  const centre = { x: 200 / 1200, y: 100 / 800 };
+  assert.equal(canvasObjectAt(mark.project, base.schemeId, centre).id, small.object.id);
+  assert.equal(canvasObjectAt(mark.project, base.schemeId, centre, [small.object.id]).id, big.object.id, "спрятанная вещь ловится");
+  assert.equal(canvasObjectAt(mark.project, base.schemeId, { x: 0.95, y: 0.95 }), null);
+
+  const waiting = stateOf(mark.project, { mode: CANVAS_MODE_BLOCK_JOIN, blockJoinWhat: "object", schemeId: base.schemeId, selectedMarkIds: [mark.mark.id] });
+  assert.equal(canvasObjectJoining(waiting, mark.mark.id), true);
+  assert.equal(canvasObjectJoining({ ...waiting, blockJoinWhat: null }, mark.mark.id), false, "ожидание блока принято за ожидание вещи");
+  assert.match(canvasHintText(waiting), /вещью/);
+});
+
+test("предложение связать приходит и после переноса метки на вещь", () => {
+  const source = readFileSync(join(SRC, "canvas.js"), "utf8");
+  const at = source.indexOf("canvasMoveStepLabel(drag.before, drag)");
+  assert.ok(at > 0);
+  assert.ok(source.slice(at, at + 1200).includes("canvasOfferLink(drag.markId)"), "перенос не предлагает связать");
 });
