@@ -1772,40 +1772,103 @@ export function draftGuides(points, cursor, scheme, view, options = {}) {
 }
 
 /**
- * Куда сядет следующая вершина ломаной: свои направляющие, направляющие по
- * вершинам и магнит направления. Одна дверь и для предпросмотра, и для клика —
- * разойтись им негде. `points` — уже поставленные вершины, `cursor` — точка под
- * курсором в долях плана. `options.free` снимает всё разом, `options.planGuides`
- * — направляющие схемы, которые пользователь поставил с линейки.
+ * Магнит «от угла до угла» (таск 266, G386): угол чертежа ловит точку, которую
+ * ставят рукой.
+ *
+ * **Мера одна на оба занятия.** Её спрашивают и линейка, и рисование стен —
+ * `draftSnap` на плане, `workshopSnapMm` в чертеже, — и своего числа ни у
+ * кого из них нет. Углы приходят доводом **в единицах того поля, где
+ * целятся**: доли плана на «Схеме», миллиметры в «Чертеже». Считать их умеет
+ * только поле (на плане это мост `planMmToFraction`), а порог — экранный, и
+ * `scheme` с `view` переводят и цель, и углы в одни и те же точки экрана, ровно
+ * как это делают направляющие.
+ *
+ * **Радиус — 13 точек экрана, и число не новое:** это `GUIDE_CROSS_PX`, порог
+ * перекрестия направляющих. Угол — такая же **точка**, а не линия, и целятся в
+ * него тем же движением, каким целятся в перекрестие; порог в миллиметрах на
+ * мелком масштабе рукой не поймать, а на крупном он ловил бы всё подряд.
+ * `options.corner` — своё число (ноль выключает), заведено ради теста.
+ *
+ * Возвращает `{point, corner}`; `corner` — пойманный угол или `null`. По нему
+ * поле рисует кольцо (`drawSnapCorner`): магнит, сработавший молча, читается
+ * как сбой.
+ */
+export function snapToCorners(corners, point, scheme, view, options = {}) {
+  const none = { point, corner: null };
+  if (!Array.isArray(corners) || corners.length === 0 || options.free) return none;
+  const limit = options.corner === undefined ? GUIDE_CROSS_PX : options.corner;
+  if (!(limit > 0)) return none;
+  const state = renderView(view);
+  const at = planToScreen(point, scheme, state);
+  let best = null;
+  for (const corner of corners) {
+    const screen = planToScreen(corner, scheme, state);
+    const gap = Math.hypot(screen.x - at.x, screen.y - at.y);
+    if (gap <= limit && (!best || gap < best.gap)) best = { gap, corner };
+  }
+  if (!best) return none;
+  return { point: { x: best.corner.x, y: best.corner.y }, corner: best.corner };
+}
+
+/**
+ * Куда сядет следующая вершина ломаной: угол чертежа, свои направляющие,
+ * направляющие по вершинам и магнит направления. Одна дверь и для
+ * предпросмотра, и для клика — разойтись им негде. `points` — уже поставленные
+ * вершины, `cursor` — точка под курсором в долях плана. `options.free` снимает
+ * всё разом, `options.planGuides` — направляющие схемы, которые пользователь
+ * поставил с линейки, `options.corners` — углы чертежа (таск 266).
  *
  * **Порядок разрешения споров — один на всю сборку: занятую ось не двигает
  * никто, а старшинство идёт сверху вниз.**
  *
- *   1. Направляющие пользователя — он поставил их руками, это точное намерение.
- *   2. Направляющие по вершинам текущей ломаной — подсказка программы.
- *   3. Угол кратно 15° — самое приблизительное из трёх.
+ *   1. Угол чертежа — готовая точка, нарисованная кружком с буквой.
+ *   2. Направляющие пользователя — он поставил их руками, это точное намерение.
+ *   3. Направляющие по вершинам текущей ломаной — подсказка программы.
+ *   4. Угол кратно 15° — самое приблизительное из четырёх.
  *
- * Угол при этом применяется целиком или молчит: сдвинуть точку с пунктира,
- * который пользователь перед собой видит, он не может.
+ * **Угол старше всех потому, что он единственный занимает обе оси сразу**: это
+ * не линия, с которой сходят в сторону, а точка, в которую целились. Поймав
+ * его, остальные молчат по тому же правилу «занятую ось не двигает никто», а не
+ * по второму, заведённому для него. На плане со включённой сеткой блока порядок
+ * тот же, и он назван в `canvas.canvasBlockSnap`: сетка блока ведёт **метку**,
+ * а угол ловит точку, которую ставят рукой, — на одном жесте они не сходятся.
+ *
+ * Направление кратно 15° при этом применяется целиком или молчит: сдвинуть
+ * точку с пунктира, который пользователь перед собой видит, он не может.
  *
  * `snapped` — итоговое направление ровное. Считается по готовой точке, а не по
  * тому, кто её подвинул: квадрат, замкнутый направляющей, стоит ровно на 180°,
- * и подсказка у курсора обязана это сказать.
+ * и подсказка у курсора обязана это сказать. У пойманного угла `snapped` всегда
+ * `false` — тем же приёмом, которым молчит узел сетки чертежа: точка уже
+ * точная, и обещать ей ровный угол незачем.
  */
 export function draftSnap(points, cursor, scheme, view, options = {}) {
   const from = Array.isArray(points) && points.length > 0 ? points[points.length - 1] : null;
   if (options.free) {
     const angle = from ? snapSegment(from, cursor, scheme, { free: true }).angle : 0;
-    return { point: cursor, angle, snapped: false, guides: [], held: { h: null, v: null } };
+    return { point: cursor, angle, snapped: false, guides: [], held: { h: null, v: null }, corner: null };
   }
-  // 1. Своя направляющая старше всех: она уже нарисована на плане.
+  // 1. Угол чертежа старше всех: он занимает обе оси, и спорить с ним нечем.
+  const caught = snapToCorners(options.corners, cursor, scheme, view, options);
+  if (caught.corner) {
+    const shown = from ? snapSegment(from, caught.point, scheme, { free: true }) : null;
+    return {
+      point: caught.point,
+      angle: shown ? shown.angle : 0,
+      snapped: false,
+      guides: [],
+      held: { h: null, v: null },
+      corner: caught.corner,
+    };
+  }
+  // 2. Своя направляющая старше программных подсказок: она нарисована на плане.
   const own = snapToSchemeGuides(options.planGuides, cursor, scheme, view, options);
   let point = own.point;
   const heldX = Boolean(own.held.v);
   const heldY = Boolean(own.held.h);
-  if (!from) return { point, angle: 0, snapped: false, guides: [], held: own.held };
+  if (!from) return { point, angle: 0, snapped: false, guides: [], held: own.held, corner: null };
 
-  // 2. Направляющие по вершинам — только по осям, которые ещё свободны.
+  // 3. Направляющие по вершинам — только по осям, которые ещё свободны.
   const vertex = draftGuides(points, point, scheme, view, options).guides.filter(
     (guide) => (guide.axis === "h" ? !heldY : !heldX),
   );
@@ -1816,7 +1879,7 @@ export function draftSnap(points, cursor, scheme, view, options = {}) {
     else point = { x: guide.at.x, y: point.y };
   }
 
-  // 3. Угол — по тому, что осталось свободным, и целиком или никак.
+  // 4. Направление — по тому, что осталось свободным, и целиком или никак.
   if (!(takenX && takenY)) {
     const snap = snapSegment(from, point, scheme, options);
     const disturbs = (takenX && snap.point.x !== point.x) || (takenY && snap.point.y !== point.y);
@@ -1831,6 +1894,7 @@ export function draftSnap(points, cursor, scheme, view, options = {}) {
     snapped: moved && roundAngle(shown.angle),
     guides: vertex,
     held: own.held,
+    corner: null,
   };
 }
 
@@ -4334,6 +4398,42 @@ export function drawPressRing(ctx, at, progress, color) {
   ctx.strokeStyle = color || "#0969da";
   ctx.beginPath();
   ctx.arc(at.x, at.y, radius, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * part);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** Кольцо магнита угла — чуть шире кружка буквы (`DRAWING_LETTER_*`, 9 точек). */
+const SNAP_CORNER_PX = 12;
+
+/**
+ * Пойманный угол: кольцо на том самом месте, где чертёж рисует кружок с буквой
+ * угла (таск 266, G386).
+ *
+ * **Магнит, сработавший молча, читается как сбой** — точка «прыгнула сама».
+ * Поэтому кольцо рисуется не по готовой мерке, а по **углу под рукой**: оно
+ * появляется ещё до клика и говорит «нажмёшь — сядет сюда», тем же приёмом,
+ * которым подсвечена сработавшая направляющая.
+ *
+ * Белая подложка под кольцом — от фона: угол стоит и на тёмной линии стены, и
+ * на подложке плана, и на бумаге чертежа. Цвет приходит доводом: у линейки
+ * свой (`MEASURE_COLOR`), у рисования — служебный цвет чертежа, как у
+ * направляющих черновика.
+ *
+ * Рисуется поверх кадра и мимо `drawScheme`: в PNG, в печать и в лист «Схема»
+ * магнит не попадает — он про руку, а не про объект.
+ */
+export function drawSnapCorner(ctx, at, color) {
+  if (!ctx || !at) return;
+  ctx.save();
+  ctx.lineWidth = 3.4;
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
+  ctx.beginPath();
+  ctx.arc(at.x, at.y, SNAP_CORNER_PX, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.lineWidth = 1.8;
+  ctx.strokeStyle = color || "#0969da";
+  ctx.beginPath();
+  ctx.arc(at.x, at.y, SNAP_CORNER_PX, 0, Math.PI * 2);
   ctx.stroke();
   ctx.restore();
 }

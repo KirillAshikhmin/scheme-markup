@@ -88,6 +88,7 @@ import {
   schemeHeightPx,
   schemeWidthPx,
   segmentDistanceMm,
+  wallCornerTargets,
   wallsOnScheme,
   labelOf,
   linkedMarkIds,
@@ -164,6 +165,7 @@ import {
   drawPressRing,
   drawRuler,
   drawSchemeGuides,
+  drawSnapCorner,
   guideFraction,
   hitSchemeGuide,
   rulerAxis,
@@ -3192,6 +3194,47 @@ function canvasScaleClick(plan, screen, free) {
 // объект (масштаб), а линейка не записывает ничего. Поэтому у неё нет ни
 // вопроса о коротком отрезке, ни шага истории, ни отказа в просмотре.
 
+/**
+ * Углы чертежа как цели магнита на плане — **в долях плана** (таск 266, G386).
+ *
+ * Что считается углом, решает модель (`wallCornerTargets`); здесь только мост
+ * миллиметров в доли (`planMmToFraction`) и два отказа:
+ *
+ *   **выключенный слой чертежа углов не даёт** — тем же правилом, которым он не
+ *     даёт кликнуть по стене (`canvasWallAt`): ловить то, чего на плане не
+ *     видно, человек не может;
+ *   **нет калибровки или привязки — нет и угла**: миллиметра на таком плане не
+ *     существует, мост отвечает `null`, и магниту не на что целиться.
+ *
+ * Чистая и вынесена наружу нарочно: оба отказа обязаны проверяться тестом.
+ */
+export function canvasCornerTargets(state, scheme) {
+  if (!state || !scheme || state.drawingShown === false) return [];
+  const project = canvasProject(state);
+  if (!project) return [];
+  const corners = [];
+  for (const corner of wallCornerTargets(project, scheme.id)) {
+    const at = planMmToFraction(project, scheme.id, corner);
+    if (at) corners.push({ x: at.x, y: at.y, letter: corner.letter });
+  }
+  return corners;
+}
+
+// Угол **под рукой**, пока линейка включена: по нему кадр рисует кольцо магнита.
+// Хранится здесь, а не в мерке (`measure.js`), ровно по той причине, по которой
+// там не хранится и сам ход руки: это ответ на «куда сядет клик», а не часть
+// измерения, и в объект он не идёт никогда (G68). Кольцо поэтому видно и до
+// первого клика — когда предпросмотра отрезка ещё нет.
+let canvasMeasureCorner = null;
+
+function canvasMeasureCornerSet(corner) {
+  const was = canvasMeasureCorner;
+  canvasMeasureCorner = corner || null;
+  if (!was && !canvasMeasureCorner) return false;
+  if (!was || !canvasMeasureCorner) return true;
+  return was.x !== canvasMeasureCorner.x || was.y !== canvasMeasureCorner.y;
+}
+
 /** Куда сядет конец отрезка: те же магниты, что у рисования и калибровки. */
 function canvasMeasureSnap(state, scheme, plan, free) {
   const ends = measureEnds("scheme", measureKeyOf(state));
@@ -3201,7 +3244,8 @@ function canvasMeasureSnap(state, scheme, plan, free) {
   return draftSnap(points, plan, scheme, canvasViewOf(state), {
     free: Boolean(free),
     planGuides: canvasSchemeGuides(state, scheme),
-  }).point;
+    corners: canvasCornerTargets(state, scheme),
+  });
 }
 
 /** Клик линейкой: первый конец, второй конец, третий — новый отрезок. */
@@ -3210,7 +3254,9 @@ function canvasMeasureClick(plan, screen, free) {
   const scheme = canvasScheme(state);
   const key = measureKeyOf(state);
   if (!scheme || !key) return;
-  measureAdd("scheme", key, canvasMeasureSnap(state, scheme, plan, free));
+  const snap = canvasMeasureSnap(state, scheme, plan, free);
+  canvasMeasureCornerSet(snap.corner);
+  measureAdd("scheme", key, snap.point);
   canvasRedraw();
 }
 
@@ -3220,7 +3266,11 @@ function canvasMeasureHover(state, point, free) {
   const key = measureKeyOf(state);
   if (!scheme || !key) return;
   const plan = screenToPlan(point, scheme, canvasViewOf(state));
-  if (measureAim("scheme", key, canvasMeasureSnap(state, scheme, plan, free))) canvasRedraw();
+  const snap = canvasMeasureSnap(state, scheme, plan, free);
+  // Кольцо магнита живёт своим кадром: угол под рукой меняется и тогда, когда
+  // мерка ещё не начата, — а она в этом случае кадра не просит.
+  const moved = canvasMeasureCornerSet(snap.corner);
+  if (measureAim("scheme", key, snap.point) || moved) canvasRedraw();
 }
 
 /** Отрезок мерки поверх кадра: экранные точки и подпись в метрах по масштабу. */
@@ -3270,6 +3320,12 @@ function canvasPaintLinkable(state, project, scheme, view) {
 }
 
 function canvasPaintMeasure(state, scheme, view) {
+  // Кольцо пойманного угла — **до** отрезка и независимо от него: мерки может
+  // не быть вовсе (первый клик ещё не сделан), а показать, куда сядет конец,
+  // надо как раз в эту минуту.
+  if (canvasMeasureCorner) {
+    drawSnapCorner(canvasCtx, planToScreen(canvasMeasureCorner, scheme, view), MEASURE_COLOR);
+  }
   const ends = measureEnds("scheme", measureKeyOf(state));
   if (!ends) return;
   const from = planToScreen(ends.from, scheme, view);
@@ -5275,6 +5331,7 @@ function canvasKeyDown(event) {
     // контура (`canvasTapKind`, `canvasPointerDown`).
     if (canvasMeasuring(state)) {
       measureDropAll();
+      canvasMeasureCornerSet(null);
       canvasApi.setState({ measuring: false });
       return;
     }
@@ -5346,6 +5403,9 @@ function canvasKeyUp(event) {
 // известной», и копия садилась бы туда, где мыши давно нет.
 function canvasPointerLeave() {
   canvasCursor = null;
+  // Кольцо магнита уходит с рукой: угол под рукой — ответ на «куда сядет
+  // клик», а руки над планом больше нет.
+  if (canvasMeasureCornerSet(null)) canvasRedraw();
   // Призрак уходит с курсором: обещать постановку там, где руки нет, нельзя.
   if (canvasGhostDrop()) canvasRedraw();
   // Курсора над планом нет — и подсвеченной ручки быть не должно: иначе она
@@ -5512,6 +5572,9 @@ function mountCanvas(host, api) {
       const held = state.selectedMarkIds.length === 1 ? findMark(state.project, state.selectedMarkIds[0]) : null;
       if (!held || held.schemeId !== state.schemeId || !canvasEditAllowed(state)) canvasStopBlockJoin();
     }
+    // Линейку включили или убрали — кольцо магнита к прежней руке не
+    // относится: инструмент выключен, и показывать «сюда сядет клик» нечему.
+    if ("measuring" in changed) canvasMeasureCornerSet(null);
     if ("mode" in changed) {
       canvasSyncCursor();
       // Новое занятие — молчание начинается заново (таск 217, D66): про

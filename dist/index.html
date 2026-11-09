@@ -8145,9 +8145,9 @@ title: "Линейка: измерить расстояние",
 titleOn: "Убрать линейку",
 mm: "{value} мм",
 hintPlan:
-"Линейка: клик — начало отрезка, второй клик — конец, расстояние в метрах по масштабу плана. Третий клик начинает новый отрезок. Направление липнет к ровным углам и направляющим, Alt — свободно. Esc — убрать линейку.",
+"Линейка: клик — начало отрезка, второй клик — конец, расстояние в метрах по масштабу плана. Третий клик начинает новый отрезок. Конец садится в угол чертежа — тот, что обведён кружком с буквой, а пойманный показан кольцом. Направление липнет к ровным углам и направляющим, Alt — свободно. Esc — убрать линейку.",
 hintDrawing:
-"Линейка: клик — начало отрезка, второй клик — конец, расстояние в миллиметрах чертежа. Третий клик начинает новый отрезок. Притяжка та же, что при рисовании: узел сетки, направляющие, ровный угол; Alt — свободно. Esc — убрать линейку.",
+"Линейка: клик — начало отрезка, второй клик — конец, расстояние в миллиметрах чертежа. Третий клик начинает новый отрезок. Притяжка та же, что при рисовании, и в том же порядке: угол чертежа (кружок с буквой, пойманный показан кольцом), узел сетки, направляющие, ровный угол; Alt — свободно. Esc — убрать линейку.",
 hintVolume:
 "Линейка: клик — начало отрезка, второй клик — конец. Концы ложатся на стену, пол, потолок, дверь, окно и откосы проёма; в воздух и в небо точка не встанет, а прозрачную мебель линейка проходит насквозь и мерит до поверхности за ней. Третий клик начинает новый отрезок. Esc — убрать линейку.",
 volumeParts: "по полу {floor}, по высоте {rise}",
@@ -8178,7 +8178,7 @@ modeSelect: "Выделение",
 modeSelectHint: "Выделять и двигать: вершина цепочки тянется за ручку, стена — за середину, проём — вдоль своей стены",
 modeAdd: "Добавление",
 anchorPickHint:
-"Щёлкните по чертежу: туда встанет точка привязки. Притянется к узлу сетки — Alt поставит миллиметр под курсором. Esc — передумать",
+"Щёлкните по чертежу: туда встанет точка привязки. Притянется к углу чертежа, а дальше от углов — к узлу сетки; Alt поставит миллиметр под курсором. Esc — передумать",
 anchorSet: "Точка привязки: {x}, {y} мм",
 splitPickHint:
 "Щёлкните по выделенной стене, где её разделить. Точка притянется к примыканию другой стены — Alt поставит её под курсор. Esc — передумать",
@@ -8308,6 +8308,8 @@ hintBand:
 hintEdit:
 "Клик выделяет. Вершина тянется за ручку, стена — за середину, проём — вдоль своей стены, объект — целиком или за углы. У полосы ручка на середине отрезка разбивает его, ручка за концом продолжает, двойной клик по вершине убирает. Ручка перед вещью поворачивает её: клик — четверть оборота, рука — кратно 15°. Delete убирает выделенное, Esc снимает выделение. Ctrl+Z — отмена.",
 hintView: "Стрелки листают чертёж, как прокрутка, удержание разгоняет ход; «+» и «−» меняют масштаб.",
+hintCorner:
+"Точка садится в угол чертежа — тот, что обведён кружком с буквой; пойманный угол показан кольцом, и он старше узла сетки. Alt — без притяжки.",
 chainAdded: "Цепочка из {count} стен",
 bandAdded: "Полоса объекта по {count} вершинам",
 originSet: "Начало координат чертежа — середина подложки",
@@ -18259,6 +18261,12 @@ return best.node;
 function wallCorners(project, schemeId) {
 return wallNaming(project, schemeId).corners;
 }
+function wallCornerTargets(project, schemeId, options = {}) {
+const skip = options.skipWallId || null;
+const corners = wallCorners(project, schemeId);
+const fit = skip ? corners.filter((corner) => !corner.wallIds.includes(skip)) : corners;
+return fit.map((corner) => ({ x: corner.atMm.x, y: corner.atMm.y, letter: corner.letter }));
+}
 function wallNames(project, schemeId) {
 const named = wallNaming(project, schemeId).walls;
 return wallsOnScheme(project, schemeId)
@@ -26360,17 +26368,45 @@ guides.push({ axis: "v", at: vertical.at });
 }
 return { point, guides };
 }
+function snapToCorners(corners, point, scheme, view, options = {}) {
+const none = { point, corner: null };
+if (!Array.isArray(corners) || corners.length === 0 || options.free) return none;
+const limit = options.corner === undefined ? GUIDE_CROSS_PX : options.corner;
+if (!(limit > 0)) return none;
+const state = renderView(view);
+const at = planToScreen(point, scheme, state);
+let best = null;
+for (const corner of corners) {
+const screen = planToScreen(corner, scheme, state);
+const gap = Math.hypot(screen.x - at.x, screen.y - at.y);
+if (gap <= limit && (!best || gap < best.gap)) best = { gap, corner };
+}
+if (!best) return none;
+return { point: { x: best.corner.x, y: best.corner.y }, corner: best.corner };
+}
 function draftSnap(points, cursor, scheme, view, options = {}) {
 const from = Array.isArray(points) && points.length > 0 ? points[points.length - 1] : null;
 if (options.free) {
 const angle = from ? snapSegment(from, cursor, scheme, { free: true }).angle : 0;
-return { point: cursor, angle, snapped: false, guides: [], held: { h: null, v: null } };
+return { point: cursor, angle, snapped: false, guides: [], held: { h: null, v: null }, corner: null };
+}
+const caught = snapToCorners(options.corners, cursor, scheme, view, options);
+if (caught.corner) {
+const shown = from ? snapSegment(from, caught.point, scheme, { free: true }) : null;
+return {
+point: caught.point,
+angle: shown ? shown.angle : 0,
+snapped: false,
+guides: [],
+held: { h: null, v: null },
+corner: caught.corner,
+};
 }
 const own = snapToSchemeGuides(options.planGuides, cursor, scheme, view, options);
 let point = own.point;
 const heldX = Boolean(own.held.v);
 const heldY = Boolean(own.held.h);
-if (!from) return { point, angle: 0, snapped: false, guides: [], held: own.held };
+if (!from) return { point, angle: 0, snapped: false, guides: [], held: own.held, corner: null };
 const vertex = draftGuides(points, point, scheme, view, options).guides.filter(
 (guide) => (guide.axis === "h" ? !heldY : !heldX),
 );
@@ -26393,6 +26429,7 @@ angle: shown.angle,
 snapped: moved && roundAngle(shown.angle),
 guides: vertex,
 held: own.held,
+corner: null,
 };
 }
 const RULER_SIZE = 18;
@@ -27874,6 +27911,22 @@ ctx.stroke();
 ctx.strokeStyle = color || "#0969da";
 ctx.beginPath();
 ctx.arc(at.x, at.y, radius, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * part);
+ctx.stroke();
+ctx.restore();
+}
+const SNAP_CORNER_PX = 12;
+function drawSnapCorner(ctx, at, color) {
+if (!ctx || !at) return;
+ctx.save();
+ctx.lineWidth = 3.4;
+ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
+ctx.beginPath();
+ctx.arc(at.x, at.y, SNAP_CORNER_PX, 0, Math.PI * 2);
+ctx.stroke();
+ctx.lineWidth = 1.8;
+ctx.strokeStyle = color || "#0969da";
+ctx.beginPath();
+ctx.arc(at.x, at.y, SNAP_CORNER_PX, 0, Math.PI * 2);
 ctx.stroke();
 ctx.restore();
 }
@@ -54613,20 +54666,42 @@ canvasDraft.guides = [];
 canvasRedraw();
 canvasScaleAsk();
 }
+function canvasCornerTargets(state, scheme) {
+if (!state || !scheme || state.drawingShown === false) return [];
+const project = canvasProject(state);
+if (!project) return [];
+const corners = [];
+for (const corner of wallCornerTargets(project, scheme.id)) {
+const at = planMmToFraction(project, scheme.id, corner);
+if (at) corners.push({ x: at.x, y: at.y, letter: corner.letter });
+}
+return corners;
+}
+let canvasMeasureCorner = null;
+function canvasMeasureCornerSet(corner) {
+const was = canvasMeasureCorner;
+canvasMeasureCorner = corner || null;
+if (!was && !canvasMeasureCorner) return false;
+if (!was || !canvasMeasureCorner) return true;
+return was.x !== canvasMeasureCorner.x || was.y !== canvasMeasureCorner.y;
+}
 function canvasMeasureSnap(state, scheme, plan, free) {
 const ends = measureEnds("scheme", measureKeyOf(state));
 const points = ends && ends.live && ends.from ? [ends.from] : [];
 return draftSnap(points, plan, scheme, canvasViewOf(state), {
 free: Boolean(free),
 planGuides: canvasSchemeGuides(state, scheme),
-}).point;
+corners: canvasCornerTargets(state, scheme),
+});
 }
 function canvasMeasureClick(plan, screen, free) {
 const state = canvasState();
 const scheme = canvasScheme(state);
 const key = measureKeyOf(state);
 if (!scheme || !key) return;
-measureAdd("scheme", key, canvasMeasureSnap(state, scheme, plan, free));
+const snap = canvasMeasureSnap(state, scheme, plan, free);
+canvasMeasureCornerSet(snap.corner);
+measureAdd("scheme", key, snap.point);
 canvasRedraw();
 }
 function canvasMeasureHover(state, point, free) {
@@ -54634,7 +54709,9 @@ const scheme = canvasScheme(state);
 const key = measureKeyOf(state);
 if (!scheme || !key) return;
 const plan = screenToPlan(point, scheme, canvasViewOf(state));
-if (measureAim("scheme", key, canvasMeasureSnap(state, scheme, plan, free))) canvasRedraw();
+const snap = canvasMeasureSnap(state, scheme, plan, free);
+const moved = canvasMeasureCornerSet(snap.corner);
+if (measureAim("scheme", key, snap.point) || moved) canvasRedraw();
 }
 function canvasPaintLinkable(state, project, scheme, view) {
 if (!canvasObjectJoining(state, state.selectedMarkIds[0])) return;
@@ -54674,6 +54751,9 @@ ctx.stroke();
 ctx.restore();
 }
 function canvasPaintMeasure(state, scheme, view) {
+if (canvasMeasureCorner) {
+drawSnapCorner(canvasCtx, planToScreen(canvasMeasureCorner, scheme, view), MEASURE_COLOR);
+}
 const ends = measureEnds("scheme", measureKeyOf(state));
 if (!ends) return;
 const from = planToScreen(ends.from, scheme, view);
@@ -55931,6 +56011,7 @@ return;
 if (event.key === "Escape") {
 if (canvasMeasuring(state)) {
 measureDropAll();
+canvasMeasureCornerSet(null);
 canvasApi.setState({ measuring: false });
 return;
 }
@@ -55984,6 +56065,7 @@ canvasSyncCursor();
 }
 function canvasPointerLeave() {
 canvasCursor = null;
+if (canvasMeasureCornerSet(null)) canvasRedraw();
 if (canvasGhostDrop()) canvasRedraw();
 if (canvasHoverHandle) {
 canvasHoverHandle = null;
@@ -56092,6 +56174,7 @@ state.mode === CANVAS_MODE_BLOCK_JOIN &&
 const held = state.selectedMarkIds.length === 1 ? findMark(state.project, state.selectedMarkIds[0]) : null;
 if (!held || held.schemeId !== state.schemeId || !canvasEditAllowed(state)) canvasStopBlockJoin();
 }
+if ("measuring" in changed) canvasMeasureCornerSet(null);
 if ("mode" in changed) {
 canvasSyncCursor();
 canvasSilentSaid = false;
@@ -72882,13 +72965,25 @@ function workshopSnapMm(pointsMm, cursorMm, view, options = {}) {
 const points = Array.isArray(pointsMm) ? pointsMm : [];
 if (options.free) {
 const shown = draftSnap(points, cursorMm, WORKSHOP_UNIT, view, { free: true });
-return { point: workshopRoundMm(cursorMm), angle: shown.angle, snapped: false, guides: [], grid: false };
+return { point: workshopRoundMm(cursorMm), angle: shown.angle, snapped: false, guides: [], grid: false, corner: null };
+}
+const caught = snapToCorners(options.corners, cursorMm, WORKSHOP_UNIT, view, options);
+if (caught.corner) {
+const shown = draftSnap(points, caught.point, WORKSHOP_UNIT, view, { free: true });
+return {
+point: workshopRoundMm(caught.point),
+angle: shown.angle,
+snapped: false,
+guides: [],
+grid: false,
+corner: caught.corner,
+};
 }
 const gridMm = Number(options.gridMm) || 0;
 if (options.gridSnap && gridMm > 0) {
 const node = { x: Math.round(cursorMm.x / gridMm) * gridMm, y: Math.round(cursorMm.y / gridMm) * gridMm };
 const shown = draftSnap(points, node, WORKSHOP_UNIT, view, { free: true });
-return { point: workshopRoundMm(node), angle: shown.angle, snapped: false, guides: [], grid: true };
+return { point: workshopRoundMm(node), angle: shown.angle, snapped: false, guides: [], grid: true, corner: null };
 }
 const snap = draftSnap(points, cursorMm, WORKSHOP_UNIT, view, {});
 return {
@@ -72897,6 +72992,7 @@ angle: snap.angle,
 snapped: snap.snapped,
 guides: snap.guides,
 grid: false,
+corner: null,
 };
 }
 function workshopMoveAnchorMm(subject) {
@@ -73428,7 +73524,8 @@ offsetY: boxHeight / 2 - ((extent.minY + extent.maxY) / 2) * zoom,
 }
 function workshopHint(tool, way, measuring = false) {
 if (measuring) return strings.measure.hintDrawing + " " + strings.workshop.hintView;
-return workshopHintSubject(tool, way) + " " + strings.workshop.hintView;
+const corner = tool === "openings" || tool === "edit" ? "" : " " + strings.workshop.hintCorner;
+return workshopHintSubject(tool, way) + corner + " " + strings.workshop.hintView;
 }
 function workshopHintSubject(tool, way) {
 if (tool === "openings") return strings.workshop.hintOpenings;
@@ -73903,6 +74000,24 @@ return getState()[key] !== false;
 function gridSnap() {
 return getState().gridSnap !== false;
 }
+function cornersMm() {
+return layerOn("drawingShown") ? wallCornerTargets(project(), schemeId) : [];
+}
+let cornerUnder = null;
+function cornerMagnetOn() {
+return measuring() || Boolean(anchorPick) || tool === "walls" || tool === "objects";
+}
+function markCorner(corner) {
+const was = cornerUnder;
+cornerUnder = corner || null;
+if (!was && !cornerUnder) return false;
+if (!was || !cornerUnder) return true;
+return was.x !== cornerUnder.x || was.y !== cornerUnder.y;
+}
+function paintCorner() {
+if (!cornerUnder || !cornerMagnetOn()) return;
+drawSnapCorner(ctx, screenOf(cornerUnder), measuring() ? MEASURE_COLOR : WORKSHOP_ACCENT);
+}
 function viewport() {
 return { width: Math.max(1, stage.clientWidth), height: Math.max(1, stage.clientHeight) };
 }
@@ -73956,6 +74071,7 @@ return workshopSnapMm(draft ? draft.points : [], pointMm, view, {
 free,
 gridMm: gridMm(),
 gridSnap: gridSnap(),
+corners: cornersMm(),
 });
 }
 let measureWanted = getState().measuring === true;
@@ -73968,19 +74084,27 @@ return measureKeyOf(getState());
 function measureSnapMm(pointMm, free) {
 const ends = measureEnds("drawing", measureKey());
 const points = ends && ends.live && ends.from ? [ends.from] : [];
-return workshopSnapMm(points, pointMm, view, { free, gridMm: gridMm(), gridSnap: gridSnap() }).point;
+return workshopSnapMm(points, pointMm, view, {
+free,
+gridMm: gridMm(),
+gridSnap: gridSnap(),
+corners: cornersMm(),
+});
 }
 function measureClick(event) {
 const key = measureKey();
 if (!key) return;
-measureAdd("drawing", key, measureSnapMm(mmOf(event), event.altKey));
+const snap = measureSnapMm(mmOf(event), event.altKey);
+markCorner(snap.corner);
+measureAdd("drawing", key, snap.point);
 redraw();
 }
 function measureHover(event) {
 const key = measureKey();
 if (!key) return;
-const at = onField(event) ? measureSnapMm(mmOf(event), event.altKey) : null;
-if (measureAim("drawing", key, at)) redraw();
+const snap = onField(event) ? measureSnapMm(mmOf(event), event.altKey) : null;
+const moved = markCorner(snap ? snap.corner : null);
+if (measureAim("drawing", key, snap ? snap.point : null) || moved) redraw();
 }
 function paintMeasure() {
 const ends = measureEnds("drawing", measureKey());
@@ -74748,13 +74872,18 @@ return;
 }
 if (tool === "objects") {
 if (objectDrawn()) addVertex(event);
-else placeObject(workshopPlacePointMm(objectGhost, event.altKey, snapOf(mmOf(event), event.altKey).point), null);
+else {
+const snap = snapOf(mmOf(event), event.altKey);
+markCorner(snap.corner);
+placeObject(workshopPlacePointMm(objectGhost, event.altKey, snap.point), null);
+}
 return;
 }
 select(null);
 }
 function addVertex(event) {
 const snap = snapOf(mmOf(event), event.altKey);
+markCorner(snap.corner);
 if (!draft) {
 draft = { points: [snap.point], cursor: snap.point, snap };
 paint();
@@ -74866,18 +74995,24 @@ if (!was !== !next || (next && was && (next.atMm !== was.atMm || next.ok !== was
 return;
 }
 if (anchorPick) {
-const next = onField(event) ? snapOf(mmOf(event), event.altKey).point : null;
+const snap = onField(event) ? snapOf(mmOf(event), event.altKey) : null;
+const next = snap ? snap.point : null;
 const was = anchorPick.pointMm;
 const moved = Boolean(next) !== Boolean(was) || (next && was && (next.x !== was.x || next.y !== was.y));
 anchorPick = { pointMm: next };
-if (moved) redraw();
+if (markCorner(snap ? snap.corner : null) || moved) redraw();
 return;
 }
 if (tool === "walls" || objectDrawn()) {
-if (!draft) return;
+if (!draft) {
+const caught = onField(event) ? snapOf(mmOf(event), event.altKey).corner : null;
+if (markCorner(caught)) redraw();
+return;
+}
 const snap = snapOf(mmOf(event), event.altKey);
 draft.cursor = snap.point;
 draft.snap = snap;
+markCorner(onField(event) ? snap.corner : null);
 redraw();
 return;
 }
@@ -74891,11 +75026,12 @@ redraw();
 return;
 }
 if (tool === "objects") {
-const next = onField(event) ? snapOf(mmOf(event), event.altKey).point : null;
+const snap = onField(event) ? snapOf(mmOf(event), event.altKey) : null;
+const next = snap ? snap.point : null;
 const was = objectGhost && objectGhost.pointMm;
 const moved = Boolean(next) !== Boolean(was) || (next && was && (next.x !== was.x || next.y !== was.y));
 objectGhost = next ? { pointMm: next, free: Boolean(event.altKey) } : null;
-if (moved) redraw();
+if (markCorner(snap ? snap.corner : null) || moved) redraw();
 return;
 }
 const pick = workshopPick(project(), schemeId, mmOf(event), view, selected, hiddenObjects());
@@ -75251,6 +75387,7 @@ paintSplit();
 paintObjectHandles();
 paintDraft();
 paintGuides(box);
+paintCorner();
 if (measuring()) paintMeasure();
 }
 function paintGuides(box) {
@@ -75942,6 +76079,7 @@ if ("wallSide" in changed || "elevationViews" in changed || "elevationGrow" in c
 sync();
 if ("measuring" in changed) {
 measureWanted = state.measuring === true;
+markCorner(null);
 sync();
 }
 if (
