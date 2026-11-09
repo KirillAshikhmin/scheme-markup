@@ -42753,7 +42753,7 @@ mark: { w: 0.025, height: 0.085 },
 });
 const VOLUME_DIGIT_SEGMENTS = Object.freeze([
 "abcdef",
-"bc",
+"i",
 "abged",
 "abgcd",
 "fgbc",
@@ -42780,6 +42780,7 @@ f: [0, w, high[0], high[1]],
 b: [1 - w, 1, high[0], high[1]],
 e: [0, w, low[0], low[1]],
 c: [1 - w, 1, low[0], low[1]],
+i: [1 - w, 1, low[0], high[1]],
 });
 })();
 function volumeSetpointMemo() {

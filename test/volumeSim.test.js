@@ -988,3 +988,50 @@ test("257: цифры доезжают до кадра — своим цвето
   // Ночью цвет тот же: экран излучает, а не отражает.
   assert.ok(!log.includes(fill(VOLUME_SETPOINT_RGB)), "уставку никто не менял, а она в кадре");
 });
+
+test("257: единица — одна сплошная стойка, и прочие цифры от этого не поменялись ни на грань", () => {
+  // Слово заказчика после живого прогона: «цифру 1 поправь, остальное ок».
+  // Единица выходила двумя обрубками: щель между `b` и `c` сделана нарочно
+  // широкой (иначе цифры слипаются к полутора метрам), а закрыть её у единицы
+  // нечем — перекладины у неё нет.
+  const box = simStand();
+  put(box, "thermo", "ТМ", [{ x: 0, y: -1350 }]);
+  const scene = volumeScene(box.project, box.schemeId, { roofOff: true });
+  const place = scene.marks.find((item) => item.markId === box.marks.thermo);
+  const across = (point) =>
+    (point.x - place.face.origin.x) * place.face.u.x + (point.y - place.face.origin.y) * place.face.u.y;
+  const span = (face, of) => ({
+    from: Math.min(...face.p.map(of)),
+    to: Math.max(...face.p.map(of)),
+  });
+  // Однозначное показание прижато вправо: на табло горит один разряд.
+  const drawn = (value) =>
+    volumeLiveSigns(scene, thermoLive(box, { now: value, want: 20, heat: false })).filter(
+      (face) => face.markId === box.marks.thermo,
+    );
+  // Точка градуса стоит правее числа и цифрой не считается.
+  const without = (faces) => {
+    const right = faces.reduce((far, face) => (span(face, across).from > span(far, across).from ? face : far), faces[0]);
+    return faces.filter((face) => face !== right);
+  };
+  assert.deepEqual(
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((value) => without(drawn(value)).length),
+    [6, 1, 5, 5, 4, 5, 6, 3, 7, 6],
+    "начертание цифры изменилось",
+  );
+  // Стойка единицы — ровно `b` и `c`, сросшиеся: та же колонка и те же края.
+  const bar = without(drawn(1))[0];
+  const seven = without(drawn(7));
+  const wide = Math.max(...seven.map((face) => span(face, across).to - span(face, across).from));
+  const uprights = seven.filter((face) => span(face, across).to - span(face, across).from < wide / 2);
+  assert.equal(uprights.length, 2, "у семёрки не две стойки — сравнивать не с чем");
+  const close = (a, b, what) => assert.ok(Math.abs(a - b) < 0.001, what + ": " + a + " против " + b);
+  close(span(bar, across).from, Math.min(...uprights.map((face) => span(face, across).from)), "стойка не в своей колонке");
+  close(span(bar, across).to, Math.max(...uprights.map((face) => span(face, across).to)), "стойка не в своей колонке");
+  const high = (point) => point.z;
+  close(span(bar, high).from, Math.min(...uprights.map((face) => span(face, high).from)), "стойка начинается не от низа `c`");
+  close(span(bar, high).to, Math.max(...uprights.map((face) => span(face, high).to)), "стойка кончается не на верху `b`");
+  // И она **сплошная**: дыры посередине у неё нет — у семёрки есть.
+  const hole = Math.min(...uprights.map((face) => span(face, high).to)) < Math.max(...uprights.map((face) => span(face, high).from));
+  assert.ok(hole, "у семёрки стойки срослись — щель между `b` и `c` пропала у всех");
+});
