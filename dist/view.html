@@ -29477,17 +29477,19 @@ const middle = (values) => values.reduce((sum, value) => sum + value, 0) / value
 const shift = middle(places) - middle(next);
 return shift === 0 ? next : next.map((value) => value + shift);
 }
-function elevationLabelRooms(places) {
-const order = places.map((value, index) => index).sort((first, second) => places[first] - places[second]);
-const rooms = places.map(() => Infinity);
-for (let at = 0; at < order.length; at += 1) {
-const place = places[order[at]];
+function elevationLabelRooms(places, line = 0) {
+const spot = (place) =>
+typeof place === "number" ? { at: place, top: 0, bottom: 0 } : { at: place.at, top: place.top, bottom: place.bottom };
+const spots = places.map(spot);
+return spots.map((place) => {
 let room = Infinity;
-if (at > 0) room = Math.min(room, place - places[order[at - 1]]);
-if (at + 1 < order.length) room = Math.min(room, places[order[at + 1]] - place);
-rooms[order[at]] = room;
+for (const other of spots) {
+if (other === place) continue;
+if (other.top - line > place.bottom || place.top - line > other.bottom) continue;
+room = Math.min(room, Math.abs(other.at - place.at));
 }
-return rooms;
+return room;
+});
 }
 function elevationLabelFit(parts, room, measure) {
 const label = String((parts && parts.label) || "");
@@ -29555,6 +29557,28 @@ elevationMarkBox(mark, scale, unit, options.views === true, options.grow === tru
 ),
 names: row.axis === "column" || row.members.length === 1,
 }));
+for (const row of rows) {
+const boxes = row.boxes;
+if (row.axis === "column") {
+row.seats = elevationPack(
+row.members.map((mark, index) => centrePx(mark, boxes[index])),
+boxes.map((box) => box.height),
+);
+const ys = row.seats.map((place) => floor - place);
+row.top = Math.min(...ys);
+row.bottom = Math.max(...ys);
+continue;
+}
+row.seats = elevationPack(
+row.members.map((mark) => mark.fromMm * scale),
+boxes.map((box) => box.width),
+);
+const highest = Math.min(
+...row.members.map((mark, index) => floor - centrePx(mark, boxes[index]) - boxes[index].height / 2),
+);
+row.top = highest - 7 * unit;
+row.bottom = row.top;
+}
 const grown = rows.reduce(
 (sum, row) => sum + row.boxes.filter((box) => box.view && box.grown > ELEVATION_GROWN_QUIET).length,
 0,
@@ -29620,12 +29644,19 @@ object.name &&
 !namedObjects.has(object.id) &&
 (object.toMm - object.fromMm) * scale >= ELEVATION_LABEL_MIN_PX * unit,
 );
+const objectLabelY = (object) => atY(object.topMm === null ? elevation.heightShownMm : object.topMm) - 8 * unit;
 const labelPlaces = [
-...lines.map((mark) => (atX(mark.fromMm) + atX(mark.toMm)) / 2),
-...rows.map((row) => atX(row.centreMm)),
-...objectLabels.map((object) => (atX(object.fromMm) + atX(object.toMm)) / 2),
+...lines.map((mark) => {
+const y = atY(mark.heightMm) - 9 * unit;
+return { at: (atX(mark.fromMm) + atX(mark.toMm)) / 2, top: y, bottom: y };
+}),
+...rows.map((row) => ({ at: atX(row.centreMm), top: row.top, bottom: row.bottom })),
+...objectLabels.map((object) => {
+const y = objectLabelY(object);
+return { at: (atX(object.fromMm) + atX(object.toMm)) / 2, top: y, bottom: y };
+}),
 ];
-const labelRooms = elevationLabelRooms(labelPlaces);
+const labelRooms = elevationLabelRooms(labelPlaces, ELEVATION_FONT * unit);
 const objectRooms = new Map(
 objectLabels.map((object, at) => [object.id, labelRooms[lines.length + rows.length + at]]),
 );
@@ -29644,7 +29675,7 @@ if ((object.toMm - object.fromMm) * scale < ELEVATION_LABEL_MIN_PX * unit) conti
 if (!namedObjects.has(object.id)) {
 const name = elevationNameFit(object.name, objectRooms.get(object.id), labelWidth);
 if (name) {
-elevationText(ctx, name, (atX(object.fromMm) + atX(object.toMm)) / 2, y - 8 * unit, "center", unit);
+elevationText(ctx, name, (atX(object.fromMm) + atX(object.toMm)) / 2, objectLabelY(object), "center", unit);
 }
 }
 if (object.topMm !== null) {
@@ -29676,8 +29707,8 @@ ctx.stroke();
 elevationText(
 ctx,
 elevationLabelFit({ label: mark.label, name: mark.objectName, heightMm: mark.heightMm }, labelRooms[index], labelWidth),
-labelPlaces[index],
-y - 9 * unit,
+labelPlaces[index].at,
+labelPlaces[index].top,
 "center",
 unit,
 );
@@ -29703,10 +29734,7 @@ const row = rows[rowAt];
 const boxes = row.boxes;
 const room = labelRooms[lines.length + rowAt];
 if (row.axis === "column") {
-const places = elevationPack(
-row.members.map((mark, index) => centrePx(mark, boxes[index])),
-boxes.map((box) => box.height),
-);
+const places = row.seats;
 row.members.forEach((mark, index) => {
 const box = boxes[index];
 const x = atX(mark.fromMm);
@@ -29723,16 +29751,10 @@ unit,
 });
 continue;
 }
-const places = elevationPack(
-row.members.map((mark) => mark.fromMm * scale),
-boxes.map((box) => box.width),
-);
-let top = Infinity;
+const places = row.seats;
 row.members.forEach((mark, index) => {
 const box = boxes[index];
-const y = floor - centrePx(mark, box);
-drawRowMark(mark, box, left + places[index], y);
-top = Math.min(top, y - box.height / 2);
+drawRowMark(mark, box, left + places[index], floor - centrePx(mark, box));
 });
 elevationText(
 ctx,
@@ -29741,8 +29763,8 @@ elevationLabelFit(
 room,
 labelWidth,
 ),
-labelPlaces[lines.length + rowAt],
-top - 7 * unit,
+labelPlaces[lines.length + rowAt].at,
+row.top,
 "center",
 unit,
 );

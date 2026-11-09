@@ -423,6 +423,26 @@ test("запас подписи — до ближайшего соседа, у �
   assert.deepEqual(elevationLabelRooms([250, 0, 100]), [150, 100, 100]);
 });
 
+test("соседка — та, что стоит на той же строке (таск 279)", () => {
+  // Место подписи — отступ и полоса высот; строка приходит доводом. Число
+  // вместо места значит «строка одна на всех» — так меряется полоса под полом.
+  const line = 11;
+  const at = (value, top, bottom = top) => ({ at: value, top, bottom });
+  assert.deepEqual(elevationLabelRooms([at(0, 0), at(100, 0), at(250, 0)], line), [100, 100, 150]);
+  // Средняя подпись ушла на две строки вверх — крайние её не замечают и меряются
+  // друг о друга, а сама она свободна.
+  assert.deepEqual(
+    elevationLabelRooms([at(0, 0), at(100, -40), at(250, 0)], line),
+    [250, Infinity, 250],
+    "подпись с другой строки отняла место",
+  );
+  // Полоса высот столбика: соседка пересекает её верх — значит она соседка.
+  assert.deepEqual(elevationLabelRooms([at(0, -40, 0), at(100, -40)], line), [100, 100]);
+  // Число вместо места — «строка одна на всех»: так меряется полоса под полом,
+  // где подписи и правда стоят в ряд.
+  assert.deepEqual(elevationLabelRooms([0, 100, 250], line), [100, 100, 150]);
+});
+
 test("подпись сдаёт имя вещи, потом высоту, а обозначение остаётся", () => {
   const parts = { label: "ТВ1 · Телевизор", name: "Телевизор", heightMm: 1200 };
   const measure = (value) => String(value).length * 6;
@@ -540,7 +560,7 @@ test("на плотной стене подпись прибора уклады�
 
 // Та же пара связанных телевизоров плюс **несвязанная** вещь между ними: её
 // лист обязан называть как называл.
-function linkedPairAndRadiator(gapMm, atX = 0) {
+function linkedPairAndRadiator(gapMm, atX = 0, heightMm = 500) {
   const scene = linkedPair(gapMm);
   const kinds = ensureSchemeObjectKinds(scene.project);
   let project = kinds.project;
@@ -558,7 +578,9 @@ function linkedPairAndRadiator(gapMm, atX = 0) {
     atMm: { x: atX, y: 1380 },
     widthMm: 800,
     depthMm: 100,
-    heightMm: 500,
+    // Верх вещи — это строка её подписи: 150 + 500 = 650 мм стоит у пола,
+    // далеко от подписей телевизоров (их знаки кончаются на 1600).
+    heightMm,
     heightAboveFloorMm: 150,
   }).project;
   return { ...scene, project };
@@ -856,15 +878,29 @@ test("имя вещи встаёт целиком или не встаёт во�
 
 test("подпись вещи стоит в той же мере тесноты, что подписи меток", () => {
   const box = { x: 0, y: 0, width: 700, height: 400 };
-  // Радиатор ближе к одному телевизору, чем телевизоры друг к другу: до таска
-  // его подпись меры не занимала, и «ТВ2 · Телевизор · 1400» ложилась на
-  // «Радиатор». Теперь имя вещи уходит у метки первым (порядок сдачи таска 273).
-  const scene = linkedPairAndRadiator(2600, -200);
+  // Вещь ближе к одному телевизору, чем телевизоры друг к другу, и верх у неё
+  // тот же (1600), то есть подпись встаёт **на той же строке**: до таска её
+  // место меры не занимало, и «ТВ2 · Телевизор · 1400» ложилась на имя вещи.
+  // Теперь имя вещи уходит у метки первым (порядок сдачи таска 273).
+  const scene = linkedPairAndRadiator(2600, -200, 1450);
   const view = wallElevation(scene.project, scene.wallId, "right");
   const { texts } = elevationLabels(view, box);
   assert.ok(texts.includes("Радиатор"), JSON.stringify(texts));
   assert.ok(texts.includes("ТВ1 · Телевизор · 1400"), "далёкой соседке тесноты прибавилось");
   assert.ok(texts.includes("ТВ2 · 1400"), "подпись метки радиатора не заметила: " + JSON.stringify(texts));
+});
+
+test("подписи, разошедшиеся по высоте, друг другу не мешают", () => {
+  const box = { x: 0, y: 0, width: 700, height: 400 };
+  // Та же вещь на том же месте, но низкая: её верх 650, подписи телевизоров
+  // стоят над 1600 — пересечься они не могут **ни при какой ширине**, и
+  // отнимать друг у друга место им не за что. Иначе лист терял бы имена вещей,
+  // которые ни на что не налезают: на объектах заказчика это 81 имя из 86.
+  const scene = linkedPairAndRadiator(2600, -200, 500);
+  const view = wallElevation(scene.project, scene.wallId, "right");
+  const { texts } = elevationLabels(view, box);
+  assert.ok(texts.includes("Радиатор"), JSON.stringify(texts));
+  assert.ok(texts.includes("ТВ2 · Телевизор · 1400"), "подпись сдала имя соседке с другой строки: " + JSON.stringify(texts));
 });
 
 /** Три радиатора 300 мм на своих местах вдоль стены, все несвязанные. */
