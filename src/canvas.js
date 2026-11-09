@@ -49,6 +49,7 @@ import {
   addToGroup,
   applyMarkWalls,
   applyRoomOutlines,
+  blockGridSnap,
   blockLabel,
   blockMembers,
   blockStepPx,
@@ -2011,39 +2012,90 @@ function canvasToggleLabelLeader(markId) {
 // поэтому правка идёт через `canvasCommit`: отменяется по Ctrl+Z, уезжает в
 // файл и виден на экране, в PNG, на листе ГОСТ и в печати.
 //
-// Кого переставляем: метку из блока — **вместе со всем блоком**, как её и
-// везут по плану (G189). Своего правила порядок не заводит: «взял розетку —
-// везёшь блок» человек уже выучил на перетаскивании, и рамка из розеток,
-// уехавшая под выключатель половиной, была бы не порядком, а поломкой.
-// Порядка **внутри** блока нет нарочно: розетки в одной рамке стоят рядом, а
-// не друг на друге, а совпавшие знаки на плане разводит стопка (G181) — у неё
-// своё правило, высота над полом.
-function canvasOrderIds(state, markId) {
+// Кого переставляем: **шаг — про метку, край — про блок** (таск 262, G385).
+//
+// Слова заказчика о порядке внутри блока — «должен быть», — и шов, по которому
+// он разошёлся, у четырёх команд уже был: шаг «выше»/«ниже» слушает фильтр и
+// шагает через ту метку, которую **видно** рядом, а «на передний план» и «на
+// задний план» фильтр не слушают нарочно — они про весь лист (разбор у
+// `markOrderPlan`). Тот же шов отвечает и на «кого везём»:
+//
+//   — «выше» и «ниже» двигают **одну метку**, и у метки из блока шагают через
+//     соседа по блоку (`canvasOrderMates`): наложение внутри рамки человек
+//     видит глазами и правит одним нажатием, а не считая, сколько там чужих
+//     ярусов между розетками;
+//   — «на передний план» и «на задний план» двигают **весь блок**, как его и
+//     везут по плану (G189): рамка из розеток, уехавшая под выключатель
+//     половиной, была бы не порядком, а поломкой.
+//
+// Второй клавиши для этого не завелось (`canvasOrderKey` цел): скобки — шаг,
+// Shift+скобки — края. Правило таска 213 закрыто там же, где и у клавиш, — в
+// подсказке каждой кнопки (`strings.markCard.order.block` и `blockStep`).
+//
+// Совпавшие знаки по-прежнему разводит стопка (G181) — у неё своё правило,
+// высота над полом; порядок решает лишь, кто остался на настоящей точке.
+export function canvasOrderSolo(move) {
+  return move === MARK_ORDER_UP || move === MARK_ORDER_DOWN;
+}
+
+function canvasOrderIds(state, markId, move) {
   const mark = state.project ? findMark(state.project, markId) : null;
   if (!mark) return [];
-  return canvasMoveIds(state.project, markId, mark.groupId || null, false);
+  return canvasMoveIds(state.project, markId, mark.groupId || null, canvasOrderSolo(move));
+}
+
+// Соседи по блоку, через которых шагает метка из блока, — или `null`, если
+// шагать надо через весь лист (метка не в блоке, команда краевая). Состав
+// блока спрашивается той же дверью, что у перетаскивания, — своего списка
+// порядок не заводит.
+function canvasOrderMates(state, markId, move) {
+  if (!canvasOrderSolo(move)) return null;
+  const mark = state.project ? findMark(state.project, markId) : null;
+  if (!mark || !mark.groupId) return null;
+  const ids = canvasMoveIds(state.project, markId, mark.groupId, false);
+  return ids.length > 1 ? new Set(ids) : null;
 }
 
 // Что человек видит: шаг «выше»/«ниже» шагает через видимую метку, иначе под
 // фильтром нажатие не меняло бы на экране ничего. Края («на передний план»,
 // «на задний план») фильтр не слушают — почему, написано у `markOrderPlan`.
-function canvasOrderAmong(state, scheme) {
-  return { among: visibleMarks(state.project, scheme, state.filter).map((mark) => mark.id) };
+// У метки из блока шаг вдобавок сужен до соседей по блоку: видимое ∩ блок.
+// Оба правила тут и остаются обоими — скрытый фильтром сосед по блоку шага не
+// получает, потому что на экране от этого шага не изменилось бы ничего.
+function canvasOrderAmong(state, scheme, markId, move) {
+  const seen = visibleMarks(state.project, scheme, state.filter).map((mark) => mark.id);
+  const mates = canvasOrderMates(state, markId, move);
+  return { among: mates ? seen.filter((id) => mates.has(id)) : seen };
+}
+
+/**
+ * Чем холст зовёт модель: `{ids, options}` — кого переставляем и через кого
+ * шагаем. Одна дверь на оба вызова (гаснущая кнопка и само нажатие), и вынесена
+ * она наружу ради теста: «шаг везёт метку, край везёт блок» — правило, которое
+ * обязано проверяться без браузера.
+ */
+export function canvasOrderPlan(state, markId, move) {
+  const scheme = state ? canvasScheme(state) : null;
+  if (!state || !state.project || !scheme) return null;
+  return {
+    ids: canvasOrderIds(state, markId, move),
+    options: canvasOrderAmong(state, scheme, markId, move),
+  };
 }
 
 /** Сделает ли команда порядка что-нибудь: по этому гаснут кнопки карточки. */
 export function canvasMarkOrderCan(state, markId, move) {
-  const scheme = state ? canvasScheme(state) : null;
-  if (!state || !state.project || !scheme || !canvasEditAllowed(state)) return false;
-  return markOrderCan(state.project, canvasOrderIds(state, markId), move, canvasOrderAmong(state, scheme));
+  if (!state || !canvasEditAllowed(state)) return false;
+  const plan = canvasOrderPlan(state, markId, move);
+  return plan ? markOrderCan(state.project, plan.ids, move, plan.options) : false;
 }
 
 export function canvasMarkOrder(markId, move) {
   const state = canvasState();
-  const scheme = state ? canvasScheme(state) : null;
-  if (!state || !state.project || !scheme) return;
+  const plan = canvasOrderPlan(state, markId, move);
+  if (!plan) return;
   try {
-    const result = moveMarkOrder(state.project, canvasOrderIds(state, markId), move, canvasOrderAmong(state, scheme));
+    const result = moveMarkOrder(state.project, plan.ids, move, plan.options);
     // Шага истории у команды, которая ничего не меняет, быть не должно:
     // Ctrl+Z после третьего нажатия «выше» у верхней метки отменил бы чужую
     // правку.
@@ -2368,6 +2420,35 @@ function canvasGuideSnap(plan, free) {
   const guides = canvasSchemeGuides(state, scheme);
   if (guides.length === 0) return plan;
   return snapToSchemeGuides(guides, plan, scheme, canvasViewOf(state), { free: Boolean(free) }).point;
+}
+
+/**
+ * Сетка блока под рукой (таск 262, G380): куда ляжет ведомая точка.
+ *
+ * **Сетка ловит метку, которая едет внутри блока, — и только её.** Блок,
+ * который везут целиком (умолчание G189), едет свободно и везёт сетку с собой:
+ * узлы отсчитываются от первой метки блока, значит «уложить блок на его
+ * собственную сетку» не выровняло бы на плане ни одной пары соседей, зато
+ * связало бы руку на пустом месте. Одиночную метку сетке ловить не за что —
+ * блока у неё нет (`blockGridSnap` отвечает той же точкой).
+ *
+ * Отсюда и ответ на «а на планшете»: пальцем метку из блока сейчас не увозят
+ * вовсе (у пальца нет Ctrl, и `moving` у него всегда весь блок), поэтому
+ * сетка там не появляется и ничего не отнимает.
+ *
+ * **Alt — одна клавиша «без магнита» на обе притяжки.** Он уже снимает
+ * направляющие (`canvasGuideSnap`) и ровные углы рисования (`draftSnap`), и
+ * второго правила «отпустить руку» в сборке быть не должно: человек, которому
+ * узлы мешают, зажимает Alt и ведёт куда хочет.
+ *
+ * Чистая и вынесенная наружу нарочно: решение «ловить или не ловить» обязано
+ * проверяться тестом, а не глазами.
+ */
+export function canvasBlockSnap(project, drag, point, free) {
+  if (free || !project || !drag || !drag.markId) return point;
+  const moving = drag.moving || [drag.markId];
+  if (moving.length !== 1) return point;
+  return blockGridSnap(project, drag.markId, point);
 }
 
 // Вершина метки, ближайшая к точке клика: за неё и считается притяжка при
@@ -4632,7 +4713,13 @@ function canvasDragTo(point, free) {
       // Притяжка к направляющим считается по той вершине, за которую взялись:
       // её пользователь и ведёт глазами. Вся метка едет за ней, форма цела.
       const anchor = shifted[canvasDrag.anchor] || shifted[0];
-      const snapped = canvasGuideSnap(anchor, free);
+      // Две притяжки на одну руку, и порядок у них назван: сперва сетка блока,
+      // потом направляющая. Направляющую человек провёл сам и видит её
+      // подсвеченной — её слово последнее, иначе сетка оттащила бы метку с
+      // линии на четверть знака, а линия продолжала бы обещать попадание.
+      // Сетки от этого не теряется ничего: направляющих на плане единицы, и
+      // ловят они только то, к чему подвели вплотную.
+      const snapped = canvasGuideSnap(canvasBlockSnap(before, canvasDrag, anchor, free), free);
       const fix = { x: snapped.x - anchor.x, y: snapped.y - anchor.y };
       const shift = { x: dx + fix.x, y: dy + fix.y };
       // Точка комментария везётся без плашки (G199): плашка стоит там, где её
