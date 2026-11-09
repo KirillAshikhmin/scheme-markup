@@ -7012,6 +7012,7 @@ dome: "Полукруг",
 "circle-fan": "Круг с тремя лучами",
 "circle-rays": "Круг с подвесом",
 "circle-bar": "Круг с чертой",
+"circle-cut": "Круг со срезом",
 "square-ring": "Квадрат с кольцом",
 "square-grid": "Квадрат с четырьмя точками",
 "diamond-ring": "Ромб с кольцом",
@@ -12730,7 +12731,7 @@ viewCircle(0.38, 0.26, 0.03),
 ),
 },
 vacuum: {
-shapes: ["trapezoid-bar"],
+shapes: ["trapezoid-bar", "circle-cut"],
 mm: { width: 350, height: 350 },
 parts: viewParts(
 viewCircle(0, 0, 0.46),
@@ -14671,6 +14672,7 @@ const SHAPE_PALETTE = [
 "circle-fan",
 "circle-rays",
 "circle-bar",
+"circle-cut",
 "square",
 "square-bar",
 "square-bar-two",
@@ -15061,7 +15063,7 @@ const TEMPLATE_TYPES = [
 { category: "sensors", code: "ДО", name: strings.types.opening, shape: "square-split", sizes: { length: 70, width: 40, depth: 15, heightAboveFloor: 2000 } },
 { category: "sensors", code: "ДПр", name: strings.types.leak, shape: "drop", sizes: { length: 60, width: 60, depth: 15, heightAboveFloor: 0 } },
 { category: "panel", code: "ЩС", name: strings.types.panelLow, shape: "square-cross", view: "panelBox", sizes: { length: 300, width: 400, depth: 90, heightAboveFloor: 1400 } },
-{ category: "appliances", code: "РП", name: strings.types.vacuum, shape: "trapezoid-bar", sizes: { length: 350, width: 350, depth: 95, heightAboveFloor: 0 } },
+{ category: "appliances", code: "РП", name: strings.types.vacuum, shape: "circle-cut", view: "vacuum", sizes: { length: 350, width: 350, depth: 95, heightAboveFloor: 0 } },
 { category: "plumbing", code: "ВР", name: strings.types.waterOutlet, view: "waterOutlet", sizes: { length: 60, width: 60, depth: 20, heightAboveFloor: 600 } },
 { category: "plumbing", code: "КН", name: strings.types.sewer, shape: "circle-drain", view: "drain", sizes: { length: 110, width: 110, depth: 40, heightAboveFloor: 100 } },
 { category: "plumbing", code: "КВ", name: strings.types.waterValve, shape: "circle-valve", sizes: { length: 100, width: 100, depth: 60, heightAboveFloor: 400 } },
@@ -16246,6 +16248,9 @@ const MARK_AXIS_UP_FIELD = {
 };
 function axisUpField(seat) {
 return MARK_AXIS_UP_FIELD[seat] || MARK_AXIS_UP_FIELD[MARK_AXIS_UPRIGHT];
+}
+function axisOnFloor(heightAboveFloor) {
+return heightAboveFloor === 0;
 }
 function markOnWall(project, mark) {
 const binding = markWall(mark);
@@ -25215,6 +25220,7 @@ const TRAPEZOID_HEIGHT = 0.72;
 const DROP_BODY = 0.72;
 const DROP_STEPS = 16;
 const DOME_BASE = 0.35;
+const CIRCLE_CUT = 0.58;
 const SHAPE_BASE = {
 "circle-cross": "circle",
 "circle-slash": "circle",
@@ -25601,6 +25607,16 @@ const base_y = y + radius * DOME_BASE;
 const points = [];
 for (let step = 0; step <= DROP_STEPS; step += 1) {
 points.push(polarPoint(x, base_y, radius, 180 + (180 * step) / DROP_STEPS));
+}
+return { kind: "polygon", points, ...shell };
+}
+if (base === "circle-cut") {
+const edge = (Math.asin(CIRCLE_CUT) * 180) / Math.PI;
+const from = 180 - edge;
+const to = 360 + edge;
+const points = [];
+for (let step = 0; step <= DROP_STEPS; step += 1) {
+points.push(polarPoint(x, y, radius, from + ((to - from) * step) / DROP_STEPS));
 }
 return { kind: "polygon", points, ...shell };
 }
@@ -29398,6 +29414,7 @@ const floor = inner.y + inner.height;
 const atX = (mm) => left + mm * scale;
 const atY = (mm) => floor - mm * scale;
 const thin = 2 * unit;
+const centrePx = (mark, box) => (axisOnFloor(mark.heightMm) ? box.height / 2 : mark.heightMm * scale);
 const unknown = [];
 const points = [];
 const lines = [];
@@ -29517,7 +29534,7 @@ for (const row of rows) {
 const boxes = row.boxes;
 if (row.axis === "column") {
 const places = elevationPack(
-row.members.map((mark) => mark.heightMm * scale),
+row.members.map((mark, index) => centrePx(mark, boxes[index])),
 boxes.map((box) => box.height),
 );
 row.members.forEach((mark, index) => {
@@ -29536,7 +29553,7 @@ boxes.map((box) => box.width),
 let top = Infinity;
 row.members.forEach((mark, index) => {
 const box = boxes[index];
-const y = atY(mark.heightMm);
+const y = floor - centrePx(mark, box);
 drawRowMark(mark, box, left + places[index], y);
 top = Math.min(top, y - box.height / 2);
 });
@@ -39147,9 +39164,6 @@ return { rgb: volumeMix((tint && tint.rgb) || VOLUME_NIGHT_RGB, VOLUME_MOON_LIGH
 // src/volume/marks.js
 const VOLUME_MARK_LIFT_MM = 2;
 const VOLUME_MARK_MIN_MM = 20;
-function volumeMarkOnFloor(heightMm) {
-return heightMm === 0;
-}
 const VOLUME_MARK_ROOM = "room";
 const VOLUME_MARK_CEILING = "ceiling";
 const VOLUME_MARK_NO_POINT = "noPoint";
@@ -39561,7 +39575,7 @@ const alongMm = line ? Math.max(VOLUME_MARK_MIN_MM, toMm - fromMm) : lengthMm;
 const middle = seat && typeof seat.alongMm === "number" && !line ? seat.alongMm : (fromMm + toMm) / 2;
 const outer = recessed ? faceMm : faceMm + depthMm;
 const inner = recessed ? faceMm - depthMm : faceMm;
-const bottomMm = volumeMarkOnFloor(heightMm) ? 0 : heightMm - widthMm / 2;
+const bottomMm = axisOnFloor(heightMm) ? 0 : heightMm - widthMm / 2;
 const topMm = bottomMm + widthMm;
 const centreMm = (bottomMm + topMm) / 2;
 const at = (across, alongMm = middle) => ({
@@ -39613,7 +39627,7 @@ const drawn = !line && path[pointIndex] ? path[pointIndex] : volumePathMiddle(pa
 const middle = seat && seat.x !== undefined && !line ? { x: seat.x, y: seat.y } : drawn;
 const room = heightMm === null ? volumeRoomAt(where, middle) : null;
 if (heightMm === null && !room) return { markId: mark.id, skip: VOLUME_MARK_NO_PLACE };
-const onFloor = volumeMarkOnFloor(heightMm);
+const onFloor = axisOnFloor(heightMm);
 const bottomMm =
 heightMm === null
 ? room.heightMm - depthMm - VOLUME_MARK_LIFT_MM
@@ -61897,7 +61911,7 @@ label
 );
 }
 const SHAPE_GROUPS = [
-{ key: "circles", last: "circle-bar" },
+{ key: "circles", last: "circle-cut" },
 { key: "squares", last: "square-grid" },
 { key: "angles", last: "plus" },
 { key: "rects", last: "trapezoid-bar" },

@@ -21,6 +21,7 @@ import {
   COMMENT_TYPE_ID,
   WALL_HEIGHT_FALLBACK_MM,
   addMark,
+  axisOnFloor,
   addOpening,
   addOutline,
   addRoom,
@@ -166,7 +167,6 @@ import {
   volumeModelKeys,
   volumeLinkLines,
   volumeMarkFaces,
-  volumeMarkOnFloor,
   volumeMarkViewLines,
   volumeMarkerFaces,
   volumePickAt,
@@ -4472,15 +4472,19 @@ test("метка на стене стоит по отступу, высоте и
 // (осушитель, робот-пылесос, датчик протечки) стояла серединой на нуле, то есть
 // нижней половиной под полом. Признак — сама нулевая высота: вещи, у которой
 // середина на уровне пола, не бывает.
+//
+// Само правило с таска 269 живёт у посадки в `model.js` (`axisOnFloor`): его
+// спрашивает и лист развёртки, и двух ответов на один вопрос в сборке нет.
+// Здесь проверяется то, ради чего его зовёт объём.
 
 test("правило различает «стоит на полу» и «висит»: двигается только нулевая высота", () => {
-  assert.equal(volumeMarkOnFloor(0), true);
-  assert.equal(volumeMarkOnFloor(300), false);
+  assert.equal(axisOnFloor(0), true);
+  assert.equal(axisOnFloor(300), false);
   // Высоты нет вовсе — это потолочная вещь, и к полу она не имеет отношения.
-  assert.equal(volumeMarkOnFloor(null), false);
+  assert.equal(axisOnFloor(null), false);
   // Сто миллиметров человек написал сам — и перетолковывать его число нельзя,
   // даже если низ вещи при этом уйдёт ниже нуля.
-  assert.equal(volumeMarkOnFloor(100), false);
+  assert.equal(axisOnFloor(100), false);
 });
 
 test("осушитель у стены стоит на полу, а не половиной под ним", () => {
