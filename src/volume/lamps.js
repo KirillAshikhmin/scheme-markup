@@ -47,7 +47,7 @@ import { VOLUME_NIGHT_SHARE } from "./sky.js";
 import { volumeClipPolygon, volumeMoonTint } from "./sun.js";
 import { VOLUME_MARK_CEILING, volumeMarkProbe } from "./marks.js";
 import { volumeArea } from "./floors.js";
-import { volumeMarkPlace } from "./scene.js";
+import { volumeMarkPlace, volumeMarkPlaces } from "./scene.js";
 
 /**
  * **Свет дома для кадра** (таск 09 сценариев, история 2.12; правка после
@@ -137,7 +137,7 @@ export function volumeLiveLight(scene, live, options = {}) {
     // потемнеть. Кусок вне всякого помещения (лента вышла за контур) светит
     // улицу, которой объём света не даёт, — его доля никуда не идёт.
     const total = volumeLampPower(place) * strength;
-    const sources = volumeLampSources(place, scene, item.roomId);
+    const sources = volumeLampSourcesOf(scene, markId, item.roomId);
     let whole = 0;
     for (const source of sources) whole += source.power;
     const rgb = color || VOLUME_LAMP_LIGHT_RGB;
@@ -372,6 +372,34 @@ export function volumeLampSources(place, scene = null, roomId = null) {
   const beam = most <= 120 ? 0.6 : most >= 400 ? 1.15 : 1;
   const room = roomId || (rooms && rooms[0]) || null;
   return [{ at: lift(place.anchor), power: volumeLampPower(place), dir: out(place.anchor.z), wall, beam, room }];
+}
+
+/**
+ * **Источники лампы по её метке** — у всех её тел разом (таск 263, G382).
+ *
+ * Тел у метки бывает несколько: посты рамки блока (таск 239) и точки
+ * потолочной метки — четыре спота, нарисованные одной меткой. Светит **каждое
+ * со своего места**: до таска свет брал первое тело (`volumeMarkPlace`), и
+ * пятно одного спота ложилось в угол комнаты вместо четырёх по месту. Задача
+ * эта уже решена у ломаной — источник на каждом метре (таск 248), — и решается
+ * тем же приёмом: **сила делится между телами**. Сила метки при этом не
+ * меняется ни на долю (`volumeLampPower` считается по лицу одного тела, как и
+ * считался), поэтому комната светлеет ровно как светлела, а пятен на её гранях
+ * становится столько, сколько тел.
+ *
+ * Тело одно — ответ тот же вызов в вызов, что у прежнего `volumeLampSources` с
+ * первым телом (G68).
+ */
+function volumeLampSourcesOf(scene, markId, roomId) {
+  const places = volumeMarkPlaces(scene, markId);
+  if (places.length < 2) return places.length === 1 ? volumeLampSources(places[0], scene, roomId) : [];
+  const out = [];
+  for (const place of places) {
+    for (const source of volumeLampSources(place, scene, roomId)) {
+      out.push({ ...source, power: source.power / places.length });
+    }
+  }
+  return out;
 }
 
 /**
@@ -964,14 +992,13 @@ function volumeLampDecalsBuild(scene, ids, live) {
   const ways = volumeLampOpenings(scene).filter((way) => !way.shut);
   const occluders = scene.occluders || [];
   for (const markId of ids) {
-    const place = volumeMarkPlace(scene, markId);
-    if (!place) continue;
     const item = live.get(markId);
     // Помещение у каждого источника своё (таск 248): пятно ложится на грани
     // помещения **этого куска**, и загораживатели тени берутся там же. Кусок
     // без помещения (лента вышла за контур) пятна не кладёт — грани улицы
-    // пятен не носят; прежде из-за такого куска гасла вся лента.
-    for (const source of volumeLampSources(place, scene, item && item.roomId)) {
+    // пятен не носят; прежде из-за такого куска гасла вся лента. Тел у лампы
+    // тоже бывает несколько (таск 263), и источники приходят от всех разом.
+    for (const source of volumeLampSourcesOf(scene, markId, item && item.roomId)) {
       if (!source.room) continue;
       const blockers = volumeShadeBlockers(occluders, source.room, source.at);
       const shade = blockers.length > 0 ? { blockers, shades: raw, planes: new Map() } : null;

@@ -27,6 +27,7 @@
 // её у соседей, а потолочный остаётся под потолком.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   addMark,
@@ -36,18 +37,24 @@ import {
   addToGroup,
   addType,
   addWall,
+  applyMarkWalls,
   createProject,
+  findMark,
+  markSizes,
   planFractionToMm,
   planMmToFraction,
   setMarkWall,
   setPlanOrigin,
   setPlanScale,
   setSchemeWallHeight,
+  sizesHeightSaid,
   updateMark,
   updateType,
 } from "../src/model.js";
 import { markSpareLine } from "../src/markSpare.js";
-import { VOLUME_BLOCK_STEP_MM, volumeScene } from "../src/volume.js";
+import { VOLUME_BLOCK_STEP_MM, volumeBlockSeats, volumeLampSources, volumeMarkFaces, volumeScene } from "../src/volume.js";
+
+const BEFORE = JSON.parse(readFileSync(new URL("./fixtures/t263-volume-before.json", import.meta.url), "utf8"));
 
 // ——— стенд: комната 4 × 3 м, северная стена по оси X ————————————————————————
 //
@@ -675,7 +682,7 @@ test("наклонная стена: шаг 71 мм меряется вдоль 
   assert.ok(Math.abs(gap - VOLUME_BLOCK_STEP_MM) < 1e-6, "по наклонной стене шаг вышел " + gap + " вместо 71");
 });
 
-test("потолочное место в ряд не идёт: метка без высоты стоит там, где стояла", () => {
+test("потолочная метка в посты не идёт: тело на точку, и каждое на своей точке", () => {
   const scene = roomScene();
   // Точечный светильник высоты в справочнике не имеет — он потолочный.
   const light = typeByCode(scene.project, "Т");
@@ -694,9 +701,199 @@ test("потолочное место в ряд не идёт: метка без
   markId = grown.mark.id;
   const mark = project.marks.find((item) => item.id === markId);
   assert.equal(mark.points.length, 2, "стенд обязан собрать метку с двумя точками");
+  // Таск 263, G382: «Люстры и т.д. не объединяются в блоки. и двигать так не
+  // надо ничего. где нарисовали, там и отображается». Тел столько, сколько
+  // точек, и каждое стоит ровно на своей — ни межцентрового, ни середины блока.
   const bodies = bodiesOf(scene, project, markId);
-  assert.equal(bodies.length, 1, "потолочную метку разобрали на тела, хотя ряда у неё нет");
-  assert.equal(bodies[0].place.mode, "ceiling", "потолочная метка перестала быть потолочной");
+  assert.equal(bodies.length, 2, "потолочная метка дала не по телу на точку");
+  for (const body of bodies) {
+    assert.equal(body.place.mode, "ceiling", "потолочная метка перестала быть потолочной");
+    assert.equal(body.alongMm, null, "потолочное тело село на стену");
+  }
+  const drawn = mark.points.map((point) => planFractionToMm(project, scene.schemeId, point));
+  for (let index = 0; index < drawn.length; index += 1) {
+    const at = bodies[index].place.frame.at;
+    assert.ok(
+      Math.hypot(at.x - drawn[index].x, at.y - drawn[index].y) < 1e-6,
+      "тело " + index + " уехало с нарисованной точки на " + Math.hypot(at.x - drawn[index].x, at.y - drawn[index].y) + " мм",
+    );
+  }
+  // И посты у такой метки не считаются вовсе: её в блоке нет ни одним путём.
+  assert.equal(
+    volumeBlockSeats(project, project.marks).has(markId),
+    false,
+    "потолочная метка попала в посты блока",
+  );
+});
+
+// ——— кто старше: заданная высота или рисунок (таск 263, G379, G381) ————————
+//
+// Слова заказчика: «если высота указана, то используется она. Если не указана,
+// то рисонок важнее». Спорят они в одном месте — у рамки, нарисованной одной
+// колонкой в глубину: заданное число держит её одним рядом вдоль стены (таск
+// 242), а незаданное уступает рисунку. Высота из справочника при этом остаётся
+// высотой поста: меняется только место.
+
+test("дверь одна: «задана ли высота» отвечает лестнице, а не числу", () => {
+  const scene = roomScene();
+  // Четыре источника высоты и один ответ на каждый: своя и группы — слово
+  // человека, умолчание типа и пустота — нет. Второго ответа в сборке быть не
+  // должно (`sizesHeightSaid`, рядом с `markSizes` и `sizesSaidNothing`).
+  const block = blockOnWall(scene, scene.project, [
+    { code: "Р", atMm: 1000, heightMm: 300 },
+    { code: "Р", atMm: 1100 },
+  ]);
+  const said = (project, markId) => sizesHeightSaid(markSizes(project, findMark(project, markId)));
+  assert.equal(said(block.project, block.ids[0]), true, "своя высота не прочлась заданной");
+  assert.equal(markSizes(block.project, findMark(block.project, block.ids[1])).heightAboveFloorFrom, "group");
+  assert.equal(said(block.project, block.ids[1]), true, "высота от соседа по блоку (G203) не прочлась заданной");
+  // Тот же блок без единой своей высоты: обе берут 300 у справочника.
+  const type = blockOnWall(scene, scene.project, [
+    { code: "Р", atMm: 1000 },
+    { code: "Р", atMm: 1100 },
+  ]);
+  for (const id of type.ids) {
+    assert.equal(markSizes(type.project, findMark(type.project, id)).heightAboveFloorFrom, "type");
+    assert.equal(said(type.project, id), false, "высота из справочника прочлась заданной");
+  }
+  // И высоты нет вовсе — у потолочного света: назвать её некому.
+  const light = typeByCode(scene.project, "Т");
+  const added = addMark(scene.project, {
+    schemeId: scene.schemeId,
+    typeId: light.id,
+    kind: "point",
+    points: [{ x: 0.4, y: 0.4 }],
+  });
+  assert.equal(said(added.project, added.mark.id), false, "высота, которой нет, прочлась заданной");
+});
+
+test("высота из справочника раскладку не решает: пара в глубину встаёт вертикально", () => {
+  const scene = roomScene();
+  // Настоящий случай заказчика «Р94 Р95»: две розетки одна за другой в глубину
+  // комнаты, и высоту 300 им никто не вписывал — она из справочника. До таска
+  // 263 разбивка отменялась и пара ложилась вдоль стены (тест выше, с
+  // **заданными** высотами, это правило и держит).
+  //
+  // Привязка у обоих постов одна: у заказчика они разведены на 2 мм, то есть
+  // вдоль стены стоят в одном месте, а в глубину — друг за другом. Колонка
+  // считается по привязке (правило 7: место — по привязке), и колонка у такой
+  // пары одна.
+  const block = blockOnWall(
+    scene,
+    scene.project,
+    [
+      { code: "Р", atMm: 1000 },
+      { code: "Р", atMm: 1000 },
+    ],
+    { side: "down" },
+  );
+  const bodies = block.ids.map((id) => bodyOf(scene, block.project, id, "розетка"));
+  for (const body of bodies) {
+    assert.equal(body.alongMm, 1000, "пара в глубину не встала на одну вертикаль: " + body.alongMm);
+  }
+  // Ближний к стене — верхний (G368), и ряды расходятся на те же 71 мм вокруг
+  // справочных 300: само число не подменяется ничем.
+  assert.deepEqual(
+    bodies.map((body) => body.heightMm),
+    [300 + 35.5, 300 - 35.5],
+    "ряды вертикальной пары разошлись не вокруг справочной высоты",
+  );
+});
+
+test("шахматный блок встаёт шахматом, а не одним рядом вдоль стены", () => {
+  const scene = roomScene();
+  // Хвост таска 262 (G380): «если в шахматном порядке или ещё как-то, то так и
+  // рисуй». Четыре выключателя справочной высоты, нарисованные через клетку: у
+  // каждого своя глубина, то есть после разбивки в каждом ряду по одному посту
+  // — и до таска 263 разбивка отменялась, а блок ложился одним рядом.
+  const block = blockOnWall(scene, scene.project, [
+    { code: "В", atMm: 1900 },
+    { code: "В", atMm: 1990 },
+    { code: "В", atMm: 2080 },
+    { code: "В", atMm: 2170 },
+  ]);
+  const plan = [
+    { x: -100, y: -1300 },
+    { x: -10, y: -1210 },
+    { x: 80, y: -1300 },
+    { x: 170, y: -1210 },
+  ];
+  let project = block.project;
+  for (let index = 0; index < block.ids.length; index += 1) {
+    project = updateMark(project, block.ids[index], {
+      points: [planMmToFraction(project, scene.schemeId, plan[index])],
+    }).project;
+  }
+  const bodies = block.ids.map((id) => bodyOf(scene, project, id, "пост шахмата"));
+  // Два ряда: ближний к стене (`y = −1300`) — верхний, уведённый в комнату —
+  // нижний. Середина рамки — справочные 900.
+  assert.deepEqual(
+    bodies.map((body) => body.heightMm),
+    [900 + 35.5, 900 - 35.5, 900 + 35.5, 900 - 35.5],
+    "шахмат собрался в один ряд: высоты не разошлись по рядам",
+  );
+  // Колонки — по рисунку: четыре отступа, разведённые на 90 мм, дают четыре
+  // колонки через модуль от середины блока (2035).
+  assert.deepEqual(
+    bodies.map((body) => body.alongMm),
+    [2035 - 106.5, 2035 - 35.5, 2035 + 35.5, 2035 + 106.5],
+    "колонки шахмата разошлись с рисунком",
+  );
+});
+
+test("заданная высота рисунку не уступает: рамку в одну колонку держит число", () => {
+  const scene = roomScene();
+  // Тот же шахмат, но высоту каждому посту вписали рукой. «Если высота указана,
+  // то используется она»: разведи ряды — и записанные 900 уехали бы на 35,5 мм.
+  const block = blockOnWall(
+    scene,
+    scene.project,
+    [
+      { code: "В", atMm: 1000, heightMm: 900 },
+      { code: "В", atMm: 1300, heightMm: 900 },
+    ],
+    { side: "down" },
+  );
+  const bodies = block.ids.map((id) => bodyOf(scene, block.project, id, "пост рамки"));
+  assert.deepEqual(
+    bodies.map((body) => body.heightMm),
+    [900, 900],
+    "заданная высота уехала с записанного числа",
+  );
+  assert.deepEqual(
+    bodies.map((body) => body.alongMm),
+    [1150 - 35.5, 1150 + 35.5],
+    "рамка с заданной высотой не осталась одним рядом вдоль стены",
+  );
+});
+
+test("высота от соседа по блоку — заданная: рамка остаётся одним рядом", () => {
+  const scene = roomScene();
+  // Второму посту высоту вписали рукой, первому — нет, и он берёт её у группы
+  // (G203, `markSizes` делится только **своими** высотами соседей). Это слово
+  // человека, просто сказанное у другой метки той же рамки, — значит заданное,
+  // и разбивка в одну колонку отменяется на весь ярус: уедет именно записанное
+  // число. Мера так и считается — «хоть у одного поста яруса высота задана».
+  const block = blockOnWall(
+    scene,
+    scene.project,
+    [
+      { code: "Р", atMm: 1000 },
+      { code: "Р", atMm: 1300, heightMm: 300 },
+    ],
+    { side: "down" },
+  );
+  const bodies = block.ids.map((id) => bodyOf(scene, block.project, id, "розетка"));
+  assert.deepEqual(
+    bodies.map((body) => body.heightMm),
+    [300, 300],
+    "ярус с одной заданной высотой разъехался по рядам",
+  );
+  assert.deepEqual(
+    bodies.map((body) => body.alongMm),
+    [1150 - 35.5, 1150 + 35.5],
+    "ярус с одной заданной высотой не остался рядом вдоль стены",
+  );
 });
 
 // ——— высота от соседей по блоку (таск 245, требование G369) ————————————————
@@ -1183,4 +1380,100 @@ test("G68: показ блока в объёме не меняет объект 
   const points = block.ids.map((id) => block.project.marks.find((mark) => mark.id === id).points[0]);
   assert.equal(points.length, 3, "метки блока на месте");
   for (const point of points) assert.ok(point.x >= 0 && point.x <= 1, "точка метки уехала из долей плана");
+});
+
+// ——— G68: объект без блоков собирается грань в грань прежним ————————————————
+//
+// Таск 263 трогает две двери, которые зовутся **у каждой** метки: место тела
+// (`volumeMarkPlacement` получил номер нарисованной точки) и свет
+// (`volumeLampSources` раздаётся по телам). Отпечаток кадра снят на прежнем
+// коде и лежит в `fixtures/t263-volume-before.json`: комната без единого блока
+// — розетка на стене, спот и люстра под потолком, лента ломаной, — и в ней не
+// должно измениться ни грани, ни источника света.
+
+/** Комната 6 × 4 без блоков: у каждой метки своя точка и своя группа — ничья. */
+function blockFreeStand() {
+  const added = addScheme(createProject(), { name: "1 этаж", imageId: "plan-1", width: 1200, height: 800 });
+  let project = setPlanScale(added.project, added.scheme.id, { a: { x: 0.1, y: 0.5 }, b: { x: 0.6, y: 0.5 }, meters: 6 }).project;
+  const schemeId = added.scheme.id;
+  project = setPlanOrigin(project, schemeId, { at: { x: 0.5, y: 0.5 }, turn: 0 }).project;
+  project = setSchemeWallHeight(project, schemeId, 2700).project;
+  const corners = [
+    { x: -3000, y: -2000 },
+    { x: 3000, y: -2000 },
+    { x: 3000, y: 2000 },
+    { x: -3000, y: 2000 },
+  ];
+  corners.forEach((point, index) => {
+    project = addWall(project, { schemeId, aMm: point, bMm: corners[(index + 1) % 4], thicknessMm: 200 }).project;
+  });
+  const made = addRoom(project, "Гостиная");
+  project = made.project;
+  const fr = (point) => planMmToFraction(project, schemeId, point);
+  project = addOutline(project, {
+    schemeId,
+    roomId: made.room.id,
+    points: [
+      { x: -2900, y: -1900 },
+      { x: 2900, y: -1900 },
+      { x: 2900, y: 1900 },
+      { x: -2900, y: 1900 },
+    ].map(fr),
+  }).project;
+  const typeId = (code) => project.markTypes.find((item) => item.code === code).id;
+  const put = (code, points, kind = "point") => {
+    const one = addMark(project, { schemeId, typeId: typeId(code), kind, points: points.map(fr) });
+    project = applyMarkWalls(one.project, schemeId).project;
+    return (one.mark || one.marks[0]).id;
+  };
+  const socket = put("Р", [{ x: -1000, y: -1890 }]);
+  const spot = put("Т", [{ x: 0, y: 0 }]);
+  const chandelier = put("ЛЮ", [{ x: 1200, y: 600 }]);
+  const tape = put("Л", [
+    { x: -2000, y: 1000 },
+    { x: 1000, y: 1000 },
+  ]);
+  project = updateMark(project, socket, { heightAboveFloor: 300 }).project;
+  return { project, schemeId, marks: { socket, spot, chandelier, tape } };
+}
+
+test("G68: объект без блоков собирается грань в грань прежним", () => {
+  const round = (value) => Math.round(Number(value) * 1000) / 1000;
+  const box = blockFreeStand();
+  const built = volumeScene(box.project, box.schemeId, {});
+  const print = {};
+  for (const [name, markId] of Object.entries(box.marks)) {
+    print[name] = (built.marks || [])
+      .filter((place) => place.markId === markId)
+      .map((place) => ({
+        mode: place.mode,
+        heightMm: round(place.heightMm),
+        anchor: [round(place.anchor.x), round(place.anchor.y), round(place.anchor.z)],
+        frame: place.frame
+          ? [
+              round(place.frame.at.x),
+              round(place.frame.at.y),
+              round(place.frame.bottomMm),
+              round(place.frame.widthMm),
+              round(place.frame.depthMm),
+              round(place.frame.heightMm),
+            ]
+          : null,
+        faces: volumeMarkFaces(place, []).map((face) => ({
+          rgb: face.rgb,
+          lit: face.lit === true,
+          p: face.p.map((point) => [round(point.x), round(point.y), round(point.z)]),
+        })),
+        lamps: volumeLampSources(place, built, null).map((source) => ({
+          at: [round(source.at.x), round(source.at.y), round(source.at.z)],
+          power: round(source.power),
+          beam: round(source.beam),
+          room: source.room || null,
+        })),
+      }));
+  }
+  assert.deepEqual(print, BEFORE, "кадр объекта без блоков разошёлся с отпечатком прежнего кода");
+  // И тело у каждой метки одно: ни у одной из них нет второй нарисованной точки
+  // (у ленты их две, но она — ломаная, и её рисует весь её путь).
+  for (const name of Object.keys(box.marks)) assert.equal(print[name].length, 1, name + ": тел не одно");
 });
