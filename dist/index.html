@@ -13135,6 +13135,64 @@ parts: modelParts(modelBox("fold", { material: "light", clear: "sheer" })),
 };
 
 // src/objectModels/light.js
+const CHANDELIER_HORNS = 5;
+const CHANDELIER_RING = 0.36;
+const CHANDELIER_HORN_TIP = 0.33;
+const CHANDELIER_HORN_HUB = 0.07;
+const CHANDELIER_BALL = 0.075;
+const CHANDELIER_DEEP = 1.25;
+const CHANDELIER_GROW = 2;
+function chandelierAt(angle, radius) {
+return [Math.cos(angle) * radius, Math.sin(angle) * radius];
+}
+function chandelierGrown(parts) {
+const grow = CHANDELIER_GROW;
+return parts.map((part) => ({
+...part,
+x: part.x * grow,
+width: part.width * grow,
+y: part.y * grow,
+depth: part.depth * grow,
+z: 1 - (1 - part.z) * grow,
+height: part.height * grow,
+...(part.points ? { points: part.points.map(([px, py]) => [px * grow, py * grow]) } : {}),
+}));
+}
+function chandelierHornParts(hornZ, hornHeight, ballZ, ballHeight) {
+const parts = [];
+const step = (Math.PI * 2) / CHANDELIER_HORNS;
+const spread = step * 0.16;
+const ballDeep = CHANDELIER_BALL * CHANDELIER_DEEP;
+for (let index = 0; index < CHANDELIER_HORNS; index += 1) {
+const angle = -Math.PI / 2 + index * step;
+const number = index + 1;
+parts.push(
+modelPlate(
+"horn" + number,
+[
+chandelierAt(angle - spread, CHANDELIER_HORN_HUB),
+chandelierAt(angle + spread, CHANDELIER_HORN_HUB),
+chandelierAt(angle, CHANDELIER_HORN_TIP),
+],
+{ z: hornZ, height: hornHeight, material: "light" },
+),
+);
+const [atX, atY] = chandelierAt(angle, CHANDELIER_RING);
+parts.push(
+modelCyl("ball" + number, {
+x: atX - CHANDELIER_BALL,
+width: CHANDELIER_BALL * 2,
+y: atY - ballDeep,
+depth: ballDeep * 2,
+z: ballZ,
+height: ballHeight,
+material: "light",
+lit: true,
+}),
+);
+}
+return parts;
+}
 const MODELS_LIGHT = {
 xmasTree: modelParts(
 modelBox("trunk", { x: -0.06, width: 0.12, y: -0.06, depth: 0.12, z: 0, height: 0.12, material: "dark" }),
@@ -13158,12 +13216,13 @@ modelBox("dropMid", { x: -0.12, width: 0.12, y: -0.32, depth: 0.2, z: 0.18, heig
 modelBox("dropShort", { x: 0.1, width: 0.12, y: 0.06, depth: 0.2, z: 0.36, height: 0.54, material: "light", lit: true }),
 modelBox("dropTop", { x: 0.3, width: 0.12, y: -0.14, depth: 0.2, z: 0.54, height: 0.36, material: "light", lit: true }),
 ),
-chandelierHanging: modelParts(
-modelBox("canopy", { x: -0.12, width: 0.24, y: -0.12, depth: 0.24, z: 0.94, height: 0.06, material: "metal" }),
-modelBox("chain", { x: -0.03, width: 0.06, y: -0.03, depth: 0.06, z: 0.06, height: 0.88, material: "metal" }),
-modelBox("tierTop", { x: -0.5, width: 1, y: -0.5, depth: 1, z: 0.4, height: 0.12, material: "light", lit: true }),
-modelBox("tierMid", { x: -0.36, width: 0.72, y: -0.36, depth: 0.72, z: 0.22, height: 0.12, material: "light", lit: true }),
-modelBox("tierLow", { x: -0.2, width: 0.4, y: -0.2, depth: 0.4, z: 0.04, height: 0.12, material: "light", lit: true }),
+chandelierHanging: chandelierGrown(
+modelParts(
+modelBox("canopy", { x: -0.065, width: 0.13, y: -0.081, depth: 0.162, z: 0.94, height: 0.06, material: "metal" }),
+modelBox("chain", { x: -0.024, width: 0.048, y: -0.03, depth: 0.06, z: 0.52, height: 0.42, material: "metal" }),
+modelCyl("column", { x: -0.065, width: 0.13, y: -0.081, depth: 0.162, z: 0.04, height: 0.48, material: "glass" }),
+chandelierHornParts(0.1, 0.04, 0.095, 0.24),
+),
 ),
 nightLight: modelParts(
 modelBox("glow", { x: -0.34, width: 0.68, y: -0.5, depth: 0.35, z: 0.08, height: 0.26, material: "light", lit: true }),
@@ -13778,8 +13837,8 @@ modelBox("foldRight", { x: 0.17, width: 0.3, y: 0.02, depth: 0.3, z: 0, height: 
 };
 
 // src/objectModels/registry.js
-const OBJECT_MODEL_BODY_MAX = 5;
-const OBJECT_MODEL_FACE_MAX = 30;
+const OBJECT_MODEL_BODY_MAX = 15;
+const OBJECT_MODEL_FACE_MAX = 100;
 const OBJECT_MODEL_THING_BODY_MAX = 15;
 const OBJECT_MODEL_THING_FACE_MAX = 90;
 function objectModelLimits(key) {

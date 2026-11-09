@@ -116,34 +116,85 @@ function placeOf(project, schemeId, markId) {
 
 // ——— тело ————————————————————————————————————————————————————————————————
 
-test("висячая люстра: чашка, цепь и три яруса, сужающиеся книзу", () => {
+test("висячая люстра рожковая: чашка, цепь, колонна и кольцо из пяти рожков с шариками", () => {
   const model = objectModelByKey("chandelierHanging");
   assert.ok(model, "висячего описания в реестре нет");
   const by = (name) => model.parts.find((part) => part.name === name);
-  assert.deepEqual(model.parts.map((part) => part.name), ["canopy", "chain", "tierTop", "tierMid", "tierLow"]);
-  // Предел метки взят целиком — как и у обычной люстры, и ни граном больше.
-  assert.equal(model.parts.length, OBJECT_MODEL_BODY_MAX, "тел не пять");
-  assert.equal(objectModelFaceCount(model), OBJECT_MODEL_FACE_MAX, "граней не тридцать");
-  // Чашка — у самого потолка, цепь — от неё насквозь до нижнего яруса: висит
-  // ниже потолка ровно на то, что осталось от габарита.
+  assert.deepEqual(
+    model.parts.map((part) => part.name),
+    ["canopy", "chain", "column", "horn1", "ball1", "horn2", "ball2", "horn3", "ball3", "horn4", "ball4", "horn5", "ball5"],
+  );
+  // Предел метки взят **не** целиком: запас оставлен нарочно — следующая
+  // правка силуэта не должна начинаться с похода за новым пределом.
+  assert.equal(model.parts.length, 13);
+  assert.ok(model.parts.length <= OBJECT_MODEL_BODY_MAX, "тел больше предела метки");
+  assert.equal(objectModelFaceCount(model), 97);
+  assert.ok(objectModelFaceCount(model) <= OBJECT_MODEL_FACE_MAX, "граней больше предела метки");
+  // Чашка — у самого потолка, под ней цепь, под цепью колонна: силуэт висячей
+  // люстры — это порядок, а не ширина плафона.
   assert.equal(round(by("canopy").z + by("canopy").height), 1, "чашка не у потолка");
   assert.equal(round(by("chain").z + by("chain").height), round(by("canopy").z), "цепь не доходит до чашки");
-  assert.ok(by("chain").z <= by("tierLow").z + by("tierLow").height, "цепь не доходит до нижнего яруса");
-  assert.ok(by("chain").width <= 0.08, "цепь толще волоска: " + by("chain").width);
-  // Ярусы сужаются книзу и стоят **с просветом**: сплошной стопкой горящая
-  // люстра читается снизу одной плитой (найдено живым прогоном).
-  const tiers = ["tierTop", "tierMid", "tierLow"].map(by);
-  for (let index = 1; index < tiers.length; index += 1) {
-    const gap = round(tiers[index - 1].z - (tiers[index].z + tiers[index].height));
-    assert.ok(gap >= 0.05, "ярусы слиплись: просвет " + gap);
-    assert.ok(tiers[index].width < tiers[index - 1].width, "ярус не сузился книзу");
-    assert.ok(tiers[index].depth < tiers[index - 1].depth, "ярус не сузился книзу и в глубину");
+  assert.equal(round(by("column").z + by("column").height), round(by("chain").z), "колонна не доходит до цепи");
+  assert.ok(by("chain").width < by("column").width / 2, "цепь не тоньше колонны: " + by("chain").width);
+  assert.equal(by("column").kind, "cyl", "колонна не круглая");
+  // Пять рожков стоят кольцом, а не по осям габарита: ни один не смотрит
+  // строго вдоль ширины или глубины — иначе это крестовина, а не люстра.
+  const horns = model.parts.filter((part) => /^horn[0-9]$/.test(part.name));
+  const balls = model.parts.filter((part) => /^ball[0-9]$/.test(part.name));
+  assert.equal(horns.length, 5);
+  assert.equal(balls.length, 5);
+  const angles = balls
+    .map((ball) => {
+      const x = ball.x + ball.width / 2;
+      const y = ball.y + ball.depth / 2;
+      return Math.round(((Math.atan2(y, x) * 180) / Math.PI + 360) % 360);
+    })
+    .sort((a, b) => a - b);
+  for (let index = 1; index < angles.length; index += 1) {
+    assert.equal(angles[index] - angles[index - 1], 72, "шарики стоят не через 72°: " + angles.join(", "));
   }
-  // Чистая цепь — от верхнего яруса до чашки: на ней плафон и висит.
-  assert.ok(by("canopy").z - (by("tierTop").z + by("tierTop").height) >= 0.3, "плафон висит не на цепи, а под потолком");
-  // Светятся ярусы, а не железо: светится то, откуда идёт свет.
-  assert.deepEqual(model.parts.filter((part) => part.lit).map((part) => part.name), ["tierTop", "tierMid", "tierLow"]);
-  assert.deepEqual([by("canopy").material, by("chain").material], ["metal", "metal"]);
+  // Шарик круглый и ростом со свой поперечник — иначе это шайба, а заказчик
+  // просил шарики.
+  for (const ball of balls) {
+    assert.equal(ball.kind, "cyl", ball.name + ": шарик не круглый");
+    assert.ok(Math.abs(ball.width * 500 - ball.depth * 400) < 1, ball.name + ": шарик овальный в миллиметрах");
+    assert.ok(Math.abs(ball.width * 500 - ball.height * 300) < 20, ball.name + ": шарик не ростом со свой поперечник");
+  }
+  // Рожок прячется под шариком: его конец не торчит наружу (живой прогон —
+  // торчащие концы читаются лопастями вентилятора).
+  for (let index = 0; index < 5; index += 1) {
+    const ball = balls[index];
+    const horn = horns[index];
+    assert.ok(horn.z >= ball.z, horn.name + ": рожок ниже шарика");
+    assert.ok(horn.z + horn.height <= ball.z + ball.height, horn.name + ": рожок выше шарика");
+    assert.ok(Math.hypot(horn.x + horn.width / 2, horn.y + horn.depth / 2) < Math.hypot(ball.x + ball.width / 2, ball.y + ball.depth / 2));
+  }
+  // Светятся шарики, а не железо с хрусталём: светится то, откуда идёт свет.
+  assert.deepEqual(model.parts.filter((part) => part.lit).map((part) => part.name), ["ball1", "ball2", "ball3", "ball4", "ball5"]);
+  assert.deepEqual([by("canopy").material, by("chain").material, by("column").material], ["metal", "metal", "glass"]);
+});
+
+test("висячая люстра крупнее габарита вдвое, и растёт она вниз от потолка", () => {
+  // Слова заказчика: «сделай её побольше, раза в 2». Растёт **рисунок**:
+  // габарит метки остаётся её габаритом (G68, проверено ниже кадром — место,
+  // размеры и лампа не тронуты).
+  const model = objectModelByKey("chandelierHanging");
+  const xs = model.parts.flatMap((part) => [part.x, part.x + part.width]);
+  const ys = model.parts.flatMap((part) => [part.y, part.y + part.depth]);
+  const zs = model.parts.flatMap((part) => [part.z, part.z + part.height]);
+  // Вверх не уходит ничего: верх габарита стоит у потолка.
+  assert.equal(round(Math.max(...zs)), 1, "люстра полезла выше потолка");
+  assert.ok(Math.min(...zs) >= -1, "люстра свесилась больше чем на вторую высоту габарита");
+  assert.ok(Math.min(...zs) < -0.5, "люстра не выросла вниз: " + Math.min(...zs));
+  for (const span of [Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)]) {
+    assert.ok(span > 1.2 && span <= 2, "в плане люстра выросла не вдвое: " + round(span));
+  }
+  // А обычная люстра из габарита не выходит ни одной долей — вариантом правится
+  // только висячая.
+  for (const part of objectModelByKey("chandelier").parts) {
+    assert.ok(part.x >= -0.5 && part.x + part.width <= 0.5, part.name + ": обычная люстра вылезла из габарита");
+    assert.ok(part.z >= 0 && part.z + part.height <= 1, part.name + ": обычная люстра вылезла по высоте");
+  }
 });
 
 test("вариант подменяет модель и ничего больше: без отметки — та же ссылка", () => {
