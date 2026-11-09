@@ -14,7 +14,7 @@ function sceneBase(width, height, meters) {
   let project = M.setPlanScale(added.project, added.scheme.id, { a: { x: 0, y: 0.5 }, b: { x: 1, y: 0.5 }, meters }).project;
   project = M.setPlanOrigin(project, added.scheme.id, { at: { x: 0.5, y: 0.5 }, turn: 0 }).project;
   project = M.setSchemeWallHeight(project, added.scheme.id, 2700).project;
-  return { project, schemeId: added.scheme.id, lamps: [], doors: [], screens: [] };
+  return { project, schemeId: added.scheme.id, lamps: [], doors: [], screens: [], thermostats: [] };
 }
 
 function wallOf(box, a, b) {
@@ -47,6 +47,24 @@ function lampAt(box, x, y) {
   });
   box.project = M.applyMarkWalls(made.project, box.schemeId).project;
   box.lamps.push(made.mark ? made.mark.id : made.marks[0].id);
+}
+
+/**
+ * Термостат на стене (таск 257): его табло — цифры, градус и знак нагрева —
+ * кладёт кадр по состоянию дома, и без поставленного прибора эта цена в замер
+ * не попадёт вовсе. Та же причина, по которой в сцене стоят телевизор и
+ * компьютерный стол (таск 255).
+ */
+function thermostatAt(box, x, y) {
+  const type = box.project.markTypes.find((item) => item.code === "ТМ");
+  const made = M.addMark(box.project, {
+    schemeId: box.schemeId,
+    typeId: type.id,
+    kind: "point",
+    points: [M.planMmToFraction(box.project, box.schemeId, { x, y })],
+  });
+  box.project = M.applyMarkWalls(made.project, box.schemeId).project;
+  box.thermostats.push(made.mark ? made.mark.id : made.marks[0].id);
 }
 
 const BENCH_THINGS = {
@@ -149,6 +167,8 @@ export function benchFlat() {
   deviceAt(box, "tv", -2750, 1650, 180);
   deviceAt(box, "deskSet", 3600, 1000);
   thingAt(box, "picture", 1500, -1680);
+  // Термостат у двери гостиной (таск 257): его табло платит кадр.
+  thermostatAt(box, -1150, 600);
   return box;
 }
 
@@ -182,6 +202,12 @@ export function benchLive(box) {
   return new Map([
     ...box.lamps.map((id) => [id, { on: true, level: 1, kind: "light", roomId: null }]),
     ...(box.screens || []).map((id) => [id, { on: true, level: 1, kind: "tv", roomId: null }]),
+    // Термостат греет и показывает температуру (таск 257): выключенное табло
+    // кадру не стоит ничего, и мерить было бы нечего.
+    ...(box.thermostats || []).map((id) => [
+      id,
+      { on: true, level: 1, kind: "other", roomId: null, heat: true, climate: { t: 21.6 }, target: 23 },
+    ]),
   ]);
 }
 

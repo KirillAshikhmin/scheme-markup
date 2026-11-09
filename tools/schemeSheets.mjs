@@ -163,6 +163,10 @@ export function jobOf(command, project, keys) {
       lamps: keys.has("lamps") ? (typeof keys.get("lamps") === "string" ? keys.get("lamps") : "all") : null,
       // Отметка «Физический свет» — та же, что в окне параметров объёма.
       flatLight: keys.has("flat-light"),
+      // Табло термостата показывает заданную температуру с пометкой
+      // (`--setpoint`, таск 257): в оснастке памяти «уставку меняли только
+      // что» нет, и снимок приёмки с пометкой иначе не снять.
+      setpoint: keys.has("setpoint"),
       scheme: (findScheme(project, schemeId) || {}).name || "",
     };
   }

@@ -143,6 +143,8 @@ import {
   volumeFallTo,
   volumeGroundMm,
   volumeSelectLines,
+  volumeSetpointMemo,
+  volumeSetpointShow,
   volumeStairLanding,
   volumeStairNear,
   volumeStanceBusy,
@@ -1594,6 +1596,11 @@ function createVolume({ api, hosts }) {
   let lastCameraKey = null;
   let lastPaintAt = -Infinity;
   let settleTimer = null;
+  // Табло термостата (таск 257): чью уставку меняли и когда (`volumeSetpointShow`),
+  // и один таймер на поверхность, которым показ гасится.
+  const setpoints = volumeSetpointMemo();
+  let setpointTimer = null;
+  let setpointAt = null;
   // Палец на поле (правка после сборки сценариев, «как стандарт в отрасли»):
   // `stick` — палец хода в левой половине, `{id, bx, by, sx, sy, moved}` —
   // середина плавающего джойстика и где палец лёг; `pad` — куда он ведёт,
@@ -2794,6 +2801,8 @@ function createVolume({ api, hosts }) {
     // Лампа ещё разгорается или гаснет — нужен следующий кадр. Улеглось —
     // кадров больше не заказывается, и поле снова молчит до события.
     if (lights.busy) redraw();
+    // Показ уставки гаснет сам — одним кадром по времени (`syncSetpoint`).
+    syncSetpoint(lights.until === undefined ? null : lights.until);
   }
 
   /**
@@ -2828,13 +2837,40 @@ function createVolume({ api, hosts }) {
   function homeLights(at) {
     const physical = volumeParamsRead().physical !== false;
     const sky = physical ? { tint: at.tint } : {};
-    if (!homeTarget) return { light: physical ? volumeLiveLight(scene, null, { physical, ...sky }) : null, busy: false, signs: [] };
+    if (!homeTarget) {
+      setpoints.clear();
+      return { light: physical ? volumeLiveLight(scene, null, { physical, ...sky }) : null, busy: false, signs: [], until: null };
+    }
     const faded = lightFadeLive(homeTarget, homeFade, now());
+    // Табло термостата (таск 257): три секунды после смены уставки на нём
+    // показана заданная температура. Память «меняли только что» — здесь, у
+    // поверхности, и больше нигде: в объект не идёт ничего (ADR 015).
+    const shown = volumeSetpointShow(homeTarget, setpoints, now());
     return {
       light: volumeLiveLight(scene, faded.live, { physical, ...sky }),
       busy: faded.busy,
-      signs: volumeLiveSigns(scene, homeTarget),
+      signs: volumeLiveSigns(scene, homeTarget, [], shown.marks),
+      until: shown.until,
     };
+  }
+
+  /**
+   * **Кадр по времени — один и короткий** (таск 257). Показ уставки обязан сам
+   * погаснуть, а стоячее поле кадров не просит: вечного таймера под это не
+   * заводится, и таймера на метку — тоже. Таймер один на поверхность и стоит
+   * до **ближайшего** погасания: проснувшись, кадр пересчитает остальные сам.
+   */
+  function syncSetpoint(until) {
+    if (until === setpointAt) return;
+    if (setpointTimer !== null) clearTimeout(setpointTimer);
+    setpointTimer = null;
+    setpointAt = until;
+    if (until === null || typeof setTimeout !== "function") return;
+    setpointTimer = setTimeout(() => {
+      setpointTimer = null;
+      setpointAt = null;
+      if (!closed) redraw();
+    }, Math.max(1, until - now()));
   }
 
   // ——— миникарта (G212) ———
@@ -5394,6 +5430,8 @@ function createVolume({ api, hosts }) {
     closed = true;
     if (fpsTimer !== null) clearInterval(fpsTimer);
     if (settleTimer !== null) clearTimeout(settleTimer);
+    if (setpointTimer !== null) clearTimeout(setpointTimer);
+    setpointTimer = null;
     volumeSurface = null;
     hosts.stage.replaceChildren();
     hosts.side.replaceChildren();

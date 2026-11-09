@@ -62,9 +62,16 @@
        * живому состоянию, и куда они идут, видно только у работающей вещи.
        * `flow` — то же, что даёт `simLiveOf` по сервису «Вентилятор»: приток у
        * бризера, вытяжка у остальных.
+       *
+       * Термостаты — с таска 257 (G398) и по той же причине: на табло есть
+       * показание, уставка и знак нагрева, и снять их иначе нечем. Показание
+       * (`LIVE_CLIMATE_C`) и уставка (`LIVE_TARGET_C`) здесь **выдуманные** —
+       * оснастка климат не считает; живой прогон смотрит настоящие.
        */
-      const LIVE_KINDS = { light: "light", tv: "tv", fan: "fan", breezer: "breezer" };
+      const LIVE_KINDS = { light: "light", tv: "tv", fan: "fan", breezer: "breezer", thermostat: "other" };
       const LIVE_FLOWS = { fan: "intake", breezer: "air" };
+      const LIVE_CLIMATE_C = 21.6;
+      const LIVE_TARGET_C = 24;
 
       function liveOf(project, schemeId, lamps) {
         const all = String(lamps).toLowerCase() === "all";
@@ -79,7 +86,16 @@
           const sign = String((type && type.code) || "") + String(mark.number || "");
           if (!all && !want.has(sign.toLowerCase())) continue;
           const flow = LIVE_FLOWS[kind] ? { kind: LIVE_FLOWS[kind], level: 1 } : null;
-          live.set(mark.id, { on: true, level: 1, kind, roomId: mark.roomId || null, fade: 1, flow });
+          const warms = device.kind === "thermostat";
+          live.set(mark.id, {
+            on: true,
+            level: 1,
+            kind,
+            roomId: mark.roomId || null,
+            fade: 1,
+            flow,
+            ...(warms ? { heat: true, climate: { t: LIVE_CLIMATE_C }, target: LIVE_TARGET_C } : {}),
+          });
         }
         return live;
       }
@@ -227,7 +243,10 @@
             const light = live ? volume.volumeLiveLight(scene, live, { physical: job.flatLight !== true, tint: mood.tint }) : null;
             // Признаки работы (таск 259): диоды и струи воздуха — те же грани
             // кадра, что в окне объёма, и приходят тем же путём — `extra`.
-            const signs = live ? volume.volumeLiveSigns(scene, live) : [];
+            // Пометка уставки (таск 257): `--lamps` показывает её у всех
+            // термостатов кадра — снимок приёмки с нею иначе не снять, памяти
+            // «меняли только что» в оснастке нет.
+            const signs = live ? volume.volumeLiveSigns(scene, live, [], job.setpoint ? new Set(live.keys()) : null) : [];
             const polygons = volume.volumeFrame(scene, camera, box, [...shadow, ...spots, ...signs], mood.tint, light);
             volume.volumeDraw(ctx, polygons);
             volume.volumeDrawBackdropNear(ctx, box, camera, mood, scene.landMm);

@@ -21,7 +21,10 @@ test("сцены стенда: квартира с мебелью и зал — 
   const hall = BENCH_SCENES.hall();
   assert.equal(hall.lamps.length, 20);
   assert.equal(hall.project.schemeObjects.length, 48);
-  assert.equal(benchLive(flat).size, 7, "пять ламп и два экрана");
+  // Термостат — с таска 257 (G398): табло на его лице кладёт кадр, и без
+  // поставленного прибора эта цена в замер не попала бы вовсе.
+  assert.equal(flat.thermostats.length, 1);
+  assert.equal(benchLive(flat).size, 8, "пять ламп, два экрана и термостат");
   assert.equal(benchCameras(flat).length, 24);
 });
 

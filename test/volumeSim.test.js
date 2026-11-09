@@ -34,11 +34,15 @@ import {
   VOLUME_GLOW_RGB,
   VOLUME_LAMP_LIGHT_SHARE,
   VOLUME_LED_ALERT_RGB,
+  VOLUME_LED_HEAT_RGB,
   VOLUME_LED_KEY_RGB,
   VOLUME_LED_OFF_RGB,
   VOLUME_LED_ON_RGB,
   VOLUME_NIGHT_RGB,
+  VOLUME_READOUT_RGB,
   VOLUME_SCREEN_RGB,
+  VOLUME_SETPOINT_MS,
+  VOLUME_SETPOINT_RGB,
   VOLUME_WALL_RGB,
   volumeCurtainShare,
   volumeDraw,
@@ -48,7 +52,10 @@ import {
   volumeLiveSigns,
   volumeFrame,
   volumeMood,
+  volumeReadoutDigits,
   volumeScene,
+  volumeSetpointMemo,
+  volumeSetpointShow,
 } from "../src/volume.js";
 
 import { markAccessory } from "../src/sim/home.js";
@@ -797,4 +804,187 @@ test("259: вытяжка тянет низом зонта, вентиляция
     const drop = Math.max(...flow.p.map((point) => point.z)) - Math.min(...flow.p.map((point) => point.z));
     assert.ok(drop < 100, "струя вентиляции загнулась вниз: " + drop);
   }
+});
+
+// ——— цифровой термостат (таск 257, требование G398) ————————————————————————
+//
+// Слова заказчика: «Термостат сделай цифровым… и что бы он отображал значение
+// температуры текущей, а при изменении целевой что бы 3 секунды отображалась
+// целевая с какой-то пометкой. И индикатор нагрева».
+//
+// Табло — грани кадра, как шкалы датчика и диоды: показание меняется с каждым
+// шагом климата, а уставка — под рукой человека, и пересобирать ради них сцену
+// нельзя. Проверяется здесь всё, что отсюда следует: что на экране число, что
+// оно меняется на заданное с пометкой, что пометка сама гаснет и что у
+// остановленного дома экран не показывает ничего.
+
+/** Живое состояние термостата: что показывает, что задано, греет ли. */
+function thermoLive(box, values) {
+  const accessory = markAccessory(box.project, box.marks.thermo);
+  const own = accessory.services.find((service) => service.type === "Thermostat").index;
+  return volumeSimLive(
+    box.project,
+    liveOf(box, {
+      [box.marks.thermo]: {
+        [own + ".TargetHeatingCoolingState"]: "HEAT",
+        [own + ".CurrentHeatingCoolingState"]: values.heat ? "HEAT" : "OFF",
+        [own + ".CurrentTemperature"]: values.now,
+        [own + ".TargetTemperature"]: values.want,
+        ...(values.off ? { [own + ".TargetHeatingCoolingState"]: "OFF" } : {}),
+      },
+    }),
+  );
+}
+
+/** Экран термостата в долях лица — по телу модели, второго места у него нет. */
+function thermoScreen(scene, box) {
+  const place = scene.marks.find((item) => item.markId === box.marks.thermo);
+  const part = place.model.parts.find((item) => item.name === "screen");
+  return { place, part };
+}
+
+test("257: на табло термостата число, градус и знак нагрева — и всё это на экране", () => {
+  const box = simStand();
+  put(box, "thermo", "ТМ", [{ x: 0, y: -1350 }]);
+  const scene = volumeScene(box.project, box.schemeId, { roofOff: true });
+  const { place, part } = thermoScreen(scene, box);
+  const signs = volumeLiveSigns(scene, thermoLive(box, { now: 21.6, want: 24, heat: true })).filter(
+    (face) => face.markId === box.marks.thermo,
+  );
+  const colour = (rgb) => signs.filter((face) => face.rgb === rgb || String(face.rgb) === String(rgb));
+  // 22 — это «abged» дважды, десять сегментов; плюс точка градуса.
+  assert.equal(colour(VOLUME_READOUT_RGB).length, 11, "на табло не 22 с градусом");
+  assert.equal(colour(VOLUME_LED_HEAT_RGB).length, 3, "знак нагрева не три штриха");
+  assert.equal(colour(VOLUME_SETPOINT_RGB).length, 0, "уставку никто не менял, а она показана");
+  // Светятся все до единой: экран излучает свет, а не отражает (`led`).
+  for (const face of signs) assert.equal(face.led, true, "знак табло не светится");
+  // И все лежат на экране, а не на светлой панели вокруг него.
+  const across = (point) =>
+    (point.x - place.face.origin.x) * place.face.u.x + (point.y - place.face.origin.y) * place.face.u.y;
+  for (const face of signs) {
+    for (const point of face.p) {
+      const fx = across(point) / place.face.widthMm;
+      const fz = (point.z - place.face.origin.z) / place.face.heightMm + 0.5;
+      assert.ok(fx > part.x - 0.001 && fx < part.x + part.width + 0.001, "знак вышел за экран вбок: " + fx);
+      assert.ok(fz > part.z - 0.001 && fz < part.z + part.height + 0.001, "знак вышел за экран вверх: " + fz);
+    }
+  }
+  // Знак нагрева — слева от числа, а не поверх него.
+  const right = (faces) => Math.max(...faces.flatMap((face) => face.p.map((point) => across(point))));
+  const left = (faces) => Math.min(...faces.flatMap((face) => face.p.map((point) => across(point))));
+  assert.ok(right(colour(VOLUME_LED_HEAT_RGB)) < left(colour(VOLUME_READOUT_RGB)), "знак нагрева налез на число");
+  // Не греет — знака нет, а число остаётся.
+  const cold = volumeLiveSigns(scene, thermoLive(box, { now: 21.6, want: 24, heat: false })).filter(
+    (face) => face.markId === box.marks.thermo,
+  );
+  assert.equal(cold.filter((face) => String(face.rgb) === String(VOLUME_LED_HEAT_RGB)).length, 0, "не греет, а знак горит");
+  assert.equal(cold.length, 11, "без нагрева число пропало");
+});
+
+test("257: заданная температура показана другим цветом и с полосой под числом", () => {
+  const box = simStand();
+  put(box, "thermo", "ТМ", [{ x: 0, y: -1350 }]);
+  const scene = volumeScene(box.project, box.schemeId, { roofOff: true });
+  const { place } = thermoScreen(scene, box);
+  const live = thermoLive(box, { now: 21.6, want: 24, heat: true });
+  const shown = volumeLiveSigns(scene, live, [], new Set([box.marks.thermo])).filter(
+    (face) => face.markId === box.marks.thermo,
+  );
+  const digits = shown.filter((face) => String(face.rgb) === String(VOLUME_SETPOINT_RGB));
+  assert.equal(shown.filter((face) => String(face.rgb) === String(VOLUME_READOUT_RGB)).length, 0, "измеренная осталась на табло");
+  // 24 — «abged» и «fgbc», девять сегментов; плюс градус и плюс полоса-пометка.
+  assert.equal(digits.length, 11, "заданная показана не 24 с градусом и пометкой");
+  // Пометка — под числом: её низ ниже низа всех цифр.
+  const low = (face) => Math.min(...face.p.map((point) => point.z));
+  const mark = digits.reduce((lowest, face) => (low(face) < low(lowest) ? face : lowest), digits[0]);
+  const others = digits.filter((face) => face !== mark);
+  assert.ok(Math.max(...others.map(low)) > low(mark), "пометка не ниже числа");
+  // Она шире любой цифры: полоса идёт под всем числом.
+  const span = (face) =>
+    Math.max(...face.p.map((point) => point.x)) - Math.min(...face.p.map((point) => point.x));
+  assert.ok(span(mark) > Math.max(...others.map(span)), "пометка уже цифры — это не полоса");
+  assert.ok(place.face, "у термостата нет лица");
+});
+
+test("257: три секунды считаются настоящими, гаснут сами и меряются по самой ранней метке", () => {
+  const memo = volumeSetpointMemo();
+  const live = new Map([
+    ["a", { target: 22 }],
+    ["b", { target: 18 }],
+  ]);
+  // Первый взгляд — не показ: вход в режим не зажигает табло всех термостатов.
+  assert.deepEqual([...volumeSetpointShow(live, memo, 1000).marks], []);
+  assert.equal(volumeSetpointShow(live, memo, 1000).until, null, "гасить нечего, а кадр по времени заказан");
+  // Поменяли уставку у одного — показан он один, и до погасания ровно три секунды.
+  const moved = new Map([["a", { target: 25 }], ["b", { target: 18 }]]);
+  const first = volumeSetpointShow(moved, memo, 2000);
+  assert.deepEqual([...first.marks], ["a"]);
+  assert.equal(first.until, 2000 + VOLUME_SETPOINT_MS);
+  // Через секунду второй — таймер переезжает на **ближайшее** погасание, а не на дальнее.
+  const both = new Map([["a", { target: 25 }], ["b", { target: 19 }]]);
+  const second = volumeSetpointShow(both, memo, 3000);
+  assert.deepEqual([...second.marks].sort(), ["a", "b"]);
+  assert.equal(second.until, 2000 + VOLUME_SETPOINT_MS, "таймер встал на дальнее погасание");
+  // Ровно на третьей секунде первый гаснет, второй ещё показан.
+  const late = volumeSetpointShow(both, memo, 2000 + VOLUME_SETPOINT_MS);
+  assert.deepEqual([...late.marks], ["b"]);
+  // И через три секунды после второго не показано ничего.
+  const over = volumeSetpointShow(both, memo, 3000 + VOLUME_SETPOINT_MS);
+  assert.deepEqual([...over.marks], []);
+  assert.equal(over.until, null, "показа нет, а кадр по времени всё ещё заказан");
+  // Выставленная в то же значение уставка ничего не меняла — и не мигает.
+  assert.deepEqual([...volumeSetpointShow(both, memo, 9000).marks], []);
+  // Метка, которой в доме не стало, память не копит.
+  volumeSetpointShow(new Map([["a", { target: 25 }]]), memo, 10000);
+  assert.equal(memo.has("b"), false, "память держит метку, которой в доме нет");
+});
+
+test("257: остановленный дом и выключенный термостат табло не рисуют — экран не врёт", () => {
+  const box = simStand();
+  put(box, "thermo", "ТМ", [{ x: 0, y: -1350 }]);
+  const scene = volumeScene(box.project, box.schemeId, { roofOff: true });
+  // Дома нет вовсе.
+  assert.deepEqual(volumeLiveSigns(scene, null), [], "без дома на табло что-то есть");
+  // Дом идёт, термостат выключен: ни цифры, ни градуса, ни знака нагрева.
+  const off = volumeLiveSigns(scene, thermoLive(box, { now: 21.6, want: 24, heat: false, off: true })).filter(
+    (face) => face.markId === box.marks.thermo,
+  );
+  assert.deepEqual(off, [], "выключенный термостат показывает температуру");
+  // Дом идёт, а показания ещё нет — цифр нет, но прибор уже живой.
+  const accessory = markAccessory(box.project, box.marks.thermo);
+  const own = accessory.services.find((service) => service.type === "Thermostat").index;
+  const mute = volumeSimLive(
+    box.project,
+    liveOf(box, { [box.marks.thermo]: { [own + ".TargetHeatingCoolingState"]: "HEAT" } }),
+  );
+  const shown = volumeLiveSigns(scene, mute).filter((face) => face.markId === box.marks.thermo);
+  // Начальное значение характеристики — 22 °C: его термостат и показывает.
+  assert.equal(shown.length, 11, "термостат без изменений показывает не своё начальное значение");
+});
+
+test("257: разряды табло — два, и ниже нуля у него перекладина вместо старшего", () => {
+  assert.deepEqual(volumeReadoutDigits(21.6), ["2", "2"], "десятые не округлились");
+  assert.deepEqual(volumeReadoutDigits(22), ["2", "2"]);
+  assert.deepEqual(volumeReadoutDigits(22.5), ["2", "3"], "половина градуса не округлилась вверх");
+  assert.deepEqual(volumeReadoutDigits(7), [null, "7"], "однозначное прижато не вправо");
+  assert.deepEqual(volumeReadoutDigits(-5), ["-", "5"]);
+  assert.deepEqual(volumeReadoutDigits(140), ["9", "9"], "больше двух разрядов табло не зажало");
+  assert.equal(volumeReadoutDigits(null), null);
+  assert.equal(volumeReadoutDigits("тепло"), null);
+});
+
+test("257: цифры доезжают до кадра — своим цветом и без тона часа", () => {
+  const box = simStand();
+  put(box, "thermo", "ТМ", [{ x: 0, y: -1350 }]);
+  const scene = volumeScene(box.project, box.schemeId, { roofOff: true });
+  const signs = volumeLiveSigns(scene, thermoLive(box, { now: 21.6, want: 24, heat: true }));
+  // Камера стоит в комнате и смотрит в северную стену, где висит термостат.
+  const camera = { at: { x: 0, y: 900, z: 1500 }, yaw: -Math.PI / 2, pitch: 0 };
+  const log = [];
+  volumeDraw(scribe(log), volumeFrame(scene, camera, STAND_BOX, signs, NIGHT.tint, null));
+  const fill = (rgb) => "fillStyle=rgb(" + rgb.join(",") + ")";
+  assert.ok(log.includes(fill(VOLUME_READOUT_RGB)), "цифр в кадре нет");
+  assert.ok(log.includes(fill(VOLUME_LED_HEAT_RGB)), "знака нагрева в кадре нет");
+  // Ночью цвет тот же: экран излучает, а не отражает.
+  assert.ok(!log.includes(fill(VOLUME_SETPOINT_RGB)), "уставку никто не менял, а она в кадре");
 });

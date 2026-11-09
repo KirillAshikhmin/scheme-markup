@@ -67,8 +67,13 @@ const VOLUME_LED_SIDES = 8;
  * Признаки работы для кадра: диоды и потоки вещей сцены по состоянию дома —
  * `live` как у `volumeLiveLight` (`simLiveOf` с видом знака). Свет, экран и
  * штора своё уже показывают и признаков не получают.
+ *
+ * `setpoints` — кому из приборов с табло показывать сейчас **заданную**
+ * температуру, а не измеренную: `Set<markId>` от `volumeSetpointShow` или
+ * `null` — всем показание (таск 257). Память «уставку меняли только что»
+ * живёт у поверхности, а не здесь: кадр — чистая функция своих доводов.
  */
-export function volumeLiveSigns(scene, live, out = []) {
+export function volumeLiveSigns(scene, live, out = [], setpoints = null) {
   if (!scene || !live || live.size === 0) return out;
   for (const place of scene.marks || []) {
     if (!place || !place.markId) continue;
@@ -83,6 +88,13 @@ export function volumeLiveSigns(scene, live, out = []) {
     }
     if (view === "climateSensor" && place.face) {
       volumeSignScales(place, item, out);
+      continue;
+    }
+    // Цифровое табло (таск 257): у кого оно есть, сказано одной таблицей
+    // `VOLUME_READOUT_PARTS`. Диода в углу такой прибор не получает — всё, что
+    // он мог бы сказать диодом, написано на экране.
+    if (view && VOLUME_READOUT_PARTS[view] && place.face) {
+      volumeSignReadout(place, item, Boolean(setpoints && setpoints.has(place.markId)), out);
       continue;
     }
     if (!place.face) continue;
@@ -313,6 +325,289 @@ function volumeSignLeds(place, item, out) {
   if (!item.on) return;
   const flow = item.flow ? item.flow.kind : null;
   corner(flow === "heat" ? VOLUME_LED_HEAT_RGB : flow === "cool" ? VOLUME_LED_COOL_RGB : VOLUME_LED_ON_RGB, true);
+}
+
+// ——— цифровое табло термостата (таск 257, требование G398) ——————————————————
+//
+// Слова заказчика: «Термостат сделай цифровым (фото примерно так) и что бы он
+// отображал значение температуры текущей, а при изменении целевой что бы
+// 3 секунды отображалась целевая с какой-то пометкой. И индикатор нагрева».
+//
+// ——— почему грани кадра, а не тела и не картинка ———————————————————————————
+//
+// Предел тел метки — пять (`objectModelLimits`), а коробка стоит шесть граней:
+// одна цифра съела бы весь предел, и это даже не считая второго разряда.
+// Поэтому цифры — **плоские грани на лице тела**, как столбики шкал датчика
+// климата и диоды соседей.
+//
+// Рядом живёт `volume/art.js` — тоже плоские грани на лице тела, — и второго
+// такого механизма здесь не заводится **потому, что он не подходит**: грани
+// картинки лежат в **сцене**, их геометрия и цвета посчитаны раз на сборку, а
+// кадру остаётся решить, показывать ли их. Показание термостата меняется с
+// каждым шагом климата, а уставка — под рукой человека; пересобирать ради
+// числа сцену нельзя. Граница та же, что у шкал и диодов: неподвижное — в
+// сцену (`art.js`), меняющееся — в кадр (этот модуль).
+//
+// ——— что на табло ————————————————————————————————————————————————————————
+//
+// Семисегментные цифры (сегмент — прямоугольник), знак градуса точкой справа
+// сверху, знак нагрева тремя штрихами в столбике слева — как на образце
+// заказчика, — и полоса-пометка под числом, пока показана уставка.
+//
+// **Пометка уставки — цвет и полоса разом**, и это решение, а не украшение.
+// Цвет читается с шагу человека, а полоса — вблизи; порознь каждого мало:
+// цвет без полосы ничего не называет (жёлтые цифры — это «теплее»?), полоса
+// без цвета не видна с двух метров. Вместе они говорят одно и то же дважды.
+//
+// **Разрядов два**, и дробной части нет: на панели 86 мм третий разряд ужал бы
+// цифру до нечитаемой, а задача таска ровно в том, чтобы число читалось.
+// Уставка в 22,5 °C поэтому показывается как 23 — табло округляет, как
+// округляет настоящее двухразрядное.
+//
+// **Раскладка — доли экрана**, а экран — тело модели по имени (`screen`).
+// Своих долей лица у табло нет ни одной: подвинь кто-нибудь экран в описании —
+// цифры поедут вместе с ним. Это то же правило, по которому у мерки один
+// хозяин.
+
+/** У кого на лице табло и каким телом задан его экран. */
+const VOLUME_READOUT_PARTS = Object.freeze({ thermostat: "screen" });
+
+/** Сколько настоящих миллисекунд показывается заданная температура. */
+export const VOLUME_SETPOINT_MS = 3000;
+
+/**
+ * Цвет измеренной температуры и цвет заданной. Измеренная — холодный белый,
+ * заданная — жёлтый: он уведён от оранжевого знака нагрева
+ * (`VOLUME_LED_HEAT_RGB`) нарочно, иначе на табло оказалось бы два оранжевых
+ * знака и читались бы они за одно.
+ */
+export const VOLUME_READOUT_RGB = [226, 238, 250];
+export const VOLUME_SETPOINT_RGB = [255, 205, 70];
+
+/**
+ * Раскладка табло в долях экрана: `u` слева направо, `w` снизу вверх, 0…1.
+ * Столбик знаков слева, число посередине, градус справа сверху.
+ */
+const VOLUME_READOUT_PLACE = Object.freeze({
+  digits: { u: 0.24, width: 0.58, w: 0.18, height: 0.72 },
+  // Щель между разрядами — доля места под оба разряда. Шире, чем кажется
+  // нужным: к полутора метрам она сходится к точке экрана, и в узкой щели
+  // соседние цифры сливаются в одно пятно (находка живого прогона).
+  gap: 0.14,
+  degree: { u: 0.9, width: 0.07, w: 0.78, height: 0.1 },
+  // Знак нагрева: три штриха в столбике слева, как на образце.
+  heat: { u: 0.035, width: 0.155, w: 0.18, height: 0.075, step: 0.11, rows: 3 },
+  // Полоса под числом — пометка «это заданная, а не измеренная». Между нею и
+  // нижним штрихом цифр оставлена щель в 0,07 высоты экрана (на панели 86 мм
+  // это три с половиной миллиметра): встань полоса вплотную — слилась бы с
+  // нижними сегментами в одну плиту (находка живого прогона).
+  mark: { w: 0.025, height: 0.085 },
+});
+
+/**
+ * Начертание цифры: какие сегменты горят. Буквы — обычные имена сегментов
+ * семисегментного знака: `a` верх, `b` правый верх, `c` правый низ, `d` низ,
+ * `e` левый низ, `f` левый верх, `g` перекладина.
+ */
+const VOLUME_DIGIT_SEGMENTS = Object.freeze([
+  "abcdef",
+  "bc",
+  "abged",
+  "abgcd",
+  "fgbc",
+  "afgcd",
+  "afgecd",
+  "abc",
+  "abcdefg",
+  "abcdfg",
+]);
+
+/**
+ * Толщина штриха и щель между штрихами — доли знака. Штрих **толстый
+ * нарочно**: на экране он к двум шагам истончается до точки с небольшим, и
+ * сглаживание съедает его раньше, чем сам знак. Щель при этом обязана остаться
+ * видимой — иначе восьмёрка слипается в ноль.
+ */
+const VOLUME_DIGIT_BAR_H = 0.15;
+const VOLUME_DIGIT_BAR_W = 0.25;
+const VOLUME_DIGIT_GAP = 0.035;
+
+/** Прямоугольники сегментов в долях знака: `[u1, u2, w1, w2]`. */
+const VOLUME_DIGIT_RECTS = (() => {
+  const h = VOLUME_DIGIT_BAR_H;
+  const w = VOLUME_DIGIT_BAR_W;
+  const gap = VOLUME_DIGIT_GAP;
+  const high = [0.5 + h / 2 + gap, 1 - h - gap];
+  const low = [h + gap, 0.5 - h / 2 - gap];
+  return Object.freeze({
+    a: [0, 1, 1 - h, 1],
+    g: [0, 1, 0.5 - h / 2, 0.5 + h / 2],
+    d: [0, 1, 0, h],
+    f: [0, w, high[0], high[1]],
+    b: [1 - w, 1, high[0], high[1]],
+    e: [0, w, low[0], low[1]],
+    c: [1 - w, 1, low[0], low[1]],
+  });
+})();
+
+/**
+ * Память показа уставки — своя у каждой поверхности, как память вспышки
+ * нажатия (`simLiveMemo`) и разгорания света (`lightFadeMemo`). В объект не
+ * идёт ничего: «уставку меняли только что» — состояние сеанса (ADR 015).
+ */
+export function volumeSetpointMemo() {
+  return new Map();
+}
+
+/**
+ * Кому показывать заданную температуру вместо измеренной: `{marks, until}` —
+ * `Set<markId>` и ближайшие настоящие мс, когда показ погаснет (`null` —
+ * гасить нечего, кадр по времени не нужен).
+ *
+ * **Три секунды — настоящие, а не имитации**, и выбор этот заметен. Часы
+ * приложения умеют стоять и умеют идти с ускорением до ×960: в секундах
+ * имитации показ у стоячих часов не погас бы никогда, а на ускорении промелькнул
+ * бы за три миллисекунды. Табло — вещь интерфейса, и меряется оно тем же, чем
+ * меряются вспышка нажатия (`SIM_LIVE_FLASH_MS`) и разгорание лампы
+ * (`lightFadeLive`), — часами поверхности.
+ *
+ * Смена узнаётся **по самому числу**, а не по отметке времени из дома: уставка,
+ * выставленная в то же значение, ничего не меняла, и мигать ей незачем. Первый
+ * взгляд на метку показом не считается — иначе вход в режим зажигал бы табло
+ * всех термостатов сразу.
+ */
+export function volumeSetpointShow(live, memo, now) {
+  const marks = new Set();
+  let until = null;
+  if (!live || !memo) return { marks, until };
+  for (const [markId, item] of live) {
+    const target = item && Number.isFinite(Number(item.target)) ? Number(item.target) : null;
+    if (target === null) {
+      memo.delete(markId);
+      continue;
+    }
+    const seen = memo.get(markId);
+    if (seen === undefined) {
+      memo.set(markId, { target, at: null });
+      continue;
+    }
+    if (seen.target !== target) memo.set(markId, { target, at: now });
+    const at = memo.get(markId).at;
+    if (at === null) continue;
+    const gone = at + VOLUME_SETPOINT_MS;
+    if (gone <= now) continue;
+    marks.add(markId);
+    until = until === null ? gone : Math.min(until, gone);
+  }
+  // Метки, которых в доме больше нет, память не копит.
+  for (const markId of [...memo.keys()]) if (!live.has(markId)) memo.delete(markId);
+  return { marks, until };
+}
+
+/** Экран прибора — тело модели по имени из таблицы; `null` — табло не на чем рисовать. */
+function volumeReadoutScreen(place) {
+  const name = place.view ? VOLUME_READOUT_PARTS[place.view.name] : null;
+  if (!name || !place.model) return null;
+  const part = (place.model.parts || []).find((item) => item.name === name && item.kind === "box");
+  return part || null;
+}
+
+/**
+ * Разряды числа: два знака справа налево, `null` — разряд пуст. Ниже нуля —
+ * перекладина вместо старшего разряда; больше двух разрядов табло не знает, и
+ * число зажимается (настоящее двухразрядное ведёт себя так же).
+ */
+export function volumeReadoutDigits(value) {
+  // Пусто — это не ноль: `Number(null)` даёт 0, и табло показало бы «0» там,
+  // где показывать нечего.
+  if (value === null || value === undefined || value === "") return null;
+  const number = Math.round(Number(value));
+  if (!Number.isFinite(number)) return null;
+  if (number < 0) return ["-", String(Math.min(9, -number))];
+  const held = Math.min(99, number);
+  return held < 10 ? [null, String(held)] : String(held).split("");
+}
+
+/** Прямоугольник в долях экрана (`u` слева направо, `w` снизу вверх) — на лице. */
+function volumeScreenRect(place, screen, u1, u2, w1, w2, rgb, out) {
+  volumeFaceRect(
+    place,
+    screen.x + screen.width * u1,
+    screen.x + screen.width * u2,
+    screen.z + screen.height * w1,
+    screen.z + screen.height * w2,
+    rgb,
+    true,
+    out,
+  );
+}
+
+/**
+ * Табло прибора: число, градус, пометка уставки и знак нагрева. Выключенный
+ * прибор табло не рисует вовсе — выключенный экран и в жизни тёмный, и без
+ * дома он тёмный тоже: признаков работы у остановленного дома нет ни одного.
+ */
+function volumeSignReadout(place, item, setpoint, out) {
+  const screen = volumeReadoutScreen(place);
+  if (!screen || item.on !== true) return;
+  const shown = setpoint && Number.isFinite(Number(item.target)) ? Number(item.target) : volumeReadoutValue(item);
+  const digits = volumeReadoutDigits(shown);
+  const rgb = setpoint ? VOLUME_SETPOINT_RGB : VOLUME_READOUT_RGB;
+  const place0 = VOLUME_READOUT_PLACE;
+  if (digits) {
+    const cell = (place0.digits.width * (1 - place0.gap)) / 2;
+    const step = place0.digits.width - cell;
+    digits.forEach((sign, index) => {
+      if (sign === null) return;
+      const from = place0.digits.u + step * index;
+      const strokes = sign === "-" ? "g" : VOLUME_DIGIT_SEGMENTS[Number(sign)] || "";
+      for (const stroke of strokes) {
+        const [u1, u2, w1, w2] = VOLUME_DIGIT_RECTS[stroke];
+        volumeScreenRect(
+          place,
+          screen,
+          from + cell * u1,
+          from + cell * u2,
+          place0.digits.w + place0.digits.height * w1,
+          place0.digits.w + place0.digits.height * w2,
+          rgb,
+          out,
+        );
+      }
+    });
+    const degree = place0.degree;
+    volumeScreenRect(place, screen, degree.u, degree.u + degree.width, degree.w, degree.w + degree.height, rgb, out);
+    // Пометка: полоса под числом его же ширины. Вместе с цветом она и говорит,
+    // что число — заданное.
+    if (setpoint) {
+      const mark = place0.mark;
+      volumeScreenRect(
+        place,
+        screen,
+        place0.digits.u,
+        place0.digits.u + place0.digits.width,
+        mark.w,
+        mark.w + mark.height,
+        rgb,
+        out,
+      );
+    }
+  }
+  // Индикатор нагрева — свой знак, а не заливка экрана: три штриха слева, как
+  // на образце. Горит, пока дом говорит, что прибор греет.
+  if (item.heat === true) {
+    const heat = place0.heat;
+    for (let row = 0; row < heat.rows; row += 1) {
+      const bottom = heat.w + heat.step * row;
+      volumeScreenRect(place, screen, heat.u, heat.u + heat.width, bottom, bottom + heat.height, VOLUME_LED_HEAT_RGB, out);
+    }
+  }
+}
+
+/** Что показывает табло, когда уставку не меняли: измеренная температура или `null`. */
+function volumeReadoutValue(item) {
+  const value = item && item.climate ? item.climate.t : undefined;
+  return Number.isFinite(Number(value)) ? Number(value) : null;
 }
 
 // ——— откуда вещь тянет воздух (таск 259, G401) ——————————————————————————————
