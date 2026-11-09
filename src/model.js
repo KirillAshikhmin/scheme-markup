@@ -162,6 +162,10 @@ export const SHAPE_PALETTE = [
   "circle-fan",
   "circle-rays",
   "circle-bar",
+  // Круг с прямым срезом: шайба робота-пылесоса сверху. Силуэт у него свой —
+  // единственный в палитре круг, у которого контур прерван прямой, — и этим он
+  // расходится со всеми круглыми знаками сразу, а не засечкой внутри.
+  "circle-cut",
   "square",
   // Клавиши выключателя: квадрат, квадрат с чертой, квадрат с двумя чертами —
   // одна, две и три клавиши, как они выглядят на стене. Следом переключатель:
@@ -1022,7 +1026,19 @@ const TEMPLATE_TYPES = [
   // **Чужих объектов это не касается** (G68): справочник копируется при
   // создании объекта, и у кого «РП» уже размечен, там остаются его числа —
   // менять их он будет сам в своём справочнике типов. Миграции нет нарочно.
-  { category: "appliances", code: "РП", name: strings.types.vacuum, shape: "trapezoid-bar", sizes: { length: 350, width: 350, depth: 95, heightAboveFloor: 0 } },
+  //
+  // **Знак — круг со срезом** (таск 270, требование G409, слова заказчика
+  // «Сделать круглым и на плане»): изображение таска 264 стало круглым роботом
+  // сверху, а условный знак оставался трапецией с чертой — видом шайбы сбоку,
+  // от прежней картинки. Трапеция осталась в палитре за тем, чему она и
+  // положена (зонт вытяжки, луч проектора, поддон осушителя), а круглый
+  // предмет получил круглый знак.
+  //
+  // **Чужой объект этим не трогается тоже**: у размеченного «РП» знак записан
+  // в его собственном типе, и сменить его может только рука в справочнике.
+  // Имя изображения стоит рядом со знаком нарочно — тем же приёмом, что у
+  // «ПЗ»: оно держит робота за типом даже у того, кто поменяет знак.
+  { category: "appliances", code: "РП", name: strings.types.vacuum, shape: "circle-cut", view: "vacuum", sizes: { length: 350, width: 350, depth: 95, heightAboveFloor: 0 } },
   { category: "plumbing", code: "ВР", name: strings.types.waterOutlet, view: "waterOutlet", sizes: { length: 60, width: 60, depth: 20, heightAboveFloor: 600 } },
   { category: "plumbing", code: "КН", name: strings.types.sewer, shape: "circle-drain", view: "drain", sizes: { length: 110, width: 110, depth: 40, heightAboveFloor: 100 } },
   { category: "plumbing", code: "КВ", name: strings.types.waterValve, shape: "circle-valve", sizes: { length: 100, width: 100, depth: 60, heightAboveFloor: 400 } },

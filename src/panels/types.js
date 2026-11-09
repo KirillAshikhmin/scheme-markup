@@ -233,7 +233,7 @@ function typesShapeCell({ shape, color, active, inherit, onPick }) {
 // смысл», а чтобы он не повторял соседние по категории, — и тогда помогает
 // ровно то, что видно глазом: круг это или квадрат.
 export const SHAPE_GROUPS = [
-  { key: "circles", last: "circle-bar" },
+  { key: "circles", last: "circle-cut" },
   { key: "squares", last: "square-grid" },
   { key: "angles", last: "plus" },
   { key: "rects", last: "trapezoid-bar" },

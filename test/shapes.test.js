@@ -7,7 +7,8 @@
 // правила закраски записаны в сборке один раз.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { SHAPES, renderInternals } from "../src/render.js";
+import { SHAPES, drawShape, renderInternals } from "../src/render.js";
+import { objectViewForShape } from "../src/objectViews/registry.js";
 import {
   SHAPE_LEGACY,
   SHAPE_NAMES,
@@ -500,4 +501,82 @@ test("разные знаки точечных типов не сливаютс�
   const problems = validate(project).filter((problem) => problem.code === "sharedShape");
   assert.equal(problems.length, groups.length, "не каждый повтор доехал до панели предупреждений");
   for (const problem of problems) assert.equal(problem.kind, "warning", "повтор знака — не ошибка объекта");
+});
+
+// ——— Таск 270: знак «РП» — круг со срезом (G409) ——————————————————————
+//
+// Слова заказчика 2026-11-09 по итогу таска 264: «Сделать круглым и на плане».
+// Изображение робота там стало круглым видом сверху, а условный знак оставался
+// трапецией с чертой — видом шайбы сбоку, от прежней картинки.
+
+test("G409: «РП» в шаблоне несёт круг со срезом, и палитра ничего не потеряла", () => {
+  const { markTypes } = defaultTemplate();
+  const vacuum = markTypes.find((type) => type.code === "РП");
+  assert.equal(vacuum.shape, "circle-cut", "знак робота остался прежним");
+  // Имя изображения стоит у типа само: знак сменился, а робот держится за тип
+  // — тем же приёмом, что у подсветки зеркала.
+  assert.equal(vacuum.view, "vacuum");
+  // Палитра выросла на один знак, и трапеция с чертой из неё не ушла: у
+  // заказчика «РП» размечен **ею** (G68), и выбирать её по-прежнему можно.
+  assert.equal(SHAPE_PALETTE.length, 54, "палитра изменилась не на один знак");
+  assert.ok(SHAPE_PALETTE.includes("trapezoid-bar"), "трапеция с чертой пропала из палитры");
+  assert.ok(
+    SHAPE_PALETTE.indexOf("circle-cut") < SHAPE_PALETTE.indexOf("square"),
+    "круг со срезом ушёл из круглой семьи — сетка выбора перестанет держаться силуэтами",
+  );
+  // Название есть — иначе в сетке выбора и в справочнике будет пустая подпись.
+  assert.equal(strings.shapes["circle-cut"], "Круг со срезом");
+});
+
+test("G409: робот достаётся и новому знаку, и прежнему (G68)", () => {
+  // Изображение берётся по знаку у типа, у которого не названо своё
+  // (`objectViewForShape`). Снять трапецию значило бы отнять робота с
+  // развёртки и тело из объёма у готового объекта, где «РП» размечен ею.
+  assert.equal(objectViewForShape("circle-cut").name, "vacuum");
+  assert.equal(objectViewForShape("trapezoid-bar").name, "vacuum");
+});
+
+test("G409: срез — хорда самого круга, и в размере метки знак ни с кем не сливается", () => {
+  // Кадр по журналу вызовов: знак рисуется ломаной, а не дугой.
+  const log = [];
+  const ctx = new Proxy(
+    {},
+    {
+      get: (target, key) => (...args) => log.push(String(key) + ":" + args.join(",")),
+      set: () => true,
+    },
+  );
+  const radius = 10;
+  drawShape(ctx, "circle-cut", 0, 0, radius, "#000000");
+  assert.ok(!log.some((line) => line.startsWith("arc:")), "круг со срезом нарисован дугой — среза видно не будет");
+  const points = log
+    .filter((line) => line.startsWith("moveTo:") || line.startsWith("lineTo:"))
+    .map((line) => line.split(":")[1].split(",").map(Number))
+    .map(([x, y]) => ({ x, y }));
+  assert.ok(points.length > 8, "ломаная вышла слишком грубой: " + points.length);
+  // Каждая вершина — на окружности: значит срез это её хорда, а не черта,
+  // приложенная к кругу поверх.
+  for (const point of points) {
+    assert.ok(Math.abs(Math.hypot(point.x, point.y) - radius) < 1e-9, "вершина ушла с окружности: " + JSON.stringify(point));
+  }
+  // Концы хорды — на одной высоте, и это низ знака: срез смотрит вниз.
+  const first = points[0];
+  const last = points[points.length - 1];
+  assert.ok(Math.abs(first.y - last.y) < 1e-9, "срез вышел косым");
+  assert.ok(first.y > 0 && first.y < radius, "срез лёг не на круг: " + first.y);
+  assert.ok(Math.abs(Math.min(...points.map((point) => point.y)) + radius) < 1e-9, "верх знака перестал быть круглым");
+  assert.ok(log.includes("closePath:"), "ломаная не замкнута — срез не нарисуется");
+
+  // И то, ради чего всё это: на бумаге в размере метки знак расходится с
+  // круглой роднёй. Ближайшая соседка — пустой круг; порог общего отпечатка
+  // 12%, и до него здесь вдвое.
+  const mine = inkOf("circle-cut");
+  assert.ok(area(mine) > GLYPH_AREA * 0.2, "знак почти не виден в размере метки");
+  for (const neighbour of ["circle", "circle-bar", "circle-dot", "circle-ring", "dome", "circle-fill"]) {
+    const share = difference(mine, inkOf(neighbour)) / GLYPH_AREA;
+    assert.ok(
+      share > MIN_DIFFERENCE,
+      "круг со срезом и " + neighbour + " расходятся всего на " + Math.round(share * 100) + "% знака",
+    );
+  }
 });

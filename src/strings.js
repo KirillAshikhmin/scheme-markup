@@ -381,6 +381,7 @@ export const strings = {
     "circle-fan": "Круг с тремя лучами",
     "circle-rays": "Круг с подвесом",
     "circle-bar": "Круг с чертой",
+    "circle-cut": "Круг со срезом",
     "square-ring": "Квадрат с кольцом",
     "square-grid": "Квадрат с четырьмя точками",
     "diamond-ring": "Ромб с кольцом",

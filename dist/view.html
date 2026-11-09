@@ -7012,6 +7012,7 @@ dome: "Полукруг",
 "circle-fan": "Круг с тремя лучами",
 "circle-rays": "Круг с подвесом",
 "circle-bar": "Круг с чертой",
+"circle-cut": "Круг со срезом",
 "square-ring": "Квадрат с кольцом",
 "square-grid": "Квадрат с четырьмя точками",
 "diamond-ring": "Ромб с кольцом",
@@ -12732,7 +12733,7 @@ viewCircle(0.38, 0.26, 0.03),
 ),
 },
 vacuum: {
-shapes: ["trapezoid-bar"],
+shapes: ["trapezoid-bar", "circle-cut"],
 mm: { width: 350, height: 350 },
 parts: viewParts(
 viewCircle(0, 0, 0.46),
@@ -14673,6 +14674,7 @@ const SHAPE_PALETTE = [
 "circle-fan",
 "circle-rays",
 "circle-bar",
+"circle-cut",
 "square",
 "square-bar",
 "square-bar-two",
@@ -15063,7 +15065,7 @@ const TEMPLATE_TYPES = [
 { category: "sensors", code: "ДО", name: strings.types.opening, shape: "square-split", sizes: { length: 70, width: 40, depth: 15, heightAboveFloor: 2000 } },
 { category: "sensors", code: "ДПр", name: strings.types.leak, shape: "drop", sizes: { length: 60, width: 60, depth: 15, heightAboveFloor: 0 } },
 { category: "panel", code: "ЩС", name: strings.types.panelLow, shape: "square-cross", view: "panelBox", sizes: { length: 300, width: 400, depth: 90, heightAboveFloor: 1400 } },
-{ category: "appliances", code: "РП", name: strings.types.vacuum, shape: "trapezoid-bar", sizes: { length: 350, width: 350, depth: 95, heightAboveFloor: 0 } },
+{ category: "appliances", code: "РП", name: strings.types.vacuum, shape: "circle-cut", view: "vacuum", sizes: { length: 350, width: 350, depth: 95, heightAboveFloor: 0 } },
 { category: "plumbing", code: "ВР", name: strings.types.waterOutlet, view: "waterOutlet", sizes: { length: 60, width: 60, depth: 20, heightAboveFloor: 600 } },
 { category: "plumbing", code: "КН", name: strings.types.sewer, shape: "circle-drain", view: "drain", sizes: { length: 110, width: 110, depth: 40, heightAboveFloor: 100 } },
 { category: "plumbing", code: "КВ", name: strings.types.waterValve, shape: "circle-valve", sizes: { length: 100, width: 100, depth: 60, heightAboveFloor: 400 } },
@@ -25216,6 +25218,7 @@ const TRAPEZOID_HEIGHT = 0.72;
 const DROP_BODY = 0.72;
 const DROP_STEPS = 16;
 const DOME_BASE = 0.35;
+const CIRCLE_CUT = 0.58;
 const SHAPE_BASE = {
 "circle-cross": "circle",
 "circle-slash": "circle",
@@ -25602,6 +25605,16 @@ const base_y = y + radius * DOME_BASE;
 const points = [];
 for (let step = 0; step <= DROP_STEPS; step += 1) {
 points.push(polarPoint(x, base_y, radius, 180 + (180 * step) / DROP_STEPS));
+}
+return { kind: "polygon", points, ...shell };
+}
+if (base === "circle-cut") {
+const edge = (Math.asin(CIRCLE_CUT) * 180) / Math.PI;
+const from = 180 - edge;
+const to = 360 + edge;
+const points = [];
+for (let step = 0; step <= DROP_STEPS; step += 1) {
+points.push(polarPoint(x, y, radius, from + ((to - from) * step) / DROP_STEPS));
 }
 return { kind: "polygon", points, ...shell };
 }
@@ -61872,7 +61885,7 @@ label
 );
 }
 const SHAPE_GROUPS = [
-{ key: "circles", last: "circle-bar" },
+{ key: "circles", last: "circle-cut" },
 { key: "squares", last: "square-grid" },
 { key: "angles", last: "plus" },
 { key: "rects", last: "trapezoid-bar" },
