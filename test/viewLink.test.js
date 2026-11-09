@@ -20,7 +20,9 @@ import {
   viewLinkPack,
   viewLinkRead,
   viewLinkStrip,
+  viewLinkVersionSaid,
 } from "../src/viewLink.js";
+import { strings } from "../src/strings.js";
 import { addLogicBinding, addScenario, findGroup, idNumberOf, markControlLinks, planFractionToMm, updateMark } from "../src/model.js";
 import { buildHomeSpec } from "../src/sim/home.js";
 import { simHouse } from "./fixtures/simHome.js";
@@ -429,7 +431,10 @@ test("нагрузка чужой версии отказывает понятн
       assert.equal(error.code, VIEW_LINK_BROKEN);
       assert.equal(error.reason, "version");
       assert.equal(error.version, 3);
-      assert.ok(error.message.includes("более новой версией"), error.message);
+      // Слова выбирает хозяин формата (`viewLinkVersionSaid`, таск 273): у
+      // более новой нагрузки — «обновите страницу», и версия названа числом.
+      assert.ok(error.message.includes("более новой сборкой"), error.message);
+      assert.ok(error.message.includes("3"), error.message);
       return true;
     },
   );
@@ -458,6 +463,10 @@ test("ссылка первой версии отвергается по вер�
       assert.equal(error.code, VIEW_LINK_BROKEN);
       assert.equal(error.reason, "version");
       assert.equal(error.version, 1);
+      // И про прежнюю ссылку сказано именно это, а не «повреждена» и не
+      // «более новая»: чинить её нечего, надо просить новую (таск 273).
+      assert.equal(error.message, strings.view.linkOldVersion);
+      assert.equal(error.message, viewLinkVersionSaid(1));
       return true;
     },
   );
@@ -494,7 +503,23 @@ test("битая, обрезанная и чужая строка дают от�
 test("кодек обязателен в обе стороны", async () => {
   const project = legacyProject("legacy-project.json");
   await assert.rejects(() => viewLinkPack(project, {}), (error) => error.reason === "codec");
-  await assert.rejects(() => viewLinkRead("1.AAAA", {}), (error) => error.reason === "codec");
+  await assert.rejects(() => viewLinkRead(VIEW_LINK_VERSION + ".AAAA", {}), (error) => error.reason === "codec");
+});
+
+// По `file://` кодек не грузится вовсе (ADR 022), и там чтение отказывало
+// кодеком раньше, чем успевало посмотреть на версию: ссылка прежней сборки
+// получала слова про порчу. Версия стоит перед сжатым куском именно для того,
+// чтобы читатель узнавал чужой формат, не распаковывая (таск 273).
+test("версия узнаётся и без кодека: прежней ссылке отказ по версии, а не по порче", async () => {
+  await assert.rejects(
+    () => viewLinkRead("1.AAAA", {}),
+    (error) => {
+      assert.equal(error.reason, "version", "версию спросили после кодека");
+      assert.equal(error.version, 1);
+      assert.equal(error.message, strings.view.linkOldVersion);
+      return true;
+    },
+  );
 });
 
 test("stats считает знаки честно", async () => {

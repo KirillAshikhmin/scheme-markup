@@ -7093,6 +7093,88 @@ export function elevationPack(places, sizes) {
 }
 
 /**
+ * **Сколько места у подписи: до ближайшего соседа** (таск 273).
+ *
+ * `places` — места подписей в точках холста, в любом порядке; отвечает запасом
+ * для каждого места **в том же порядке**. Соседа с этой стороны нет — предела с
+ * этой стороны нет (`Infinity`).
+ *
+ * Почему мерка именно «до соседа», а не «полпути до соседа»: подписи ряда
+ * стоят серединой над своим местом, и если **каждая** не шире промежутка до
+ * соседки, то их половины вместе этого промежутка не перекрывают
+ * (`(ширина₁ + ширина₂) / 2 ≤ промежуток`) — наезда не бывает вовсе. Мерка
+ * одна и доказуема, поэтому второго правила раскладки у развёртки не заводится.
+ */
+export function elevationLabelRooms(places) {
+  const order = places.map((value, index) => index).sort((first, second) => places[first] - places[second]);
+  const rooms = places.map(() => Infinity);
+  for (let at = 0; at < order.length; at += 1) {
+    const place = places[order[at]];
+    let room = Infinity;
+    if (at > 0) room = Math.min(room, place - places[order[at - 1]]);
+    if (at + 1 < order.length) room = Math.min(room, places[order[at + 1]] - place);
+    rooms[order[at]] = room;
+  }
+  return rooms;
+}
+
+/**
+ * **Подпись метки на развёртке сдаёт части, пока не влезет в `room`** (таск
+ * 273) — одно правило на все подписи меток листа.
+ *
+ * Было: подпись связанного прибора выросла до «ТВ1 · Телевизор · 1200» (имя
+ * пары собирает модель, `markObject.pairLabel`), и на плотной стене она
+ * налезала на соседнюю.
+ *
+ * Порядок сдачи назван и обратному не подлежит:
+ *
+ *   1. **имя вещи** — его на листе и так видно: вещь нарисована рядом в
+ *      масштабе своим изображением, а имя стоит в списке стены и в таблице
+ *      меток;
+ *   2. **высота над полом** — она размер, и на листе её больше нигде нет,
+ *      поэтому уходит второй;
+ *   3. **обозначение остаётся всегда**: по нему прибор находят в таблице, и
+ *      знак без обозначения — безымянная точка. Спрятать подпись целиком
+ *      соседке не помогло бы: там, где не влезает «ТВ1», не влезает ничего.
+ *
+ * `parts` — `{label, name, heightMm}`: `label` — готовая подпись метки (у
+ * связанной это пара «ТВ1 · Телевизор»), `name` — имя вещи-хозяина из той же
+ * записи. Имя снимается **тем же шаблоном**, которым модель его приклеила:
+ * второй склейки имени пары в сборке нет, и разбирать её по знаку «·» значило
+ * бы завести вторую.
+ *
+ * `measure` — ширина строки в точках (`ctx.measureText` тем же шрифтом, которым
+ * будем рисовать). Мерки нет — подпись остаётся целой: соврать о ширине хуже,
+ * чем не сократить.
+ */
+export function elevationLabelFit(parts, room, measure) {
+  const label = String((parts && parts.label) || "");
+  const name = String((parts && parts.name) || "");
+  const heightMm = parts ? parts.heightMm : null;
+  const tail = heightMm === null || heightMm === undefined ? "" : " · " + heightMm;
+  const full = label + tail;
+  if (!(room > 0) || typeof measure !== "function") return full;
+  const width = (value) => {
+    const got = measure(value);
+    return Number.isFinite(got) ? got : NaN;
+  };
+  const first = width(full);
+  if (!Number.isFinite(first) || first <= room) return full;
+  // Имя вещи снимается шаблоном `markObject.pairLabel` с пустым обозначением:
+  // «{label} · {name}» даёт хвост « · Телевизор», и подпись без него — то же
+  // обозначение, которое было у метки до связи.
+  const trim = name ? text("markObject.pairLabel", { label: "", name }) : "";
+  const own = trim && label.endsWith(trim) ? label.slice(0, label.length - trim.length) : label;
+  for (const value of [own + tail, own]) {
+    if (value === full) continue;
+    const got = width(value);
+    if (!Number.isFinite(got)) return full;
+    if (got <= room) return value;
+  }
+  return own;
+}
+
+/**
  * Нарисовать развёртку в заданный прямоугольник.
  *
  * Возвращает геометрию поля (`{x, y, width, height, scale}`) — по ней
@@ -7211,6 +7293,14 @@ export function drawElevation(ctx, elevation, box, options = {}) {
   ctx.save();
   ctx.font = drawFont(ELEVATION_FONT * unit, 600);
   ctx.textBaseline = "middle";
+  // Ширина подписи — **тем же** `ctx` и тем же шрифтом, которым будем рисовать
+  // (шрифт уже выставлен строкой выше): это та же мерка, которой легенда режет
+  // свои строки. Холст без `measureText` (журнал вызовов в тестах) отвечает
+  // `NaN`, и подпись остаётся целой — см. `elevationLabelFit`.
+  const labelWidth = (value) => {
+    const got = typeof ctx.measureText === "function" ? ctx.measureText(value) : null;
+    return got && Number.isFinite(got.width) ? got.width : NaN;
+  };
 
   // Подпись — в верхнем поле рамки и по левому краю поля, а не над самой
   // стеной: короткая стена стоит по середине, и подписи ряда разъехались бы.
@@ -7305,9 +7395,21 @@ export function drawElevation(ctx, elevation, box, options = {}) {
     }
   }
 
+  // **Запас у подписей считается разом** (таск 273): теснит их друг друга одна
+  // и та же стена, и мерка у них одна — до ближайшего соседа
+  // (`elevationLabelRooms`). Линейные метки и ряды стоят в одном списке
+  // нарочно: подпись ленты налезает на подпись розетки так же, как на подпись
+  // соседней ленты.
+  const labelPlaces = [
+    ...lines.map((mark) => (atX(mark.fromMm) + atX(mark.toMm)) / 2),
+    ...rows.map((row) => atX(row.centreMm)),
+  ];
+  const labelRooms = elevationLabelRooms(labelPlaces);
+
   // Метки: знак или изображение на своём месте и высоте, подпись рядом.
   // Линия — отрезком.
-  for (const mark of lines) {
+  for (let index = 0; index < lines.length; index += 1) {
+    const mark = lines[index];
     const y = atY(mark.heightMm);
     ctx.strokeStyle = mark.color;
     ctx.fillStyle = mark.color;
@@ -7318,8 +7420,8 @@ export function drawElevation(ctx, elevation, box, options = {}) {
     ctx.stroke();
     elevationText(
       ctx,
-      mark.label + " · " + mark.heightMm,
-      (atX(mark.fromMm) + atX(mark.toMm)) / 2,
+      elevationLabelFit({ label: mark.label, name: mark.objectName, heightMm: mark.heightMm }, labelRooms[index], labelWidth),
+      labelPlaces[index],
       y - 9 * unit,
       "center",
       unit,
@@ -7346,8 +7448,14 @@ export function drawElevation(ctx, elevation, box, options = {}) {
     }
   };
 
-  for (const row of rows) {
+  for (let rowAt = 0; rowAt < rows.length; rowAt += 1) {
+    const row = rows[rowAt];
     const boxes = row.boxes;
+    // Запас у подписи ряда — до соседнего ряда; у столбика он **тот же**.
+    // Столбик подписан справа от знаков и расходится по вертикали, то есть
+    // сам на себя не налезает, а теснит его та же соседка по стене: мерка
+    // одна, второй раскладки подписей у развёртки нет (таск 273).
+    const room = labelRooms[lines.length + rowAt];
     // **Столбик** (G203): метки стоят на одном месте стены и различаются
     // высотой. Расходятся они по вертикали — и подписана высота у каждой: ради
     // разных высот столбик и собирают.
@@ -7361,7 +7469,14 @@ export function drawElevation(ctx, elevation, box, options = {}) {
         const x = atX(mark.fromMm);
         const y = floor - places[index];
         drawRowMark(mark, box, x, y);
-        elevationText(ctx, mark.label + " · " + mark.heightMm, x + box.width / 2 + 4 * unit, y, "left", unit);
+        elevationText(
+          ctx,
+          elevationLabelFit({ label: mark.label, name: mark.objectName, heightMm: mark.heightMm }, room, labelWidth),
+          x + box.width / 2 + 4 * unit,
+          y,
+          "left",
+          unit,
+        );
       });
       continue;
     }
@@ -7384,7 +7499,20 @@ export function drawElevation(ctx, elevation, box, options = {}) {
     // ряда высота и правда одна, и повторять её у каждого подрозетника незачем.
     // Стоит она над серединой группы — той, что на плане: `elevationPack`
     // середину ряда не двигает.
-    elevationText(ctx, row.label + " · " + row.heightMm, atX(row.centreMm), top - 7 * unit, "center", unit);
+    // Имя вещи у ряда есть только там, где ряд — одна метка: у блока подпись
+    // общая (`blockLabelOf`), и пары в ней не бывает.
+    elevationText(
+      ctx,
+      elevationLabelFit(
+        { label: row.label, name: row.members.length === 1 ? row.members[0].objectName : "", heightMm: row.heightMm },
+        room,
+        labelWidth,
+      ),
+      labelPlaces[lines.length + rowAt],
+      top - 7 * unit,
+      "center",
+      unit,
+    );
   }
 
   // Метки без высоты — полосой под полом: на стене им места нет, но и
@@ -7399,10 +7527,21 @@ export function drawElevation(ctx, elevation, box, options = {}) {
     ctx.lineTo(left + wallWidth, floor + 3 * unit);
     ctx.stroke();
     ctx.setLineDash([]);
-    for (const mark of unknown) {
+    // Полоса под полом меряется своим списком: она лежит ниже пола и с
+    // подписями на стене не спорит — спорят в ней только свои соседки.
+    // Правило то же (таск 273), высоты у этих меток нет вовсе.
+    const bandRooms = elevationLabelRooms(unknown.map((mark) => atX(mark.fromMm)));
+    unknown.forEach((mark, index) => {
       drawShape(ctx, mark.shape, atX(mark.fromMm), y, 7 * unit, mark.color);
-      elevationText(ctx, mark.label, atX(mark.fromMm) + 11 * unit, y, "left", unit);
-    }
+      elevationText(
+        ctx,
+        elevationLabelFit({ label: mark.label, name: mark.objectName, heightMm: null }, bandRooms[index], labelWidth),
+        atX(mark.fromMm) + 11 * unit,
+        y,
+        "left",
+        unit,
+      );
+    });
   }
 
   // Пол толще стен: он опора всему, что на развёртке стоит.

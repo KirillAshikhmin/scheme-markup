@@ -37,7 +37,7 @@ import {
   storeMode,
 } from "../store.js";
 import { strings, text } from "../strings.js";
-import { VIEW_LINK_BROKEN, VIEW_LINK_VERSION, viewLinkRead } from "../viewLink.js";
+import { VIEW_LINK_BROKEN, viewLinkRead, viewLinkVersionSaid } from "../viewLink.js";
 import { projectsMigrateStored } from "./projects.js";
 import { uiButton, uiConfirm, uiEl, uiIconLabelButton, uiModal } from "./ui.js";
 import { viewScenariosOpen } from "./viewScenarios.js";
@@ -118,20 +118,18 @@ export async function viewStartLinkLoad(hash, options = {}) {
  *
  * `reason: "version"` доезжал сюда и выбрасывался: заказчик на любой отказ
  * читал «Ссылка повреждена или обрезана», то есть неправду про каждую уже
- * разосланную ссылку прежней сборки. Готовая `errors.futureVersion` тут не
- * годится вдвойне: она говорит про **более новую** версию и про файл.
+ * разосланную ссылку прежней сборки.
  *
  * Своё у ссылки прежней сборки и у ссылки более новой: в первом случае чинить
- * нечего и надо просить новую, во втором достаточно обновить страницу.
+ * нечего и надо просить новую, во втором достаточно обновить страницу. Выбирает
+ * между ними **хозяин формата** (`viewLinkVersionSaid`), а не эта дверь: тот же
+ * выбор делает сообщение самого отказа, и двух развилок на один вопрос в сборке
+ * не бывает (таск 273).
  */
 export function viewStartLinkRefusal(result) {
   const from = result || {};
   if (from.reason !== "version") return strings.view.linkBroken;
-  const version = Number(from.version);
-  if (Number.isFinite(version) && version > VIEW_LINK_VERSION) {
-    return text("view.linkNewVersion", { version, current: VIEW_LINK_VERSION });
-  }
-  return strings.view.linkOldVersion;
+  return viewLinkVersionSaid(from.version);
 }
 
 /**

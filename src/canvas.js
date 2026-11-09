@@ -2850,7 +2850,13 @@ function canvasObjectJoinClick(plan) {
   }
   const can = canvasObjectLinkCan(state, markId, object.id);
   if (!can.ok) {
-    canvasApi.notify(can.why);
+    // Причина — от модели, **рамка вокруг неё одна** и та же, что у отказа,
+    // доехавшего исключением (`errors.markObjectRefused`): причины написаны
+    // продолжением фразы («вещь уже связана с меткой Р1»), и в тосте они
+    // стояли сами, со строчной буквы и без начала. Своих слов отказ не
+    // придумывает — иначе их стало бы два набора, один у тоста, другой у
+    // модели (таск 273).
+    canvasApi.notify(text("errors.markObjectRefused", { why: can.why }));
     return;
   }
   const done = canvasLinkMarkObject(markId, object.id);

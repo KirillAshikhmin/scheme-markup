@@ -29599,6 +29599,41 @@ const middle = (values) => values.reduce((sum, value) => sum + value, 0) / value
 const shift = middle(places) - middle(next);
 return shift === 0 ? next : next.map((value) => value + shift);
 }
+function elevationLabelRooms(places) {
+const order = places.map((value, index) => index).sort((first, second) => places[first] - places[second]);
+const rooms = places.map(() => Infinity);
+for (let at = 0; at < order.length; at += 1) {
+const place = places[order[at]];
+let room = Infinity;
+if (at > 0) room = Math.min(room, place - places[order[at - 1]]);
+if (at + 1 < order.length) room = Math.min(room, places[order[at + 1]] - place);
+rooms[order[at]] = room;
+}
+return rooms;
+}
+function elevationLabelFit(parts, room, measure) {
+const label = String((parts && parts.label) || "");
+const name = String((parts && parts.name) || "");
+const heightMm = parts ? parts.heightMm : null;
+const tail = heightMm === null || heightMm === undefined ? "" : " · " + heightMm;
+const full = label + tail;
+if (!(room > 0) || typeof measure !== "function") return full;
+const width = (value) => {
+const got = measure(value);
+return Number.isFinite(got) ? got : NaN;
+};
+const first = width(full);
+if (!Number.isFinite(first) || first <= room) return full;
+const trim = name ? text("markObject.pairLabel", { label: "", name }) : "";
+const own = trim && label.endsWith(trim) ? label.slice(0, label.length - trim.length) : label;
+for (const value of [own + tail, own]) {
+if (value === full) continue;
+const got = width(value);
+if (!Number.isFinite(got)) return full;
+if (got <= room) return value;
+}
+return own;
+}
 function drawElevation(ctx, elevation, box, options = {}) {
 if (!elevation) return null;
 const unit = options.unit > 0 ? options.unit : 1;
@@ -29649,6 +29684,10 @@ if (box.view && box.guessed) spare.push({ markId: mark.id, label: mark.label });
 ctx.save();
 ctx.font = drawFont(ELEVATION_FONT * unit, 600);
 ctx.textBaseline = "middle";
+const labelWidth = (value) => {
+const got = typeof ctx.measureText === "function" ? ctx.measureText(value) : null;
+return got && Number.isFinite(got.width) ? got.width : NaN;
+};
 if (options.label) {
 const said = grown > 0 ? options.label + " · " + text("elevationSheet.grown", { count: grown }) : options.label;
 const captionY = box.y + (ELEVATION_PAD.top / 2) * unit;
@@ -29702,7 +29741,13 @@ if (opening.floorMm > 0) {
 elevationText(ctx, String(opening.floorMm), x + width / 2, top + height + 9 * unit, "center", unit);
 }
 }
-for (const mark of lines) {
+const labelPlaces = [
+...lines.map((mark) => (atX(mark.fromMm) + atX(mark.toMm)) / 2),
+...rows.map((row) => atX(row.centreMm)),
+];
+const labelRooms = elevationLabelRooms(labelPlaces);
+for (let index = 0; index < lines.length; index += 1) {
+const mark = lines[index];
 const y = atY(mark.heightMm);
 ctx.strokeStyle = mark.color;
 ctx.fillStyle = mark.color;
@@ -29713,8 +29758,8 @@ ctx.lineTo(atX(mark.toMm), y);
 ctx.stroke();
 elevationText(
 ctx,
-mark.label + " · " + mark.heightMm,
-(atX(mark.fromMm) + atX(mark.toMm)) / 2,
+elevationLabelFit({ label: mark.label, name: mark.objectName, heightMm: mark.heightMm }, labelRooms[index], labelWidth),
+labelPlaces[index],
 y - 9 * unit,
 "center",
 unit,
@@ -29736,8 +29781,10 @@ drawObjectView(ctx, box.view, rect, mark.color);
 drawShape(ctx, mark.shape, x, y, 9 * unit, mark.color);
 }
 };
-for (const row of rows) {
+for (let rowAt = 0; rowAt < rows.length; rowAt += 1) {
+const row = rows[rowAt];
 const boxes = row.boxes;
+const room = labelRooms[lines.length + rowAt];
 if (row.axis === "column") {
 const places = elevationPack(
 row.members.map((mark, index) => centrePx(mark, boxes[index])),
@@ -29748,7 +29795,14 @@ const box = boxes[index];
 const x = atX(mark.fromMm);
 const y = floor - places[index];
 drawRowMark(mark, box, x, y);
-elevationText(ctx, mark.label + " · " + mark.heightMm, x + box.width / 2 + 4 * unit, y, "left", unit);
+elevationText(
+ctx,
+elevationLabelFit({ label: mark.label, name: mark.objectName, heightMm: mark.heightMm }, room, labelWidth),
+x + box.width / 2 + 4 * unit,
+y,
+"left",
+unit,
+);
 });
 continue;
 }
@@ -29763,7 +29817,18 @@ const y = floor - centrePx(mark, box);
 drawRowMark(mark, box, left + places[index], y);
 top = Math.min(top, y - box.height / 2);
 });
-elevationText(ctx, row.label + " · " + row.heightMm, atX(row.centreMm), top - 7 * unit, "center", unit);
+elevationText(
+ctx,
+elevationLabelFit(
+{ label: row.label, name: row.members.length === 1 ? row.members[0].objectName : "", heightMm: row.heightMm },
+room,
+labelWidth,
+),
+labelPlaces[lines.length + rowAt],
+top - 7 * unit,
+"center",
+unit,
+);
 }
 if (unknown.length > 0) {
 const y = floor + band / 2 + 4 * unit;
@@ -29775,10 +29840,18 @@ ctx.moveTo(left, floor + 3 * unit);
 ctx.lineTo(left + wallWidth, floor + 3 * unit);
 ctx.stroke();
 ctx.setLineDash([]);
-for (const mark of unknown) {
+const bandRooms = elevationLabelRooms(unknown.map((mark) => atX(mark.fromMm)));
+unknown.forEach((mark, index) => {
 drawShape(ctx, mark.shape, atX(mark.fromMm), y, 7 * unit, mark.color);
-elevationText(ctx, mark.label, atX(mark.fromMm) + 11 * unit, y, "left", unit);
-}
+elevationText(
+ctx,
+elevationLabelFit({ label: mark.label, name: mark.objectName, heightMm: null }, bandRooms[index], labelWidth),
+atX(mark.fromMm) + 11 * unit,
+y,
+"left",
+unit,
+);
+});
 }
 ctx.lineWidth = 2.5 * unit;
 ctx.strokeStyle = DRAWING_WALL;
@@ -54433,7 +54506,7 @@ return;
 }
 const can = canvasObjectLinkCan(state, markId, object.id);
 if (!can.ok) {
-canvasApi.notify(can.why);
+canvasApi.notify(text("errors.markObjectRefused", { why: can.why }));
 return;
 }
 const done = canvasLinkMarkObject(markId, object.id);
@@ -59204,12 +59277,14 @@ if (code === 10 || code === 13 || code === 0x2028 || code === 0x2029) breaks += 
 }
 return breaks;
 }
+function viewLinkVersionSaid(version) {
+const got = Number(version);
+return Number.isFinite(got) && got > VIEW_LINK_VERSION
+? text("view.linkNewVersion", { version: got, current: VIEW_LINK_VERSION })
+: strings.view.linkOldVersion;
+}
 function viewLinkFail(reason, extra = {}) {
-const error = new Error(
-reason === "version"
-? text("errors.futureVersion", { version: extra.version, current: VIEW_LINK_VERSION })
-: strings.view.linkBroken,
-);
+const error = new Error(reason === "version" ? viewLinkVersionSaid(extra.version) : strings.view.linkBroken);
 error.code = VIEW_LINK_BROKEN;
 error.reason = reason;
 Object.assign(error, extra);
@@ -59495,7 +59570,6 @@ scenarios: stripped.scenarios,
 }
 async function viewLinkRead(linkText, opts = {}) {
 const decompress = opts.decompress;
-if (typeof decompress !== "function") throw viewLinkFail("codec");
 if (typeof linkText !== "string" || linkText === "") throw viewLinkFail("payload");
 const dot = linkText.indexOf(".");
 if (dot <= 0) throw viewLinkFail("payload");
@@ -59503,6 +59577,7 @@ const head = linkText.slice(0, dot);
 if (!/^[0-9]{1,4}$/.test(head)) throw viewLinkFail("payload");
 const version = Number(head);
 if (version !== VIEW_LINK_VERSION) throw viewLinkFail("version", { version });
+if (typeof decompress !== "function") throw viewLinkFail("codec");
 const body = linkText.slice(dot + 1);
 if (body === "") throw viewLinkFail("payload");
 const bytes = viewLinkDecode(body);
@@ -72932,7 +73007,7 @@ function workshopRoundMm(point) {
 return { x: drawingMmValue(workshopClampMm(point && point.x)), y: drawingMmValue(workshopClampMm(point && point.y)) };
 }
 function workshopPlacement(project, schemeId) {
-const scheme = findScheme(project, schemeId);
+const scheme = project ? findScheme(project, schemeId) : null;
 if (!scheme) return { kind: "noScheme" };
 if (!scheme.imageId) return { kind: "noImage" };
 const perMeter = planPixelsPerMeter(project, schemeId);
@@ -78309,11 +78384,7 @@ version: error && error.version !== undefined ? error.version : null,
 function viewStartLinkRefusal(result) {
 const from = result || {};
 if (from.reason !== "version") return strings.view.linkBroken;
-const version = Number(from.version);
-if (Number.isFinite(version) && version > VIEW_LINK_VERSION) {
-return text("view.linkNewVersion", { version, current: VIEW_LINK_VERSION });
-}
-return strings.view.linkOldVersion;
+return viewLinkVersionSaid(from.version);
 }
 function viewStartReplace(saved, next) {
 if (!saved) return "fresh";

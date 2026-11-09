@@ -32,6 +32,7 @@ import {
   schemeObjectKindsInOrder,
   setPlanOrigin,
   setPlanScale,
+  setMarkObject,
   setRoomWallHeight,
   setSchemeWallHeight,
   wallElevation,
@@ -39,7 +40,7 @@ import {
   wallObjectsOn,
   wallRoomId,
 } from "../src/model.js";
-import { drawElevation } from "../src/render.js";
+import { drawElevation, elevationLabelFit, elevationLabelRooms } from "../src/render.js";
 import {
   ELEVATION_HEIGHT_PX,
   elevationHeight,
@@ -397,4 +398,122 @@ test("G68: развёртка ничего не пишет в объект", () 
   wallElevation(scene.project, scene.wallId, "right");
   wallObjectsOn(scene.project, scene.wallId, "left");
   assert.equal(JSON.stringify(scene.project), before);
+});
+// ——— подпись не шире, чем до соседа (таск 273) ————————————————————————
+//
+// Подпись связанного прибора — пара «ТВ1 · Телевизор» плюс высота, и на
+// плотной стене она налезала на соседнюю. Правило одно и названное: подпись
+// сдаёт части, пока не влезет в промежуток до ближайшего соседа, — сперва имя
+// вещи, потом высоту; обозначение остаётся всегда.
+
+test("запас подписи — до ближайшего соседа, у края стены предела нет", () => {
+  assert.deepEqual(elevationLabelRooms([]), []);
+  assert.deepEqual(elevationLabelRooms([120]), [Infinity], "соседа нет — предела нет");
+  assert.deepEqual(elevationLabelRooms([0, 100, 250]), [100, 100, 150]);
+  // Порядок ответа — порядок мест, а не отсортированный.
+  assert.deepEqual(elevationLabelRooms([250, 0, 100]), [150, 100, 100]);
+});
+
+test("подпись сдаёт имя вещи, потом высоту, а обозначение остаётся", () => {
+  const parts = { label: "ТВ1 · Телевизор", name: "Телевизор", heightMm: 1200 };
+  const measure = (value) => String(value).length * 6;
+  // «ТВ1 · Телевизор · 1200» — 22 знака, 132 точки.
+  assert.equal(elevationLabelFit(parts, 200, measure), "ТВ1 · Телевизор · 1200");
+  assert.equal(elevationLabelFit(parts, 100, measure), "ТВ1 · 1200", "имя вещи уходит первым");
+  assert.equal(elevationLabelFit(parts, 40, measure), "ТВ1", "высота уходит второй");
+  assert.equal(elevationLabelFit(parts, 5, measure), "ТВ1", "обозначение сдавать некуда");
+  // Мерки нет — сокращать нечем: подпись остаётся целой.
+  assert.equal(elevationLabelFit(parts, 5, null), "ТВ1 · Телевизор · 1200");
+  assert.equal(elevationLabelFit(parts, Infinity, measure), "ТВ1 · Телевизор · 1200");
+  // Метка без связи: сдавать нечего, кроме высоты.
+  const plain = { label: "Р1", name: "", heightMm: 300 };
+  assert.equal(elevationLabelFit(plain, 100, measure), "Р1 · 300");
+  assert.equal(elevationLabelFit(plain, 30, measure), "Р1");
+  // Полоса под полом: высоты у метки нет вовсе.
+  assert.equal(elevationLabelFit({ label: "ТВ1 · Телевизор", name: "Телевизор", heightMm: null }, 40, measure), "ТВ1");
+});
+
+/**
+ * Два связанных телевизора на одной стене, в `gapMm` друг от друга. Высота у
+ * прибора приходит от вещи (`markPlace`), поэтому своей ей задавать не надо.
+ */
+function linkedPair(gapMm) {
+  const scene = wallScene();
+  let project = scene.project;
+  for (const x of [gapMm / 2, -gapMm / 2]) {
+    const thing = addSchemeObject(project, {
+      schemeId: scene.schemeId,
+      catalogKey: "tv",
+      shape: "rect",
+      atMm: { x, y: 1380 },
+      widthMm: 600,
+      depthMm: 80,
+      heightMm: 400,
+      heightAboveFloorMm: 1200,
+      turnDeg: 0,
+    });
+    project = thing.project;
+    const typeId = project.markTypes.find((type) => type.code === "ТВ").id;
+    const mark = addMark(project, {
+      schemeId: scene.schemeId,
+      typeId,
+      kind: "point",
+      points: [fraction(project, scene.schemeId, { x, y: 1380 })],
+    });
+    project = setMarkObject(mark.project, mark.mark.id, thing.schemeObject.id).project;
+  }
+  project = applyMarkWalls(project).project;
+  return { ...scene, project };
+}
+
+// Подписи ловятся на `fillText`: подложка под буквами рисуется `strokeText`
+// тем же текстом, и считать её второй подписью незачем.
+function elevationLabels(elevation, box) {
+  const texts = [];
+  const ctx = new Proxy(
+    { measureText: (value) => ({ width: String(value).length * 6 }) },
+    {
+      get: (target, key) =>
+        key in target
+          ? target[key]
+          : (...args) => {
+              if (key === "fillText") texts.push(String(args[0]));
+            },
+      set: () => true,
+    },
+  );
+  const field = drawElevation(ctx, elevation, box, { views: true });
+  return { texts, field };
+}
+
+test("на плотной стене подпись прибора укладывается, а на свободной стоит целой", () => {
+  const box = { x: 0, y: 0, width: 700, height: 400 };
+  const roomy = linkedPair(2600);
+  const far = elevationLabels(wallElevation(roomy.project, roomy.wallId, "right"), box);
+  assert.ok(
+    far.texts.includes("ТВ1 · Телевизор · 1400"),
+    "на свободной стене подпись сократилась: " + JSON.stringify(far.texts),
+  );
+
+  // 800 мм при масштабе развёртки — около девяноста точек: пара не влезает,
+  // обозначение с высотой влезает.
+  const tight = linkedPair(800);
+  const near = elevationLabels(wallElevation(tight.project, tight.wallId, "right"), box);
+  assert.ok(near.texts.includes("ТВ1 · 1400"), "имя вещи не ушло: " + JSON.stringify(near.texts));
+  assert.equal(
+    near.texts.some((value) => value.includes("ТВ1 · Телевизор")),
+    false,
+    "подпись прибора осталась длинной: " + JSON.stringify(near.texts),
+  );
+
+  // Совсем вплотную — остаётся обозначение, и оно остаётся всегда.
+  const dense = linkedPair(300);
+  const packed = elevationLabels(wallElevation(dense.project, dense.wallId, "right"), box);
+  assert.ok(packed.texts.includes("ТВ1"), "обозначение пропало: " + JSON.stringify(packed.texts));
+  assert.ok(packed.texts.includes("ТВ2"), "обозначение соседки пропало: " + JSON.stringify(packed.texts));
+  assert.equal(
+    packed.texts.some((value) => value.startsWith("ТВ1 ·")),
+    false,
+    "на плотной стене подпись не уложилась: " + JSON.stringify(packed.texts),
+  );
 });

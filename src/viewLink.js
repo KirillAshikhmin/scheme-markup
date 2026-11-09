@@ -164,13 +164,28 @@ function viewLinkBreaksOf(body) {
   return breaks;
 }
 
+/**
+ * **Слова отказа по версии нагрузки — одно место на сборку** (таск 273).
+ *
+ * У ссылки прежней сборки и у ссылки более новой разные ответы: первую чинить
+ * нечего — надо просить новую; у второй старая страница, и достаточно её
+ * обновить. Прежде это решалось дважды: `viewLinkRead` брал готовую
+ * `errors.futureVersion` на **любую** чужую версию — то есть говорил про
+ * **файл** и про **более новую** версию каждой уже разосланной ссылке, — а
+ * страница просмотра выбирала слова сама. Две развилки на один вопрос
+ * расходятся; теперь развилка здесь, у хозяина формата, а дверь страницы
+ * (`viewStartLinkRefusal`) её зовёт.
+ */
+export function viewLinkVersionSaid(version) {
+  const got = Number(version);
+  return Number.isFinite(got) && got > VIEW_LINK_VERSION
+    ? text("view.linkNewVersion", { version: got, current: VIEW_LINK_VERSION })
+    : strings.view.linkOldVersion;
+}
+
 /** Отказ чтения: один код на все причины, причина — отдельным полем. */
 function viewLinkFail(reason, extra = {}) {
-  const error = new Error(
-    reason === "version"
-      ? text("errors.futureVersion", { version: extra.version, current: VIEW_LINK_VERSION })
-      : strings.view.linkBroken,
-  );
+  const error = new Error(reason === "version" ? viewLinkVersionSaid(extra.version) : strings.view.linkBroken);
   error.code = VIEW_LINK_BROKEN;
   error.reason = reason;
   Object.assign(error, extra);
@@ -586,14 +601,20 @@ export async function viewLinkPack(project, opts = {}) {
  */
 export async function viewLinkRead(linkText, opts = {}) {
   const decompress = opts.decompress;
-  if (typeof decompress !== "function") throw viewLinkFail("codec");
   if (typeof linkText !== "string" || linkText === "") throw viewLinkFail("payload");
   const dot = linkText.indexOf(".");
   if (dot <= 0) throw viewLinkFail("payload");
   const head = linkText.slice(0, dot);
   if (!/^[0-9]{1,4}$/.test(head)) throw viewLinkFail("payload");
   const version = Number(head);
+  // **Версия спрашивается раньше кодека** (таск 273), и ровно для этого она
+  // стоит перед сжатым куском: по `file://` кодек не грузится (ADR 022), и
+  // ссылка прежней сборки получала там «повреждена или обрезана» — то есть
+  // отказ по версии, который мы знаем наверняка, подменялся догадкой о порче.
+  // Отсутствие кодека ссылке своей версии по-прежнему отказ: распаковать её
+  // нечем.
   if (version !== VIEW_LINK_VERSION) throw viewLinkFail("version", { version });
+  if (typeof decompress !== "function") throw viewLinkFail("codec");
   const body = linkText.slice(dot + 1);
   if (body === "") throw viewLinkFail("payload");
   const bytes = viewLinkDecode(body);

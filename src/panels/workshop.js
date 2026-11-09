@@ -572,7 +572,16 @@ export function workshopRoundMm(point) {
  * попадает нуль чертежа, `turn` — поворот осей чертежа относительно осей плана.
  */
 export function workshopPlacement(project, schemeId) {
-  const scheme = findScheme(project, schemeId);
+  // **Объекта может не быть вовсе** (таск 273). Режим экрана живёт в сеансе и
+  // помнится браузером, а ряд кнопок режимов спрятан, пока не открыта схема
+  // (`panels/screens.js`), — то есть «в чертёж не попасть» держалось на
+  // спрятанной кнопке, а не на этой двери: `setScreen("drawing")` без объекта
+  // ронял здесь `TypeError` (`findScheme(null)` читает `project.schemes`), и
+  // вместе с дверью падала левая панель, которая спрашивает место на каждой
+  // перерисовке (`panels/tools.js`). Нашлось нажатием из скрипта живого
+  // прогона (таск 267). Ответ на «объекта нет» тот же, что на чужой
+  // `schemeId`: `noScheme` — показывать нечего, и сказано это словом.
+  const scheme = project ? findScheme(project, schemeId) : null;
   if (!scheme) return { kind: "noScheme" };
   if (!scheme.imageId) return { kind: "noImage" };
   const perMeter = planPixelsPerMeter(project, schemeId);

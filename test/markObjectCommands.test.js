@@ -30,7 +30,7 @@ import {
   canvasObjectLinkCan,
 } from "../src/canvas.js";
 import { markCardModel } from "../src/panels/markCard.js";
-import { strings } from "../src/strings.js";
+import { strings, text } from "../src/strings.js";
 
 const SRC = join(dirname(fileURLToPath(import.meta.url)), "..", "src");
 
@@ -179,6 +179,27 @@ test("команды связи пишут только через canvasCommit 
   }
   // Предложение при постановке метки идёт из постановки точки.
   assert.ok(bodyOf("function canvasPlacePoint(").includes("canvasOfferLink("), "постановка не предлагает связать");
+});
+
+// Причины отказа написаны продолжением фразы — так их читает и модель, когда
+// отказ доезжает исключением («Связать не получилось: …»). В тосте режима
+// связи причина стояла голой и начиналась со строчной буквы: человек читал
+// «вещь уже связана с меткой Р1» без начала (таск 273).
+test("отказ связи в тосте начинается с начала фразы, а не с причины", () => {
+  for (const [key, value] of Object.entries(strings.markObject)) {
+    if (!key.startsWith("why")) continue;
+    assert.equal(value, value.charAt(0).toLowerCase() + value.slice(1), key + " — не продолжение фразы");
+  }
+  const said = text("errors.markObjectRefused", { why: text("markObject.whyTaken", { label: "Р1" }) });
+  assert.match(said, /^[А-ЯЁ]/, said);
+  assert.ok(said.includes("уже связана с меткой Р1"), said);
+
+  const source = readFileSync(join(SRC, "canvas.js"), "utf8");
+  const at = source.indexOf("function canvasObjectJoinClick(");
+  assert.ok(at > 0, "пропала дверь щелчка по вещи");
+  const body = source.slice(at, source.indexOf("\n}\n", at));
+  assert.ok(body.includes('text("errors.markObjectRefused"'), "тост показывает причину без начала фразы");
+  assert.equal(body.includes("notify(can.why"), false, "причина уехала в тост голой");
 });
 
 test("ожидание вещи — готовый режим блока с отметкой; щелчок находит меньшую накрывающую вещь", () => {
