@@ -329,8 +329,9 @@ test("у каждой вещи каталога есть модель, и дев
   // автомобиль). Гардеробная, обувница и вешалка — правка 2026-10-27;
   // телевизор, полотенцесушитель и вытяжка вернулись в каталог сборкой «связь
   // метки и вещи» (таск 186 уводил первых двух в метки); кухонный шкаф — таск
-  // 254 (G395).
-  assert.equal(objectCatalogKeys().length, 66);
+  // 254 (G395); робот-пылесос — таск 261 (G403), и тело у него общее с меткой
+  // «РП».
+  assert.equal(objectCatalogKeys().length, 67);
   // Мост до каталога: имена нынешних видов из словаря ведут к своим ключам. И
   // имена **ушедших** вещей — тоже: вид прежней разметки, названный
   // «Телевизор» или «Полотенцесушитель», обязан узнаваться как узнавался, иначе
@@ -692,6 +693,85 @@ test("кухонный шкаф — комод с вертикальными д�
       printOf(objectModelByKey("kitchenCabinet")),
       printOf(objectModelByKey(other)),
       "кухонный шкаф выглядит как " + other,
+    );
+  }
+});
+
+// ——— робот-пылесос вещью каталога (таск 261, G403) ———————————————————————
+
+test("робот-пылесос: два ключа, одно тело, три реестра — и габарит метки цел", () => {
+  // Слова заказчика: «А заодно поправь робот пылесос и так же что бы был и
+  // объектом». Вещь заводится ключом в три реестра, а **тело** у неё то же, что
+  // у метки «РП»: предмет один, двух форм у него не бывает.
+  const entry = objectCatalogEntry("robotVacuum");
+  assert.ok(entry, "робота-пылесоса нет в каталоге");
+  assert.equal(entry.name, strings.schemeObjectKinds.robotVacuum);
+  assert.equal(entry.category, "appliances");
+  assert.equal(entry.mount, "floor");
+  assert.deepEqual(objectCatalogDefaults("robotVacuum"), {
+    shape: "rect",
+    widthMm: 350,
+    depthMm: 350,
+    heightMm: 95,
+    heightAboveFloorMm: 0,
+  });
+  // **Габарит вещи круглый, а габарит метки — нет, и трогать его нельзя**
+  // (G68): 350 × 100 на 100 в высоту лежит в стартовом справочнике и записано
+  // в объектах заказчика. Отсюда и овальная шайба у метки: доли считаются от
+  // габарита.
+  const vacuumType = defaultTemplate().markTypes.find((type) => type.code === "РП");
+  assert.deepEqual(vacuumType.sizes, { length: 350, width: 100, depth: 100, heightAboveFloor: 0 });
+
+  // **Тело — одно описание на два ключа**, ссылкой, как у щита чертежа и щита
+  // метки. Два похожих списка долей разошлись бы первой же правкой.
+  assert.equal(bodies("robotVacuum"), bodies("vacuum"), "у вещи и метки развелись тела");
+
+  // **Изображения, наоборот, разные**: вещь чертежа видят сверху, метку — сбоку
+  // на развёртке. Реестр плоский, поэтому два вида одного предмета — это два
+  // ключа.
+  const thingView = objectViewByName("robotVacuum");
+  const markView = objectViewByName("vacuum");
+  assert.ok(thingView && markView, "у робота пропало изображение");
+  assert.equal(thingView.family, "objects");
+  assert.equal(markView.family, "things");
+  assert.notDeepEqual(thingView.parts, markView.parts, "рисунок метки просто перенесён вещи");
+
+  // Три круглых тела — тридцать граней, то есть **прежний предел метки**.
+  // Поднятый в таске 260 потолок здесь не берётся нарочно: дороже тридцати
+  // граней стоит одна модель метки на сборку (проверяется выше), и робот в это
+  // правило уложен, а не вынесен из него.
+  const parts = bodies("robotVacuum");
+  assert.deepEqual(parts.map((part) => part.name), ["case", "lid", "turret"]);
+  assert.deepEqual(parts.map((part) => part.kind), ["cyl", "cyl", "cyl"]);
+  assert.equal(objectModelFaceCount(objectModelByKey("robotVacuum")), 30);
+  for (const key of ["robotVacuum", "vacuum"]) {
+    const limits = objectModelLimits(key);
+    assert.ok(parts.length <= limits.bodies && 30 <= limits.faces, key + ": робот не влез в предел");
+  }
+  const [shell, lid, turret] = parts;
+  assert.equal(shell.material, "dark");
+  assert.equal(lid.material, "light");
+  assert.equal(turret.material, "dark");
+  // **Бампер — это край шайбы, вышедший из-под крышки спереди.** Крышка сдвинута
+  // назад, поэтому спереди тёмного видно больше, чем по бокам, и у робота
+  // читается перёд. Своего тела у бампера нет: внутри сплошной шайбы его не
+  // было бы видно.
+  const front = lid.y - shell.y;
+  const side = lid.x - shell.x;
+  assert.ok(front > side + 0.05, "крышка не сдвинута назад — перёд у робота не читается");
+  assert.ok(front >= 0.2, "полоса бампера спереди уже пятой доли поперечника");
+  // Башенка стоит на крышке, а не висит над ней и не тонет в ней.
+  assert.equal(turret.z, lid.z + lid.height);
+  assert.equal(turret.z + turret.height, 1);
+  assert.ok(turret.width <= 0.34 && turret.depth <= 0.34, "башенка размером с полшайбы");
+  assert.ok(turret.y >= 0, "башенка дальномера вышла вперёд середины — у робота она сзади");
+  // И силуэт у него свой: ни табуретка, ни торшер, ни цветок — круглых вещей в
+  // каталоге хватает.
+  for (const other of ["stool", "floorLamp", "plant", "treePot"]) {
+    assert.notEqual(
+      printOf(objectModelByKey("robotVacuum")),
+      printOf(objectModelByKey(other)),
+      "робот-пылесос выглядит как " + other,
     );
   }
 });

@@ -20,6 +20,7 @@
 // (`objectModelByKey`), а имя в ключ переводит каталог.
 import { modelBox, modelCyl, modelFront, modelParts, modelTube } from "./kit.js";
 import { MODELS_POWER } from "./power.js";
+import { MODELS_THINGS } from "./things.js";
 import { objectStairModel } from "./stairs.js";
 
 // Марши лестницы собираются по габариту (`objectModels/stairs.js`, правка
@@ -674,4 +675,24 @@ export const MODELS_OBJECTS = {
     modelBox("wheelFront", { y: -0.36, depth: 0.13, z: 0, height: 0.4, material: "dark" }),
     modelBox("wheelRear", { y: 0.2, depth: 0.13, z: 0, height: 0.4, material: "dark" }),
   ),
+
+  // ——— робот-пылесос (таск 261, G403) ———
+  //
+  // Слова заказчика: «А заодно поправь робот пылесос и так же что бы был и
+  // объектом».
+  //
+  // Тело — **то же описание, что у метки «РП»** (`MODELS_THINGS.vacuum`), и
+  // стоит оно здесь ссылкой, как тело щита (`panel: MODELS_POWER.panelBox`):
+  // робот один и тот же предмет, у него не бывает двух разных форм, и правка
+  // одной правит обе. Второй список долей рядом с первым разошёлся бы с ним
+  // первой же правкой — ровно то, чего это место и избегает.
+  //
+  // **Ключ у вещи и у метки разный**, и это не оплошность: у метки он `vacuum`
+  // по имени её изображения (шайба **сбоку** — так рисуют метку на развёртке),
+  // а вещь чертежа видна **сверху**, и рисунок у неё свой
+  // (`objectViews/objects.js`). Реестр изображений плоский — одно имя, одна
+  // запись, — поэтому два вида одного предмета это два ключа, как у щита
+  // (`panel` и `panelBox`) и у зеркала (`wallMirror` и `mirror`). Тело при
+  // этом остаётся одно.
+  robotVacuum: MODELS_THINGS.vacuum,
 };
