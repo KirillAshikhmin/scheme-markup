@@ -6836,6 +6836,7 @@ backHint: "Убрать метку под все остальные на это�
 keyHint: "Клавиша «{key}»",
 keys: { front: "Shift+]", up: "]", down: "[", back: "Shift+[" },
 block: "Метка из блока переставляется вместе со всем блоком",
+blockStep: "Метка из блока шагает одна — через соседа по блоку",
 },
 blockRow: {
 label: "Блок",
@@ -7189,7 +7190,7 @@ hintSelect:
 hintPoint:
 "Добавление: клик ставит {label}. Ручки «+» у выделенной метки ставят рядом {label} — так в одной рамке собираются выключатель и розетка. Esc снимает выделение и прячет ручки, второй Esc возвращает в «Выделение».",
 hintSelectMode:
-"Клик выбирает метку, перетаскивание двигает её или подпись, двойной клик по подписи возвращает её на место, Delete удаляет, Esc снимает выделение. Метка из блока везёт весь блок; с зажатым Ctrl едет одна она. Клик по стенке контура выделяет помещение: вершину двигают перетаскиванием, «+» на стенке добавляет новую, двойной клик по вершине убирает. Стрелки листают план, как прокрутка, удержание разгоняет ход; «+» и «−» меняют масштаб. Перетаскивание с Shift или с зажатым пробелом — сдвиг: так план возят и поверх меток.",
+"Клик выбирает метку, перетаскивание двигает её или подпись, двойной клик по подписи возвращает её на место, Delete удаляет, Esc снимает выделение. Метка из блока везёт весь блок; с зажатым Ctrl едет одна она и ложится на сетку в полметки — так получаются ровные ряды и шахматный порядок, а Alt ведёт свободно. Клик по стенке контура выделяет помещение: вершину двигают перетаскиванием, «+» на стенке добавляет новую, двойной клик по вершине убирает. Стрелки листают план, как прокрутка, удержание разгоняет ход; «+» и «−» меняют масштаб. Перетаскивание с Shift или с зажатым пробелом — сдвиг: так план возят и поверх меток.",
 hintLine:
 "Добавление линией: клик — вершина. Двойной клик по последней завершает линию, по первой — замыкает. Backspace — убрать вершину, Esc — отменить, ещё раз — вернуться в «Выделение». Направление липнет к ровным углам через 15°, а курсор — к прежним вершинам ломаной по пунктирным направляющим; у курсора виден градус, Alt — рисовать свободно.",
 hintComment:
@@ -14767,6 +14768,33 @@ const size = Number.isFinite(markSize) && markSize > 0 ? markSize : DEFAULT_MARK
 return size * BLOCK_STEP_RATIO;
 }
 const BLOCK_STEP_PX = blockStepPx(DEFAULT_MARK_SIZE);
+function blockGridPx(project) {
+return blockStepPx(projectViewSizes(project).markSize) / 2;
+}
+function blockGridOrigin(project, mark) {
+const group = mark && mark.groupId ? findGroup(project, mark.groupId) : null;
+if (!group) return null;
+const members = (group.markIds || []).map((id) => findMark(project, id)).filter(Boolean);
+if (members.length < 2) return null;
+const point = markPlaceHolder(project, members[0]).points[0];
+return point && Number.isFinite(point.x) && Number.isFinite(point.y) ? point : null;
+}
+function blockGridSnap(project, markId, point) {
+const mark = findMark(project, markId);
+if (!mark || !point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return point;
+const origin = blockGridOrigin(project, mark);
+if (!origin) return point;
+const scheme = findScheme(project, mark.schemeId);
+const width = schemeWidthPx(scheme);
+const height = schemeHeightPx(scheme);
+if (!(width > 0) || !(height > 0)) return point;
+const stepPx = blockGridPx(project);
+const cell = (value, base, size) => {
+const step = stepPx / size;
+return clampFraction(base + Math.round((value - base) / step) * step);
+};
+return { x: cell(point.x, origin.x, width), y: cell(point.y, origin.y, height) };
+}
 const FALLBACK_COLOR = "#8B949E";
 const BLOCK_SIDES = ["left", "right", "up", "down"];
 const ROOM_PALETTE = [
@@ -53694,25 +53722,45 @@ canvasCommit(state.project, after, strings.history.labelLeader, { selection: [ma
 canvasFail(error);
 }
 }
-function canvasOrderIds(state, markId) {
+function canvasOrderSolo(move) {
+return move === MARK_ORDER_UP || move === MARK_ORDER_DOWN;
+}
+function canvasOrderIds(state, markId, move) {
 const mark = state.project ? findMark(state.project, markId) : null;
 if (!mark) return [];
-return canvasMoveIds(state.project, markId, mark.groupId || null, false);
+return canvasMoveIds(state.project, markId, mark.groupId || null, canvasOrderSolo(move));
 }
-function canvasOrderAmong(state, scheme) {
-return { among: visibleMarks(state.project, scheme, state.filter).map((mark) => mark.id) };
+function canvasOrderMates(state, markId, move) {
+if (!canvasOrderSolo(move)) return null;
+const mark = state.project ? findMark(state.project, markId) : null;
+if (!mark || !mark.groupId) return null;
+const ids = canvasMoveIds(state.project, markId, mark.groupId, false);
+return ids.length > 1 ? new Set(ids) : null;
+}
+function canvasOrderAmong(state, scheme, markId, move) {
+const seen = visibleMarks(state.project, scheme, state.filter).map((mark) => mark.id);
+const mates = canvasOrderMates(state, markId, move);
+return { among: mates ? seen.filter((id) => mates.has(id)) : seen };
+}
+function canvasOrderPlan(state, markId, move) {
+const scheme = state ? canvasScheme(state) : null;
+if (!state || !state.project || !scheme) return null;
+return {
+ids: canvasOrderIds(state, markId, move),
+options: canvasOrderAmong(state, scheme, markId, move),
+};
 }
 function canvasMarkOrderCan(state, markId, move) {
-const scheme = state ? canvasScheme(state) : null;
-if (!state || !state.project || !scheme || !canvasEditAllowed(state)) return false;
-return markOrderCan(state.project, canvasOrderIds(state, markId), move, canvasOrderAmong(state, scheme));
+if (!state || !canvasEditAllowed(state)) return false;
+const plan = canvasOrderPlan(state, markId, move);
+return plan ? markOrderCan(state.project, plan.ids, move, plan.options) : false;
 }
 function canvasMarkOrder(markId, move) {
 const state = canvasState();
-const scheme = state ? canvasScheme(state) : null;
-if (!state || !state.project || !scheme) return;
+const plan = canvasOrderPlan(state, markId, move);
+if (!plan) return;
 try {
-const result = moveMarkOrder(state.project, canvasOrderIds(state, markId), move, canvasOrderAmong(state, scheme));
+const result = moveMarkOrder(state.project, plan.ids, move, plan.options);
 if (!result.moved) return;
 canvasCommit(state.project, result.project, strings.history.markOrder, { selection: [markId] });
 } catch (error) {
@@ -53868,6 +53916,12 @@ if (!scheme) return plan;
 const guides = canvasSchemeGuides(state, scheme);
 if (guides.length === 0) return plan;
 return snapToSchemeGuides(guides, plan, scheme, canvasViewOf(state), { free: Boolean(free) }).point;
+}
+function canvasBlockSnap(project, drag, point, free) {
+if (free || !project || !drag || !drag.markId) return point;
+const moving = drag.moving || [drag.markId];
+if (moving.length !== 1) return point;
+return blockGridSnap(project, drag.markId, point);
 }
 function canvasNearestVertex(project, mark, point, scheme, view) {
 const points = markPlaceHolder(project, mark).points;
@@ -55333,7 +55387,7 @@ const mark = findMark(before, canvasDrag.markId);
 const shown = markPlaceHolder(before, mark).points;
 const shifted = shown.map((item) => ({ x: item.x + dx, y: item.y + dy }));
 const anchor = shifted[canvasDrag.anchor] || shifted[0];
-const snapped = canvasGuideSnap(anchor, free);
+const snapped = canvasGuideSnap(canvasBlockSnap(before, canvasDrag, anchor, free), free);
 const fix = { x: snapped.x - anchor.x, y: snapped.y - anchor.y };
 const shift = { x: dx + fix.x, y: dy + fix.y };
 if (canvasDrag.commentPoint) {
@@ -63897,11 +63951,12 @@ if (!state || !state.project || !canvasEditAllowed(state) || !canvasOnScreen(sta
 const words = strings.markCard.order;
 const mark = findMark(state.project, markId);
 if (!mark) return null;
-const tail = mark.groupId ? ". " + words.block : "";
+const tail = (move) =>
+mark.groupId ? ". " + (canvasOrderSolo(move) ? words.blockStep : words.block) : "";
 const options = (move, label, hint) => ({
 class: "ui-btn mark-card__order",
 label,
-title: label + " — " + hint + tail + ". " + text("markCard.order.keyHint", { key: words.keys[move] }),
+title: label + " — " + hint + tail(move) + ". " + text("markCard.order.keyHint", { key: words.keys[move] }),
 attrs: canvasMarkOrderCan(state, markId, move) ? {} : { disabled: "disabled" },
 on: { click: () => canvasMarkOrder(markId, move) },
 });

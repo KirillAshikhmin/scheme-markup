@@ -45,7 +45,7 @@ import {
   setMarkNumber,
   updateMark,
 } from "../src/model.js";
-import { canvasOrderKey } from "../src/canvas.js";
+import { canvasMarkOrderCan, canvasOrderKey, canvasOrderPlan, canvasOrderSolo } from "../src/canvas.js";
 import { strings } from "../src/strings.js";
 import { packProject, unpackProject } from "../src/projectFile.js";
 import { drawScheme, hitTest, markStackPoints, markStacks, visibleMarks } from "../src/render.js";
@@ -263,6 +263,126 @@ test("метка из блока переставляется вместе со 
     visibleMarks(back, back.schemes[0], null).map((mark) => mark.id),
     [...blockIds, switchMark.mark.id],
   );
+});
+
+// ——— порядок внутри блока (таск 262, G385) ————————————————————————————
+//
+// Слова заказчика о порядке у метки внутри блока: «должен быть». Шов, по
+// которому он разошёлся, у четырёх команд уже был (шаг слушает фильтр, края —
+// весь лист), и здесь проверяется, что тот же шов отвечает и на «кого везём»:
+// шаг — метку, край — блок. Зовёт модель холст, поэтому проверка идёт через
+// его дверь `canvasOrderPlan` — ту самую, которой пользуются и гаснущая
+// кнопка, и нажатие.
+
+// Блок из трёх розеток, выключатель рядом и состояние холста при них.
+function framed() {
+  const built = near(1);
+  let project = addToGroup(built.project, built.ids[0], "right").project;
+  const second = project.marks[project.marks.length - 1].id;
+  project = addToGroup(project, second, "right").project;
+  const third = project.marks[project.marks.length - 1].id;
+  const alien = addMark(project, {
+    schemeId: built.scheme.id,
+    typeId: typeId(project, "В"),
+    kind: "point",
+    points: [{ x: 0.45, y: 0.5 }],
+  });
+  project = alien.project;
+  const ids = [built.ids[0], second, third];
+  return {
+    project,
+    scheme: project.schemes[0],
+    ids,
+    alien: alien.mark.id,
+    state: (patch) => ({
+      project,
+      schemeId: project.schemes[0].id,
+      filter: null,
+      layout: "desktop",
+      screen: "scheme",
+      selectedMarkIds: [],
+      mode: "select",
+      ...patch,
+    }),
+  };
+}
+
+test("шаг везёт метку из блока одну, край — весь блок", () => {
+  const built = framed();
+  const state = built.state();
+  for (const kind of [MARK_ORDER_UP, MARK_ORDER_DOWN]) {
+    assert.deepEqual(canvasOrderPlan(state, built.ids[1], kind).ids, [built.ids[1]], kind + ": шаг повёз весь блок");
+  }
+  for (const kind of [MARK_ORDER_FRONT, MARK_ORDER_BACK]) {
+    assert.deepEqual(
+      canvasOrderPlan(state, built.ids[1], kind).ids.slice().sort(),
+      built.ids.slice().sort(),
+      kind + ": край повёз не весь блок",
+    );
+  }
+  // Одиночная метка — одна во всех четырёх командах, как и была.
+  for (const kind of MARK_ORDER_MOVES) {
+    assert.deepEqual(canvasOrderPlan(state, built.alien, kind).ids, [built.alien], kind + ": одиночку повезли с кем-то");
+  }
+  // Правило названо одной дверью, и в ней нет ничего, кроме двух шагов.
+  assert.equal(canvasOrderSolo(MARK_ORDER_UP), true);
+  assert.equal(canvasOrderSolo(MARK_ORDER_DOWN), true);
+  assert.equal(canvasOrderSolo(MARK_ORDER_FRONT), false);
+  assert.equal(canvasOrderSolo(MARK_ORDER_BACK), false);
+});
+
+test("шаг метки из блока идёт через соседа по блоку, а не через весь лист", () => {
+  const built = framed();
+  const state = built.state();
+  // Выключатель лежит между розетками по порядку — но блоку он не сосед.
+  const project = move(built.project, [built.alien], MARK_ORDER_BACK);
+  const lowered = { ...state, project };
+  assert.deepEqual(shown(project, built.scheme), ["В1", "Р1", "Р2", "Р3"]);
+
+  const plan = canvasOrderPlan(lowered, built.ids[0], MARK_ORDER_UP);
+  assert.deepEqual(plan.options.among, built.ids, "шаг в блоке считается не по блоку");
+  const after = moveMarkOrder(project, plan.ids, MARK_ORDER_UP, plan.options).project;
+  // Поехала одна метка — через соседку по блоку; остальные стоят как стояли.
+  assert.deepEqual(shown(after, built.scheme), ["В1", "Р2", "Р1", "Р3"], "шаг поднял не ту метку или не одну");
+  // Клик в накладке достаётся поднятой — порядок на экране и попадание одно.
+  assert.equal(clicked(after, built.scheme, between(0, 1)), built.ids[0], "поднятая метка блока не забрала клик");
+});
+
+test("кнопка «выше» у верхней метки блока гаснет, а край у неё работает", () => {
+  const built = framed();
+  const state = built.state();
+  // Р3 — верхняя в блоке, но не на листе: выключатель поставлен после неё.
+  assert.equal(canvasMarkOrderCan(state, built.ids[2], MARK_ORDER_UP), false, "верхняя в блоке шагает выше себя");
+  assert.equal(canvasMarkOrderCan(state, built.ids[2], MARK_ORDER_FRONT), true, "блоку некуда подняться над листом");
+  assert.equal(canvasMarkOrderCan(state, built.ids[0], MARK_ORDER_DOWN), false, "нижняя в блоке шагает ниже себя");
+  assert.equal(canvasMarkOrderCan(state, built.ids[0], MARK_ORDER_UP), true, "нижней в блоке некуда шагнуть");
+  // В просмотре и при запущенном доме порядка нет вовсе — правило прежнее.
+  assert.equal(canvasMarkOrderCan(built.state({ layout: "mobile" }), built.ids[0], MARK_ORDER_UP), false);
+});
+
+test("шаг в блоке слушает фильтр: скрытый сосед шага не получает", () => {
+  // Оба правила остаются обоими — видимое ∩ блок. Сосед, которого на экране
+  // нет, шага не стоит: картинка от него не изменилась бы.
+  const built = framed();
+  const hidden = { ...built.state(), filter: { markIds: new Set([built.ids[0], built.ids[2], built.alien]) } };
+  const plan = canvasOrderPlan(hidden, built.ids[0], MARK_ORDER_UP);
+  assert.deepEqual(plan.options.among, [built.ids[0], built.ids[2]], "фильтр перестал сужать шаг в блоке");
+  const after = moveMarkOrder(built.project, plan.ids, MARK_ORDER_UP, plan.options).project;
+  assert.deepEqual(shown(after, built.scheme), ["Р2", "Р3", "Р1", "В1"], "шаг остановился на скрытой метке");
+});
+
+test("порядок внутри блока не трогает ни место в массиве, ни состав блока", () => {
+  const built = framed();
+  const plan = canvasOrderPlan(built.state(), built.ids[0], MARK_ORDER_UP);
+  const after = moveMarkOrder(built.project, plan.ids, MARK_ORDER_UP, plan.options).project;
+  assert.deepEqual(
+    after.marks.map((mark) => mark.id),
+    built.project.marks.map((mark) => mark.id),
+    "порядок постановки переставлен",
+  );
+  assert.deepEqual(after.groups, built.project.groups, "состав блока изменился от порядка");
+  // Подпись блока — та же: она считается по справочнику и номерам, а не по ярусу.
+  assert.equal(labelOf(after, built.ids[0]), labelOf(built.project, built.ids[0]));
 });
 
 test("метки чужой схемы в переносе не участвуют", () => {

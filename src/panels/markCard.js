@@ -48,6 +48,7 @@ import {
   canvasMarkOrder,
   canvasMarkOrderCan,
   canvasOnScreen,
+  canvasOrderSolo,
   canvasStartBlockJoin,
   canvasStopBlockJoin,
   canvasUnlinkMarkObject,
@@ -304,6 +305,12 @@ export function markCardParts(model, { headButton = null, extra = null, order = 
  * тогда, когда клавиша и работает, — метка выделена, правка разрешена. Так же
  * названы Ctrl+Z у отмены и Ctrl+S у сохранения.
  *
+ * **У метки из блока ряд работает надвое** (таск 262, G385): шаг «выше» и
+ * «ниже» двигает её одну через соседа по блоку, края везут весь блок, как и
+ * перетаскивание (G189). Разбор шва — у `canvasOrderSolo`; здесь от этого
+ * меняется только хвост подсказки, и кнопка «выше» у верхней метки блока
+ * гаснет — так видно, что в рамке она и так сверху.
+ *
  * `null` — ряда нет вовсе: в просмотре и при запущенном доме правок не бывает
  * (`canvasEditAllowed`), и гаснущий ряд кнопок обещал бы несуществующее.
  *
@@ -316,9 +323,12 @@ export function markCardOrderRow(state, markId) {
   const words = strings.markCard.order;
   const mark = findMark(state.project, markId);
   if (!mark) return null;
-  // Слова про блок — в подсказке каждой кнопки: поедет вся рамка розеток, а не
-  // взятая розетка (G189), и узнать об этом человеку больше негде.
-  const tail = mark.groupId ? ". " + words.block : "";
+  // Слова про блок — в подсказке каждой кнопки, и у шага они свои (таск 262,
+  // G385): край везёт всю рамку розеток (G189), шаг двигает одну взятую
+  // розетку через соседа по блоку. Узнать об этом человеку больше негде, а
+  // кнопка видна ровно тогда, когда и работает.
+  const tail = (move) =>
+    mark.groupId ? ". " + (canvasOrderSolo(move) ? words.blockStep : words.block) : "";
   // Имя значка стоит в самом вызове строкой, а не приезжает доводом: набор
   // значков сверяется с кодом сканированием исходников (`test/panelIcons`), и
   // спрятанное за помощником имя было бы для него мёртвым рисунком.
@@ -330,7 +340,7 @@ export function markCardOrderRow(state, markId) {
   const options = (move, label, hint) => ({
     class: "ui-btn mark-card__order",
     label,
-    title: label + " — " + hint + tail + ". " + text("markCard.order.keyHint", { key: words.keys[move] }),
+    title: label + " — " + hint + tail(move) + ". " + text("markCard.order.keyHint", { key: words.keys[move] }),
     attrs: canvasMarkOrderCan(state, markId, move) ? {} : { disabled: "disabled" },
     on: { click: () => canvasMarkOrder(markId, move) },
   });
