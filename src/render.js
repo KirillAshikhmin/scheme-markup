@@ -7104,18 +7104,38 @@ export function elevationPack(places, sizes) {
  * соседки, то их половины вместе этого промежутка не перекрывают
  * (`(ширина₁ + ширина₂) / 2 ≤ промежуток`) — наезда не бывает вовсе. Мерка
  * одна и доказуема, поэтому второго правила раскладки у развёртки не заводится.
+ *
+ * **Соседка — та, что стоит на той же строке** (таск 279). Место подписи — это
+ * `{at, top, bottom}`: отступ вдоль стены и полоса высот, которую подпись
+ * занимает (у одиночной подписи `top` и `bottom` равны, у столбика — от верхней
+ * до нижней). `line` — высота строки в тех же точках; подписи, чьи полосы
+ * разошлись дальше неё, пересечься не могут **ни при какой ширине**, и считать
+ * их соседками значило бы отнимать место у того, кто никому не мешает.
+ *
+ * Строка понадобилась ровно тогда, когда в меру вошли подписи вещей: имя вещи
+ * стоит над её верхом, а подпись метки — над знаком, и между ними бывает метр
+ * стены. На объектах заказчика из 86 имён, которые одномерная мера прятала,
+ * 81 теснила подпись, отстоящая по высоте на 100–670 точек при строке в 11.
+ *
+ * Одно число вместо места значит «строка одна на всех» — так меряется полоса
+ * под полом, где все подписи и правда стоят в ряд.
  */
-export function elevationLabelRooms(places) {
-  const order = places.map((value, index) => index).sort((first, second) => places[first] - places[second]);
-  const rooms = places.map(() => Infinity);
-  for (let at = 0; at < order.length; at += 1) {
-    const place = places[order[at]];
+export function elevationLabelRooms(places, line = 0) {
+  const spot = (place) =>
+    typeof place === "number" ? { at: place, top: 0, bottom: 0 } : { at: place.at, top: place.top, bottom: place.bottom };
+  const spots = places.map(spot);
+  // Перебор парами, а не проход по отсортированному ряду: ближайшая **по
+  // отступу** соседка может стоять на другой строке, и тогда запас даёт
+  // следующая за ней. Подписей на листе десятки — считать тут нечего.
+  return spots.map((place) => {
     let room = Infinity;
-    if (at > 0) room = Math.min(room, place - places[order[at - 1]]);
-    if (at + 1 < order.length) room = Math.min(room, places[order[at + 1]] - place);
-    rooms[order[at]] = room;
-  }
-  return rooms;
+    for (const other of spots) {
+      if (other === place) continue;
+      if (other.top - line > place.bottom || place.top - line > other.bottom) continue;
+      room = Math.min(room, Math.abs(other.at - place.at));
+    }
+    return room;
+  });
 }
 
 /**
@@ -7172,6 +7192,38 @@ export function elevationLabelFit(parts, room, measure) {
     if (got <= room) return value;
   }
   return own;
+}
+
+/**
+ * **Имя вещи на листе встаёт целиком или не встаёт вовсе** (таск 279).
+ *
+ * Мера тесноты у развёртки одна — `elevationLabelRooms`, — и подписи вещей
+ * стоят в её списке наравне с подписями меток: до этого таска имя вещи меру не
+ * занимало и не спрашивало, и на снимке приёмки таска 276 «Телевизор» был
+ * перечёркнут подписями двух розеток.
+ *
+ * А вот **сдаёт** вещь не то, что метка, и поэтому дверь своя, а не ветка в
+ * `elevationLabelFit`:
+ *
+ *   - у метки сдавать есть что — имя вещи, потом высоту, — а обозначение
+ *     остаётся всегда: по нему прибор находят в таблице (таск 273);
+ *   - у вещи в подписи **только имя**, и частей в нём нет. Обрезать его
+ *     многоточием значило бы завести на листе второй вид сдачи — не «часть
+ *     ушла», а «слово ушло наполовину», — а «Телеви…» не найти ни в списке
+ *     стены, ни в таблице, ни в каталоге.
+ *
+ * Поэтому ответ «не влезло» у вещи — пустая строка, и это **тот же** ответ,
+ * какой лист уже даёт узкой вещи (`ELEVATION_LABEL_MIN_PX`): места нет — имени
+ * нет. Нарисованной вещь при этом остаётся, и верх её подписан числом.
+ *
+ * `measure` — ширина строки в точках тем же шрифтом, которым будем рисовать;
+ * мерки нет — имя остаётся целым (соврать о ширине хуже, чем не спрятать).
+ */
+export function elevationNameFit(name, room, measure) {
+  const value = String(name || "");
+  if (!value || !(room > 0) || typeof measure !== "function") return value;
+  const got = measure(value);
+  return Number.isFinite(got) && got > room ? "" : value;
 }
 
 /**
@@ -7278,6 +7330,38 @@ export function drawElevation(ctx, elevation, box, options = {}) {
     // нему же вещь решает, называть ли себя, — и поэтому он один.
     names: row.axis === "column" || row.members.length === 1,
   }));
+  // **Где встанут знаки ряда и его подписи — считается до рисования** (таск
+  // 279): подпись обязана знать свою строку, а строку даёт нарисованное.
+  // Второго счёта от этого не завелось — рисование берёт готовое.
+  //
+  //   `seats`  — раскладка ряда по его оси (`elevationPack`): у ряда отступы
+  //              вдоль стены в точках от левого края стены, у столбика — высоты
+  //              середин над полом;
+  //   `top`/`bottom` — полоса высот, которую занимают **подписи** ряда: у ряда
+  //              это одна строка над самым высоким знаком, у столбика — от
+  //              верхней подписи до нижней.
+  for (const row of rows) {
+    const boxes = row.boxes;
+    if (row.axis === "column") {
+      row.seats = elevationPack(
+        row.members.map((mark, index) => centrePx(mark, boxes[index])),
+        boxes.map((box) => box.height),
+      );
+      const ys = row.seats.map((place) => floor - place);
+      row.top = Math.min(...ys);
+      row.bottom = Math.max(...ys);
+      continue;
+    }
+    row.seats = elevationPack(
+      row.members.map((mark) => mark.fromMm * scale),
+      boxes.map((box) => box.width),
+    );
+    const highest = Math.min(
+      ...row.members.map((mark, index) => floor - centrePx(mark, boxes[index]) - boxes[index].height / 2),
+    );
+    row.top = highest - 7 * unit;
+    row.bottom = row.top;
+  }
   // Знак без изображения не считается подтянутым: он и не обещал масштаба.
   // Подтяжка меньше десятой доли — молча (см. `ELEVATION_GROWN_QUIET`).
   const grown = rows.reduce(
@@ -7395,20 +7479,105 @@ export function drawElevation(ctx, elevation, box, options = {}) {
     if (row.names) row.members.forEach(namesObject);
   }
 
+  // **И нарисован прибор на листе тоже один раз** (таск 279). До этой правки у
+  // связанного прибора рисовались и прямоугольник вещи, и изображение её метки
+  // — в том же месте, тем же габаритом и в том же масштабе: телевизор стоял
+  // внутри светлого прямоугольника (снимок приёмки таска 276).
+  //
+  // **Рисует метка, а уступает вещь**, и это не расхождение с «Объёмом», а то
+  // же правило: там прибор рисует тот, у кого есть **тело** (таск 255, вещь с
+  // моделью), здесь — тот, у кого есть **изображение** (`objectViews`), а
+  // уступает тот, чей рисунок — один габарит. На листе габарит и есть
+  // прямоугольник вещи: внутри него ничего, а изображение метки стоит ровно в
+  // нём — тем же лицом (`length` × поле посадки), той же серединой и тем же
+  // углом, потому что всё это дала ей сама вещь (`markPlace`). Обводить
+  // нарисованный прибор его же габаритом незачем.
+  //
+  // **Уступает вещь только изображению, и ни знаку, ни отрезку, ни полосе под
+  // полом.** Знак не изображает вещь и масштаба не обещает (`elevationMarkBox`,
+  // отметка «Изображения» снята), отрезок линейной метки — её ход по стене, а
+  // метка без высоты стоит вовсе под полом. Во всех этих случаях прямоугольник
+  // вещи — единственное, что о её размере на листе говорит, и он остаётся.
+  //
+  // **Связь приносит модель, та же дверь** `objectId`, что у имени (таск 276):
+  // сличать места здесь нельзя — это догадка, а не связь.
+  //
+  // Подписи правило не касается ни одной: имя вещи печатается по правилу таска
+  // 276 (`namedObjects`), верх — числом у правого края того же прямоугольника,
+  // в котором стоит изображение. Метки на листе нет, а вещь есть — вещь
+  // рисуется и называет себя, как рисовала (у заказчика это 20 случаев из 27).
+  const drawnObjects = new Set();
+  for (const row of rows) {
+    row.members.forEach((mark, index) => {
+      if (mark.objectId && row.boxes[index].view) drawnObjects.add(mark.objectId);
+    });
+  }
+
+  // **Запас у подписей считается разом** (таск 273): теснит их друг друга одна
+  // и та же стена, и мерка у них одна — до ближайшего соседа
+  // (`elevationLabelRooms`). Линейные метки и ряды стоят в одном списке
+  // нарочно: подпись ленты налезает на подпись розетки так же, как на подпись
+  // соседней ленты.
+  //
+  // **Подписи вещей стоят в том же списке** (таск 279): стена у них общая, а
+  // имя вещи наезжало на соседнюю подпись ровно так же — второй меры рядом с
+  // этой не заводится. В список идёт то место, **где подпись и правда будет**:
+  // вещь, названная меткой (таск 276), узкая вещь без подписи
+  // (`ELEVATION_LABEL_MIN_PX`) и вещь без имени места не занимают — пустое
+  // место тесноты не создаёт.
+  //
+  // Мера считается **раз, по местам**, а не по напечатанному: спрятанное имя
+  // запаса соседкам не возвращает. Иначе ответ зависел бы от порядка, в котором
+  // подписи сдаются, и две соседки по очереди уступали бы место друг другу.
+  //
+  // И **строка у места названа**: имя вещи стоит над её верхом, подпись метки —
+  // над знаком, и подписи, разошедшиеся по высоте, друг другу не мешают (см.
+  // `elevationLabelRooms`). Без этого лист терял бы имена вещей, которые ни на
+  // что не налезали.
+  const objectLabels = elevation.objects.filter(
+    (object) =>
+      object.name &&
+      !namedObjects.has(object.id) &&
+      (object.toMm - object.fromMm) * scale >= ELEVATION_LABEL_MIN_PX * unit,
+  );
+  const objectLabelY = (object) => atY(object.topMm === null ? elevation.heightShownMm : object.topMm) - 8 * unit;
+  const labelPlaces = [
+    ...lines.map((mark) => {
+      const y = atY(mark.heightMm) - 9 * unit;
+      return { at: (atX(mark.fromMm) + atX(mark.toMm)) / 2, top: y, bottom: y };
+    }),
+    ...rows.map((row) => ({ at: atX(row.centreMm), top: row.top, bottom: row.bottom })),
+    ...objectLabels.map((object) => {
+      const y = objectLabelY(object);
+      return { at: (atX(object.fromMm) + atX(object.toMm)) / 2, top: y, bottom: y };
+    }),
+  ];
+  const labelRooms = elevationLabelRooms(labelPlaces, ELEVATION_FONT * unit);
+  const objectRooms = new Map(
+    objectLabels.map((object, at) => [object.id, labelRooms[lines.length + rows.length + at]]),
+  );
+
   // Объекты на полу — под всем остальным: розетка над столешницей обязана
   // остаться видной поверх неё.
   for (const object of elevation.objects) {
     const top = object.topMm === null ? elevation.heightShownMm : object.topMm;
     const y = atY(top);
     const height = Math.max(thin, (top - object.floorMm) * scale);
-    ctx.fillStyle = DRAWING_OBJECT_FILL;
-    ctx.fillRect(atX(object.fromMm), y, Math.max(thin, (object.toMm - object.fromMm) * scale), height);
-    ctx.lineWidth = 1.2 * unit;
-    ctx.strokeStyle = DRAWING_OBJECT;
-    ctx.strokeRect(atX(object.fromMm), y, Math.max(thin, (object.toMm - object.fromMm) * scale), height);
+    // Прибор, нарисованный изображением своей метки, вещь вторым габаритом не
+    // обводит (таск 279).
+    if (!drawnObjects.has(object.id)) {
+      ctx.fillStyle = DRAWING_OBJECT_FILL;
+      ctx.fillRect(atX(object.fromMm), y, Math.max(thin, (object.toMm - object.fromMm) * scale), height);
+      ctx.lineWidth = 1.2 * unit;
+      ctx.strokeStyle = DRAWING_OBJECT;
+      ctx.strokeRect(atX(object.fromMm), y, Math.max(thin, (object.toMm - object.fromMm) * scale), height);
+    }
     if ((object.toMm - object.fromMm) * scale < ELEVATION_LABEL_MIN_PX * unit) continue;
     if (!namedObjects.has(object.id)) {
-      elevationText(ctx, object.name, (atX(object.fromMm) + atX(object.toMm)) / 2, y - 8 * unit, "center", unit);
+      const name = elevationNameFit(object.name, objectRooms.get(object.id), labelWidth);
+      if (name) {
+        elevationText(ctx, name, (atX(object.fromMm) + atX(object.toMm)) / 2, objectLabelY(object), "center", unit);
+      }
     }
     if (object.topMm !== null) {
       elevationText(ctx, String(object.topMm), atX(object.toMm) + 2 * unit, y + 9 * unit, "left", unit);
@@ -7433,17 +7602,6 @@ export function drawElevation(ctx, elevation, box, options = {}) {
     }
   }
 
-  // **Запас у подписей считается разом** (таск 273): теснит их друг друга одна
-  // и та же стена, и мерка у них одна — до ближайшего соседа
-  // (`elevationLabelRooms`). Линейные метки и ряды стоят в одном списке
-  // нарочно: подпись ленты налезает на подпись розетки так же, как на подпись
-  // соседней ленты.
-  const labelPlaces = [
-    ...lines.map((mark) => (atX(mark.fromMm) + atX(mark.toMm)) / 2),
-    ...rows.map((row) => atX(row.centreMm)),
-  ];
-  const labelRooms = elevationLabelRooms(labelPlaces);
-
   // Метки: знак или изображение на своём месте и высоте, подпись рядом.
   // Линия — отрезком.
   for (let index = 0; index < lines.length; index += 1) {
@@ -7459,8 +7617,8 @@ export function drawElevation(ctx, elevation, box, options = {}) {
     elevationText(
       ctx,
       elevationLabelFit({ label: mark.label, name: mark.objectName, heightMm: mark.heightMm }, labelRooms[index], labelWidth),
-      labelPlaces[index],
-      y - 9 * unit,
+      labelPlaces[index].at,
+      labelPlaces[index].top,
       "center",
       unit,
     );
@@ -7498,10 +7656,7 @@ export function drawElevation(ctx, elevation, box, options = {}) {
     // высотой. Расходятся они по вертикали — и подписана высота у каждой: ради
     // разных высот столбик и собирают.
     if (row.axis === "column") {
-      const places = elevationPack(
-        row.members.map((mark, index) => centrePx(mark, boxes[index])),
-        boxes.map((box) => box.height),
-      );
+      const places = row.seats;
       row.members.forEach((mark, index) => {
         const box = boxes[index];
         const x = atX(mark.fromMm);
@@ -7520,17 +7675,12 @@ export function drawElevation(ctx, elevation, box, options = {}) {
     }
     // **Ряд**: каждая метка на своём отступе вдоль стены, вплотную расходятся
     // только налезающие (дефект D27). Считается в точках холста относительно
-    // левого края стены — там же, где живут размеры знаков.
-    const places = elevationPack(
-      row.members.map((mark) => mark.fromMm * scale),
-      boxes.map((box) => box.width),
-    );
-    let top = Infinity;
+    // левого края стены — там же, где живут размеры знаков; саму раскладку и
+    // строку подписи ряд получил до меры (`row.seats`, `row.top`).
+    const places = row.seats;
     row.members.forEach((mark, index) => {
       const box = boxes[index];
-      const y = floor - centrePx(mark, box);
-      drawRowMark(mark, box, left + places[index], y);
-      top = Math.min(top, y - box.height / 2);
+      drawRowMark(mark, box, left + places[index], floor - centrePx(mark, box));
     });
     // Одна отметка высоты на ряд, по нижнему объекту (G191): «2 блока розеток
     // мы в одну группу не собираем, это всегда 2 группы разных», — значит у
@@ -7547,8 +7697,8 @@ export function drawElevation(ctx, elevation, box, options = {}) {
         room,
         labelWidth,
       ),
-      labelPlaces[lines.length + rowAt],
-      top - 7 * unit,
+      labelPlaces[lines.length + rowAt].at,
+      row.top,
       "center",
       unit,
     );
