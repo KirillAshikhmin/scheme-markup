@@ -54,6 +54,7 @@ import {
   volumeDrawn,
   volumePointInside,
   volumePrismFaces,
+  volumeValueSame,
 } from "./shapes.js";
 import { volumeDoorOpen } from "./walls.js";
 import { volumeCurtainShare } from "./sun.js";
@@ -1014,11 +1015,12 @@ function volumeMovePlanes(node, dx, dy, dz) {
 /**
  * Этаж встаёт на новое место: своя база и своё смещение плана.
  *
- * `part` — этаж из `scene.stackParts`: `{sub, cuts, tree, at}`. Переносятся
+ * `part` — этаж из `scene.stackParts`: `{sub, cuts, base, at}`. Переносятся
  * **все** точки, какие у этажа есть: точки граней сцены (у каждой грани свои,
  * общих между гранями нет) и точки резов дерева (`cuts`) — их в сцене нет
- * нигде, и без списка они остались бы на прежнем месте. Дерево, лежащее в
- * этаже, уезжает вместе с ними.
+ * нигде, и без списка они остались бы на прежнем месте. Дерево неподвижных
+ * граней пачки (`base`, таск 265), если эта пачка его голова, уезжает вместе с
+ * ними: плоскость узла — на `n·t`, а точки его резов лежат в начале `cuts`.
  *
  * Перенос записывается в `part.move`: по нему сшивка узнаёт, что пачка этажей
  * уехала целиком и одинаково, — только тогда её дерево годится как есть.
@@ -1031,7 +1033,6 @@ export function volumeFloorPlace(part, { baseMm = 0, shiftMm = null } = {}) {
   const dz = lift - part.at.baseMm;
   const dx = toX - part.at.dx;
   const dy = toY - part.at.dy;
-  part.fresh = false;
   part.move = { dx, dy, dz };
   if (dx === 0 && dy === 0 && dz === 0) return part;
   for (const face of part.sub.faces) {
@@ -1046,7 +1047,7 @@ export function volumeFloorPlace(part, { baseMm = 0, shiftMm = null } = {}) {
     point.y += dy;
     point.z += dz;
   }
-  volumeMovePlanes(part.tree, dx, dy, dz);
+  volumeMovePlanes(part.base, dx, dy, dz);
   part.at.baseMm = lift;
   part.at.dx = toX;
   part.at.dy = toY;
@@ -1108,7 +1109,19 @@ export function volumeFloorKey(project, schemeId, options, cover, upper, known) 
   };
 }
 
-/** Тот же ключ или нет. Метки сравниваются поштучно: список собран заново. */
+/**
+ * Тот же ключ или нет. Метки сравниваются поштучно: список собран заново.
+ *
+ * **И поштучно — по значению, а не по ссылке** (таск 265). Список приходит от
+ * `render.visibleMarks`, а та отдаёт связанной с вещью метке **копию** с
+ * точками вещи (`visibleMark`, таск 252): на объекте, где есть хоть один
+ * связанный прибор, ссылки расходятся на каждой сборке — и ключ этажа не
+ * сходился **никогда**. Кэш этажей (таск 232) от этого молча умирал: дверь
+ * первого этажа снова пересобирала всю стопку, хотя числа таска 232 обещали
+ * обратное. Сверка значений дешева ровно потому, что расходится одно поле:
+ * ссылка на саму метку совпадает у всех несвязанных, а у копии совпадает всё,
+ * кроме точек (`volumeValueSame` смотрит ссылку первой).
+ */
 export function volumeFloorKeySame(was, now) {
   if (!was || !now) return false;
   if (
@@ -1130,6 +1143,7 @@ export function volumeFloorKeySame(was, now) {
   }
   if (was.marks === now.marks) return true;
   if (!was.marks || !now.marks || was.marks.length !== now.marks.length) return false;
-  for (let at = 0; at < was.marks.length; at += 1) if (was.marks[at] !== now.marks[at]) return false;
+  // Три уровня вглубь — те же, что у граней: метка → точки → координаты.
+  for (let at = 0; at < was.marks.length; at += 1) if (!volumeValueSame(was.marks[at], now.marks[at], 3)) return false;
   return true;
 }

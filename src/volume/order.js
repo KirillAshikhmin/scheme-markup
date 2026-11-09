@@ -6,7 +6,7 @@
 // `src/volume/` — напрямую. Зависимости идут только вниз по слоям (порядок —
 // в шапке `volume.js`), циклов нет. Решения и доводы — в шапках разделов ниже.
 import { VOLUME_LAYER_BODY, VOLUME_ORDER_SPLIT_COST, VOLUME_ORDER_TRIES, VOLUME_PLANE_EPS_MM } from "./measures.js";
-import { volumeBoxEmpty, volumeFacesSpan } from "./shapes.js";
+import { volumeBoxEmpty, volumeFacesSpan, volumeValueSame } from "./shapes.js";
 
 /**
  * Дерево порядка стопки: по дереву на этаж, сшитые горизонтальной плоскостью.
@@ -24,12 +24,25 @@ import { volumeBoxEmpty, volumeFacesSpan } from "./shapes.js";
  * в объёме обязан быть точным в каждом пикселе.
  *
  * `boxes` — этажи стопки (таск 232), по одному на каждую запись `groups`.
- * Дерево пачки лежит **у первого её этажа** (`box.tree`, состав пачки —
- * `box.pack`), и берётся готовым, когда сошлись три условия: состав пачки тот
- * же, ни один её этаж не собран заново (`box.fresh`) и все уехали одинаково
- * (`box.move`). Иначе ящики всей пачки пустеют, а дерево строится здесь: оно
- * ложится в ящик первого этажа, точки резов — в его `cuts`, и по ним пачка
- * потом переезжает целиком.
+ * Память пачки лежит **у первого её этажа**: неподвижные грани (`box.statics`),
+ * дерево по ним (`box.base`) и состав пачки, для которого оно построено
+ * (`box.pack`). Полотна дверей в него **вставляются на каждой сборке** —
+ * десяток граней против шестнадцати тысяч, — и устроено это ровно так же, как
+ * у сцены одной схемы (`volumeOrderKept`): второго приёма для стопки не
+ * заводится, иначе «годно ли готовое дерево» получило бы два ответа.
+ *
+ * Таск 265 (долг T202, ответ заказчика G383): до него дерево хранилось
+ * **целиком, с полотнами**, и годилось только пока ни один этаж пачки не
+ * собран заново. У двусвета, где этажи продеты друг в друга и дерево у них
+ * одно, своя дверь пересобирала его всегда — 78 мс из 100 на объекте
+ * заказчика. Неподвижным граням дверь не меняет ни поля, и сверка их поле в
+ * поле это видит.
+ *
+ * Память годится, когда состав пачки тот же и **все её этажи уехали одинаково
+ * с головой** (`box.move`): дерево переносится переносом головного этажа
+ * (`volumeFloorPlace`), и этаж, уехавший не со всеми, сошёлся бы со своими
+ * гранями по ссылке и соврал бы порядку. Всё остальное решает сверка: промах в
+ * ней стоит времени, а не картинки.
  *
  * Пачка из одного этажа и пачка из слипшихся считаются одинаково, второго
  * правила для них нет: у перекрывшихся этажей дерево просто одно на всех, а
@@ -60,33 +73,34 @@ export function volumeOrderStack(groups, boxes = null) {
     parts.push({ faces: inTree, span, pack: [group] });
   }
   if (parts.length === 0) return null;
-  /** Готовое дерево пачки или `null`: состав, свежесть и переезд — у всех. */
-  const ready = (part) => {
+  /**
+   * Годится ли память головного этажа этой пачке: тот же состав и один перенос
+   * у всех. Сами грани сверяет `volumeOrderTree` — здесь только то, чего по
+   * граням не видно (уехавший этаж сходится по ссылке).
+   */
+  const fits = (part) => {
     const box = boxAt(part.pack[0]);
-    if (!box || !box.tree) return null;
+    if (!box || !box.base) return false;
     const was = box.pack || [];
-    if (was.length !== part.pack.length) return null;
-    for (let at = 0; at < was.length; at += 1) if (was[at] !== part.pack[at]) return null;
+    if (was.length !== part.pack.length) return false;
+    for (let at = 0; at < was.length; at += 1) if (was[at] !== part.pack[at]) return false;
     const move = box.move || { dx: 0, dy: 0, dz: 0 };
     for (const group of part.pack) {
       const one = boxAt(group);
-      if (!one || one.fresh) return null;
+      if (!one) return false;
       const step = one.move || { dx: 0, dy: 0, dz: 0 };
-      if (step.dx !== move.dx || step.dy !== move.dy || step.dz !== move.dz) return null;
+      if (step.dx !== move.dx || step.dy !== move.dy || step.dz !== move.dz) return false;
     }
-    return box.tree;
+    return true;
   };
   const treeOf = (part) => {
-    const done = ready(part);
-    if (done) return done;
-    for (const group of part.pack) volumeBoxEmpty(boxAt(group));
     const box = boxAt(part.pack[0]);
-    const built = volumeOrderTree(part.faces, box ? box.cuts : null);
-    if (box) {
-      box.tree = built;
+    if (!box) return volumeOrderTree(part.faces);
+    if (!fits(part)) {
+      volumeBoxEmpty(box);
       box.pack = part.pack;
     }
-    return built;
+    return volumeOrderTree(part.faces, box.cuts, box);
   };
   let tree = treeOf(parts[0]);
   for (let at = 1; at < parts.length; at += 1) {
@@ -274,9 +288,16 @@ export function volumeSplitFace(face, plane, cuts = null) {
  *
  * `cuts` — список точек реза (см. `volumeSplitFace`). Собирает его только
  * стопка: по нему этаж переставляется на другую базу целиком, вместе с уже
- * построенным деревом (таск 232).
+ * построенным деревом (таск 232). В нём сперва точки неподвижного дерева —
+ * `slot.baseCuts` штук, они живут столько же, сколько само дерево, — а за ними
+ * точки полотен **этой** сборки; на каждой сборке хвост отрезается, иначе
+ * список рос бы мёртвыми точками прежних полотен.
+ *
+ * `slot` — где лежит память неподвижного дерева. У сцены одной схемы она одна
+ * на модуль (`volumeOrderKept`), у пачки этажей — в ящике её головного этажа
+ * (таск 265). Устройство одно на оба случая: `{statics, base, baseCuts}`.
  */
-export function volumeOrderTree(faces, cuts = null) {
+export function volumeOrderTree(faces, cuts = null, slot = null) {
   const statics = [];
   const doors = [];
   for (const face of faces || []) {
@@ -286,16 +307,15 @@ export function volumeOrderTree(faces, cuts = null) {
     if (!face || !volumeInTree(face)) continue;
     (face.doorId ? doors : statics).push(face);
   }
-  // Память — только у сцены одной схемы (`cuts` пуст): у этажа стопки точки
-  // граней переезжают на месте, и сверять их с прежними нечем.
-  let base = null;
-  const kept = cuts === null ? volumeOrderKept : null;
-  if (kept && volumeFacesSame(kept.statics, statics)) base = kept.tree;
-  else {
-    base = volumeOrderNode(statics, cuts);
-    if (cuts === null) volumeOrderKept = { statics, tree: base };
-  }
-  return volumeOrderInsert(base, doors, cuts);
+  const kept = slot || (cuts === null ? volumeOrderKept : null);
+  if (!kept) return volumeOrderInsert(volumeOrderNode(statics, cuts), doors, cuts);
+  if (!kept.statics || !volumeFacesSame(kept.statics, statics)) {
+    if (cuts) cuts.length = 0;
+    kept.base = volumeOrderNode(statics, cuts);
+    kept.baseCuts = cuts ? cuts.length : 0;
+    kept.statics = statics;
+  } else if (cuts) cuts.length = kept.baseCuts || 0;
+  return volumeOrderInsert(kept.base, doors, cuts);
 }
 
 // ——— дерево неподвижных граней (правка 2026-10-27) ————————————————————————
@@ -317,33 +337,31 @@ export function volumeOrderTree(faces, cuts = null) {
 // после, — такое же дерево разбиения, просто плоскости дверей в нём лежат
 // ниже. Вставка не трогает готового дерева — меняются копии узлов на её пути,
 // и прежнее дерево остаётся годным для следующей двери.
+//
+// С таска 265 **этажи стопки живут по тому же приёму**, только память у них
+// своя — в ящике головного этажа пачки, а не в этом модуле: сцена стопки
+// разобрана на этажи (таск 232), и память, живущая ровно её срок, остаётся
+// частью сцены, а не вторым ответом о ней.
 
-/** Неподвижные грани последней сборки и их дерево: `{statics, tree}`. */
-let volumeOrderKept = null;
+/**
+ * Неподвижные грани последней сборки **одной схемы** и дерево по ним:
+ * `{statics, base, baseCuts}`. Правится на месте, потому что устройство памяти
+ * одно с памятью пачки этажей, а ту держит чужой ящик.
+ */
+const volumeOrderKept = { statics: null, base: null, baseCuts: 0 };
 
-/** Грани поле в поле те же, в том же порядке. */
+/**
+ * Грани поле в поле те же, в том же порядке.
+ *
+ * Сверка значений — чужая и общая на «Объём» (`volumeValueSame`): грань →
+ * точки → координаты, то есть три уровня вглубь. Второй такой сверки в сборке
+ * быть не должно — по ней решают и годность дерева, и готовность этажа стопки.
+ */
 function volumeFacesSame(was, now) {
   if (was.length !== now.length) return false;
   for (let index = 0; index < was.length; index += 1) {
-    if (!volumeOrderValueSame(was[index], now[index], 3)) return false;
+    if (!volumeValueSame(was[index], now[index], 3)) return false;
   }
-  return true;
-}
-
-// Сверка значений вглубь на `depth` уровней: грань → точки → координаты.
-// Глубже — «не те же», и дерево строится заново: промах здесь стоит времени,
-// а не картинки.
-function volumeOrderValueSame(a, b, depth) {
-  if (a === b) return true;
-  if (!a || !b || typeof a !== "object" || typeof b !== "object" || depth <= 0) return false;
-  if (Array.isArray(a)) {
-    if (!Array.isArray(b) || a.length !== b.length) return false;
-    for (let index = 0; index < a.length; index += 1) if (!volumeOrderValueSame(a[index], b[index], depth - 1)) return false;
-    return true;
-  }
-  const keys = Object.keys(a);
-  if (keys.length !== Object.keys(b).length) return false;
-  for (const key of keys) if (!volumeOrderValueSame(a[key], b[key], depth - 1)) return false;
   return true;
 }
 

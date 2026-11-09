@@ -8257,8 +8257,6 @@ outside: "Вне помещений",
 tight: "тесно, отойдите или посмотрите обзором (V)",
 noFloor: "пола здесь нет — вы над двусветным пространством",
 fellTo: "Этаж {floor}: вы упали в дыру двусветного пространства",
-fallOneFloor:
-"Падать некуда: показан один этаж. Включите «Все этажи» в параметрах просмотра (P) — тогда в дыру падают.",
 fallNoBelow: "Падать некуда: ниже этого этажа ничего не нарисовано — вы идёте над дырой",
 counts: "Стен {walls} · проёмов {openings} · помещений {rooms} · меток {marks}",
 pickHint: "Клик равноценен E: по вещи — выделит её (то же выделение, что в списке меток и на плане), по двери — откроет или закроет. Q — окно метки под прицелом.",
@@ -36748,9 +36746,24 @@ return (points || []).map((point) => ({ ...point, x: point.x + shiftMm.x, y: poi
 const VOLUME_WALL_SAME_DEG = 20;
 function volumeBoxEmpty(box) {
 if (!box) return;
-box.tree = null;
+box.statics = null;
+box.base = null;
+box.baseCuts = 0;
 box.pack = null;
 if (box.cuts) box.cuts.length = 0;
+}
+function volumeValueSame(a, b, depth) {
+if (a === b) return true;
+if (!a || !b || typeof a !== "object" || typeof b !== "object" || depth <= 0) return false;
+if (Array.isArray(a)) {
+if (!Array.isArray(b) || a.length !== b.length) return false;
+for (let index = 0; index < a.length; index += 1) if (!volumeValueSame(a[index], b[index], depth - 1)) return false;
+return true;
+}
+const keys = Object.keys(a);
+if (keys.length !== Object.keys(b).length) return false;
+for (const key of keys) if (!volumeValueSame(a[key], b[key], depth - 1)) return false;
+return true;
 }
 function volumeFacesSpan(faces) {
 let minZ = Infinity;
@@ -36839,32 +36852,29 @@ continue;
 parts.push({ faces: inTree, span, pack: [group] });
 }
 if (parts.length === 0) return null;
-const ready = (part) => {
+const fits = (part) => {
 const box = boxAt(part.pack[0]);
-if (!box || !box.tree) return null;
+if (!box || !box.base) return false;
 const was = box.pack || [];
-if (was.length !== part.pack.length) return null;
-for (let at = 0; at < was.length; at += 1) if (was[at] !== part.pack[at]) return null;
+if (was.length !== part.pack.length) return false;
+for (let at = 0; at < was.length; at += 1) if (was[at] !== part.pack[at]) return false;
 const move = box.move || { dx: 0, dy: 0, dz: 0 };
 for (const group of part.pack) {
 const one = boxAt(group);
-if (!one || one.fresh) return null;
+if (!one) return false;
 const step = one.move || { dx: 0, dy: 0, dz: 0 };
-if (step.dx !== move.dx || step.dy !== move.dy || step.dz !== move.dz) return null;
+if (step.dx !== move.dx || step.dy !== move.dy || step.dz !== move.dz) return false;
 }
-return box.tree;
+return true;
 };
 const treeOf = (part) => {
-const done = ready(part);
-if (done) return done;
-for (const group of part.pack) volumeBoxEmpty(boxAt(group));
 const box = boxAt(part.pack[0]);
-const built = volumeOrderTree(part.faces, box ? box.cuts : null);
-if (box) {
-box.tree = built;
+if (!box) return volumeOrderTree(part.faces);
+if (!fits(part)) {
+volumeBoxEmpty(box);
 box.pack = part.pack;
 }
-return built;
+return volumeOrderTree(part.faces, box.cuts, box);
 };
 let tree = treeOf(parts[0]);
 for (let at = 1; at < parts.length; at += 1) {
@@ -36939,41 +36949,29 @@ front: front.length >= 3 ? { ...face, p: front } : null,
 back: back.length >= 3 ? { ...face, p: back } : null,
 };
 }
-function volumeOrderTree(faces, cuts = null) {
+function volumeOrderTree(faces, cuts = null, slot = null) {
 const statics = [];
 const doors = [];
 for (const face of faces || []) {
 if (!face || !volumeInTree(face)) continue;
 (face.doorId ? doors : statics).push(face);
 }
-let base = null;
-const kept = cuts === null ? volumeOrderKept : null;
-if (kept && volumeFacesSame(kept.statics, statics)) base = kept.tree;
-else {
-base = volumeOrderNode(statics, cuts);
-if (cuts === null) volumeOrderKept = { statics, tree: base };
+const kept = slot || (cuts === null ? volumeOrderKept : null);
+if (!kept) return volumeOrderInsert(volumeOrderNode(statics, cuts), doors, cuts);
+if (!kept.statics || !volumeFacesSame(kept.statics, statics)) {
+if (cuts) cuts.length = 0;
+kept.base = volumeOrderNode(statics, cuts);
+kept.baseCuts = cuts ? cuts.length : 0;
+kept.statics = statics;
+} else if (cuts) cuts.length = kept.baseCuts || 0;
+return volumeOrderInsert(kept.base, doors, cuts);
 }
-return volumeOrderInsert(base, doors, cuts);
-}
-let volumeOrderKept = null;
+const volumeOrderKept = { statics: null, base: null, baseCuts: 0 };
 function volumeFacesSame(was, now) {
 if (was.length !== now.length) return false;
 for (let index = 0; index < was.length; index += 1) {
-if (!volumeOrderValueSame(was[index], now[index], 3)) return false;
+if (!volumeValueSame(was[index], now[index], 3)) return false;
 }
-return true;
-}
-function volumeOrderValueSame(a, b, depth) {
-if (a === b) return true;
-if (!a || !b || typeof a !== "object" || typeof b !== "object" || depth <= 0) return false;
-if (Array.isArray(a)) {
-if (!Array.isArray(b) || a.length !== b.length) return false;
-for (let index = 0; index < a.length; index += 1) if (!volumeOrderValueSame(a[index], b[index], depth - 1)) return false;
-return true;
-}
-const keys = Object.keys(a);
-if (keys.length !== Object.keys(b).length) return false;
-for (const key of keys) if (!volumeOrderValueSame(a[key], b[key], depth - 1)) return false;
 return true;
 }
 function volumeOrderInsert(node, faces, cuts = null) {
@@ -40521,7 +40519,6 @@ const toY = Number(shiftMm && shiftMm.y) || 0;
 const dz = lift - part.at.baseMm;
 const dx = toX - part.at.dx;
 const dy = toY - part.at.dy;
-part.fresh = false;
 part.move = { dx, dy, dz };
 if (dx === 0 && dy === 0 && dz === 0) return part;
 for (const face of part.sub.faces) {
@@ -40536,7 +40533,7 @@ point.x += dx;
 point.y += dy;
 point.z += dz;
 }
-volumeMovePlanes(part.tree, dx, dy, dz);
+volumeMovePlanes(part.base, dx, dy, dz);
 part.at.baseMm = lift;
 part.at.dx = toX;
 part.at.dy = toY;
@@ -40593,7 +40590,7 @@ return false;
 }
 if (was.marks === now.marks) return true;
 if (!was.marks || !now.marks || was.marks.length !== now.marks.length) return false;
-for (let at = 0; at < was.marks.length; at += 1) if (was.marks[at] !== now.marks[at]) return false;
+for (let at = 0; at < was.marks.length; at += 1) if (!volumeValueSame(was.marks[at], now.marks[at], 3)) return false;
 return true;
 }
 
@@ -41055,10 +41052,11 @@ schemeId: item.schemeId,
 sub,
 known,
 key: volumeFloorKey(project, item.schemeId, options, cover, upper, known),
-cuts: [],
-tree: null,
-pack: null,
-fresh: true,
+cuts: ready ? ready.cuts : [],
+baseCuts: ready ? ready.baseCuts || 0 : 0,
+statics: ready ? ready.statics : null,
+base: ready ? ready.base : null,
+pack: ready ? ready.pack : null,
 move: { dx: 0, dy: 0, dz: 0 },
 at: {
 baseMm: Number(item.baseMm) || 0,
@@ -70177,7 +70175,9 @@ markImages: state.marksHighlight === true,
 objectsClear: volumeParamsRead().objectsClear !== false,
 });
 const floorPlan = (state) => volumeFloorPlan(state.project, schemeId);
-const stacking = (state, plan) => volumeParamsRead().floorsAll === true && (plan || floorPlan(state)).can;
+let fallShown = false;
+const stacking = (state, plan) =>
+(volumeParamsRead().floorsAll === true || fallShown) && (plan || floorPlan(state)).can;
 let scene = null;
 const sceneOf = (state) => {
 const plan = floorPlan(state);
@@ -71412,10 +71412,10 @@ fallSaid = false;
 return null;
 }
 const state = getState();
-const floor = scene.stackMm ? volumeFallTo(state.project, floorPlan(state), person) : null;
+const floor = volumeFallTo(state.project, floorPlan(state), person);
 if (!floor) {
 if (!fallSaid) {
-notify(scene.stackMm ? strings.volume.fallNoBelow : strings.volume.fallOneFloor, "info");
+notify(strings.volume.fallNoBelow, "info");
 fallSaid = true;
 }
 return null;
@@ -71426,12 +71426,19 @@ function fallFloorMm() {
 const floor = fallFloor();
 return floor ? floor.baseMm : 0;
 }
+function fallShow(show) {
+const want = show && volumeParamsRead().floorsAll !== true;
+if (fallShown === want) return;
+fallShown = want;
+rebuildScene();
+}
 function fallTo(floor) {
 const state = getState();
 const was = { x: person.x, y: person.y };
 const from = schemeId;
 closeAsk();
 leaveScheme();
+fallShown = false;
 schemeId = floor.schemeId;
 setState({ schemeId });
 setScene(state);
@@ -71461,6 +71468,7 @@ stuckSaid = true;
 if (!crouchStuck) stuckSaid = false;
 }
 const floor = fallFloor();
+fallShow(floor !== null);
 const floorMm = floor ? floor.baseMm : 0;
 stance = volumeStanceStep(stance, step, { crouch: want || crouchStuck, canStand: room, floorMm });
 if (floor && volumeStanceLanded(stance, floorMm)) fallTo(floor);

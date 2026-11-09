@@ -728,6 +728,56 @@ test("падение в поле: один вопрос «куда падать�
   assert.ok(!body.includes("liftMm"), "поле считает высоту падения само");
 });
 
+test("падают и при одном показанном этаже: стопка поднимается на время полёта (таск 265, G384)", () => {
+  // Смена этажа и показ стопки живут в замыкании поверхности, и тестом их не
+  // позвать. Обещания таска проверяются по исходникам — надёжнее, чем глазом.
+  const panel = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "..", "src", "panels", "volume.js"),
+    "utf8",
+  );
+  const code = stripComments(panel);
+  // **Вопрос «куда падать» больше не задаётся одной стопке.** До таска он
+  // стоял за `scene.stackMm`, и при одном показанном этаже человек шёл над
+  // дырой по воздуху.
+  const now = code.slice(code.indexOf("function fallFloorNow("));
+  const nowBody = now.slice(0, now.indexOf("\n  }\n"));
+  assert.ok(/volumeFallTo\(state\.project, floorPlan\(state\), person\)/.test(nowBody), "этажи спрашиваются не планом");
+  assert.ok(!nowBody.includes("stackMm"), "падение снова спрашивает разрешения у стопки");
+  // **Причина «падать некуда» одна.** Строки про один показанный этаж в
+  // словаре больше нет, и спрашивать о нём нечем.
+  assert.ok(nowBody.includes("strings.volume.fallNoBelow"), "про «падать некуда» перестали говорить");
+  assert.ok(!code.includes("fallOneFloor"), "поле зовёт мёртвую строку про один этаж");
+  // **Стопку поднимает одна дверь**, и она же её снимает: заведись вторая —
+  // поле пересобирало бы сцену по двум правилам.
+  assert.equal((code.match(/function fallShow\(/g) || []).length, 1, "у подъёма стопки завелась вторая дверь");
+  // Два попадания — это объявление и единственный зов (из шага стойки).
+  assert.equal((code.match(/fallShow\(/g) || []).length, 2, "`fallShow` объявлена или зовётся не однажды");
+  const show = code.slice(code.indexOf("function fallShow("));
+  const showBody = show.slice(0, show.indexOf("\n  }\n"));
+  // Отметка «Все этажи» уже показывает стопку — тогда признак не трогается, и
+  // лишней пересборки сцены на шаг в дыру не бывает.
+  assert.ok(showBody.includes("floorsAll"), "подъём стопки не спрашивает отметку «Все этажи»");
+  assert.ok(showBody.includes("rebuildScene()"), "сцену собирает не общая дверь");
+  // **Показ стопки — это признак полёта, а не отметка человека.** Отметку
+  // «Все этажи» поле не пишет вовсе: она живёт в окне параметров.
+  assert.ok(!/volumeParamsFlag\(\s*"floorsAll"/.test(code), "поле переставило отметку «Все этажи» за человека");
+  assert.ok(/floorsAll === true \|\| fallShown/.test(code), "стопка не поднимается на время полёта");
+  // **Признак объявлен до первой сборки сцены.** Ловушка живого прогона: он
+  // `let`, а `stacking` зовётся из сборки, которая стоит в поверхности выше
+  // раздела падения, — объявленный там признак ронял поверхность обращением до
+  // инициализации, и тесты этого не видели (DOM они не поднимают).
+  assert.ok(
+    code.indexOf("let fallShown") >= 0 && code.indexOf("let fallShown") < code.indexOf("scene = sceneOf(getState())"),
+    "`fallShown` объявлен после первой сборки сцены — поверхность упадёт",
+  );
+  // **Приземление снимает признак до сборки сцены нового этажа** — иначе она
+  // собралась бы стопкой и тут же пересобралась одним этажом.
+  const fall = code.slice(code.indexOf("function fallTo("));
+  const body = fall.slice(0, fall.indexOf("\n  }\n"));
+  assert.ok(body.indexOf("fallShown = false") >= 0, "приземлившийся остался со стопкой");
+  assert.ok(body.indexOf("fallShown = false") < body.indexOf("setScene"), "стопка снимается после сборки сцены");
+});
+
 test("поворот взгляда считает одно место на оба вида (таск 207, G312)", () => {
   const panel = readFileSync(
     join(dirname(fileURLToPath(import.meta.url)), "..", "src", "panels", "volume.js"),

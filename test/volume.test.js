@@ -339,6 +339,9 @@ import {
 } from "../src/screenPlace.js";
 import { elevationNote } from "../src/panels/elevation.js";
 import { plateUnseen } from "../src/panels/plate.js";
+// Список видимых меток кадра: им же сцена получает метки от поверхности, и
+// связанной с вещью метке он отдаёт копию (таск 265 сверяет ключ по значению).
+import { visibleMarks } from "../src/render.js";
 import { strings, text } from "../src/strings.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -6911,7 +6914,45 @@ test("ключ протухает сам: правка объекта, филь�
   sameStack(twice, stackOf(house.project, house.first, shut), "ничего не менялось");
 });
 
-test("двусвет слипает этажи в одно дерево — и готовыми они берутся так же", () => {
+test("метка-копия этаж не пересобирает: ключ сверяет метки по значению (таск 265)", () => {
+  // Список видимых меток приходит от `render.visibleMarks`, а та отдаёт
+  // связанной с вещью метке **копию** с точками вещи (`visibleMark`, таск
+  // 252). Сверяй ключ метки по ссылке — и на объекте, где есть хоть один
+  // связанный прибор, этаж не брался бы готовым **никогда**: кэш таска 232
+  // умирал бы молча, а дверь первого этажа снова пересобирала бы всю стопку.
+  const house = stackCacheScene();
+  const copies = (id) => {
+    const scheme = findScheme(house.project, id);
+    const marks = scheme ? visibleMarks(house.project, scheme, null) : [];
+    // Так выглядит список от `visibleMark` у связанной метки: те же значения,
+    // другой объект, и точки собраны заново.
+    return marks.map((mark) => ({ ...mark, points: mark.points.map((point) => ({ ...point })) }));
+  };
+  const shut = (id) => ({ marks: copies(id), openDoorIds: new Set(), openCurtainIds: new Set(), hiddenObjectIds: [] });
+  const first = stackOf(house.project, house.first, shut);
+  const idle = stackOf(house.project, house.first, shut, first);
+  for (let at = 0; at < 3; at += 1) {
+    assert.equal(idle.stackParts[at], first.stackParts[at], "этаж " + at + " пересобран из-за копии метки");
+  }
+  // А вот изменившаяся метка этаж пересобирает: по значению — значит по
+  // значению, и сдвинутая точка это значение меняет.
+  const away = (id) => {
+    const marks = copies(id);
+    return {
+      marks: marks.map((mark, at) => (at === 0 ? { ...mark, points: [{ ...mark.points[0], x: mark.points[0].x + 0.1 }] } : mark)),
+      openDoorIds: new Set(),
+      openCurtainIds: new Set(),
+      hiddenObjectIds: [],
+    };
+  };
+  const moved = stackOf(house.project, house.first, away, idle);
+  for (let at = 0; at < 3; at += 1) {
+    assert.notEqual(moved.stackParts[at], idle.stackParts[at], "сдвинутая метка этаж не пересобрала");
+  }
+  sameStack(moved, stackOf(house.project, house.first, away), "метка уехала");
+});
+
+test("двусвет слипает этажи в одно дерево — и дверь берёт его готовым (таск 265)", () => {
   const house = stackCacheScene();
   // Так собран двусвет (таск 209): у комнаты сверху снят пол, комнате снизу
   // задана высота в два этажа. Тела этажей от этого перекрываются по вертикали,
@@ -6920,22 +6961,51 @@ test("двусвет слипает этажи в одно дерево — и �
   const off = setRoomFloor(house.project, house.secondRoomId, false).project;
   const project = setRoomWallHeight(off, house.firstRoomId, 5800).project;
   const shut = () => ({ openDoorIds: new Set(), openCurtainIds: new Set(), hiddenObjectIds: [] });
-  const first = stackOf(project, house.first, shut);
+  const first = stackOf(project, house.second, shut);
   assert.deepEqual(first.stackParts[0].pack, [0, 1], "двусвет слепил первый этаж со вторым");
   assert.equal(first.stackParts[1].pack, null, "у слипшегося этажа своего дерева нет");
-  const was = first.stackParts.map((part) => ({ part, faces: part.sub.faces, tree: part.tree }));
-  // Смена этажа: пачка уехала целиком и одинаково — дерево уехало с ней.
-  const up = stackOf(project, house.second, shut, first);
-  for (let at = 0; at < 3; at += 1) assert.equal(up.stackParts[at], was[at].part, "этаж " + at + " собран заново");
-  assert.equal(up.stackParts[0].tree, was[0].tree, "дерево пачки то же — его переставили");
-  sameStack(up, stackOf(project, house.second, shut), "двусвет: поднялись на второй этаж");
-  // Открытая дверь своего этажа: у пачки дерево одно, и оно строится заново —
-  // зато грани чужих этажей остаются как были.
+  // Сцены ниже идут **цепочкой**: каждая собрана из предыдущей, и части у них
+  // общие — собранная заново сцена переставляет их на свою базу. Перепрыгнуть
+  // через звено нельзя: переставленная дважды стопка уже не та, с которой
+  // сверяются.
+  const was = first.stackParts.map((part) => ({ part, faces: part.sub.faces, base: part.base }));
+  assert.ok(was[0].base, "дерево пачки должно лежать у её головы");
+  // **Открытая дверь не строит дерево пачки заново** (таск 265, долг T202,
+  // ответ заказчика G383). Этаж с дверью собирается заново, но ни одной
+  // неподвижной грани дверь не меняет — а дерево построено по ним, и сверка
+  // поле в поле это видит. До таска у двусвета своя дверь строила дерево
+  // целиком: этажи продеты друг в друга, дерево на пачку одно, и 78 мс из 100
+  // на объекте заказчика уходили на него.
   const open = () => ({ openDoorIds: new Set([house.doors.second]), openCurtainIds: new Set(), hiddenObjectIds: [] });
-  const after = stackOf(project, house.second, open, up);
+  const after = stackOf(project, house.second, open, first);
   assert.equal(after.stackParts[0].sub.faces, was[0].faces, "грани первого этажа пересобраны напрасно");
-  assert.notEqual(after.stackParts[0].tree, was[0].tree, "дерево пачки обязано собраться заново");
+  assert.notEqual(after.stackParts[1].sub.faces, was[1].faces, "этаж с дверью обязан собраться заново");
+  assert.equal(after.stackParts[0].base, was[0].base, "дерево пачки построено заново из-за двери");
   sameStack(after, stackOf(project, house.second, open), "двусвет: открыли дверь");
+  // Закрыли — то же самое, и дерево всё то же.
+  const shutAgain = stackOf(project, house.second, shut, after);
+  assert.equal(shutAgain.stackParts[0].base, was[0].base, "дерево пачки построено заново из-за закрытой двери");
+  sameStack(shutAgain, stackOf(project, house.second, shut), "двусвет: закрыли дверь");
+  // **Дверь головного этажа пачки** — тот же ответ, хотя память лежит именно у
+  // него: собранный заново этаж забирает её у прежнего себя (`floorPart`),
+  // иначе дерево терялось бы ровно у того этажа, которому оно принадлежит.
+  const first1 = () => ({ openDoorIds: new Set([house.doors.first]), openCurtainIds: new Set(), hiddenObjectIds: [] });
+  const head = stackOf(project, house.second, first1, shutAgain);
+  assert.notEqual(head.stackParts[0].sub.faces, was[0].faces, "головной этаж обязан собраться заново");
+  assert.equal(head.stackParts[0].base, was[0].base, "дерево пачки потеряно вместе с головным этажом");
+  sameStack(head, stackOf(project, house.second, first1), "двусвет: открыли дверь головного этажа");
+  // **Первая смена этажа после открытой двери строит дерево заново** — и это
+  // честный отказ, а не недоделка (долг таска 265). Дерево, взятое готовым,
+  // стоит на **прежних** гранях того этажа, который собрали заново: они
+  // одинаковы поле в поле, кадру этого хватает, а вот переезду — нет, потому
+  // что переезд двигает точки граней сцены, а прежние лежат уже не в ней.
+  // Сверка это видит и строит дерево заново: кадр остаётся верным, цена —
+  // одна пересборка на переход. Следующая смена этажа опять дешёвая.
+  const moved = stackOf(project, house.third, shut, head);
+  sameStack(moved, stackOf(project, house.third, shut), "двусвет: смена этажа после двери");
+  const again = stackOf(project, house.second, shut, moved);
+  assert.equal(again.stackParts[0].base, moved.stackParts[0].base, "вторая смена этажа подряд строит дерево заново");
+  sameStack(again, stackOf(project, house.second, shut), "двусвет: вторая смена этажа подряд");
 });
 
 test("двусвет — одно помещение для света: дыра этажом выше получает ключ комнаты под ней (правка 2026-10-27)", () => {
@@ -7288,9 +7358,10 @@ test("снятый пол — дыра в перекрытии, и край её
 });
 
 test("над дырой окно говорит словом — там, где падать некуда (таск 209, таск 229)", () => {
-  // С таска 229 из дыры падают (G342). Слово осталось для тех мест, откуда
-  // падать некуда: одна схема без стопки, двусвет на нижнем этаже. Молчать о
-  // них нельзя — иначе это читается хождением по воздуху, а не снятым полом.
+  // С таска 229 из дыры падают (G342), с таска 265 — и при одном показанном
+  // этаже (G384). Слово осталось для тех мест, откуда падать **правда** некуда:
+  // двусвет на нижнем этаже, под ним земля. Молчать о них нельзя — иначе это
+  // читается хождением по воздуху, а не снятым полом.
   const scene = roomScene();
   const off = setRoomFloor(scene.project, scene.roomId, false).project;
   const holed = volumeScene(off, scene.schemeId);
@@ -7298,9 +7369,10 @@ test("над дырой окно говорит словом — там, где 
   assert.ok(where.includes(strings.volume.noFloor), "сказано вслух: " + where);
   const solid = volumeWhere(scene.project, volumeScene(scene.project, scene.schemeId), { x: 0, y: 0 });
   assert.ok(!solid.includes(strings.volume.noFloor), "с полом про дыру не говорится: " + solid);
-  // И причину окно называет вслух: обе строки есть в словаре, и обе про то,
-  // что человек может исправить.
-  assert.ok(strings.volume.fallOneFloor.length > 0 && strings.volume.fallNoBelow.length > 0);
+  // И причина называется вслух — одна, а не две: «показан один этаж» причиной
+  // быть перестало (таск 265), и строки об этом в словаре больше нет.
+  assert.ok(strings.volume.fallNoBelow.length > 0);
+  assert.equal(strings.volume.fallOneFloor, undefined, "мёртвая строка про один этаж осталась в словаре");
 });
 
 // ——— потолок под дырой двусвета (таск 229, требование G343) ——————————————
