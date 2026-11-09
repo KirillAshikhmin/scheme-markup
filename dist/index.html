@@ -20081,6 +20081,7 @@ view: typeObjectView(type),
 turnDeg: place.turnDeg,
 placeFrom: place.from,
 objectName: place.object ? schemeObjectNameOf(project, place.object) : "",
+objectId: place.object ? place.object.id : null,
 groupId: mark.groupId || null,
 groupLabel: mark.groupId ? blockLabelOf(project, mark.groupId) : "",
 });
@@ -29692,6 +29693,7 @@ const rows = elevationRows(points).map((row) => ({
 boxes: row.members.map((mark) =>
 elevationMarkBox(mark, scale, unit, options.views === true, options.grow === true),
 ),
+names: row.axis === "column" || row.members.length === 1,
 }));
 const grown = rows.reduce(
 (sum, row) => sum + row.boxes.filter((box) => box.view && box.grown > ELEVATION_GROWN_QUIET).length,
@@ -29737,6 +29739,15 @@ if (cross.name) {
 elevationText(ctx, cross.name, x + width / 2, floor - wallHeight + 13 * unit, "center", unit);
 }
 }
+const namedObjects = new Set();
+const namesObject = (mark) => {
+if (mark.objectId) namedObjects.add(mark.objectId);
+};
+lines.forEach(namesObject);
+unknown.forEach(namesObject);
+for (const row of rows) {
+if (row.names) row.members.forEach(namesObject);
+}
 for (const object of elevation.objects) {
 const top = object.topMm === null ? elevation.heightShownMm : object.topMm;
 const y = atY(top);
@@ -29747,7 +29758,9 @@ ctx.lineWidth = 1.2 * unit;
 ctx.strokeStyle = DRAWING_OBJECT;
 ctx.strokeRect(atX(object.fromMm), y, Math.max(thin, (object.toMm - object.fromMm) * scale), height);
 if ((object.toMm - object.fromMm) * scale < ELEVATION_LABEL_MIN_PX * unit) continue;
+if (!namedObjects.has(object.id)) {
 elevationText(ctx, object.name, (atX(object.fromMm) + atX(object.toMm)) / 2, y - 8 * unit, "center", unit);
+}
 if (object.topMm !== null) {
 elevationText(ctx, String(object.topMm), atX(object.toMm) + 2 * unit, y + 9 * unit, "left", unit);
 }
@@ -29843,7 +29856,7 @@ top = Math.min(top, y - box.height / 2);
 elevationText(
 ctx,
 elevationLabelFit(
-{ label: row.label, name: row.members.length === 1 ? row.members[0].objectName : "", heightMm: row.heightMm },
+{ label: row.label, name: row.names ? row.members[0].objectName : "", heightMm: row.heightMm },
 room,
 labelWidth,
 ),
