@@ -547,7 +547,11 @@ function mountViewStart(host, api) {
       await openStore();
       noteStore();
       previewSeen = (await getSetting(VIEW_PREVIEW_SETTING)) === true;
-      const list = await listProjects();
+      // `listProjects` отдаёт `null`, когда чтение не состоялось (таск 268).
+      // Здесь список нужен ровно для одного — вспомнить последний просмотр;
+      // не вспомнили, значит показываем начальный экран, как при пустой базе.
+      // Своих слов о пустоте у этой страницы нет, и врать тут нечем.
+      const list = (await listProjects()) || [];
       const lastId = await getSetting(LAST_PROJECT_KEY);
       const target = list.find((item) => item.id === lastId) || list[0] || null;
       const stored = target ? await loadProject(target.id) : null;

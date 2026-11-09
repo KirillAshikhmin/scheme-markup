@@ -230,9 +230,21 @@ async function runTransaction(name, mode, action) {
 
 // ——— объекты ——————————————————————————————————————————————————————————
 
+/**
+ * Сводки объектов, новые сверху. **Чтение, которое не состоялось, отдаёт
+ * `null`, а не пустой список** (дефект D75, живой прогон таска 268): «базу
+ * прочитали, и она пуста» и «прочитать не вышло» — разные ответы, и путать их
+ * нельзя. Отказ, выданный за пустоту, доходит до человека словами «Объектов
+ * пока нет» и окном первого запуска поверх целой работы.
+ *
+ * Тем же правилом живёт `allProjectDocs` ниже: по неполному списку нельзя ни
+ * показывать, ни удалять. В памяти (`storeMode() === "memory"`) базы нет
+ * вовсе, и пустота там — честный ответ, а не отказ.
+ */
 export async function listProjects() {
   const summaries = new Map();
   const read = await runTransaction(STORE_NAMES.projects, "readonly", (store) => idbRequest(store.getAll()));
+  if (!read.ok && storeModeValue === "idb") return null;
   if (read.ok) {
     for (const doc of read.result || []) summaries.set(doc.id, summaryOf(doc));
   }

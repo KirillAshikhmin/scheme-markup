@@ -7979,6 +7979,8 @@ welcomeText:
 welcomeFile: "Объект с другой машины или от напарника приходит файлом проекта — откройте его.",
 empty: "Объектов пока нет",
 reading: "Читаем список объектов…",
+unread: "Список объектов не прочитан",
+none: "Объект не открыт",
 },
 projectProps: {
 title: "Свойства объекта",
@@ -8643,6 +8645,7 @@ homeTouchHint:
 storage: {
 memory: "Браузер не дал открыть хранилище — работаем в памяти. Выгрузите объект в файл, иначе работа пропадёт при закрытии вкладки.",
 writeFailed: "Браузер не дал записать данные — работа осталась в памяти. Выгрузите объект в файл.",
+listFailed: "Браузер не дал прочитать список объектов — это не значит, что они пропали. Откройте страницу заново.",
 lowSpace: "В браузере осталось меньше {free} свободного места — выгрузите объект в файл.",
 },
 marks: {
@@ -22124,6 +22127,7 @@ return { ok: false, error };
 async function listProjects() {
 const summaries = new Map();
 const read = await runTransaction(STORE_NAMES.projects, "readonly", (store) => idbRequest(store.getAll()));
+if (!read.ok && storeModeValue === "idb") return null;
 if (read.ok) {
 for (const doc of read.result || []) summaries.set(doc.id, summaryOf(doc));
 }
@@ -61865,7 +61869,7 @@ function render() {
 const state = getState();
 addRow.hidden = !appAllows("editRooms", state);
 if (!state.project) {
-list.replaceChildren(uiEl("p", { class: "panel__empty", text: strings.projects.empty }));
+list.replaceChildren(uiEl("p", { class: "panel__empty", text: strings.projects.none }));
 setSectionBadge(SECTION_IDS.rooms, "");
 input.disabled = true;
 addButton.disabled = true;
@@ -64922,16 +64926,37 @@ let index = 2;
 while (taken.has(base + " " + index)) index += 1;
 return base + " " + index;
 }
-function projectListItems({ known, id, name } = {}) {
+function projectListItems({ known, failed, id, name } = {}) {
 const list = Array.isArray(known) ? known : [];
-const empty = known === null || known === undefined ? strings.projects.reading : strings.projects.empty;
+const unread = known === null || known === undefined;
+const empty = unread
+? failed
+? strings.projects.unread
+: strings.projects.reading
+: strings.projects.empty;
 if (!id) return { items: list, empty };
 if (list.some((item) => item.id === id)) return { items: list, empty };
 return { items: [{ id, name: name || strings.project.untitled }, ...list], empty };
 }
+function projectListAfterSave(known, project) {
+if (!Array.isArray(known) || !project) return known;
+const summary = {
+id: project.id,
+name: project.name,
+updatedAt: project.updatedAt,
+schemes: project.schemes.length,
+marks: project.marks.length,
+};
+if (known.some((item) => item.id === project.id)) {
+return known.map((item) => (item.id === project.id ? { ...item, ...summary } : item));
+}
+return [summary, ...known];
+}
 function mountProjectsPanel(host, api) {
 const { getState, setState, notify, subscribe } = api;
 let known = null;
+let listFailed = false;
+let listFailReported = false;
 let saveTimer = null;
 let lowSpaceReported = false;
 const select = uiEl("select", {
@@ -64967,6 +64992,7 @@ const id = currentId();
 const state = getState();
 const { items, empty } = projectListItems({
 known,
+failed: listFailed,
 id,
 name: state.project ? state.project.name : "",
 });
@@ -64988,8 +65014,15 @@ propsButton.hidden = !editable;
 removeButton.hidden = !editable;
 }
 async function refreshList() {
-known = await listProjects();
+const list = await listProjects();
+listFailed = !list;
+if (list) known = list;
 renderList();
+if (listFailed && !listFailReported) {
+listFailReported = true;
+notify(strings.storage.listFailed, "error");
+}
+return list;
 }
 let lastProjectId = null;
 function refreshIfUnknown(project) {
@@ -65057,6 +65090,7 @@ for (const scheme of project.schemes) {
 if (scheme.imageId) await deleteImage(scheme.imageId);
 }
 await deleteProject(project.id);
+if (Array.isArray(known)) known = known.filter((item) => item.id !== project.id);
 setState({ project: null, schemeId: null, selectedMarkIds: [], activeTypeId: null });
 notify(text("projects.removed", { name: project.name }), "success");
 await refreshList();
@@ -65103,11 +65137,7 @@ saveTimer = setTimeout(async () => {
 saveTimer = null;
 const result = await saveProject(project);
 if (result.ok) {
-known = (known || []).map((item) =>
-item.id === project.id
-? { ...item, name: project.name, updatedAt: project.updatedAt, schemes: project.schemes.length, marks: project.marks.length }
-: item,
-);
+known = projectListAfterSave(known, project);
 renderList();
 await checkSpace();
 }
@@ -65138,7 +65168,7 @@ await refreshList();
 const lastId = await getSetting(LAST_PROJECT_KEY);
 const target = (known || []).find((item) => item.id === lastId) || (known || [])[0] || null;
 if (target) await openProjectById(target.id);
-else showWelcome();
+else if (known) showWelcome();
 await checkSpace();
 if (storeMode() === "memory") renderList();
 })();
@@ -76564,7 +76594,8 @@ if (!project || project.schemes.length === 0) {
 hint.textContent = editable
 ? project
 ? strings.schemes.addHint
-: strings.projects.empty
+:
+strings.projects.none
 : hints
 ? strings.mobile.viewOnly
 : "";
@@ -78436,7 +78467,7 @@ try {
 await openStore();
 noteStore();
 previewSeen = (await getSetting(VIEW_PREVIEW_SETTING)) === true;
-const list = await listProjects();
+const list = (await listProjects()) || [];
 const lastId = await getSetting(LAST_PROJECT_KEY);
 const target = list.find((item) => item.id === lastId) || list[0] || null;
 const stored = target ? await loadProject(target.id) : null;

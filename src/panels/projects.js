@@ -99,18 +99,57 @@ function uniqueProjectName(list) {
  * Что стоит в списке шапки — чистое правило, вынесенное ради теста (дефект
  * D75). DOM и база сюда не ходят.
  *
- * `known === null` — список ещё не прочитан, `[]` — объектов правда нет.
- * Пустота говорит о себе разными словами: непрочитанная — «читаем», ответ
- * базы — «объектов пока нет». Открытый объект стоит в списке всегда, даже
- * если список его ещё не знает: строка, отрицающая открытый объект, читается
- * как «моя работа пропала».
+ * Пустота у списка **троякая**, и все три говорят разными словами:
+ *
+ *   * `known === null` — список ещё не прочитан: «Читаем список объектов…»;
+ *   * `known === null` и `failed` — прочитать не вышло (отказ базы, живой
+ *     прогон таска 268): «Список объектов не прочитан». Молчаливое «читаем»
+ *     здесь тоже неправда: никто не читает;
+ *   * `[]` — база ответила, и объектов правда нет: «Объектов пока нет».
+ *
+ * Открытый объект стоит в списке всегда, даже если список его ещё не знает:
+ * строка, отрицающая открытый объект, читается как «моя работа пропала».
  */
-export function projectListItems({ known, id, name } = {}) {
+export function projectListItems({ known, failed, id, name } = {}) {
   const list = Array.isArray(known) ? known : [];
-  const empty = known === null || known === undefined ? strings.projects.reading : strings.projects.empty;
+  const unread = known === null || known === undefined;
+  const empty = unread
+    ? failed
+      ? strings.projects.unread
+      : strings.projects.reading
+    : strings.projects.empty;
   if (!id) return { items: list, empty };
   if (list.some((item) => item.id === id)) return { items: list, empty };
   return { items: [{ id, name: name || strings.project.untitled }, ...list], empty };
+}
+
+/**
+ * Список после того, как объект записан **нами самими**: знакомая строка
+ * обновляется на месте, незнакомый объект встаёт первым (список идёт новыми
+ * сверху, а только что записанный — самый новый).
+ *
+ * Зачем (живой прогон таска 268): под медленной базой перечитка идёт
+ * секунды, и всё это время принесённый файлом объект держался в шапке только
+ * тем, что открыт. Стоило переключиться на соседний — и он пропадал из
+ * списка до конца перечитки, то есть ровно симптом D75. А мы про него знаем
+ * больше базы: мы его туда и записали.
+ *
+ * Непрочитанный список остаётся непрочитанным: превратить `null` в список из
+ * одного объекта — значит сказать «в базе он один», чего мы не знаем.
+ */
+export function projectListAfterSave(known, project) {
+  if (!Array.isArray(known) || !project) return known;
+  const summary = {
+    id: project.id,
+    name: project.name,
+    updatedAt: project.updatedAt,
+    schemes: project.schemes.length,
+    marks: project.marks.length,
+  };
+  if (known.some((item) => item.id === project.id)) {
+    return known.map((item) => (item.id === project.id ? { ...item, ...summary } : item));
+  }
+  return [summary, ...known];
 }
 
 function mountProjectsPanel(host, api) {
@@ -122,6 +161,11 @@ function mountProjectsPanel(host, api) {
   // вовсе — `panels/file.js` кладёт его в состояние, а перечитывать список
   // панели не говорит, и перерисовка шла по устаревшему `known`.
   let known = null;
+  // Чтение списка не состоялось (живой прогон таска 268). Отдельный признак,
+  // а не ещё одно значение `known`: прежний список при отказе остаётся
+  // прежним, а непрочитанный — непрочитанным.
+  let listFailed = false;
+  let listFailReported = false;
   let saveTimer = null;
   let lowSpaceReported = false;
 
@@ -170,7 +214,8 @@ function mountProjectsPanel(host, api) {
    *
    * 1. Пока список не прочитан (`known === null`), на месте пустоты стоит
    *    «читаем», а не «объектов пока нет». Прочитанная пустота — ответ базы,
-   *    непрочитанная — ещё ничей.
+   *    непрочитанная — ещё ничей, а отказ чтения (`listFailed`, таск 268) —
+   *    третий ответ со своими словами.
    * 2. Открытый объект стоит в списке **всегда**, даже если список его ещё не
    *    знает: он открыт, он на экране, и строка, которая его отрицает, — это
    *    и есть «моя работа пропала». Так приходит объект из файла: `file.js`
@@ -181,6 +226,7 @@ function mountProjectsPanel(host, api) {
     const state = getState();
     const { items, empty } = projectListItems({
       known,
+      failed: listFailed,
       id,
       name: state.project ? state.project.name : "",
     });
@@ -206,9 +252,27 @@ function mountProjectsPanel(host, api) {
     removeButton.hidden = !editable;
   }
 
+  /**
+   * Перечитать список. **Чтение, которое не состоялось, список не трогает**
+   * (живой прогон таска 268): `listProjects` отдаёт `null`, и прежний список
+   * остаётся прежним, а непрочитанный — непрочитанным. До этой правки отказ
+   * базы ложился в `known` пустым массивом, то есть выходил человеку словами
+   * «Объектов пока нет» и окном первого запуска поверх целой работы — тот
+   * самый обман, ради которого затевался таск 223.
+   *
+   * Об отказе говорят вслух, но один раз за сеанс: перечитка идёт по многим
+   * поводам, и молчать о ней нельзя, а повторять на каждый повод — тоже.
+   */
   async function refreshList() {
-    known = await listProjects();
+    const list = await listProjects();
+    listFailed = !list;
+    if (list) known = list;
     renderList();
+    if (listFailed && !listFailReported) {
+      listFailReported = true;
+      notify(strings.storage.listFailed, "error");
+    }
+    return list;
   }
 
   /**
@@ -330,6 +394,9 @@ function mountProjectsPanel(host, api) {
       if (scheme.imageId) await deleteImage(scheme.imageId);
     }
     await deleteProject(project.id);
+    // Удалённый уходит из списка сразу: про него мы знаем больше базы, и
+    // перечитка, которая не состоится, не должна вернуть его в шапку (268).
+    if (Array.isArray(known)) known = known.filter((item) => item.id !== project.id);
     setState({ project: null, schemeId: null, selectedMarkIds: [], activeTypeId: null });
     notify(text("projects.removed", { name: project.name }), "success");
     await refreshList();
@@ -390,11 +457,9 @@ function mountProjectsPanel(host, api) {
       saveTimer = null;
       const result = await saveProject(project);
       if (result.ok) {
-        known = (known || []).map((item) =>
-          item.id === project.id
-            ? { ...item, name: project.name, updatedAt: project.updatedAt, schemes: project.schemes.length, marks: project.marks.length }
-            : item,
-        );
+        // Записанный объект из списка не пропадает: правило целиком в
+        // `projectListAfterSave` (таск 268).
+        known = projectListAfterSave(known, project);
         renderList();
         await checkSpace();
       }
@@ -433,8 +498,11 @@ function mountProjectsPanel(host, api) {
     await refreshList();
     const lastId = await getSetting(LAST_PROJECT_KEY);
     const target = (known || []).find((item) => item.id === lastId) || (known || [])[0] || null;
+    // Окно первого запуска поднимается **только по прочитанному списку**
+    // (таск 268). «Начнём с объекта» поверх целой работы — это не приглашение,
+    // а сообщение о пропаже: база, которая не ответила, о пустоте не говорит.
     if (target) await openProjectById(target.id);
-    else showWelcome();
+    else if (known) showWelcome();
     await checkSpace();
     if (storeMode() === "memory") renderList();
   })();
