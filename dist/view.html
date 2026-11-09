@@ -70139,6 +70139,7 @@ markImages: state.marksHighlight === true,
 objectsClear: volumeParamsRead().objectsClear !== false,
 });
 const floorPlan = (state) => volumeFloorPlan(state.project, schemeId);
+let fallShown = false;
 const stacking = (state, plan) =>
 (volumeParamsRead().floorsAll === true || fallShown) && (plan || floorPlan(state)).can;
 let scene = null;
@@ -70216,7 +70217,6 @@ let stuckSaid = false;
 let fallAt = null;
 let fallSnap = null;
 let fallSaid = false;
-let fallShown = false;
 const visited = new Map();
 let around = null;
 aroundSet(
