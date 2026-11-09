@@ -17,6 +17,7 @@ import {
   LINE_STYLES,
   OPENING_GLASS_FRAME_MM,
   SHAPE_NAMES,
+  axisOnFloor,
   blockLabel,
   blockLabelParts,
   blockMembers,
@@ -7010,6 +7011,27 @@ export function drawElevation(ctx, elevation, box, options = {}) {
   // Чем тонкой полоске не стать: узкий проём или плинтус обязан остаться
   // видимым, и на бумаге эта мера тоже измеряется единицами, а не точками.
   const thin = 2 * unit;
+  /**
+   * **Середина силуэта над полом, в точках холста** (таск 269, дефект D34).
+   *
+   * Записанная высота — это середина вещи, и только у нулевой высоты на полу
+   * стоит её **низ**: правило одно на всю сборку (`axisOnFloor` у посадки в
+   * `model.js`), и здесь оно спрашивается, а не повторяется — до таска 269 лист
+   * центрировал силуэт на записанном числе всегда, и вертикальная лента 6000 мм
+   * висела на три метра под полом, а датчик протечки — на половину себя.
+   *
+   * Низ кладётся по **нарисованной** высоте силуэта, а не по записанной, и это
+   * то же, что делает объём: там сторона тела подтянута до
+   * `VOLUME_MARK_MIN_MM`, здесь — до `ELEVATION_VIEW_MIN_PX` (отметка «мелкое
+   * крупнее»), и в обоих случаях на полу стоит низ **того, что видно**. Иначе
+   * подтянутый датчик снова ушёл бы под пол — ровно от той подтяжки, которая
+   * нужна, чтобы его разглядеть.
+   *
+   * Силуэта у знака нет, и мера у него своя (квадрат `elevationMarkBox`), но
+   * правило то же: знак метки, стоящей на полу, тоже не половинится линией
+   * пола. Отдельной ветки на это нет нарочно — ветка и была бы вторым ответом.
+   */
+  const centrePx = (mark, box) => (axisOnFloor(mark.heightMm) ? box.height / 2 : mark.heightMm * scale);
 
   // Метки разбираются **до рисования**, а не по дороге: подпись над чертежом
   // говорит, сколько вещей пришлось подтянуть до читаемого размера (дефект
@@ -7193,7 +7215,7 @@ export function drawElevation(ctx, elevation, box, options = {}) {
     // разных высот столбик и собирают.
     if (row.axis === "column") {
       const places = elevationPack(
-        row.members.map((mark) => mark.heightMm * scale),
+        row.members.map((mark, index) => centrePx(mark, boxes[index])),
         boxes.map((box) => box.height),
       );
       row.members.forEach((mark, index) => {
@@ -7215,7 +7237,7 @@ export function drawElevation(ctx, elevation, box, options = {}) {
     let top = Infinity;
     row.members.forEach((mark, index) => {
       const box = boxes[index];
-      const y = atY(mark.heightMm);
+      const y = floor - centrePx(mark, box);
       drawRowMark(mark, box, left + places[index], y);
       top = Math.min(top, y - box.height / 2);
     });

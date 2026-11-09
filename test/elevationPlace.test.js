@@ -32,8 +32,9 @@ import {
   updateMark,
   wallElevation,
 } from "../src/model.js";
-import { drawElevation, elevationPack, elevationRows } from "../src/render.js";
+import { drawElevation, elevationMarkBox, elevationPack, elevationRows } from "../src/render.js";
 import { elevationNote } from "../src/panels/elevation.js";
+import { volumeScene } from "../src/volume.js";
 
 // ——— чистая раскладка по оси ——————————————————————————————————————————
 
@@ -269,4 +270,127 @@ test("G203: своя высота старше группы — на этом д
   assert.ok(Math.abs(signs[0].x - signs[1].x) < 1e-6, "столбик разъехался по горизонтали");
   assert.ok(Math.abs(signs[0].mm - 300) < 0.5, "нижний знак не на своей высоте: " + signs[0].mm);
   assert.ok(Math.abs(signs[1].mm - 1100) < 0.5, "верхний знак не на своей высоте: " + signs[1].mm);
+});
+
+// ——— D34 на листе: ноль — это низ (таск 269) ———————————————————————————
+//
+// Высота над полом — середина вещи, но у вещи с высотой **нуль** на нуле стоит
+// её низ: объём это знал с дефекта D34, а лист центрировал силуэт на записанном
+// числе всегда — и вертикальная лента 6000 мм висела на три метра под полом, а
+// датчик протечки — на половину себя.
+//
+// Правило живёт у посадки в `model.js` (`axisOnFloor`), и спрашивают его оба.
+// Здесь проверяется то, ради чего его зовёт лист: где знак, где силуэт и
+// сходится ли лист с объёмом в миллиметрах.
+
+// Вещь ростом 600 мм, стоящая на полу: вертикальная лента заказчика в
+// уменьшенном виде (у него это 2800…6000 мм при нулевой высоте).
+function standing(heightAboveFloor) {
+  const built = frame([2000], [heightAboveFloor]);
+  const project = setMarkDimensions(built.project, built.ids[0], { length: 40, width: 600 }).project;
+  return { ...built, project };
+}
+
+// Высота знака над полом в миллиметрах: знаки рисуются кружком радиуса
+// `SIGN_RADIUS`, и место видно числом, а не рисунком.
+function signHeightsMm(log, drawn) {
+  const floor = drawn.y + drawn.height;
+  return log
+    .filter((line) => line.startsWith("arc:"))
+    .map((line) => line.slice(4).split(","))
+    .filter((parts) => Math.abs(Number(parts[2]) - SIGN_RADIUS) < 1e-9)
+    .map((parts) => (floor - Number(parts[1])) / drawn.scale);
+}
+
+test("D34 на листе: знак метки с нулевой высотой стоит на полу, а не половиной под ним", () => {
+  const built = standing(0);
+  assert.equal(markSizes(built.project, findMark(built.project, built.ids[0])).heightAboveFloor, 0);
+  const elevation = wallElevation(built.project, built.wallId, "left");
+  assert.equal(elevation.marks[0].heightMm, 0, "ноль не доехал до листа");
+  // Вверх у вещи на стене идёт `width` — и правило картинки записанных чисел не
+  // трогает (G68).
+  assert.equal(elevation.marks[0].sizeMm.height, 600, "вверх на листе пошло не то поле");
+
+  const { ctx, log } = recorder();
+  const drawn = drawElevation(ctx, elevation, { x: 0, y: 0, width: 1000, height: 600 }, { unit: 1 });
+  const signs = signHeightsMm(log, drawn);
+  assert.equal(signs.length, 1, "нарисован не один знак: " + signs.length);
+  // Низ знака — на линии пола: середина поднята на половину его меры (у знака
+  // она своя, квадрат `elevationMarkBox`), и в пол не ушла ни одна его точка.
+  assert.ok(signs[0] > 0, "знак остался серединой на нуле: " + signs[0]);
+  assert.ok(Math.abs(signs[0] * drawn.scale - SIGN_RADIUS) < 1e-6, "знак встал не низом на полу: " + signs[0]);
+});
+
+test("D34 на листе: пятьдесят миллиметров человек написал сам — середина остаётся на пятидесяти", () => {
+  const built = standing(50);
+  const elevation = wallElevation(built.project, built.wallId, "left");
+  const { ctx, log } = recorder();
+  const drawn = drawElevation(ctx, elevation, { x: 0, y: 0, width: 1000, height: 600 }, { unit: 1 });
+  const signs = signHeightsMm(log, drawn);
+  assert.equal(signs.length, 1);
+  // Правило, сработай оно здесь, поставило бы знак в другое место — иначе
+  // проверка ниже не различала бы ничего.
+  const onFloorMm = SIGN_RADIUS / drawn.scale;
+  assert.ok(Math.abs(onFloorMm - 50) > 1, "масштаб подобран так, что проверять нечего: " + onFloorMm);
+  // Ровно пятьдесят: правило узкое — двигается только нуль.
+  assert.ok(Math.abs(signs[0] - 50) < 0.5, "число человека перетолковали: " + signs[0]);
+});
+
+// Силуэт, нарисованный изображением вещи: его середина снимается с записи
+// холста (изображение розетки симметрично по вертикали), а мера — у той же
+// `elevationMarkBox`, которой его рисует лист. Правило здесь не повторяется:
+// место берётся с картинки, размер — у двери листа.
+function silhouetteMm(project, wallId, markId) {
+  const elevation = wallElevation(project, wallId, "left");
+  const mark = elevation.marks.find((item) => item.id === markId);
+  const { ctx, log } = recorder();
+  const drawn = drawElevation(ctx, elevation, { x: 0, y: 0, width: 1000, height: 600 }, { unit: 1, views: true });
+  const floor = drawn.y + drawn.height;
+  // Изображение рисуется внутри своей пары `save`/`restore` — единственной
+  // вложенной в развёртке без проёмов и поворотов.
+  const opened = log.indexOf("save:", log.indexOf("save:") + 1);
+  assert.ok(opened > 0, "изображение вещи не нарисовано");
+  const closed = log.indexOf("restore:", opened);
+  const ys = [];
+  for (const line of log.slice(opened, closed)) {
+    if (!line.startsWith("moveTo:") && !line.startsWith("lineTo:")) continue;
+    ys.push(Number(line.split(":")[1].split(",")[1]));
+  }
+  assert.ok(ys.length > 0, "у изображения не нашлось ни одной точки");
+  const centreMm = (floor - (Math.min(...ys) + Math.max(...ys)) / 2) / drawn.scale;
+  const halfMm = elevationMarkBox(mark, drawn.scale, 1, true).height / 2 / drawn.scale;
+  return { centreMm, bottomMm: centreMm - halfMm, topMm: centreMm + halfMm };
+}
+
+// Тело вещи в объёме: низ, верх и середина — те же три числа.
+function bodyMm(project, schemeId, markId) {
+  const place = volumeScene(project, schemeId, {}).marks.find((item) => item.markId === markId);
+  const prism = place.prisms[0];
+  return { centreMm: place.heightMm, bottomMm: prism.bottomMm, topMm: prism.topMm };
+}
+
+test("D34: лист и объём говорят об одной метке одно — и у нуля, и у высоты", () => {
+  for (const heightAboveFloor of [0, 1100]) {
+    const built = standing(heightAboveFloor);
+    const sheet = silhouetteMm(built.project, built.wallId, built.ids[0]);
+    const body = bodyMm(built.project, built.schemeId, built.ids[0]);
+    for (const key of ["bottomMm", "topMm", "centreMm"]) {
+      assert.ok(
+        Math.abs(sheet[key] - body[key]) < 1,
+        "при высоте " +
+          heightAboveFloor +
+          " лист и объём разошлись в " +
+          key +
+          ": " +
+          Math.round(sheet[key]) +
+          " против " +
+          body[key],
+      );
+    }
+    // И числа те самые: у нуля вещь занимает от нуля до своего роста, у
+    // заданной высоты — половину роста в обе стороны от неё.
+    const expected = heightAboveFloor === 0 ? { bottomMm: 0, topMm: 600 } : { bottomMm: 800, topMm: 1400 };
+    assert.equal(body.bottomMm, expected.bottomMm, "объём поставил тело не туда");
+    assert.equal(body.topMm, expected.topMm);
+  }
 });
