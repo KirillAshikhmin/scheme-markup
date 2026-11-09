@@ -831,6 +831,68 @@ for (const [name, make, lit, camera] of [
   });
 }
 
+// ——— свет метки со многими телами (таск 263, требование G382) ——————————————
+//
+// Слова заказчика о потолочной метке со многими точками: «Люстры и т.д. не
+// объединяются в блоки. и двигать так не надо ничего. где нарисовали, там и
+// отображается». Тел у такой метки столько, сколько точек, и светит **каждое со
+// своего места**: до таска свет брал первое тело, а оно у четырёх спотов лежит в
+// углу их габарита. Задача та же, что у ленты (таск 248), и приём тот же —
+// сила метки делится между телами, а не умножается на их число.
+
+/** Четыре спота одной меткой в гостиной: один тип, одна метка, четыре точки. */
+function spotsStand() {
+  const box = lampStand();
+  let project = box.project;
+  const fr = (point) => planMmToFraction(project, box.schemeId, point);
+  const spot = project.markTypes.find((item) => item.code === "Т");
+  const at = [
+    { x: -3000, y: -700 },
+    { x: -1000, y: -700 },
+    { x: -3000, y: 700 },
+    { x: -1000, y: 700 },
+  ];
+  const made = addMark(project, {
+    schemeId: box.schemeId,
+    typeId: spot.id,
+    kind: "point",
+    blockMode: "single",
+    points: at.map(fr),
+  });
+  project = applyMarkWalls(made.project, box.schemeId).project;
+  return { ...box, project, atMm: at, marks: { ...box.marks, spots: made.marks[0].id } };
+}
+
+test("четыре спота одной меткой: по телу на точку, и светит каждое со своего места", () => {
+  const box = spotsStand();
+  const scene = sceneOf(box);
+  const places = scene.marks.filter((place) => place.markId === box.marks.spots);
+  assert.equal(places.length, 4, "метка в четыре точки дала не четыре тела");
+  // Тело стоит на своей нарисованной точке — ни межцентрового, ни середины.
+  for (let index = 0; index < places.length; index += 1) {
+    const at = places[index].frame.at;
+    const want = box.atMm[index];
+    assert.ok(Math.hypot(at.x - want.x, at.y - want.y) < 1e-6, "тело " + index + " уехало с нарисованной точки");
+    assert.equal(places[index].mode, "ceiling", "тело спота перестало быть потолочным");
+  }
+  const light = volumeLiveLight(scene, liveOf(box, { spots: 1 }), { physical: true });
+  // Сила метки цела: доли тел складываются в неё, а не умножаются на их число.
+  const whole = volumeLampPower(places[0]);
+  const living = light.rooms.get(box.rooms.living);
+  assert.ok(Math.abs(powerOf(living, LIVING_MM2) - whole) < 1e-9, "сила метки разошлась с силой одного тела");
+  // Пятна легли вокруг **каждой** точки: источников четыре, и каждый на своём.
+  const sources = new Set();
+  for (const list of light.decals.values()) {
+    for (const ring of list) {
+      if (ring.markId !== box.marks.spots) continue;
+      sources.add(Math.round(ring.src.at.x) + " " + Math.round(ring.src.at.y));
+    }
+  }
+  assert.equal(sources.size, 4, "кольца пришли не от четырёх источников: " + [...sources].join(" | "));
+  for (const want of box.atMm) assert.ok(sources.has(Math.round(want.x) + " " + Math.round(want.y)), "нет пятна у точки " + want.x);
+  assert.ok(ringsIn(light, box.marks.spots, box.rooms.living) >= 4, "в гостиной меньше кольца на тело");
+});
+
 test("свет по частям: погашенная лампа в кадр не идёт, хотя её кольца построены", () => {
   const box = tapeStand();
   const scene = sceneOf(box);
