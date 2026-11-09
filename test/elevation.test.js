@@ -28,11 +28,13 @@ import {
   createProject,
   ensureSchemeObjectKinds,
   findWall,
+  joinToBlock,
   planMmToFraction,
   schemeObjectKindsInOrder,
   setPlanOrigin,
   setPlanScale,
   setMarkObject,
+  setMarkWall,
   setRoomWallHeight,
   setSchemeWallHeight,
   wallElevation,
@@ -40,7 +42,7 @@ import {
   wallObjectsOn,
   wallRoomId,
 } from "../src/model.js";
-import { drawElevation, elevationLabelFit, elevationLabelRooms } from "../src/render.js";
+import { drawElevation, elevationLabelFit, elevationLabelRooms, visibleMarks } from "../src/render.js";
 import {
   ELEVATION_HEIGHT_PX,
   elevationHeight,
@@ -468,7 +470,7 @@ function linkedPair(gapMm) {
 
 // Подписи ловятся на `fillText`: подложка под буквами рисуется `strokeText`
 // тем же текстом, и считать её второй подписью незачем.
-function elevationLabels(elevation, box) {
+function elevationLabels(elevation, box, options = { views: true }) {
   const texts = [];
   const ctx = new Proxy(
     { measureText: (value) => ({ width: String(value).length * 6 }) },
@@ -482,7 +484,7 @@ function elevationLabels(elevation, box) {
       set: () => true,
     },
   );
-  const field = drawElevation(ctx, elevation, box, { views: true });
+  const field = drawElevation(ctx, elevation, box, options);
   return { texts, field };
 }
 
@@ -516,4 +518,177 @@ test("на плотной стене подпись прибора уклады�
     false,
     "на плотной стене подпись не уложилась: " + JSON.stringify(packed.texts),
   );
+});
+
+// ——— имя прибора печатается один раз (таск 276) ————————————————————————
+//
+// Дефект, найденный на снимке приёмки таска 273: у связанного прибора имя
+// стояло на листе дважды — вещь подписывала себя сама (`elevation.objects`), а
+// подпись её метки несла то же имя в паре «ТВ1 · Телевизор» (таск 255), и обе
+// ложились в одно место.
+//
+// Правило одно: **вещь подписывает себя, если на этом листе её имени не
+// напечатала подпись метки.** Связь приносит модель (`objectId` у записи
+// метки), а не сличение имён и мест.
+
+// Та же пара связанных телевизоров плюс **несвязанная** вещь между ними: её
+// лист обязан называть как называл.
+function linkedPairAndRadiator(gapMm) {
+  const scene = linkedPair(gapMm);
+  const kinds = ensureSchemeObjectKinds(scene.project);
+  let project = kinds.project;
+  const radiator = schemeObjectKindsInOrder(project).find((kind) => kind.name === "Радиатор");
+  project = addSchemeObject(project, {
+    schemeId: scene.schemeId,
+    kindId: radiator.id,
+    shape: "rect",
+    // Внутри комнаты (правая сторона стены), между телевизорами.
+    atMm: { x: -200, y: 1380 },
+    widthMm: 800,
+    depthMm: 100,
+    heightMm: 500,
+    heightAboveFloorMm: 150,
+  }).project;
+  return { ...scene, project };
+}
+
+test("имя связанного прибора на листе одно, а несвязанная вещь подписана как была", () => {
+  const box = { x: 0, y: 0, width: 700, height: 400 };
+  const scene = linkedPairAndRadiator(2600);
+  const view = wallElevation(scene.project, scene.wallId, "right");
+  // В данных листа имя вещи остаётся: пропадает подпись, а не запись — по ней
+  // живут список стены, таблицы и `tools/scheme.mjs walls`.
+  assert.deepEqual(
+    view.objects.map((item) => item.name).sort(),
+    ["Радиатор", "Телевизор", "Телевизор"],
+    JSON.stringify(view.objects),
+  );
+  // И связь у записи метки названа моделью — рисующий её не угадывает.
+  assert.deepEqual(
+    view.marks.map((mark) => mark.objectId),
+    view.objects.filter((item) => item.name === "Телевизор").map((item) => item.id),
+    JSON.stringify(view.marks.map((mark) => [mark.label, mark.objectId])),
+  );
+
+  const { texts } = elevationLabels(view, box);
+  // Имя телевизора напечатано один раз на прибор — в паре.
+  assert.deepEqual(
+    texts.filter((value) => value.includes("Телевизор")),
+    ["ТВ1 · Телевизор · 1400", "ТВ2 · Телевизор · 1400"],
+    JSON.stringify(texts),
+  );
+  // Несвязанная вещь называет себя сама, и ровно один раз.
+  assert.equal(texts.filter((value) => value === "Радиатор").length, 1, JSON.stringify(texts));
+});
+
+test("вещь, чью метку этот лист не показывает, называет себя сама", () => {
+  const box = { x: 0, y: 0, width: 700, height: 400 };
+  const scene = linkedPair(2600);
+  // Привязку к стене у первой метки снимаем: прибор с листа ушёл, вещь на нём
+  // осталась — значит имя обязано вернуться к вещи, иначе она безымянна.
+  const first = scene.project.marks[0];
+  const loose = setMarkWall(scene.project, first.id, null).project;
+  const view = wallElevation(loose, scene.wallId, "right");
+  assert.equal(view.marks.length, 1, "пример не тот: метка осталась на листе");
+  const { texts } = elevationLabels(view, box);
+  assert.equal(
+    texts.filter((value) => value === "Телевизор").length,
+    1,
+    "вещь ушедшей метки осталась безымянной: " + JSON.stringify(texts),
+  );
+  assert.ok(texts.includes("ТВ2 · Телевизор · 1400"), JSON.stringify(texts));
+});
+
+test("на листе обратной стороны вещь внутри стены называет себя сама", () => {
+  const box = { x: 0, y: 0, width: 700, height: 400 };
+  const scene = wallScene();
+  const kinds = ensureSchemeObjectKinds(scene.project);
+  let project = kinds.project;
+  const column = schemeObjectKindsInOrder(project).find((kind) => kind.name === "Колонна");
+  const thing = addSchemeObject(project, {
+    schemeId: scene.schemeId,
+    kindId: column.id,
+    shape: "rect",
+    // Середина внутри самой стены (её половина — 100 мм): такая вещь видна с
+    // обеих сторон. Чуть в сторону комнаты — чтобы у знака была сторона: ровно
+    // на оси стены она решается ничьей (`wallTieSide`), а тест здесь не о том.
+    atMm: { x: 0, y: 1450 },
+    widthMm: 400,
+    depthMm: 400,
+    heightMm: 600,
+    heightAboveFloorMm: 1000,
+  });
+  project = thing.project;
+  const typeId = project.markTypes.find((type) => type.code === "ТВ").id;
+  const mark = addMark(project, {
+    schemeId: scene.schemeId,
+    typeId,
+    kind: "point",
+    points: [fraction(project, scene.schemeId, { x: 0, y: 1450 })],
+  });
+  project = setMarkObject(mark.project, mark.mark.id, thing.schemeObject.id).project;
+  project = applyMarkWalls(project).project;
+
+  // Метка привязана к стене со стороны комнаты — её лист прибор и называет.
+  const inside = wallElevation(project, scene.wallId, "right");
+  assert.equal(inside.marks.length, 1, "метка не встала на свою сторону");
+  const insideTexts = elevationLabels(inside, box).texts;
+  assert.equal(
+    insideTexts.filter((value) => value.includes("Колонна")).length,
+    1,
+    JSON.stringify(insideTexts),
+  );
+  // А на обратной стороне метки нет, вещь нарисована — и называет себя.
+  const outside = wallElevation(project, scene.wallId, "left");
+  assert.equal(outside.marks.length, 0, "метка попала на обе стороны");
+  assert.equal(outside.objects.length, 1, "вещь внутри стены не видна снаружи");
+  assert.ok(elevationLabels(outside, box).texts.includes("Колонна"), JSON.stringify(elevationLabels(outside, box).texts));
+});
+
+test("фильтр плана до развёртки не доходит: прибор на листе назван и со снятой галочкой", () => {
+  const box = { x: 0, y: 0, width: 700, height: 400 };
+  const scene = linkedPairAndRadiator(2600);
+  const scheme = scene.project.schemes[0];
+  const tvType = scene.project.markTypes.find((type) => type.code === "ТВ").id;
+  const others = scene.project.markTypes.filter((type) => type.id !== tvType).map((type) => type.id);
+  // На плане галочка типа «ТВ» снята — метки нет ни в кадре, ни под кликом.
+  assert.deepEqual(visibleMarks(scene.project, scheme, { typeIds: others }), []);
+  // На развёртке фильтра нет вовсе: лист стены — документ монтажнику, а не вид
+  // экрана, и метки на нём стоят все. Поэтому прибор назван подписью метки, а
+  // не вещью, при любой галочке.
+  const view = wallElevation(scene.project, scene.wallId, "right");
+  assert.equal(view.marks.length, 2);
+  const { texts } = elevationLabels(view, box);
+  assert.deepEqual(
+    texts.filter((value) => value.includes("Телевизор")),
+    ["ТВ1 · Телевизор · 1400", "ТВ2 · Телевизор · 1400"],
+    JSON.stringify(texts),
+  );
+});
+
+test("у блока подпись общая, и вещи его меток называют себя сами", () => {
+  const box = { x: 0, y: 0, width: 700, height: 400 };
+  const scene = linkedPair(2600);
+  const [first, second] = scene.project.marks;
+  const joined = joinToBlock(scene.project, first.id, second.id).project;
+  const view = wallElevation(joined, scene.wallId, "right");
+  const { texts } = elevationLabels(view, box);
+  // Подпись ряда — одна на блок (`blockLabelOf`), имени пары в ней не бывает.
+  assert.ok(
+    texts.some((value) => value.includes("ТВ1") && !value.includes("Телевизор")),
+    JSON.stringify(texts),
+  );
+  // Значит обе вещи блока остаются названными сами: безымянным прибор на листе
+  // не бывает ни в одном случае.
+  assert.equal(texts.filter((value) => value === "Телевизор").length, 2, JSON.stringify(texts));
+});
+
+test("лист бумаги называет прибор теми же словами, что экран", () => {
+  const scene = linkedPairAndRadiator(2600);
+  const view = wallElevation(scene.project, scene.wallId, "right");
+  const screen = elevationLabels(view, { x: 0, y: 0, width: 700, height: 400 });
+  // Бумага (лист ГОСТ, печать, ч/б, архив) — тот же `drawElevation` с единицей
+  // бумаги: второго счёта подписей у листа нет и не заводится.
+  const paper = elevationLabels(view, { x: 0, y: 0, width: 1400, height: 800 }, { views: true, unit: 2 });
+  assert.deepEqual(paper.texts, screen.texts);
 });

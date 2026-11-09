@@ -7271,6 +7271,12 @@ export function drawElevation(ctx, elevation, box, options = {}) {
     boxes: row.members.map((mark) =>
       elevationMarkBox(mark, scale, unit, options.views === true, options.grow === true),
     ),
+    // **Несёт ли подпись ряда имя вещи** (таск 276). У блока подпись одна на
+    // всех (`blockLabelOf`), и пары «ТВ1 · Телевизор» в ней не бывает (таск
+    // 255); столбик, наоборот, подписывает каждую метку порознь. Ответ
+    // спрашивается в двух местах — здесь собирается сама подпись, ниже по
+    // нему же вещь решает, называть ли себя, — и поэтому он один.
+    names: row.axis === "column" || row.members.length === 1,
   }));
   // Знак без изображения не считается подтянутым: он и не обещал масштаба.
   // Подтяжка меньше десятой доли — молча (см. `ELEVATION_GROWN_QUIET`).
@@ -7359,6 +7365,36 @@ export function drawElevation(ctx, elevation, box, options = {}) {
     }
   }
 
+  // **Имя прибора на листе печатается один раз** (таск 276). До этой правки
+  // связанный прибор назывался дважды: вещь подписывала себя сама, а подпись
+  // её метки несла то же имя в паре «ТВ1 · Телевизор» (таск 255), и у прибора
+  // на стене обе ложились в одно место — читалось «Телевизор Телевизор».
+  //
+  // Правило одно: **вещь подписывает себя, если на этом листе её имени не
+  // напечатала подпись метки.** Связь приносит модель (`objectId` у записи
+  // метки, собран резолвером места); сличать имена и места здесь нельзя —
+  // это догадка, а не связь.
+  //
+  // Называет не всякая метка листа, а та, **чья подпись несёт имя пары**
+  // (`row.names`): у блока подпись общая, и такой прибор по-прежнему называет
+  // сама вещь, иначе он остался бы безымянным. По той же причине правило не
+  // касается вещи, чья метка на этот лист не попала вовсе — не привязана к
+  // стене, смотрит другой стороной, отрезана участком между углами: имя
+  // остаётся у вещи, и безымянным прибор не бывает ни в одном из случаев.
+  //
+  // А вот сокращение подписи (таск 273) имя вещи ей **не возвращает**: оно
+  // сдаётся ровно там, где до соседки нет места, и то же имя, напечатанное на
+  // том же месте вещью, вернуло бы наезд, который таск 273 и убрал.
+  const namedObjects = new Set();
+  const namesObject = (mark) => {
+    if (mark.objectId) namedObjects.add(mark.objectId);
+  };
+  lines.forEach(namesObject);
+  unknown.forEach(namesObject);
+  for (const row of rows) {
+    if (row.names) row.members.forEach(namesObject);
+  }
+
   // Объекты на полу — под всем остальным: розетка над столешницей обязана
   // остаться видной поверх неё.
   for (const object of elevation.objects) {
@@ -7371,7 +7407,9 @@ export function drawElevation(ctx, elevation, box, options = {}) {
     ctx.strokeStyle = DRAWING_OBJECT;
     ctx.strokeRect(atX(object.fromMm), y, Math.max(thin, (object.toMm - object.fromMm) * scale), height);
     if ((object.toMm - object.fromMm) * scale < ELEVATION_LABEL_MIN_PX * unit) continue;
-    elevationText(ctx, object.name, (atX(object.fromMm) + atX(object.toMm)) / 2, y - 8 * unit, "center", unit);
+    if (!namedObjects.has(object.id)) {
+      elevationText(ctx, object.name, (atX(object.fromMm) + atX(object.toMm)) / 2, y - 8 * unit, "center", unit);
+    }
     if (object.topMm !== null) {
       elevationText(ctx, String(object.topMm), atX(object.toMm) + 2 * unit, y + 9 * unit, "left", unit);
     }
@@ -7500,11 +7538,12 @@ export function drawElevation(ctx, elevation, box, options = {}) {
     // Стоит она над серединой группы — той, что на плане: `elevationPack`
     // середину ряда не двигает.
     // Имя вещи у ряда есть только там, где ряд — одна метка: у блока подпись
-    // общая (`blockLabelOf`), и пары в ней не бывает.
+    // общая (`blockLabelOf`), и пары в ней не бывает. Тот же ответ
+    // (`row.names`) читает вещь, решая, называть ли себя (таск 276).
     elevationText(
       ctx,
       elevationLabelFit(
-        { label: row.label, name: row.members.length === 1 ? row.members[0].objectName : "", heightMm: row.heightMm },
+        { label: row.label, name: row.names ? row.members[0].objectName : "", heightMm: row.heightMm },
         room,
         labelWidth,
       ),
