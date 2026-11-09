@@ -80,6 +80,7 @@ import {
   findMark,
   findOpening,
   findRoom,
+  findScenario,
   idCounterKey,
   idNumberOf,
   idsMigrate,
@@ -98,12 +99,18 @@ import { strings } from "../src/strings.js";
 const isNumbered = (id) => idNumberOf(id) !== null;
 const counterOf = (project, collection) => Number(project.counters[idCounterKey(collection)]) || 0;
 
+// Сущности вида — своим обходом: направляющие лежат внутри схем, остальные
+// коллекцией верхнего уровня.
+function listOf(project, collection) {
+  return collection === "guides"
+    ? (project.schemes || []).flatMap((scheme) => scheme.guides || [])
+    : project[collection] || [];
+}
+
 // Самый большой занятый номер вида — считается здесь своим обходом, а не
 // дверью модели: иначе критерий сверялся бы сам с собой.
 function topOf(project, collection) {
-  const list = collection === "guides"
-    ? (project.schemes || []).flatMap((scheme) => scheme.guides || [])
-    : project[collection] || [];
+  const list = listOf(project, collection);
   let top = 0;
   for (const item of list) {
     const number = idNumberOf(item && item.id);
@@ -517,6 +524,76 @@ test("датчик открытия не пересаживается на др�
   assert.notEqual(second.opening.id, first.opening.id, "новый проём занял номер удалённого");
   assert.equal(doorOf(second.project), first.opening.id, "ссылка метки поехала сама");
   assert.equal(findOpening(second.project, doorOf(second.project)), null, "датчик пересел на другую дверь");
+});
+
+// **Счётчик прикрывает номер, пока сущность жива; занятый номер — пока она
+// есть.** Счётчик теряется: объект собран руками, пришёл ссылкой без
+// `counters`, слит из двух. Выдать номер поверх занятого — значит сшить две
+// разные сущности в одну, самая дорогая из поломок (`idFloors` в модели), и
+// проверяется это у **каждой** двери: промахнись одна видом или не спроси
+// занятый номер — новая сущность встала бы поверх живой.
+test("счётчики потеряны — ни одна дверь не выдаёт номер поверх занятого", () => {
+  for (const door of ID_DOORS) {
+    const collection = door.collection || door.what;
+    const scene = house();
+    const first = door.make(scene.project, scene, 0);
+    const top = topOf(first.project, collection);
+    assert.ok(top > 0, door.what + ": пример не тот, занятых номеров нет");
+
+    // Объект без счётчиков — так он приходит собранным руками и слитым.
+    const lost = { ...first.project, counters: {} };
+    const second = door.make(lost, scene, 1);
+    assert.ok(
+      idNumberOf(second.id) > top,
+      door.what + ": номер выдан поверх занятого (" + second.id + " при занятом " + top + ")",
+    );
+    // И ни одного номера, занятого дважды: сущности не сшились.
+    const ids = listOf(second.project, collection).map((item) => item.id);
+    assert.equal(new Set(ids).size, ids.length, door.what + ": один номер достался двум сущностям");
+    // Счётчик своего вида при этом встал на выданное — второй раз этот номер
+    // не выйдет. Соседние виды остаются без счётчиков нарочно: команда правит
+    // счётчик только своего вида, и это её право.
+    assert.ok(
+      counterOf(second.project, collection) >= idNumberOf(second.id),
+      door.what + ": счётчик вида не догнал выданный номер",
+    );
+  }
+});
+
+// Свой идентификатор вызывающего принимается **только** свободным номером
+// (ADR 038) — и обязан пройти через счётчик своего вида. Прими его молча, и
+// счётчик останется позади: занятый номер прикрывает выдачу лишь пока сценарий
+// жив, а удалённый из обхода уходит — номер выдаётся второй раз, и ссылка
+// «запусти сценарий», которую `deleteScenario` не чистит нарочно, оживает
+// чужим сценарием молча. Живых вызовов с `id` нет ни одного: это защита.
+test("принятый снаружи номер сценария двигает счётчик своего вида", () => {
+  const project = createProject({ name: "Сценарии" });
+  assert.equal(counterOf(project, "scenarios"), 0, "пример не тот: у нового объекта есть сценарии");
+
+  const taken = addScenario(project, { kind: "logic", name: "Своя логика", id: "9001" });
+  assert.equal(taken.scenario.id, "9001", "свободный номер не принят");
+  assert.equal(counterOf(taken.project, "scenarios"), 9001, "счётчик вида остался позади принятого номера");
+  assertCounters(taken.project, "сценарий с принятым номером");
+
+  // Номер удалённого сценария новому не достаётся — это и есть цена молчания:
+  // ссылка на удалённый сценарий осталась бы в объекте и ожила бы новым.
+  const gone = deleteScenario(taken.project, "9001").project;
+  const next = addScenario(gone, { kind: "logic", name: "Следующая" });
+  assert.equal(next.scenario.id, "9002", "номер удалённого сценария достался новому");
+  assert.equal(findScenario(next.project, "9001"), null, "ссылка в никуда ожила новым сценарием");
+
+  // Занятый номер в дверь не проходит: выдаётся свой, следующий по счётчику.
+  const twin = addScenario(taken.project, { kind: "logic", name: "Двойник", id: "9001" });
+  assert.equal(twin.scenario.id, "9002", "принят занятый номер");
+
+  // И не номер — тоже: uuid прежней разметки сделал бы объект
+  // непронумерованным по видам, а следующее открытие перенумеровало бы его
+  // целиком, сдвинув адреса аксессуаров у всех меток.
+  for (const bad of ["s1", "0", "01", "acts", "7b1e2f3c-0000-4000-8000-0123456789ab", 17, " 9002 "]) {
+    const made = addScenario(taken.project, { kind: "logic", name: "Чужой id", id: bad });
+    assert.equal(made.scenario.id, "9002", "в дверь прошёл не номер: " + String(bad));
+    assertCounters(made.project, "сценарий с чужим id");
+  }
 });
 
 test("номер — это номер, и `idNumberOf` не принимает похожее", () => {

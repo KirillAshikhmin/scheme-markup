@@ -1347,6 +1347,15 @@ function idsAnyNumbered(project) {
 // `next(collection)` — вид называет вызывающий, и это не формальность:
 // промахнись он видом, метка получила бы номер из счётчика стен и встала бы
 // поверх живой метки.
+//
+// `claim(collection, id)` — **номер, названный снаружи**, занимается тем же
+// счётчиком. Принять его и счётчик не сдвинуть — это тихая порча: `idFloors`
+// прикрывает выдачу лишь пока сущность **жива**, а удалённая сущность из
+// обхода уходит, и счётчик, оставшийся позади, выдаёт её номер второй раз
+// (G09). Ссылки на удалённую сущность в объекте остаются **нарочно** («запусти
+// сценарий» после `deleteScenario` показывает редактор), и такая ссылка ожила
+// бы чужой сущностью молча — ровно та порча, из-за которой при перенумерации
+// гасится ссылка в никуда (`ID_GONE`).
 function idMint(project) {
   const counters = { ...(project && project.counters ? project.counters : {}) };
   const floors = idFloors(project);
@@ -1357,6 +1366,13 @@ function idMint(project) {
       const value = Math.max(Number(counters[key]) || 0, floors.get(collection) || 0) + 1;
       counters[key] = value;
       return String(value);
+    },
+    claim(collection, id) {
+      const number = idNumberOf(id);
+      if (number === null) return null;
+      const key = idCounterKey(collection);
+      if ((Number(counters[key]) || 0) < number) counters[key] = number;
+      return id;
     },
   };
 }
@@ -12906,8 +12922,9 @@ function withScenarios(project, scenarios, extra = {}) {
 
 /**
  * Добавить сценарий в конец списка: `{project, scenario}`. Вид обязателен
- * (`block | logic | global`); id сохраняется, если он строка и не занят,
- * иначе выдаётся новый.
+ * (`block | logic | global`); id сохраняется, если он **свободный номер**, и
+ * счётчик вида при этом доводится до него (`idMint.claim`), иначе выдаётся
+ * новый.
  */
 export function addScenario(project, scenario = {}) {
   const source = deviceObject(scenario) ? scenario : {};
@@ -12920,8 +12937,14 @@ export function addScenario(project, scenario = {}) {
   // а следующее открытие перенумеровало бы **весь** объект, сдвинув адреса
   // аксессуаров у всех меток. Живых вызовов с `id` сейчас нет, и это защита, а
   // не починка: цена промаха — адресация всего дома, а стоит она одного условия.
+  //
+  // И принятый номер **идёт через счётчик** (`mint.claim`), как все прочие:
+  // иначе счётчик остался бы позади занятого номера, а после удаления этого
+  // сценария выдал бы его второй раз — и ссылка «запусти сценарий», которую
+  // `deleteScenario` нарочно не чистит, ожила бы чужим сценарием молча. Тихого
+  // «приняли чужой номер и счётчик не сдвинули» в сборке нет (ADR 038).
   const given = typeof source.id === "string" && idNumberOf(source.id) !== null && !findScenario(project, source.id);
-  const id = given ? source.id : mint.next("scenarios");
+  const id = given ? mint.claim("scenarios", source.id) : mint.next("scenarios");
   const base = {
     id,
     kind: source.kind,

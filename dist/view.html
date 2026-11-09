@@ -15133,6 +15133,13 @@ const value = Math.max(Number(counters[key]) || 0, floors.get(collection) || 0) 
 counters[key] = value;
 return String(value);
 },
+claim(collection, id) {
+const number = idNumberOf(id);
+if (number === null) return null;
+const key = idCounterKey(collection);
+if ((Number(counters[key]) || 0) < number) counters[key] = number;
+return id;
+},
 };
 }
 const ID_OWNERS = [
@@ -21192,7 +21199,7 @@ if (!SCENARIO_KINDS.includes(source.kind)) throw modelError("scenarioKindUnknown
 const list = scenariosList(project);
 const mint = idMint(project);
 const given = typeof source.id === "string" && idNumberOf(source.id) !== null && !findScenario(project, source.id);
-const id = given ? source.id : mint.next("scenarios");
+const id = given ? mint.claim("scenarios", source.id) : mint.next("scenarios");
 const base = {
 id,
 kind: source.kind,
@@ -22836,13 +22843,23 @@ accessories,
 links,
 doors,
 scenarios: homeLeadMarks(structuredClone(given || scenariosInOrder(project)), followers),
-logicBindings: homeLeadMarks(structuredClone(logicBindingsOf(project)), followers),
+logicBindings: homeLeadBindings(structuredClone(logicBindingsOf(project)), followers),
 };
 }
 function homeLeadScenario(project, scenario) {
 const followers = deviceFollowers(project);
 if (followers.size === 0 || !scenario || typeof scenario !== "object") return scenario;
 return homeLeadMarks(structuredClone(scenario), followers);
+}
+function homeLeadBindings(list, followers) {
+if (followers.size === 0 || !Array.isArray(list)) return list;
+for (const binding of list) {
+if (!binding || typeof binding !== "object") continue;
+if (typeof binding.markId === "string" && followers.has(binding.markId)) {
+binding.markId = followers.get(binding.markId);
+}
+}
+return list;
 }
 function homeLeadMarks(value, followers) {
 if (followers.size === 0 || !value || typeof value !== "object") return value;
