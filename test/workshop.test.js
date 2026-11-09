@@ -610,7 +610,7 @@ test("вещь садится серединой на узел, за какой 
     [{ x: 2900, y: 1530 }, { x: 2500, y: 1500 }],
     [{ x: 3400, y: 1530 }, { x: 3000, y: 1500 }],
   ]) {
-    const delta = workshopMoveDeltaMm(anchor, press, cursor, view, grid);
+    const delta = workshopMoveDeltaMm(anchor, press, cursor, view, grid).deltaMm;
     const now = { x: object.atMm.x + delta.x, y: object.atMm.y + delta.y };
     assert.deepEqual(now, middle, "курсор " + cursor.x + ": середина уехала мимо узла в " + JSON.stringify(now));
   }
@@ -624,7 +624,7 @@ test("Alt снимает притяжку переноса — остаётся 
     gridSnap: true,
     free: true,
   });
-  assert.deepEqual(delta, { x: 120, y: 40 });
+  assert.deepEqual(delta.deltaMm, { x: 120, y: 40 });
 });
 
 test("сетка выключена — перенос идёт за рукой, как и ходил", () => {
@@ -633,7 +633,7 @@ test("сетка выключена — перенос идёт за рукой,
     gridMm: 500,
     gridSnap: false,
   });
-  assert.deepEqual(delta, { x: 120, y: 40 });
+  assert.deepEqual(delta.deltaMm, { x: 120, y: 40 });
 });
 
 test("у полосы и у стены опора — первая вершина: на узлы садятся вершины", () => {
@@ -645,7 +645,7 @@ test("у полосы и у стены опора — первая вершин�
   const delta = workshopMoveDeltaMm(workshopMoveAnchorMm(wall), { x: 2000, y: 900 }, { x: 2600, y: 1400 }, viewOf({ zoom: 0.1 }), {
     gridMm: 500,
     gridSnap: true,
-  });
+  }).deltaMm;
   assert.deepEqual({ x: wall.aMm.x + delta.x, y: wall.aMm.y + delta.y }, { x: 2000, y: 1500 });
 });
 
@@ -654,7 +654,8 @@ test("опоры нет — остаётся сырой ход руки, и ни
     gridMm: 500,
     gridSnap: true,
   });
-  assert.deepEqual(delta, { x: 30, y: 40 });
+  assert.deepEqual(delta.deltaMm, { x: 30, y: 40 });
+  assert.equal(delta.corner, null, "целей магнита не было — и угла нет");
   assert.equal(workshopMoveAnchorMm(null), null);
   assert.equal(workshopMoveAnchorMm({ shape: "polyline", pointsMm: [] }), null);
 });

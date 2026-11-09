@@ -726,12 +726,26 @@ export function workshopMoveAnchorMm(subject) {
  * сырому ходу руки прибавляется опора, и уже она садится на узел — тем же
  * `workshopSnapMm`, которым садится вершина и которым встаёт вещь по клику.
  * Alt (`free`) снимает притяжку, как и везде: остаётся чистый ход руки.
+ *
+ * **Угол ловится той же опорой** (таск 271): своей точки у магнита в этом жесте
+ * нет, и правило поэтому одно на все притяжки переноса — липнет то, что
+ * садится на узел сетки, то есть у стены и у полосы первая вершина, у вещи её
+ * середина. У вещи это ровно то место, куда её кладёт клик
+ * (`workshopPlacePointMm`): перенесённая вещь встаёт там же, где встала бы
+ * поставленная, и двух ответов на «куда сядет вещь в углу» в сборке нет.
+ *
+ * Возвращает `{deltaMm, corner}` — сдвиг и пойманный угол. Угол нужен кадру
+ * (кольцо `drawSnapCorner`), и считается он здесь, одним зовом притяжки:
+ * спросить его вторым зовом значило бы завести второй ответ на тот же вопрос.
  */
 export function workshopMoveDeltaMm(anchorMm, startMm, cursorMm, view, options = {}) {
   const raw = { x: Number(cursorMm.x) - Number(startMm.x), y: Number(cursorMm.y) - Number(startMm.y) };
-  if (!anchorMm) return workshopRoundMm(raw);
-  const target = workshopSnapMm([], { x: anchorMm.x + raw.x, y: anchorMm.y + raw.y }, view, options).point;
-  return workshopRoundMm({ x: target.x - anchorMm.x, y: target.y - anchorMm.y });
+  if (!anchorMm) return { deltaMm: workshopRoundMm(raw), corner: null };
+  const snap = workshopSnapMm([], { x: anchorMm.x + raw.x, y: anchorMm.y + raw.y }, view, options);
+  return {
+    deltaMm: workshopRoundMm({ x: snap.point.x - anchorMm.x, y: snap.point.y - anchorMm.y }),
+    corner: snap.corner,
+  };
 }
 
 /**
@@ -939,6 +953,51 @@ export function workshopVertexEnds(walls, pointMm) {
     if (wall.bMm.x === pointMm.x && wall.bMm.y === pointMm.y) ends.push({ wallId: wall.id, end: "b" });
   }
   return ends;
+}
+
+/**
+ * Что из взятого под руку ловит угол чертежа (таск 271, долг таска 266).
+ *
+ * Перечень назван списком, а не ветками по месту: магнит у взятого под руку
+ * один, и спрашивают его двое — `dragTo` (куда едет) и кадр (рисовать ли
+ * кольцо). Кого в списке нет:
+ *
+ * - **проём** — он ездит вдоль своей стены и поперёк её свободы не имеет
+ *   (правило таска 266: садится серединой под курсор, угла ему не надо);
+ * - **ручка вещи** (`objectHandle`) — это правка размера и поворота, а не
+ *   постановка точки; заказчик про неё не говорил, и приклеивать угол к
+ *   растягиванию габарита без его слова нельзя (открытый вопрос таска 271).
+ */
+export const WORKSHOP_CORNER_DRAGS = ["vertex", "wall", "object"];
+
+/**
+ * Чьи углы магнит **не** предлагает тому, что ведут рукой: углы стен, которые
+ * едут вместе с ней (таск 271).
+ *
+ * Правило одно на три случая и читается одной строкой — **едущая стена своего
+ * угла не ловит**:
+ *
+ * - **вершина** — едут все стены, чей конец стоит в этом узле: ровно те, что
+ *   переставит `workshopMoveVertex`. Свой угол ушёл бы в цели первым, и
+ *   вершина стояла бы приклеенной к месту, с которого её повели; угол на другом
+ *   конце едущей стены схлопнул бы её в точку, а в цепочке то же сделал бы
+ *   дальний конец соседки, которая едет этим же узлом. Поэтому исключается
+ *   каждая едущая стена целиком, а не «свой угол»;
+ * - **стена** — она сама: оба её конца стоят там, откуда она уезжает, и
+ *   предлагать их значило бы держать стену на месте;
+ * - **вещь** — никто: вещь не стена, и углы чертежа ей все чужие.
+ *
+ * Стены, которые остались на месте, из целей не убираются никогда — ради них
+ * магнит и заведён («подтяни конец стены к углу соседней»).
+ */
+export function workshopDragSkipWallIds(walls, drag) {
+  if (!drag || !WORKSHOP_CORNER_DRAGS.includes(drag.kind)) return [];
+  if (drag.kind === "vertex") {
+    if (!drag.fromMm) return [];
+    return workshopVertexEnds(walls, drag.fromMm).map((end) => end.wallId);
+  }
+  if (drag.kind === "wall") return drag.wallId ? [drag.wallId] : [];
+  return [];
 }
 
 /**
@@ -1835,20 +1894,22 @@ export function workshopFitView(extent, viewport, max = WORKSHOP_ZOOM_MAX) {
  * Shift там сказано своим языком с самого начала (правило таска 182).
  *
  * **Про магнит угла — тем же приёмом** (таск 266, G386, `hintCorner`), но не ко
- * всем: он дописывается занятиям, которые **ставят точку рукой**. У проёма
- * ловить угол нечего — он садится серединой в стену под курсором, — а в
- * «Выделении» рукой ничего не ставят. У линейки про магнит сказано своими
- * словами (`measure.hintDrawing`), и второй раз повторять его не надо.
+ * всем: он дописывается занятиям, где точку **кладут рукой**. У проёма ловить
+ * угол нечего — он садится серединой в стену под курсором. «Выделение» строку
+ * получило с таска 271: вершину, стену и вещь под рукой магнит ловит, и
+ * умолчать об этом было бы тем же, чем умолчать о клавише (правило таска 213).
+ * У линейки про магнит сказано своими словами (`measure.hintDrawing`), и второй
+ * раз повторять его не надо.
  */
 export function workshopHint(tool, way, measuring = false) {
   // Линейка (таск 237) — поверх занятий: рука занята отрезком, и про стены с
   // проёмами рассказывать нечего. Ход по полю при этом тот же, и строка о нём
   // остаётся: вид возят из любого занятия.
   if (measuring) return strings.measure.hintDrawing + " " + strings.workshop.hintView;
-  // Кому не дописывается: проёму (садится серединой в стену под курсором) и
-  // «Выделению» (рукой там ничего не ставят). Занятию, которого не узнали,
-  // достаются слова стен — и магнит вместе с ними: строка у них одна целиком.
-  const corner = tool === "openings" || tool === "edit" ? "" : " " + strings.workshop.hintCorner;
+  // Кому не дописывается: одному проёму — он садится серединой в стену под
+  // курсором, и угла ему не надо. Занятию, которого не узнали, достаются слова
+  // стен — и магнит вместе с ними: строка у них одна целиком.
+  const corner = tool === "openings" ? "" : " " + strings.workshop.hintCorner;
   return workshopHintSubject(tool, way) + corner + " " + strings.workshop.hintView;
 }
 
@@ -2677,7 +2738,7 @@ function createWorkshop({ api, hosts }) {
     return getState().gridSnap !== false;
   }
 
-  // ——— магнит «от угла до угла» (таск 266, G386) ———
+  // ——— магнит «от угла до угла» (таск 266, G386; ведение — таск 271) ———
   //
   // Что считается углом, решает модель (`wallCornerTargets` — те же узлы, что
   // носят буквы), порог в точках экрана — одна мера на два поля
@@ -2687,8 +2748,17 @@ function createWorkshop({ api, hosts }) {
   // **Выключенный слой стен углов не даёт** — тем же правилом, которым он не
   // даёт выделить стену: ловить то, чего на поле не видно, нельзя.
 
-  function cornersMm() {
-    return layerOn("drawingShown") ? wallCornerTargets(project(), schemeId) : [];
+  function cornersMm(skipWallIds) {
+    return layerOn("drawingShown") ? wallCornerTargets(project(), schemeId, { skipWallIds }) : [];
+  }
+
+  /**
+   * Цели для того, что ведут рукой (таск 271): те же углы, но без углов стен,
+   * которые едут вместе с ней. Кто едет — одна дверь
+   * `workshopDragSkipWallIds`, и своего разбора у поля нет.
+   */
+  function dragCornersMm() {
+    return cornersMm(workshopDragSkipWallIds(walls(), drag));
   }
 
   // Угол **под рукой**, а не часть черновика: кольцо появляется до первого
@@ -2697,9 +2767,17 @@ function createWorkshop({ api, hosts }) {
   let cornerUnder = null;
 
   // Жив ли магнит в этом занятии. У проёма угол ловить нечего — он садится
-  // серединой в стену под курсором, — а в «Выделении» рукой ничего не ставят.
+  // серединой в стену под курсором, — а в «Выделении» рукой ничего не ставят,
+  // **пока ничего не ведут**: вершину, стену и вещь под рукой магнит получил
+  // (таск 271), и перечень того, что его ловит, назван списком
+  // `WORKSHOP_CORNER_DRAGS`, а не веткой по месту.
   function cornerMagnetOn() {
-    return measuring() || Boolean(anchorPick) || tool === "walls" || tool === "objects";
+    return measuring() || Boolean(anchorPick) || tool === "walls" || tool === "objects" || dragCatchesCorner();
+  }
+
+  /** Ведут ли сейчас то, что ловит угол: вершину, стену или вещь (таск 271). */
+  function dragCatchesCorner() {
+    return Boolean(drag) && WORKSHOP_CORNER_DRAGS.includes(drag.kind);
   }
 
   /** Запомнить пойманный угол; `true` — кольцо сменило место и нужен кадр. */
@@ -4346,13 +4424,28 @@ function createWorkshop({ api, hosts }) {
       redraw();
       return;
     }
-    const options = { free: event.altKey, gridMm: gridMm(), gridSnap: gridSnap() };
+    // Магнит угла и у ведомой вершины, и у переноса (таск 271, долг таска 266):
+    // цели те же, что у рисования, минус углы стен, которые едут с рукой.
+    // Кольцо помечается **здесь**, у того, кто решает, нужен ли кадр, а не
+    // внутри притяжки (ловушка таска 266): `dragTo` перерисовывает поле на
+    // каждый ход руки, и ответа `markCorner` ему не надо.
+    const options = {
+      free: event.altKey,
+      gridMm: gridMm(),
+      gridSnap: gridSnap(),
+      corners: dragCatchesCorner() ? dragCornersMm() : [],
+    };
     if (drag.kind === "vertex") {
-      drag.toMm = workshopSnapMm(vertexAnchor(drag), mmOf(event), view, options).point;
+      const snap = workshopSnapMm(vertexAnchor(drag), mmOf(event), view, options);
+      drag.toMm = snap.point;
+      markCorner(snap.corner);
     } else {
-      // Переносят вещь или стену: к узлу притягивается **их** опорная точка, а
-      // не место, за которое взяли (дефект D40) — `workshopMoveDeltaMm`.
-      drag.deltaMm = workshopMoveDeltaMm(drag.anchorMm, drag.startMm, mmOf(event), view, options);
+      // Переносят вещь или стену: к узлу — и к углу — притягивается **их**
+      // опорная точка, а не место, за которое взяли (дефект D40, таск 271) —
+      // `workshopMoveDeltaMm`.
+      const snap = workshopMoveDeltaMm(drag.anchorMm, drag.startMm, mmOf(event), view, options);
+      drag.deltaMm = snap.deltaMm;
+      markCorner(snap.corner);
     }
     redraw();
   }
@@ -4436,9 +4529,11 @@ function createWorkshop({ api, hosts }) {
     }
   }
 
-  // Якорь для магнита угла при переносе вершины — противоположный конец той
-  // стены, за которую взялись: ровную стену тянут за угол, и 15° отмеряются от
-  // её же второго конца.
+  // Якорь для магнита **направления** (кратно 15°) при переносе вершины —
+  // противоположный конец той стены, за которую взялись: ровную стену тянут за
+  // угол, и 15° отмеряются от её же второго конца. Магнит угла чертежа (таск
+  // 266) к этому списку отношения не имеет — цели ему приходят отдельно
+  // (`dragCornersMm`), и спорить им негде: угол решается раньше направления.
   function vertexAnchor(current) {
     const wall = walls().find((item) => item.id === current.wallId);
     if (!wall) return [];
@@ -4465,6 +4560,11 @@ function createWorkshop({ api, hosts }) {
     if (!drag) return;
     const current = drag;
     drag = null;
+    // Руку отпустили — кольцо к ней больше не относится (таск 271): в
+    // «Выделении» магнит живёт только в ведении, и оставленное кольцо обещало
+    // бы притяжку там, где её уже нет. Кадр закажут ветки ниже — `paint` или
+    // `sync` зовётся на каждом пути.
+    markCorner(null);
     if (!current.moved) {
       // Ручка разбивки и ручка продолжения срабатывают и без движения: клик по
       // ним ставит вершину туда, где они нарисованы. Вершину, наоборот,

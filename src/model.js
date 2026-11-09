@@ -6959,13 +6959,25 @@ export function wallCorners(project, schemeId) {
  * значило бы придумать точку, которой на чертеже не нарисовано (перебор пар
  * стен на каждый ход мыши — отдельная цена к тому же).
  *
- * `options.skipWallId` убирает углы названной стены: её собственный угол магнит
- * ловить не должен — стена схлопнулась бы сама в себя.
+ * `options.skipWallIds` убирает углы названных стен: **свой угол стена ловить
+ * не должна** — она либо стояла бы приклеенной к месту, с которого её повели,
+ * либо схлопнулась бы сама в себя. Список, а не одно имя (таск 271): у вершины
+ * цепочки с рукой едут **все** стены, чей конец стоит в этом узле
+ * (`workshopMoveVertex`), и одного имени на них не хватило бы.
+ *
+ * Фильтр считается **по стене, а не по точке**: угол, за который названная
+ * стена держится вместе с соседкой, уходит целиком. Так решено в таске 266, и
+ * правило остаётся прежним — предлагать точку, в которой едущая стена
+ * перестанет быть стеной, нельзя, а разбирать, какая из двух стен в этом узле
+ * едет, значило бы второй ответ на «чей это угол».
  */
 export function wallCornerTargets(project, schemeId, options = {}) {
-  const skip = options.skipWallId || null;
+  const skip = Array.isArray(options.skipWallIds) ? options.skipWallIds.filter(Boolean) : [];
   const corners = wallCorners(project, schemeId);
-  const fit = skip ? corners.filter((corner) => !corner.wallIds.includes(skip)) : corners;
+  const fit =
+    skip.length === 0
+      ? corners
+      : corners.filter((corner) => !corner.wallIds.some((wallId) => skip.includes(wallId)));
   return fit.map((corner) => ({ x: corner.atMm.x, y: corner.atMm.y, letter: corner.letter }));
 }
 

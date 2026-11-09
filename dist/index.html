@@ -18262,9 +18262,12 @@ function wallCorners(project, schemeId) {
 return wallNaming(project, schemeId).corners;
 }
 function wallCornerTargets(project, schemeId, options = {}) {
-const skip = options.skipWallId || null;
+const skip = Array.isArray(options.skipWallIds) ? options.skipWallIds.filter(Boolean) : [];
 const corners = wallCorners(project, schemeId);
-const fit = skip ? corners.filter((corner) => !corner.wallIds.includes(skip)) : corners;
+const fit =
+skip.length === 0
+? corners
+: corners.filter((corner) => !corner.wallIds.some((wallId) => skip.includes(wallId)));
 return fit.map((corner) => ({ x: corner.atMm.x, y: corner.atMm.y, letter: corner.letter }));
 }
 function wallNames(project, schemeId) {
@@ -73006,9 +73009,12 @@ return subject.atMm ? { x: Number(subject.atMm.x), y: Number(subject.atMm.y) } :
 }
 function workshopMoveDeltaMm(anchorMm, startMm, cursorMm, view, options = {}) {
 const raw = { x: Number(cursorMm.x) - Number(startMm.x), y: Number(cursorMm.y) - Number(startMm.y) };
-if (!anchorMm) return workshopRoundMm(raw);
-const target = workshopSnapMm([], { x: anchorMm.x + raw.x, y: anchorMm.y + raw.y }, view, options).point;
-return workshopRoundMm({ x: target.x - anchorMm.x, y: target.y - anchorMm.y });
+if (!anchorMm) return { deltaMm: workshopRoundMm(raw), corner: null };
+const snap = workshopSnapMm([], { x: anchorMm.x + raw.x, y: anchorMm.y + raw.y }, view, options);
+return {
+deltaMm: workshopRoundMm({ x: snap.point.x - anchorMm.x, y: snap.point.y - anchorMm.y }),
+corner: snap.corner,
+};
 }
 function workshopDistinct(pointsMm) {
 const points = [];
@@ -73084,6 +73090,16 @@ if (wall.aMm.x === pointMm.x && wall.aMm.y === pointMm.y) ends.push({ wallId: wa
 if (wall.bMm.x === pointMm.x && wall.bMm.y === pointMm.y) ends.push({ wallId: wall.id, end: "b" });
 }
 return ends;
+}
+const WORKSHOP_CORNER_DRAGS = ["vertex", "wall", "object"];
+function workshopDragSkipWallIds(walls, drag) {
+if (!drag || !WORKSHOP_CORNER_DRAGS.includes(drag.kind)) return [];
+if (drag.kind === "vertex") {
+if (!drag.fromMm) return [];
+return workshopVertexEnds(walls, drag.fromMm).map((end) => end.wallId);
+}
+if (drag.kind === "wall") return drag.wallId ? [drag.wallId] : [];
+return [];
 }
 function workshopMoveVertex(project, schemeId, fromMm, toMm) {
 const ends = workshopVertexEnds(wallsOnScheme(project, schemeId), fromMm);
@@ -73524,7 +73540,7 @@ offsetY: boxHeight / 2 - ((extent.minY + extent.maxY) / 2) * zoom,
 }
 function workshopHint(tool, way, measuring = false) {
 if (measuring) return strings.measure.hintDrawing + " " + strings.workshop.hintView;
-const corner = tool === "openings" || tool === "edit" ? "" : " " + strings.workshop.hintCorner;
+const corner = tool === "openings" ? "" : " " + strings.workshop.hintCorner;
 return workshopHintSubject(tool, way) + corner + " " + strings.workshop.hintView;
 }
 function workshopHintSubject(tool, way) {
@@ -74000,12 +74016,18 @@ return getState()[key] !== false;
 function gridSnap() {
 return getState().gridSnap !== false;
 }
-function cornersMm() {
-return layerOn("drawingShown") ? wallCornerTargets(project(), schemeId) : [];
+function cornersMm(skipWallIds) {
+return layerOn("drawingShown") ? wallCornerTargets(project(), schemeId, { skipWallIds }) : [];
+}
+function dragCornersMm() {
+return cornersMm(workshopDragSkipWallIds(walls(), drag));
 }
 let cornerUnder = null;
 function cornerMagnetOn() {
-return measuring() || Boolean(anchorPick) || tool === "walls" || tool === "objects";
+return measuring() || Boolean(anchorPick) || tool === "walls" || tool === "objects" || dragCatchesCorner();
+}
+function dragCatchesCorner() {
+return Boolean(drag) && WORKSHOP_CORNER_DRAGS.includes(drag.kind);
 }
 function markCorner(corner) {
 const was = cornerUnder;
@@ -75078,11 +75100,20 @@ view,
 redraw();
 return;
 }
-const options = { free: event.altKey, gridMm: gridMm(), gridSnap: gridSnap() };
+const options = {
+free: event.altKey,
+gridMm: gridMm(),
+gridSnap: gridSnap(),
+corners: dragCatchesCorner() ? dragCornersMm() : [],
+};
 if (drag.kind === "vertex") {
-drag.toMm = workshopSnapMm(vertexAnchor(drag), mmOf(event), view, options).point;
+const snap = workshopSnapMm(vertexAnchor(drag), mmOf(event), view, options);
+drag.toMm = snap.point;
+markCorner(snap.corner);
 } else {
-drag.deltaMm = workshopMoveDeltaMm(drag.anchorMm, drag.startMm, mmOf(event), view, options);
+const snap = workshopMoveDeltaMm(drag.anchorMm, drag.startMm, mmOf(event), view, options);
+drag.deltaMm = snap.deltaMm;
+markCorner(snap.corner);
 }
 redraw();
 }
@@ -75162,6 +75193,7 @@ return;
 if (!drag) return;
 const current = drag;
 drag = null;
+markCorner(null);
 if (!current.moved) {
 const adds = current.kind === "objectHandle" && (current.handle.kind === "insert" || current.handle.kind === "extend");
 if (adds) applyObjectHandle(current);

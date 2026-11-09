@@ -27,9 +27,19 @@ import {
   setPlanOrigin,
   setPlanScale,
   wallCornerTargets,
+  wallsOnScheme,
 } from "../src/model.js";
 import { GUIDE_CROSS_PX, draftSnap, snapToCorners } from "../src/render.js";
-import { WORKSHOP_UNIT, workshopHint, workshopSnapMm } from "../src/panels/workshop.js";
+import {
+  WORKSHOP_CORNER_DRAGS,
+  WORKSHOP_UNIT,
+  workshopDragSkipWallIds,
+  workshopHint,
+  workshopMoveAnchorMm,
+  workshopMoveDeltaMm,
+  workshopMoveVertex,
+  workshopSnapMm,
+} from "../src/panels/workshop.js";
 import { strings } from "../src/strings.js";
 import { canvasCornerTargets } from "../src/canvas.js";
 
@@ -114,9 +124,9 @@ test("торец упёртой перегородки — угол, перек�
   assert.equal(cornersMm(cross).length, 4, "у двух стен четыре конца, и все четыре — углы");
 });
 
-test("свои углы названной стены магниту не отдаются", () => {
+test("свои углы названных стен магниту не отдаются", () => {
   const scene = withWalls(bareScene(), ROOM);
-  const own = cornersMm(scene, { skipWallId: scene.wallIds[0] });
+  const own = cornersMm(scene, { skipWallIds: [scene.wallIds[0]] });
   // Первая стена — АБ: её концы (0, 0) и (4000, 0) держат ещё и соседки,
   // поэтому убираются целиком — иначе вершину тянуло бы к собственной стене.
   assert.deepEqual(
@@ -124,6 +134,16 @@ test("свои углы названной стены магниту не отд
     ["В", "Г"],
     "остались углы, за которые эта стена не держится",
   );
+  // Список, а не одно имя (таск 271): в узле цепочки с рукой едет не одна
+  // стена, и каждая уходит из целей целиком.
+  assert.deepEqual(
+    cornersMm(scene, { skipWallIds: [scene.wallIds[0], scene.wallIds[1]] }).map((corner) => corner.letter),
+    ["Г"],
+  );
+  // Пустой список и мусор фильтром не считаются: цели остаются все.
+  for (const options of [{}, { skipWallIds: [] }, { skipWallIds: [null] }, { skipWallIds: "АБ" }]) {
+    assert.equal(cornersMm(scene, options).length, 4, JSON.stringify(options));
+  }
 });
 
 // ——— мера одна, и она в точках экрана ————————————————————————————————
@@ -288,12 +308,17 @@ test("выключенный слой чертежа и некалиброван
 test("подсказки называют новый магнит — правило таска 213", () => {
   // Занятия, где точку ставят рукой, получают строку о магните; проём и
   // «Выделение» — нет: там его нет и самого.
-  for (const tool of ["walls", "objects"]) {
+  // «Выделение» получило ту же строку с таска 271: вершину, стену и вещь под
+  // рукой магнит ловит, и умолчать об этом нельзя. Своих слов для этого не
+  // заведено — правило у магнита одно, и строка остаётся одна.
+  for (const tool of ["walls", "objects", "edit"]) {
     assert.ok(workshopHint(tool, "rect").includes(strings.workshop.hintCorner), tool);
   }
-  for (const tool of ["openings", "edit"]) {
-    assert.equal(workshopHint(tool, "rect").includes(strings.workshop.hintCorner), false, tool);
-  }
+  assert.equal(
+    workshopHint("openings", "rect").includes(strings.workshop.hintCorner),
+    false,
+    "проём садится серединой в стену под курсором — угла ему не надо",
+  );
   // У линейки про магнит сказано своими словами — и в обоих полях.
   assert.ok(strings.measure.hintPlan.includes("угол чертежа"));
   assert.ok(strings.measure.hintDrawing.includes("угол чертежа"));
@@ -313,6 +338,193 @@ test("магнит ничего не пишет в объект (G68)", () => {
   for (const corner of corners) {
     draftSnap([], { x: corner.x + 0.001, y: corner.y }, scheme, view, { corners });
     workshopSnapMm([], at(corner.x, corner.y), view, { corners: cornersMm(scene), gridMm: 500, gridSnap: true });
+  }
+  assert.equal(JSON.stringify(scene.project), before, "притяжка — про руку, в объекте от неё ни одного знака");
+});
+
+// ——— магнит у того, что ведут рукой (таск 271, долг таска 266) ——————————
+//
+// Жест правки шёл мимо разрешителя притяжки: вершину стены тянули, стену и вещь
+// переносили — и ни одна из них угла не ловила. Проверяется три вещи:
+//
+// 1. **Едущая стена своего угла не ловит.** Иначе вершина стояла бы приклеенной
+//    к месту, с которого её повели, а дальний конец схлопнул бы стену в точку.
+//    Кто едет — одна дверь `workshopDragSkipWallIds`, и у вершины это **все**
+//    стены узла, те же, что переставит `workshopMoveVertex`.
+// 2. **Липнет опора переноса** — та же точка, которой взятое садится на узел
+//    сетки (дефект D40) и которой вещь встаёт по клику. Второго правила в этом
+//    жесте нет.
+// 3. **Прежние притяжки целы:** угла рядом нет — прежний узел сетки, Alt —
+//    миллиметр под курсором.
+
+// Одинокая стена не в узлах сетки: по ней видно, что сработал угол, а не сетка.
+const LOOSE = [{ x: 1230, y: 870 }, { x: 1230, y: 1870 }];
+
+function dragScene() {
+  const scene = withWalls(bareScene(), [...ROOM, LOOSE]);
+  return { ...scene, looseId: scene.wallIds[4] };
+}
+
+test("кто едет с рукой, тот своих углов магниту не отдаёт", () => {
+  const scene = dragScene();
+  const walls = wallsOnScheme(scene.project, scene.schemeId);
+  // Одинокая стена: едет она одна.
+  assert.deepEqual(
+    workshopDragSkipWallIds(walls, { kind: "vertex", wallId: scene.looseId, fromMm: at(1230, 870) }),
+    [scene.looseId],
+  );
+  // Узел цепочки: едут **все** стены, чей конец в нём стоит — ровно те, что
+  // переставит `workshopMoveVertex`.
+  const node = at(4000, 0);
+  const riding = workshopDragSkipWallIds(walls, { kind: "vertex", wallId: scene.wallIds[0], fromMm: node });
+  assert.deepEqual(riding.slice().sort(), [scene.wallIds[0], scene.wallIds[1]].slice().sort());
+  assert.equal(workshopMoveVertex(scene.project, scene.schemeId, node, at(3900, 100)).moved, riding.length);
+  // Перенос стены — она сама; вещь не стена, и углы чертежа ей все чужие.
+  assert.deepEqual(workshopDragSkipWallIds(walls, { kind: "wall", wallId: scene.looseId }), [scene.looseId]);
+  assert.deepEqual(workshopDragSkipWallIds(walls, { kind: "object", id: "вещь" }), []);
+  // Кого магнит не касается вовсе — назван списком, а не веткой по месту.
+  assert.deepEqual(WORKSHOP_CORNER_DRAGS, ["vertex", "wall", "object"]);
+  for (const kind of ["opening", "objectHandle"]) {
+    assert.equal(WORKSHOP_CORNER_DRAGS.includes(kind), false, kind);
+    assert.deepEqual(workshopDragSkipWallIds(walls, { kind, wallId: scene.looseId, fromMm: at(1230, 870) }), []);
+  }
+  assert.deepEqual(workshopDragSkipWallIds(walls, null), []);
+  assert.deepEqual(workshopDragSkipWallIds(walls, { kind: "vertex", wallId: scene.looseId }), []);
+});
+
+test("ведомая вершина садится в угол соседней стены", () => {
+  const scene = dragScene();
+  const walls = wallsOnScheme(scene.project, scene.schemeId);
+  const view = viewOf({ zoom: 1 });
+  const drag = { kind: "vertex", wallId: scene.looseId, fromMm: at(1230, 870) };
+  const corners = cornersMm(scene, { skipWallIds: workshopDragSkipWallIds(walls, drag) });
+  const options = { gridMm: 500, gridSnap: true, corners };
+  // Опора направления (кратно 15°) — второй конец своей стены: тот же список,
+  // что собирает `vertexAnchor` в поле.
+  const anchor = [at(1230, 1870)];
+  // Рука в пяти миллиметрах от угла «А»: на зуме 1 это пять точек экрана.
+  const snap = workshopSnapMm(anchor, at(5, 4), view, options);
+  assert.deepEqual(snap.point, { x: 0, y: 0 }, "вершина села в угол соседней стены");
+  assert.equal(snap.corner.letter, "А", "пойманный угол назван — по нему рисуется кольцо");
+  assert.equal(snap.grid, false, "узел сетки молчит: угол занял обе оси");
+  // Прежние притяжки целы: угла рядом нет — прежний узел сетки.
+  const grid = workshopSnapMm(anchor, at(1004, 1003), view, options);
+  assert.deepEqual(grid.point, { x: 1000, y: 1000 });
+  assert.equal(grid.grid, true);
+  assert.equal(grid.corner, null);
+  // Alt — миллиметр под курсором, и ни угла, ни узла.
+  const free = workshopSnapMm(anchor, at(5, 4), view, { ...options, free: true });
+  assert.deepEqual(free.point, { x: 5, y: 4 });
+  assert.equal(free.corner, null);
+});
+
+test("свой угол в цели не идёт, и стена сама в себя не схлопывается", () => {
+  const scene = dragScene();
+  const walls = wallsOnScheme(scene.project, scene.schemeId);
+  const view = viewOf({ zoom: 1 });
+  const drag = { kind: "vertex", wallId: scene.looseId, fromMm: at(1230, 870) };
+  const options = { gridMm: 500, gridSnap: true };
+  // Без фильтра рука в четырёх миллиметрах от **своего** угла возвращает его
+  // же: вершина стояла бы приклеенной к месту, с которого её повели.
+  const stuck = workshopSnapMm([], at(1234, 867), view, { ...options, corners: cornersMm(scene) });
+  assert.deepEqual(stuck.point, { x: 1230, y: 870 }, "так выглядел бы магнит без фильтра");
+  // С фильтром тот же ход руки даёт прежний узел сетки.
+  const corners = cornersMm(scene, { skipWallIds: workshopDragSkipWallIds(walls, drag) });
+  const loose = workshopSnapMm([], at(1234, 867), view, { ...options, corners });
+  assert.deepEqual(loose.point, { x: 1000, y: 1000 });
+  assert.equal(loose.corner, null);
+  // И ни одна цель, оставшаяся у ведомого узла цепочки, не делает едущую стену
+  // точкой: длина у всех едущих остаётся положительной.
+  const node = at(4000, 0);
+  const chain = { kind: "vertex", wallId: scene.wallIds[0], fromMm: node };
+  const riding = workshopDragSkipWallIds(walls, chain);
+  assert.equal(riding.length, 2, "в узле «Б» едут две стены, и обе из целей выходят");
+  const targets = cornersMm(scene, { skipWallIds: riding });
+  assert.deepEqual(
+    targets.map((corner) => corner.letter),
+    ["Г", "Д", "Е"],
+    "у ведомого узла «Б» остаются дальний угол комнаты и концы стены, которая стоит на месте",
+  );
+  for (const target of targets) {
+    const moved = workshopMoveVertex(scene.project, scene.schemeId, node, at(target.x, target.y)).project;
+    for (const wall of wallsOnScheme(moved, scene.schemeId)) {
+      assert.ok(
+        wall.aMm.x !== wall.bMm.x || wall.aMm.y !== wall.bMm.y,
+        "угол «" + target.letter + "» схлопнул стену в точку",
+      );
+    }
+  }
+});
+
+test("перенос ловит угол опорой — той же, которой садится на узел сетки", () => {
+  const scene = dragScene();
+  const walls = wallsOnScheme(scene.project, scene.schemeId);
+  const view = viewOf({ zoom: 1 });
+  const wall = walls.find((item) => item.id === scene.looseId);
+  const anchor = workshopMoveAnchorMm(wall);
+  assert.deepEqual(anchor, { x: 1230, y: 870 }, "опора стены — её первая вершина");
+  const drag = { kind: "wall", wallId: scene.looseId };
+  const corners = cornersMm(scene, { skipWallIds: workshopDragSkipWallIds(walls, drag) });
+  const options = { gridMm: 500, gridSnap: true, corners };
+  // Ход руки такой, что опора приходит в пяти точках от угла «В» (4000, 3000).
+  const press = at(2000, 2000);
+  const cursor = at(press.x + (4005 - anchor.x), press.y + (2996 - anchor.y));
+  const snap = workshopMoveDeltaMm(anchor, press, cursor, view, options);
+  assert.deepEqual(snap.deltaMm, { x: 2770, y: 2130 });
+  assert.equal(snap.corner.letter, "В");
+  assert.deepEqual(
+    { x: anchor.x + snap.deltaMm.x, y: anchor.y + snap.deltaMm.y },
+    { x: 4000, y: 3000 },
+    "опора села ровно в угол, а не рядом с ним",
+  );
+  // Своих углов везомая стена не ловит: без фильтра она прилипала бы к месту,
+  // с которого её повезли.
+  const near = at(press.x + 4, press.y - 3);
+  assert.deepEqual(workshopMoveDeltaMm(anchor, press, near, view, { ...options, corners: cornersMm(scene) }).deltaMm, {
+    x: 0,
+    y: 0,
+  });
+  assert.deepEqual(workshopMoveDeltaMm(anchor, press, near, view, options).deltaMm, { x: -230, y: 130 });
+  // Alt — чистый ход руки: ни угла, ни узла.
+  const free = workshopMoveDeltaMm(anchor, press, cursor, view, { ...options, free: true });
+  assert.deepEqual(free.deltaMm, { x: 2775, y: 2126 });
+  assert.equal(free.corner, null);
+});
+
+test("вещь переносом встаёт в угол тем же местом, которым её кладёт клик", () => {
+  const scene = dragScene();
+  const walls = wallsOnScheme(scene.project, scene.schemeId);
+  const view = viewOf({ zoom: 1 });
+  const object = { shape: "rect", atMm: { x: 1230, y: 870 }, widthMm: 600, depthMm: 400, turnDeg: 0 };
+  const anchor = workshopMoveAnchorMm(object);
+  assert.deepEqual(anchor, { x: 1230, y: 870 }, "опора прямоугольника — его середина (дефект D40)");
+  // Вещь не стена: из целей не уходит ни один угол.
+  const corners = cornersMm(scene, { skipWallIds: workshopDragSkipWallIds(walls, { kind: "object", id: "вещь" }) });
+  assert.equal(corners.length, 6, "четыре угла комнаты и два конца одинокой стены");
+  const press = at(2000, 2000);
+  const cursor = at(press.x + (4 - anchor.x), press.y + (3 - anchor.y));
+  const snap = workshopMoveDeltaMm(anchor, press, cursor, view, { gridMm: 500, gridSnap: true, corners });
+  assert.deepEqual(
+    { x: anchor.x + snap.deltaMm.x, y: anchor.y + snap.deltaMm.y },
+    { x: 0, y: 0 },
+    "середина вещи села в угол — туда же, куда её кладёт клик",
+  );
+  assert.equal(snap.corner.letter, "А");
+});
+
+test("магнит ведомого в объект не пишет ни знака (G68)", () => {
+  const scene = dragScene();
+  const walls = wallsOnScheme(scene.project, scene.schemeId);
+  const view = viewOf({ zoom: 1 });
+  const before = JSON.stringify(scene.project);
+  for (const drag of [
+    { kind: "vertex", wallId: scene.looseId, fromMm: at(1230, 870) },
+    { kind: "wall", wallId: scene.looseId },
+    { kind: "object", id: "вещь" },
+  ]) {
+    const corners = cornersMm(scene, { skipWallIds: workshopDragSkipWallIds(walls, drag) });
+    workshopSnapMm([], at(5, 4), view, { gridMm: 500, gridSnap: true, corners });
+    workshopMoveDeltaMm(at(1230, 870), at(2000, 2000), at(775, 1130), view, { gridMm: 500, gridSnap: true, corners });
   }
   assert.equal(JSON.stringify(scene.project), before, "притяжка — про руку, в объекте от неё ни одного знака");
 });
