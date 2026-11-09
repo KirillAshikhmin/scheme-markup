@@ -159,6 +159,7 @@ import {
   rgbToHex,
   wallHeightInheritedMm,
   wallHeightValueMm,
+  wallCornerTargets,
   wallLengthMm,
   wallName,
   wallOwnHeightMm,
@@ -224,11 +225,13 @@ import {
   drawFont,
   drawMeasure,
   drawPathHandles,
+  drawSnapCorner,
   hitPathHandle,
   pathEditHandles,
   pathVertexHandles,
   planToScreen,
   screenToPlan,
+  snapToCorners,
 } from "../render.js";
 import {
   uiApply,
@@ -631,27 +634,48 @@ export function workshopPlanPointScreen(point, placement, view) {
  * Порядок разрешения споров назван здесь целиком:
  *
  *   `free` (зажатый Alt) — никакой притяжки, миллиметр под курсором;
+ *   угол чертежа рядом (таск 266, G386) — **он старше узла сетки**: это
+ *     готовая точка, нарисованная кружком с буквой, и целились именно в неё.
+ *     Узел сетки, перебей он угол, уводил бы вершину от соседней стены как раз
+ *     там, где стены и сходятся — на чертеже, обведённом по чужому плану, узлы
+ *     с углами не совпадают;
  *   сетка включена — узел сетки и больше ничего: точка на узле уже точная, и
  *     двигать её магнитом угла значило бы снять её с узла, который человек
  *     перед собой видит;
  *   сетка выключена — прежние магниты холста целиком (`render.draftSnap`):
- *     направляющие по вершинам этой же цепочки и угол кратно 15°.
+ *     направляющие по вершинам этой же цепочки и направление кратно 15°.
  *
  * Выключатель сетки нужен ровно за тем, за чем просил заказчик рисовать по
  * чужому плану: там стены стоят не по круглым числам, и узел увёл бы вершину
  * с линии, которую обводят.
+ *
+ * Магнит угла живёт в одной мере на оба поля (`render.snapToCorners`, порог в
+ * точках экрана), а цели ему приходит доводом `options.corners` — своего
+ * списка углов у чертежа нет.
  */
 export function workshopSnapMm(pointsMm, cursorMm, view, options = {}) {
   const points = Array.isArray(pointsMm) ? pointsMm : [];
   if (options.free) {
     const shown = draftSnap(points, cursorMm, WORKSHOP_UNIT, view, { free: true });
-    return { point: workshopRoundMm(cursorMm), angle: shown.angle, snapped: false, guides: [], grid: false };
+    return { point: workshopRoundMm(cursorMm), angle: shown.angle, snapped: false, guides: [], grid: false, corner: null };
+  }
+  const caught = snapToCorners(options.corners, cursorMm, WORKSHOP_UNIT, view, options);
+  if (caught.corner) {
+    const shown = draftSnap(points, caught.point, WORKSHOP_UNIT, view, { free: true });
+    return {
+      point: workshopRoundMm(caught.point),
+      angle: shown.angle,
+      snapped: false,
+      guides: [],
+      grid: false,
+      corner: caught.corner,
+    };
   }
   const gridMm = Number(options.gridMm) || 0;
   if (options.gridSnap && gridMm > 0) {
     const node = { x: Math.round(cursorMm.x / gridMm) * gridMm, y: Math.round(cursorMm.y / gridMm) * gridMm };
     const shown = draftSnap(points, node, WORKSHOP_UNIT, view, { free: true });
-    return { point: workshopRoundMm(node), angle: shown.angle, snapped: false, guides: [], grid: true };
+    return { point: workshopRoundMm(node), angle: shown.angle, snapped: false, guides: [], grid: true, corner: null };
   }
   const snap = draftSnap(points, cursorMm, WORKSHOP_UNIT, view, {});
   return {
@@ -660,6 +684,7 @@ export function workshopSnapMm(pointsMm, cursorMm, view, options = {}) {
     snapped: snap.snapped,
     guides: snap.guides,
     grid: false,
+    corner: null,
   };
 }
 
@@ -1808,13 +1833,23 @@ export function workshopFitView(extent, viewport, max = WORKSHOP_ZOOM_MAX) {
  * поля, — и шесть копий в шести подсказках разошлись бы на первой же правке.
  * Привычные слова занятий при этом не переписаны ни в одном: про колесо и
  * Shift там сказано своим языком с самого начала (правило таска 182).
+ *
+ * **Про магнит угла — тем же приёмом** (таск 266, G386, `hintCorner`), но не ко
+ * всем: он дописывается занятиям, которые **ставят точку рукой**. У проёма
+ * ловить угол нечего — он садится серединой в стену под курсором, — а в
+ * «Выделении» рукой ничего не ставят. У линейки про магнит сказано своими
+ * словами (`measure.hintDrawing`), и второй раз повторять его не надо.
  */
 export function workshopHint(tool, way, measuring = false) {
   // Линейка (таск 237) — поверх занятий: рука занята отрезком, и про стены с
   // проёмами рассказывать нечего. Ход по полю при этом тот же, и строка о нём
   // остаётся: вид возят из любого занятия.
   if (measuring) return strings.measure.hintDrawing + " " + strings.workshop.hintView;
-  return workshopHintSubject(tool, way) + " " + strings.workshop.hintView;
+  // Кому не дописывается: проёму (садится серединой в стену под курсором) и
+  // «Выделению» (рукой там ничего не ставят). Занятию, которого не узнали,
+  // достаются слова стен — и магнит вместе с ними: строка у них одна целиком.
+  const corner = tool === "openings" || tool === "edit" ? "" : " " + strings.workshop.hintCorner;
+  return workshopHintSubject(tool, way) + corner + " " + strings.workshop.hintView;
 }
 
 function workshopHintSubject(tool, way) {
@@ -2642,6 +2677,46 @@ function createWorkshop({ api, hosts }) {
     return getState().gridSnap !== false;
   }
 
+  // ——— магнит «от угла до угла» (таск 266, G386) ———
+  //
+  // Что считается углом, решает модель (`wallCornerTargets` — те же узлы, что
+  // носят буквы), порог в точках экрана — одна мера на два поля
+  // (`render.snapToCorners`), а здесь только две вещи: кому их отдавать и что
+  // человек увидит.
+  //
+  // **Выключенный слой стен углов не даёт** — тем же правилом, которым он не
+  // даёт выделить стену: ловить то, чего на поле не видно, нельзя.
+
+  function cornersMm() {
+    return layerOn("drawingShown") ? wallCornerTargets(project(), schemeId) : [];
+  }
+
+  // Угол **под рукой**, а не часть черновика: кольцо появляется до первого
+  // клика (предпросмотра линии в эту минуту ещё нет) и уходит с рукой. В объект
+  // не идёт ничем (G68) — это ответ на «куда сядет клик».
+  let cornerUnder = null;
+
+  // Жив ли магнит в этом занятии. У проёма угол ловить нечего — он садится
+  // серединой в стену под курсором, — а в «Выделении» рукой ничего не ставят.
+  function cornerMagnetOn() {
+    return measuring() || Boolean(anchorPick) || tool === "walls" || tool === "objects";
+  }
+
+  /** Запомнить пойманный угол; `true` — кольцо сменило место и нужен кадр. */
+  function markCorner(corner) {
+    const was = cornerUnder;
+    cornerUnder = corner || null;
+    if (!was && !cornerUnder) return false;
+    if (!was || !cornerUnder) return true;
+    return was.x !== cornerUnder.x || was.y !== cornerUnder.y;
+  }
+
+  /** Кольцо пойманного угла поверх кадра: цвет — у того, кто целится. */
+  function paintCorner() {
+    if (!cornerUnder || !cornerMagnetOn()) return;
+    drawSnapCorner(ctx, screenOf(cornerUnder), measuring() ? MEASURE_COLOR : WORKSHOP_ACCENT);
+  }
+
   // ——— масштаб и вид ———
 
   function viewport() {
@@ -2727,6 +2802,7 @@ function createWorkshop({ api, hosts }) {
       free,
       gridMm: gridMm(),
       gridSnap: gridSnap(),
+      corners: cornersMm(),
     });
   }
 
@@ -2761,14 +2837,21 @@ function createWorkshop({ api, hosts }) {
   function measureSnapMm(pointMm, free) {
     const ends = measureEnds("drawing", measureKey());
     const points = ends && ends.live && ends.from ? [ends.from] : [];
-    return workshopSnapMm(points, pointMm, view, { free, gridMm: gridMm(), gridSnap: gridSnap() }).point;
+    return workshopSnapMm(points, pointMm, view, {
+      free,
+      gridMm: gridMm(),
+      gridSnap: gridSnap(),
+      corners: cornersMm(),
+    });
   }
 
   /** Клик линейкой: первый конец, второй конец, третий — новый отрезок. */
   function measureClick(event) {
     const key = measureKey();
     if (!key) return;
-    measureAdd("drawing", key, measureSnapMm(mmOf(event), event.altKey));
+    const snap = measureSnapMm(mmOf(event), event.altKey);
+    markCorner(snap.corner);
+    measureAdd("drawing", key, snap.point);
     redraw();
   }
 
@@ -2776,8 +2859,11 @@ function createWorkshop({ api, hosts }) {
   function measureHover(event) {
     const key = measureKey();
     if (!key) return;
-    const at = onField(event) ? measureSnapMm(mmOf(event), event.altKey) : null;
-    if (measureAim("drawing", key, at)) redraw();
+    const snap = onField(event) ? measureSnapMm(mmOf(event), event.altKey) : null;
+    // Кольцо магнита просит кадр само: угол под рукой меняется и до первого
+    // клика, когда у мерки второго конца ещё нет и кадра она не просит.
+    const moved = markCorner(snap ? snap.corner : null);
+    if (measureAim("drawing", key, snap ? snap.point : null) || moved) redraw();
   }
 
   /** Отрезок мерки поверх кадра: целые миллиметры чертежа. */
@@ -3969,7 +4055,11 @@ function createWorkshop({ api, hosts }) {
       // Точка — у призрака (таск 168): он её показал, и до полуметра расхождения
       // между показанным и вставшим набиралось на одной дрогнувшей руке
       // (`workshopPlacePointMm`).
-      else placeObject(workshopPlacePointMm(objectGhost, event.altKey, snapOf(mmOf(event), event.altKey).point), null);
+      else {
+        const snap = snapOf(mmOf(event), event.altKey);
+        markCorner(snap.corner);
+        placeObject(workshopPlacePointMm(objectGhost, event.altKey, snap.point), null);
+      }
       return;
     }
     // «Правка» по пустому месту снимает выделение — как клик по пустому месту
@@ -3979,6 +4069,7 @@ function createWorkshop({ api, hosts }) {
 
   function addVertex(event) {
     const snap = snapOf(mmOf(event), event.altKey);
+    markCorner(snap.corner);
     if (!draft) {
       draft = { points: [snap.point], cursor: snap.point, snap };
       paint();
@@ -4140,20 +4231,30 @@ function createWorkshop({ api, hosts }) {
       return;
     }
     if (anchorPick) {
-      const next = onField(event) ? snapOf(mmOf(event), event.altKey).point : null;
+      const snap = onField(event) ? snapOf(mmOf(event), event.altKey) : null;
+      const next = snap ? snap.point : null;
       const was = anchorPick.pointMm;
       const moved = Boolean(next) !== Boolean(was) || (next && was && (next.x !== was.x || next.y !== was.y));
       anchorPick = { pointMm: next };
-      if (moved) redraw();
+      if (markCorner(snap ? snap.corner : null) || moved) redraw();
       return;
     }
     if (tool === "walls" || objectDrawn()) {
       // Предпросмотра до первого клика нет — как и на холсте: тянуть резинку
-      // не от чего.
-      if (!draft) return;
+      // не от чего. **Кольцо магнита при этом показывается** (таск 266): первая
+      // вершина садится в угол ровно так же, как все следующие, и прыгать молча
+      // она не должна — кадр заказывается только на смену угла под рукой.
+      // Рука ушла в колонку — кольца быть не должно: магнит отвечает на «куда
+      // сядет клик», а клика там не будет.
+      if (!draft) {
+        const caught = onField(event) ? snapOf(mmOf(event), event.altKey).corner : null;
+        if (markCorner(caught)) redraw();
+        return;
+      }
       const snap = snapOf(mmOf(event), event.altKey);
       draft.cursor = snap.point;
       draft.snap = snap;
+      markCorner(onField(event) ? snap.corner : null);
       redraw();
       return;
     }
@@ -4176,11 +4277,12 @@ function createWorkshop({ api, hosts }) {
     if (tool === "objects") {
       // Рука ушла с поля (курсор в колонке) — призрака нет: рисовать вещь там,
       // куда клик её не поставит, значило бы обещать невозможное.
-      const next = onField(event) ? snapOf(mmOf(event), event.altKey).point : null;
+      const snap = onField(event) ? snapOf(mmOf(event), event.altKey) : null;
+      const next = snap ? snap.point : null;
       const was = objectGhost && objectGhost.pointMm;
       const moved = Boolean(next) !== Boolean(was) || (next && was && (next.x !== was.x || next.y !== was.y));
       objectGhost = next ? { pointMm: next, free: Boolean(event.altKey) } : null;
-      if (moved) redraw();
+      if (markCorner(snap ? snap.corner : null) || moved) redraw();
       return;
     }
     const pick = workshopPick(project(), schemeId, mmOf(event), view, selected, hiddenObjects());
@@ -4726,6 +4828,9 @@ function createWorkshop({ api, hosts }) {
     paintObjectHandles();
     paintDraft();
     paintGuides(box);
+    // Кольцо пойманного угла — поверх чертежа и шкалы, как и мерка: это ответ
+    // руке, а не часть чертежа (таск 266).
+    paintCorner();
     // Отрезок линейки — поверх и шкалы: это мерка, а не часть чертежа, и в
     // лист ГОСТ с выгрузками она не уходит (их рисует `drawDrawing`).
     if (measuring()) paintMeasure();
@@ -5855,6 +5960,9 @@ function createWorkshop({ api, hosts }) {
     // Линейку включили или убрали (таск 237): меняются и подсказка, и кадр.
     if ("measuring" in changed) {
       measureWanted = state.measuring === true;
+      // Кольцо магнита к прежней руке больше не относится: занятие сменилось
+      // целиком (таск 266).
+      markCorner(null);
       sync();
     }
     // Слои и притяжка живут в «Интерфейсе» (таск 187, G281), а рисует их поле:
