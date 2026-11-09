@@ -490,7 +490,10 @@ function mountRoomsPanel(host, api) {
     // просмотра их читают контуром на плане, а завести новое нечем.
     addRow.hidden = !appAllows("editRooms", state);
     if (!state.project) {
-      list.replaceChildren(uiEl("p", { class: "panel__empty", text: strings.projects.empty }));
+      // «Объект не открыт», а не «Объектов пока нет»: про базу колонка не
+      // знает ничего, и пока список читается, объектов в ней может быть
+      // сколько угодно (живой прогон таска 268).
+      list.replaceChildren(uiEl("p", { class: "panel__empty", text: strings.projects.none }));
       setSectionBadge(SECTION_IDS.rooms, "");
       input.disabled = true;
       addButton.disabled = true;

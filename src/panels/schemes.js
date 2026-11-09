@@ -833,7 +833,9 @@ function mountSchemesPanel(host, api) {
       hint.textContent = editable
         ? project
           ? strings.schemes.addHint
-          : strings.projects.empty
+          : // Открытого объекта нет — а есть ли он в базе, колонка не знает
+            // (живой прогон таска 268).
+            strings.projects.none
         : hints
           ? strings.mobile.viewOnly
           : "";

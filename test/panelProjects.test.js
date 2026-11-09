@@ -19,10 +19,11 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { projectListItems } from "../src/panels/projects.js";
+import { projectListAfterSave, projectListItems } from "../src/panels/projects.js";
 
-const read = () =>
-  readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "src", "panels", "projects.js"), "utf8");
+const srcDir = join(dirname(fileURLToPath(import.meta.url)), "..", "src");
+const read = () => readFileSync(join(srcDir, "panels", "projects.js"), "utf8");
+const readSrc = (...parts) => readFileSync(join(srcDir, ...parts), "utf8");
 import { strings } from "../src/strings.js";
 
 test("непрочитанный список и пустая база говорят разными словами", () => {
@@ -89,6 +90,79 @@ test("шапка рисуется до того, как база ответил�
     text.indexOf("  renderList();\n\n  (async () => {") < text.indexOf("await openStore()"),
     "кадр рисуется после открытия базы, а не до",
   );
+});
+
+// ——— живой прогон таска 268 ————————————————————————————————————————————————
+//
+// Прогон собранной страницы в своём Chrome показал, что правило D75 держит не
+// везде. Три случая ниже найдены глазами, а не рассуждением.
+
+test("отказ чтения — это не пустая база", () => {
+  // Случай найден живьём: чтение списка роняется (транзакция отменяется), а
+  // страница показывает «Объектов пока нет» и окно «Начнём с объекта» — при
+  // двух целых объектах в базе. Отказ, выданный за пустоту, — тот же обман,
+  // ради которого затевался таск 223.
+  assert.equal(projectListItems({ known: null, failed: true, id: "" }).empty, strings.projects.unread);
+  assert.notEqual(strings.projects.unread, strings.projects.empty);
+  assert.notEqual(strings.projects.unread, strings.projects.reading);
+  // Пока читают — «читаем»; отказа ещё не было.
+  assert.equal(projectListItems({ known: null, id: "" }).empty, strings.projects.reading);
+  // Прежний список при отказе остаётся на месте: слова о пустоте не нужны.
+  const stale = projectListItems({ known: [{ id: "b2", name: "Белый дом" }], failed: true, id: "" });
+  assert.deepEqual(stale.items, [{ id: "b2", name: "Белый дом" }]);
+});
+
+test("чтение, которое не состоялось, список не трогает", () => {
+  // Правило живёт в двух местах, и оба держатся по исходнику: база отдаёт
+  // `null` вместо пустого списка, панель на `null` ничего не переписывает и
+  // не поднимает окно первого запуска.
+  const store = readSrc("store.js");
+  const list = store.slice(store.indexOf("export async function listProjects"));
+  assert.match(
+    list.slice(0, list.indexOf("}")),
+    /if \(!read\.ok && storeModeValue === "idb"\) return null;/,
+    "отказ чтения снова выдаётся за пустую базу",
+  );
+  const panel = read();
+  const refresh = panel.slice(panel.indexOf("async function refreshList"), panel.indexOf("Объект появился в состоянии"));
+  assert.match(refresh, /if \(list\) known = list;/, "непрочитанный список снова затирает прежний");
+  assert.match(panel, /else if \(known\) showWelcome\(\);/, "окно первого запуска снова встаёт на непрочитанном списке");
+});
+
+test("записанный объект из списка не пропадает", () => {
+  // Случай найден живьём под медленной базой: объект пришёл файлом, его
+  // записали, а в списке его нет — перечитка ещё идёт. Переключились на
+  // соседний объект — и принесённый пропал из шапки до конца перечитки.
+  const project = { id: "c3", name: "Белый дом", updatedAt: "2026-11-09T10:00:00Z", schemes: [{}], marks: [{}, {}] };
+  const grown = projectListAfterSave([{ id: "a1", name: "Городские сады" }], project);
+  assert.deepEqual(grown, [
+    { id: "c3", name: "Белый дом", updatedAt: "2026-11-09T10:00:00Z", schemes: 1, marks: 2 },
+    { id: "a1", name: "Городские сады" },
+  ]);
+  // Знакомая строка обновляется на месте, порядок не едет.
+  const same = projectListAfterSave([{ id: "a1", name: "Старое имя" }, { id: "c3", name: "Белый дом" }], {
+    ...project,
+    id: "a1",
+    name: "Городские сады",
+  });
+  assert.equal(same[0].name, "Городские сады");
+  assert.equal(same[1].id, "c3");
+  // Непрочитанный список остаётся непрочитанным: «в базе он один» мы не знаем.
+  assert.equal(projectListAfterSave(null, project), null);
+});
+
+test("колонки не говорят о базе того, чего не знают", () => {
+  // «Объектов пока нет» — слова прочитанной базы. Колонки помещений и схем
+  // говорили ими о другом: нет открытого объекта. Под медленной базой это
+  // выходило на экран при двух целых объектах в ней.
+  for (const file of [["panels", "rooms.js"], ["panels", "schemes.js"]]) {
+    assert.doesNotMatch(
+      readSrc(...file),
+      /strings\.projects\.empty/,
+      file.join("/") + ": колонка снова называет пустой базой отсутствие открытого объекта",
+    );
+  }
+  assert.notEqual(strings.projects.none, strings.projects.empty);
 });
 
 test("список перечитывается, когда объект пришёл со стороны", () => {
