@@ -753,6 +753,22 @@ test("плашка окна выбора отзывается на поиск, �
 // Слияние двух файлов напарников. Встроенного типа нет ни в одном
 // справочнике, и без прямой оговорки слияние посчитало бы плашки метками с
 // висячей ссылкой на тип — то есть выбросило бы их все.
+//
+// **Время правки проставлено руками, и спор проверяется с двух сторон** (таск
+// 272). Счётчики у разошедшихся копий одни, поэтому наша плашка и розетка
+// напарника заводятся под одним номером, и одна из двух сущностей переезжает
+// на свободный (`mergeIdClash`). Кто переезжает — решает `updatedAt`, а здесь
+// его брали часы: наш объект собирался первым, и стоило миллисекундной
+// границе лечь между нашей правкой и постановкой розетки, спор выигрывал
+// напарник, переезжала **плашка**, а тест искал её по прежнему номеру — и
+// находил розетку. Отсюда `'10' !== 'comment'` в CI: «10» — это номер типа
+// «Р». Падало примерно раз на двадцать прогонов под нагрузкой; сборка при
+// этом работала верно.
+//
+// Поэтому плашка ищется по отчёту о переезде (`reissued`), а не по номеру,
+// который слияние вправе сменить, и оба исхода спора проверяются поимённо:
+// выбросить плашку или подменить ей встроенный тип слияние не вправе ни в
+// одном из них.
 test("G68: слияние файлов напарников не теряет плашек", () => {
   let base = createProject({ name: "Общий объект" });
   const scheme = addScheme(base, { name: "1 этаж", width: 1000, height: 500 });
@@ -773,18 +789,37 @@ test("G68: слияние файлов напарников не теряет п
     kind: "point",
     points: [{ x: 0.7, y: 0.7 }],
   });
+  assert.equal(mine.mark.id, partner.mark.id, "пример не тот: номера разошлись сами, столкновения нет");
 
-  const result = mergeProjects(ours, partner.project, base);
-  const plate = findMark(result.project, mine.mark.id);
-  assert.ok(plate, "плашка выброшена слиянием как метка без типа");
-  assert.equal(plate.typeId, COMMENT_TYPE_ID);
-  assert.equal(markCommentText(plate), "Моё замечание");
-  assert.equal(labelOf(result.project, plate.id), "Коммент1");
-  assert.equal(
-    result.conflicts.some((item) => item.code === "danglingRef" && item.entity === "marks"),
-    false,
-    "встроенный тип принят за висячую ссылку",
-  );
-  // Розетка напарника приехала рядом — слияние отработало обычным порядком.
-  assert.equal(result.project.marks.length, 2);
+  const early = "2026-11-09T10:00:00.000Z";
+  const late = "2026-11-09T10:05:00.000Z";
+  for (const [ourAt, theirAt] of [
+    [late, early],
+    [early, late],
+  ]) {
+    const moves = ourAt > theirAt ? "переезжает розетка напарника" : "переезжает наша плашка";
+    const result = mergeProjects({ ...ours, updatedAt: ourAt }, { ...partner.project, updatedAt: theirAt }, base);
+    // Номер сущности человеку не виден, и слияние вправе его сменить —
+    // сказано об этом отчётом `reissued`, где `side` называет того, чья
+    // сущность переехала. Переезжает всегда проигравший спор.
+    assert.equal(result.reissued.length, 1, "столкновение номеров не разведено: " + moves);
+    assert.equal(result.reissued[0].entity, "marks", moves);
+    assert.equal(result.reissued[0].side, ourAt > theirAt ? "theirs" : "ours", "переехала не та сторона: " + moves);
+    const moved = result.reissued.find(
+      (item) => item.entity === "marks" && item.side === "ours" && item.was === mine.mark.id,
+    );
+    const plate = findMark(result.project, moved ? moved.now : mine.mark.id);
+    assert.ok(plate, "плашка выброшена слиянием как метка без типа: " + moves);
+    assert.equal(markIsComment(plate), true, "плашка перестала быть плашкой: " + moves);
+    assert.equal(plate.typeId, COMMENT_TYPE_ID, moves);
+    assert.equal(markCommentText(plate), "Моё замечание", moves);
+    assert.equal(labelOf(result.project, plate.id), "Коммент1", moves);
+    assert.equal(
+      result.conflicts.some((item) => item.code === "danglingRef" && item.entity === "marks"),
+      false,
+      "встроенный тип принят за висячую ссылку: " + moves,
+    );
+    // Розетка напарника приехала рядом — слияние отработало обычным порядком.
+    assert.equal(result.project.marks.length, 2, moves);
+  }
 });
