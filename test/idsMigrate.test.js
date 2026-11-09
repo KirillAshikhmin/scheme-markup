@@ -95,6 +95,17 @@ function stable(project) {
   );
 }
 
+// Чей тип у метки, названный так, чтобы это **не зависело от номеров**: код
+// типа справочника, встроенный ключ плашки или честное «без типа». Сравнение
+// до и после открытия по этой строке ловит и гашение ссылки, и подмену
+// встроенного типа номером живого.
+function typeSaid(project, mark) {
+  const type = (project.markTypes || []).find((item) => item.id === mark.typeId);
+  if (type) return "код " + type.code;
+  if (mark.typeId === "comment") return "встроенная плашка";
+  return "без типа " + String(mark.typeId);
+}
+
 const LEGACY = [
   "legacy-project.json",
   "legacy-views-project.json",
@@ -164,12 +175,25 @@ for (const name of LEGACY) {
         project.marks.map((mark, index) => String(index + 1)),
         "метки получили не 1…N подряд",
       );
-      // Ссылки целы: у каждой метки живая схема и живой тип.
+      // Ссылки целы: у каждой метки живая схема.
       for (const mark of project.marks) {
         assert.ok(project.schemes.some((scheme) => scheme.id === mark.schemeId), "метка осталась без схемы");
-        const known = project.markTypes.some((type) => type.id === mark.typeId) || mark.typeId === "comment";
-        assert.ok(known, "метка осталась без типа");
       }
+      // И тип у метки **тот же**, а не какой-нибудь живой (долг таска 272).
+      // Прежняя проверка «тип найден или это `comment`» поймала бы гашение
+      // встроенного типа в `ID_GONE`, но не подмену его номером живого типа —
+      // а это молча перекрашенная плашка: `typeId` «10» в объекте выглядит
+      // исправной ссылкой на тип «Р».
+      assert.deepEqual(
+        project.marks.map((mark) => typeSaid(project, mark)),
+        legacy.marks.map((mark) => typeSaid(legacy, mark)),
+        "тип метки после открытия не тот",
+      );
+      assert.deepEqual(
+        project.marks.map((mark) => typeSaid(project, mark)).filter((said) => said.startsWith("без типа")),
+        [],
+        "метка осталась без типа",
+      );
       // Счётчик **каждого вида** доведён до последнего выданного номера, а
       // общего счётчика не осталось ни одного (ADR 038).
       assert.equal(
@@ -682,4 +706,17 @@ test("G391: битая ссылка объекта поры uuid остаётс�
     1,
     "жёлтая строка про удалённое устройство пропала",
   );
+
+  // **Второе условие гашения, и оно про опции.** Адрес гасится только там, где
+  // метки объекта **были пронумерованы**: аксессуарная часть адреса и номер
+  // метки жили в одном числовом пространстве. У поры uuid адресами были
+  // девятизначные хэши, и короткое число в опциях адресом не являлось вовсе —
+  // это выбор человека («задержка 5», значение списка «22.5»), и погасить его
+  // значило бы переписать опцию молча. Сними условие — и весь прогон
+  // останется зелёным, если этого не проверить здесь.
+  const optionsWere = legacy.logicBindings[0].options;
+  const short = String(optionsWere.excludeAccessoriesId);
+  assert.ok(/^[1-9][0-9]*$/.test(short) && Number(short) < 1000, "пример не тот: в опциях нет короткого числа");
+  assert.ok(String(optionsWere.motion1).startsWith(short + "."), "пример не тот: в опциях нет формы адреса");
+  assert.deepEqual(stored.logicBindings[0].options, optionsWere, "опции объекта поры uuid погашены или переписаны");
 });

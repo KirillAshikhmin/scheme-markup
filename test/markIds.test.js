@@ -41,6 +41,7 @@ import {
   ID_COUNTER_SHARED_KEY,
   ID_KEY_PROBLEM_CODES,
   ID_OWNER_KEYS,
+  ID_OWNER_REFS,
   acceptProblem,
   acceptedProblems,
   addCategory,
@@ -60,6 +61,7 @@ import {
   addToGroup,
   addType,
   addWall,
+  applyRoomOutlines,
   createProject,
   deleteCategory,
   deleteEquipment,
@@ -80,6 +82,7 @@ import {
   findMark,
   findOpening,
   findRoom,
+  findScenario,
   idCounterKey,
   idNumberOf,
   idsMigrate,
@@ -90,6 +93,8 @@ import {
   setMarkControls,
   setMarkDevice,
   setMarkNumber,
+  setMarkObject,
+  setMarkWall,
   splitWall,
   validate,
 } from "../src/model.js";
@@ -98,12 +103,18 @@ import { strings } from "../src/strings.js";
 const isNumbered = (id) => idNumberOf(id) !== null;
 const counterOf = (project, collection) => Number(project.counters[idCounterKey(collection)]) || 0;
 
+// Сущности вида — своим обходом: направляющие лежат внутри схем, остальные
+// коллекцией верхнего уровня.
+function listOf(project, collection) {
+  return collection === "guides"
+    ? (project.schemes || []).flatMap((scheme) => scheme.guides || [])
+    : project[collection] || [];
+}
+
 // Самый большой занятый номер вида — считается здесь своим обходом, а не
 // дверью модели: иначе критерий сверялся бы сам с собой.
 function topOf(project, collection) {
-  const list = collection === "guides"
-    ? (project.schemes || []).flatMap((scheme) => scheme.guides || [])
-    : project[collection] || [];
+  const list = listOf(project, collection);
   let top = 0;
   for (const item of list) {
     const number = idNumberOf(item && item.id);
@@ -126,9 +137,11 @@ function assertCounters(project, what) {
   }
 }
 
-// Объект со схемой, помещением, стеной, проёмом и вещью чертежа.
-function house() {
-  let project = createProject({ name: "Номера" });
+// Объект со схемой, помещением, стеной, проёмом и вещью чертежа. `base` —
+// готовый объект вместо свежего (им пользуется фикстура со всеми ссылками,
+// которой нужны номера, разведённые по видам).
+function house(base) {
+  let project = base || createProject({ name: "Номера" });
   const scheme = addScheme(project, { name: "1 этаж", width: 1000, height: 800 });
   project = scheme.project;
   const room = addRoom(project, "Кухня");
@@ -519,6 +532,76 @@ test("датчик открытия не пересаживается на др�
   assert.equal(findOpening(second.project, doorOf(second.project)), null, "датчик пересел на другую дверь");
 });
 
+// **Счётчик прикрывает номер, пока сущность жива; занятый номер — пока она
+// есть.** Счётчик теряется: объект собран руками, пришёл ссылкой без
+// `counters`, слит из двух. Выдать номер поверх занятого — значит сшить две
+// разные сущности в одну, самая дорогая из поломок (`idFloors` в модели), и
+// проверяется это у **каждой** двери: промахнись одна видом или не спроси
+// занятый номер — новая сущность встала бы поверх живой.
+test("счётчики потеряны — ни одна дверь не выдаёт номер поверх занятого", () => {
+  for (const door of ID_DOORS) {
+    const collection = door.collection || door.what;
+    const scene = house();
+    const first = door.make(scene.project, scene, 0);
+    const top = topOf(first.project, collection);
+    assert.ok(top > 0, door.what + ": пример не тот, занятых номеров нет");
+
+    // Объект без счётчиков — так он приходит собранным руками и слитым.
+    const lost = { ...first.project, counters: {} };
+    const second = door.make(lost, scene, 1);
+    assert.ok(
+      idNumberOf(second.id) > top,
+      door.what + ": номер выдан поверх занятого (" + second.id + " при занятом " + top + ")",
+    );
+    // И ни одного номера, занятого дважды: сущности не сшились.
+    const ids = listOf(second.project, collection).map((item) => item.id);
+    assert.equal(new Set(ids).size, ids.length, door.what + ": один номер достался двум сущностям");
+    // Счётчик своего вида при этом встал на выданное — второй раз этот номер
+    // не выйдет. Соседние виды остаются без счётчиков нарочно: команда правит
+    // счётчик только своего вида, и это её право.
+    assert.ok(
+      counterOf(second.project, collection) >= idNumberOf(second.id),
+      door.what + ": счётчик вида не догнал выданный номер",
+    );
+  }
+});
+
+// Свой идентификатор вызывающего принимается **только** свободным номером
+// (ADR 038) — и обязан пройти через счётчик своего вида. Прими его молча, и
+// счётчик останется позади: занятый номер прикрывает выдачу лишь пока сценарий
+// жив, а удалённый из обхода уходит — номер выдаётся второй раз, и ссылка
+// «запусти сценарий», которую `deleteScenario` не чистит нарочно, оживает
+// чужим сценарием молча. Живых вызовов с `id` нет ни одного: это защита.
+test("принятый снаружи номер сценария двигает счётчик своего вида", () => {
+  const project = createProject({ name: "Сценарии" });
+  assert.equal(counterOf(project, "scenarios"), 0, "пример не тот: у нового объекта есть сценарии");
+
+  const taken = addScenario(project, { kind: "logic", name: "Своя логика", id: "9001" });
+  assert.equal(taken.scenario.id, "9001", "свободный номер не принят");
+  assert.equal(counterOf(taken.project, "scenarios"), 9001, "счётчик вида остался позади принятого номера");
+  assertCounters(taken.project, "сценарий с принятым номером");
+
+  // Номер удалённого сценария новому не достаётся — это и есть цена молчания:
+  // ссылка на удалённый сценарий осталась бы в объекте и ожила бы новым.
+  const gone = deleteScenario(taken.project, "9001").project;
+  const next = addScenario(gone, { kind: "logic", name: "Следующая" });
+  assert.equal(next.scenario.id, "9002", "номер удалённого сценария достался новому");
+  assert.equal(findScenario(next.project, "9001"), null, "ссылка в никуда ожила новым сценарием");
+
+  // Занятый номер в дверь не проходит: выдаётся свой, следующий по счётчику.
+  const twin = addScenario(taken.project, { kind: "logic", name: "Двойник", id: "9001" });
+  assert.equal(twin.scenario.id, "9002", "принят занятый номер");
+
+  // И не номер — тоже: uuid прежней разметки сделал бы объект
+  // непронумерованным по видам, а следующее открытие перенумеровало бы его
+  // целиком, сдвинув адреса аксессуаров у всех меток.
+  for (const bad of ["s1", "0", "01", "acts", "7b1e2f3c-0000-4000-8000-0123456789ab", 17, " 9002 "]) {
+    const made = addScenario(taken.project, { kind: "logic", name: "Чужой id", id: bad });
+    assert.equal(made.scenario.id, "9002", "в дверь прошёл не номер: " + String(bad));
+    assertCounters(made.project, "сценарий с чужим id");
+  }
+});
+
 test("номер — это номер, и `idNumberOf` не принимает похожее", () => {
   assert.equal(idNumberOf("17"), 17);
   // **Число идентификатором не считается** (D01, ADR 035; G392, когда дверь
@@ -714,6 +797,271 @@ test("перенумерация: метки получают 1…N, кажды�
   // Ни одного прежнего идентификатора нигде.
   assert.equal(JSON.stringify(after.project).includes("old-"), false, "прежний идентификатор где-то остался");
 });
+
+// ——— каждая ссылка переезжает, а не только та, что попала в фикстуру ————————
+//
+// **Чем прежние проверки перенумерации были слабее своего критерия.** Они
+// стояли на фикстуре, где заполнены пять-шесть ссылок из двадцати с лишним:
+// помещение метки, её стена, связанная вещь, вид вещи чертежа, тип
+// оборудования, место оборудования и **дверь датчика открытия** в них не
+// заполнялись вовсе. Убери любую из этих ссылок из таблицы `ID_OWNERS` или из
+// `idsRewrite` — и весь прогон оставался зелёным, а у заказчика датчик
+// открытия после открытия объекта смотрел бы в чужую дверь: номера проёмов
+// смыкаются, и старое число называет живой чужой проём (та же порча, из-за
+// которой гасится ссылка в никуда).
+//
+// Поэтому здесь объект, где заполнена **каждая** ссылка: простые — по перечню
+// модели (`ID_OWNER_REFS`, полнота сверяется), непростые — поимённо, как они и
+// названы в `idsRewrite`.
+
+// **Номера, уникальные по всему объекту** — и это не про формат, а про саму
+// проверку. Пока номер свой у каждого вида, число 3 называет и метку, и
+// помещение, и узнать по значению, чья это ссылка, нельзя — только по
+// названному полю, то есть по таблице модели. Проверка, построенная на той же
+// таблице, молчит ровно о том, чего в таблице нет: убери `roomId` — и
+// фикстура, которую строит та же таблица, помещение метки просто не переселит,
+// и прогон останется зелёным. Поэтому здесь каждый вид получает **свою тысячу**
+// номеров: тогда значение однозначно называет сущность, и обход ниже обходится
+// без таблиц вовсе.
+function spreadIds(project) {
+  const counters = { ...project.counters };
+  const bases = new Map();
+  ID_OWNER_KEYS.forEach((collection, at) => bases.set(collection, (at + 1) * 1000));
+  // Встроенный справочник завёлся раньше, каждый вид с единицы: его переселяем
+  // в свою тысячу дверью модели — иначе номер типа совпал бы с номером
+  // категории, и ссылка стала бы неоднозначной. Сами эти две ссылки
+  // (`mark.typeId`, `markType.categoryId`) проверяются ниже отдельно: дверь
+  // переселения — та же, что под проверкой, и верить ей на слово нельзя.
+  const moves = {};
+  for (const collection of ["categories", "markTypes", "equipmentTypes"]) {
+    const table = {};
+    listOf(project, collection).forEach((item, at) => {
+      table[item.id] = String(bases.get(collection) + at + 1);
+    });
+    moves[collection] = table;
+  }
+  const spread = idsReplace({ ...project, counters }, moves).project;
+  for (const collection of ID_OWNER_KEYS) {
+    counters[idCounterKey(collection)] = bases.get(collection) + listOf(spread, collection).length;
+  }
+  return { ...spread, counters };
+}
+
+// Свежий объект, у которого номера разведены по тысячам (`spreadIds`): всё,
+// что заводится ниже, получает номер своего вида и уникально по объекту.
+function richBuild() {
+  const scene = house(spreadIds(createProject({ name: "Все ссылки" })));
+  let project = scene.project;
+  const ids = {};
+
+  // Контур помещения на весь план: через него метки получают `roomId`.
+  project = addOutline(project, {
+    schemeId: scene.schemeId,
+    roomId: scene.roomId,
+    points: [
+      { x: 0.01, y: 0.01 },
+      { x: 0.99, y: 0.01 },
+      { x: 0.99, y: 0.99 },
+      { x: 0.01, y: 0.99 },
+    ],
+  }).project;
+  project = addSchemeGuide(project, scene.schemeId, { axis: "h", at: 0.25 }).project;
+
+  // Вещь чертежа **своего вида** (не из каталога): это ссылка `kindId`.
+  const kind = addSchemeObjectKind(project, { name: "Шкаф" });
+  project = kind.project;
+  const closet = addSchemeObject(project, {
+    schemeId: scene.schemeId,
+    kindId: kind.schemeObjectKind.id,
+    atMm: { x: 1000, y: 1500 },
+    widthMm: 800,
+    depthMm: 600,
+    heightMm: 2200,
+  });
+  project = closet.project;
+
+  const lamp = markAt(project, scene.schemeId, "Т", { x: 0.3, y: 0.3 });
+  project = lamp.project;
+  const switcher = markAt(project, scene.schemeId, "В", { x: 0.4, y: 0.4 });
+  project = switcher.project;
+  const sensor = markAt(project, scene.schemeId, "ДО", { x: 0.45, y: 0.05 });
+  project = sensor.project;
+  // Блок из двух точек: метки получают `groupId`, группа — `markIds`.
+  const block = addMark(project, {
+    schemeId: scene.schemeId,
+    typeId: project.markTypes.find((item) => item.code === "Р").id,
+    kind: "point",
+    points: [
+      { x: 0.6, y: 0.6 },
+      { x: 0.62, y: 0.6 },
+    ],
+  });
+  project = block.project;
+
+  // Связанная вещь (`mark.objectId`) и привязка к стене (`mark.wallId`).
+  project = setMarkObject(project, lamp.mark.id, scene.objectId).project;
+  project = setMarkWall(project, switcher.mark.id, { wallId: scene.wallId, atMm: 1200 }, { manual: true }).project;
+  // Помещение — следствие места знака, его ставит автоматика по контуру.
+  project = applyRoomOutlines(project, scene.schemeId).project;
+
+  // «Чем управляет» — **обе** формы записи: строка и `{id, channel}`.
+  project = setMarkControls(project, switcher.mark.id, [lamp.mark.id, { id: block.marks[0].id, channel: 1 }]).project;
+  // Дверь датчика открытия: ссылка на проём внутри записи метки.
+  project = setMarkDevice(project, sensor.mark.id, { doorId: scene.openingId }).project;
+
+  // Оборудование своего типа и его место на метке со списком связанных.
+  const gearType = addEquipmentType(project, { name: "Светильники" });
+  project = gearType.project;
+  const gear = addEquipment(project, { name: "Прибор", typeId: gearType.equipmentType.id });
+  project = gear.project;
+  project = addPlacement(project, {
+    equipmentId: gear.equipment.id,
+    markId: lamp.mark.id,
+    links: [block.marks[1].id],
+  }).project;
+
+  // Два сценария: блочный ссылается из дерева и на метку, и на второй сценарий.
+  const logic = addScenario(project, { kind: "logic", name: "Логика" });
+  project = logic.project;
+  const blocks = addScenario(project, { kind: "block", name: "Свет по датчику" });
+  project = blocks.project;
+  project = {
+    ...project,
+    scenarios: project.scenarios.map((item) =>
+      item.id === blocks.scenario.id
+        ? {
+            ...item,
+            targets: [
+              {
+                type: "if",
+                blocks: [
+                  { type: "act", markId: lamp.mark.id, service: 0 },
+                  { type: "run", scenarioId: logic.scenario.id },
+                ],
+              },
+            ],
+          }
+        : item,
+    ),
+  };
+  project = addLogicBinding(project, { scenarioId: logic.scenario.id, markId: sensor.mark.id }).project;
+
+  // Ответ «так и задумано» — в его ключе тоже стоят идентификаторы.
+  for (const problem of validate(project)) project = acceptProblem(project, problem).project;
+  assert.ok(acceptedProblems(project).length > 0, "фикстура без принятых предупреждений");
+
+  ids.lamp = lamp.mark.id;
+  ids.switcher = switcher.mark.id;
+  ids.sensor = sensor.mark.id;
+  ids.closet = closet.schemeObject.id;
+  return { project, ids, scene };
+}
+
+// Где в объекте лежит номер сущности — найдено **по значению** и с путём до
+// места. Проверка не знает ни одной таблицы модели: любое поле, которое
+// перенумерация пропустила, остаётся здесь прежним номером и видно сразу.
+function idPlaces(value, known, path = [], out = []) {
+  if (typeof value === "string") {
+    if (known.has(value)) out.push({ path: [...path], id: value });
+    return out;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, at) => idPlaces(item, known, [...path, at], out));
+    return out;
+  }
+  if (value && typeof value === "object") {
+    for (const [key, item] of Object.entries(value)) idPlaces(item, known, [...path, key], out);
+  }
+  return out;
+}
+
+const valueAt = (project, path) => path.reduce((node, key) => (node == null ? node : node[key]), project);
+
+test("каждый номер в объекте переезжает на ту же сущность — у объекта, где заполнены все ссылки", () => {
+  const rich = richBuild();
+  // Номера уникальны по всему объекту: иначе обход по значению называл бы
+  // сущность догадкой.
+  const before = (() => {
+    const spread = spreadIds(rich.project);
+    // Счётчики видов снимаются — так объект отправляется на перенумерацию
+    // целиком (их отсутствие и есть признак «нумеровался не по видам»).
+    return { ...spread, counters: Object.fromEntries(Object.entries(spread.counters).filter(([key]) => !key.startsWith("#"))) };
+  })();
+
+  const known = new Map();
+  for (const collection of ID_OWNER_KEYS) {
+    listOf(before, collection).forEach((item, at) => {
+      assert.equal(known.has(item.id), false, "номер " + item.id + " в фикстуре занят дважды");
+      known.set(item.id, { collection, at });
+    });
+  }
+  // Фикстура цела: справочник переселяла дверь модели, и если бы она
+  // промахнулась, объект врал бы молча.
+  for (const mark of before.marks) {
+    assert.ok(before.markTypes.some((type) => type.id === mark.typeId), "в фикстуре метка без живого типа");
+  }
+  for (const type of before.markTypes) {
+    assert.ok(before.categories.some((item) => item.id === type.categoryId), "в фикстуре тип без живой категории");
+  }
+
+  const places = idPlaces(before, new Set(known.keys()));
+  // **Полнота фикстуры — условие, а не надежда.** Каждое простое поле-ссылка
+  // из перечня модели обязано быть заполнено: не заполнено — проверка о нём
+  // молчит, а молчащая проверка хуже отсутствующей.
+  for (const ref of ID_OWNER_REFS) {
+    assert.ok(
+      places.some((place) => place.path[0] === ref.owner && place.path[2] === ref.field),
+      "в фикстуре не заполнена ссылка " + ref.owner + "." + ref.field + " → " + ref.to,
+    );
+  }
+  // И ссылки непростой формы — поимённо, как они названы в `idsRewrite`.
+  // Сущности ищутся **по содержимому**: номера к этому времени уже переселены.
+  const owner = before.marks.find((mark) => Array.isArray(mark.controls) && mark.controls.length > 1);
+  assert.ok(owner && owner.controls.some((item) => typeof item === "string"), "в фикстуре нет связи строкой");
+  assert.ok(
+    owner && owner.controls.some((item) => item && typeof item === "object"),
+    "в фикстуре нет связи записью `{id, channel}`",
+  );
+  const sensorWas = before.marks.find((mark) => mark.device && mark.device.doorId);
+  assert.ok(sensorWas, "в фикстуре нет двери датчика открытия");
+  const treeOf = (project) => project.scenarios.find((item) => item.kind === "block").targets[0].blocks;
+  assert.ok(treeOf(before)[0].markId && treeOf(before)[1].scenarioId, "в фикстуре нет ссылок дерева блоков");
+  // Направляющая схемы — вложенный вид со своим счётчиком.
+  assert.ok(places.some((place) => place.path[2] === "guides"), "в фикстуре нет направляющей схемы");
+
+  const after = idsMigrate(before);
+  assert.equal(after.changed, true, "объект не отправился на перенумерацию");
+  const project = after.project;
+
+  // **Одна проверка на все ссылки разом.** Для каждого места, где лежал номер,
+  // там же обязан лежать новый номер **той же** сущности (её место в своей
+  // коллекции перенумерация не трогает — это чистое переименование). Поле,
+  // которое перенумерация пропустила, оставит здесь прежний номер; поле,
+  // уехавшее по чужой таблице, — номер чужой сущности.
+  assert.ok(places.length > 30, "обход нашёл подозрительно мало номеров: " + places.length);
+  for (const place of places) {
+    const { collection, at } = known.get(place.id);
+    const now = listOf(project, collection)[at];
+    assert.ok(now, collection + ": сущность пропала при перенумерации");
+    assert.equal(
+      valueAt(project, place.path),
+      now.id,
+      "номер в «" + place.path.join(".") + "» уехал не на ту сущность (" + place.id + " → " + String(valueAt(project, place.path)) + ", ждали " + now.id + ")",
+    );
+  }
+  // Ни одного прежнего номера нигде: эта проверка не смотрит на пути вовсе.
+  const stale = [...known.keys()].filter((id) => JSON.stringify(project).includes('"' + id + '"'));
+  assert.deepEqual(stale, [], "прежний номер где-то остался");
+
+  // Ответы «так и задумано» остались на тех же вопросах — ни одного сироты и
+  // ни одного заданного заново.
+  assert.equal(acceptedProblems(project).length, acceptedProblems(before).length, "список принятых поехал");
+  for (const problem of validate(project)) {
+    assert.equal(problemAccepted(project, problem.key), true, "вопрос «" + problem.code + "» задался заново");
+  }
+  assertCounters(project, "объект со всеми ссылками");
+});
+
 
 test("перенумерация идемпотентна: второе открытие даёт тот же объект", () => {
   const once = idsMigrate(uuidBuild().project);

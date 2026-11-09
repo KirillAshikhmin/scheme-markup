@@ -10,9 +10,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  addLogicBinding,
   addMark,
+  addScenario,
   deviceFollowers,
+  findLogicBinding,
   findMark,
+  idNumberOf,
   labelOf,
   markDeviceLeader,
   markDeviceOf,
@@ -115,6 +119,47 @@ test("в доме имитации одно обозначение — один 
   assert.equal(scenario.targets[0].ref.markId, lamps[2], "сценарий объекта переписан");
   const listed = scenariosDeviceGroups(project).flatMap((group) => group.devices.map((device) => device.markId));
   assert.ok(listed.includes(lamps[0]) && !listed.includes(lamps[1]), "в списке устройств сценариев Т не одной строкой");
+});
+
+// **Ссылка привязки — её `markId`, и только он.** Долг, названный после таска
+// 251: перенумерация обходит по значению **дерево блоков сценария** (там
+// `markId` на любой глубине — настоящая ссылка), а в `options` ссылок по
+// идентификатору не ищет вовсе — там лежат значения опций самого скрипта, и
+// единственное ссылающееся значение узнаётся **по форме адреса**
+// (`aid[.sid[.cid]]`, своя дверь `idsMovedAddress`). Дом же искал `markId` по
+// всей привязке, то есть считал ссылкой опцию, которую так назвал автор
+// сценария. Две двери сошлись на одном ответе: ссылки по идентификатору в
+// `options` не бывает.
+//
+// Почему адрес в опциях вести к ведущей и не надо: у ведомой метки аксессуара
+// нет вовсе (`homeAccessories` её пропускает), значит её адрес в списке окна
+// «Опции» не предлагался, и адрес всегда называет ведущую.
+test("привязка ведомой достаётся ведущей, а опции сценария дом не переписывает", () => {
+  const { box, lamps } = sameLabel();
+  const scenario = addScenario(box.project, { kind: "logic", name: "Свет по движению" });
+  // Опции: адрес характеристики ведущей (так их и выбирают в окне «Опции»),
+  // опция, которую автор скрипта назвал `markId` и в которую человек вписал
+  // номер **ведомой**, и опции, адресами не являющиеся вовсе.
+  const options = {
+    motion1: idNumberOf(lamps[0]) + ".13.15",
+    markId: lamps[1],
+    offDelaySeconds: 5,
+    singlePress: true,
+  };
+  const bound = addLogicBinding(scenario.project, {
+    scenarioId: scenario.scenario.id,
+    markId: lamps[2],
+    service: 0,
+    options,
+  });
+
+  const spec = buildHomeSpec(bound.project);
+  assert.equal(spec.logicBindings.length, 1, "привязка до дома не дошла");
+  assert.equal(spec.logicBindings[0].markId, lamps[0], "привязка ведомой не досталась ведущей");
+  assert.deepEqual(spec.logicBindings[0].options, options, "дом переписал выбор человека в опциях");
+  // И сам объект дом не тронул: привязка по-прежнему на ведомой.
+  assert.equal(findLogicBinding(bound.project, bound.binding.id).markId, lamps[2], "дом правит объект");
+  assert.deepEqual(findLogicBinding(bound.project, bound.binding.id).options, options);
 });
 
 test("знак состояния: ведомая рисуется видом ведущей и светит своё помещение", () => {

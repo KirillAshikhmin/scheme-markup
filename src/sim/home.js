@@ -306,7 +306,7 @@ export function buildHomeSpec(project, opts = null) {
     links,
     doors,
     scenarios: homeLeadMarks(structuredClone(given || scenariosInOrder(project)), followers),
-    logicBindings: homeLeadMarks(structuredClone(logicBindingsOf(project)), followers),
+    logicBindings: homeLeadBindings(structuredClone(logicBindingsOf(project)), followers),
   };
 }
 
@@ -322,7 +322,43 @@ export function homeLeadScenario(project, scenario) {
   return homeLeadMarks(structuredClone(scenario), followers);
 }
 
-/** Поля `markId` в копии сценариев и привязок: ведомая метка → ведущая (на месте). */
+/**
+ * **Привязка так, как её увидит дом: ведомая метка — ведущей, и только она.**
+ *
+ * Ссылка по идентификатору у привязки одна — её собственный `markId` (он же
+ * назван в `ID_OWNERS` модели, по нему идёт перенумерация). В `options` ссылок
+ * по идентификатору **не бывает**: это значения опций самого скрипта
+ * (`info.options`, типы `Boolean | Integer | Double | String`), ключи придумал
+ * автор сценария, а значение выбрал человек в окне «Опции». Единственное
+ * ссылающееся значение там — **адрес аксессуара** (`aid[.sid[.cid]]`), и
+ * узнаётся он **по форме**, а не по имени поля: так его и переселяет
+ * перенумерация (`model.js: idsMovedAddress`), своей дверью и своим правилом.
+ *
+ * Поэтому глубокий обход привязки (прежний `homeLeadMarks`) был неправ дважды:
+ *
+ *   — опция, которую автор скрипта назвал `markId`, ссылкой не является, и
+ *     подменять её значение дом не вправе — это правка выбора человека;
+ *   — вести адрес к ведущей метке и не нужно: у ведомой аксессуара нет вовсе
+ *     (`homeAccessories` её пропускает), значит в списке окна «Опции» её адрес
+ *     не предлагался, и адрес всегда называет ведущую.
+ *
+ * Расхождение двух дверей — перенумерации и дома — было названо долгом и
+ * разведено здесь: глубоко по значению обходится **дерево блоков сценария**
+ * (там `markId` на любой глубине — настоящая ссылка, и обе двери читают его
+ * одинаково), а привязка — на один уровень.
+ */
+function homeLeadBindings(list, followers) {
+  if (followers.size === 0 || !Array.isArray(list)) return list;
+  for (const binding of list) {
+    if (!binding || typeof binding !== "object") continue;
+    if (typeof binding.markId === "string" && followers.has(binding.markId)) {
+      binding.markId = followers.get(binding.markId);
+    }
+  }
+  return list;
+}
+
+/** Поля `markId` в копии сценариев: ведомая метка → ведущая (на месте). */
 function homeLeadMarks(value, followers) {
   if (followers.size === 0 || !value || typeof value !== "object") return value;
   if (Array.isArray(value)) {
