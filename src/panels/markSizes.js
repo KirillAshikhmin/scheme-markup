@@ -34,6 +34,7 @@ import {
   MARK_DIMENSION_MAX,
   MARK_DIMENSION_SIGNED,
   axisSeatOf,
+  axisUpField,
   findMark,
   findType,
   labelOf,
@@ -49,7 +50,12 @@ import { uiBadLine, uiButton, uiEl, uiMarkBad, uiModal } from "./ui.js";
 
 // Поля, у которых имя зависит от посадки (таск 161): «Длина» и «Высота над
 // полом» при любой посадке значат одно и то же, и второго имени у них нет.
-const MARK_SIZES_SEATED = ["width", "depth"];
+//
+// Пара берётся **у модели** (таск 264): какое поле идёт вверх при какой
+// посадке, сказано один раз (`MARK_AXIS_UP_FIELD`), и имена полей здесь — та же
+// таблица, прочитанная с другой стороны. Повтори её списком — и подпись
+// разошлась бы с листом развёртки, который читает её же.
+const MARK_SIZES_SEATED = [axisUpField(MARK_AXIS_UPRIGHT), axisUpField(MARK_AXIS_FLAT)];
 
 /**
  * Ключ строки поля при этой посадке. У вещи лицом вниз два поля берутся из
@@ -80,10 +86,15 @@ export function markSizesLabel(field, seat = MARK_AXIS_UPRIGHT) {
  * «Д 500 · В 300 · Ш 400», верно по числам и задом наперёд по порядку.
  * Разбор полей (`markSizesParse`) этого порядка не знает и знать не должен —
  * он идёт по ключам файла.
+ *
+ * Считается по той же таблице, что подписи (таск 264): «В» — поле, идущее
+ * вверх (`axisUpField`), «Ш» — второе из пары. Второго списка полей здесь
+ * больше нет: он молча разошёлся бы с подписями на первой же правке.
  */
 export function markSizesOrder(seat = MARK_AXIS_UPRIGHT) {
-  if (seat !== MARK_AXIS_FLAT) return MARK_DIMENSION_FIELDS;
-  return ["length", "width", "depth", "heightAboveFloor"];
+  const up = axisUpField(seat);
+  const across = MARK_SIZES_SEATED.find((field) => field !== up);
+  return ["length", across, up, "heightAboveFloor"];
 }
 
 // Число в подпись кнопки. Дробное пишется через запятую — так его и набирают;

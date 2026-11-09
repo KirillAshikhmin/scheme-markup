@@ -27,25 +27,31 @@ import {
   MARK_AXIS_FLAT,
   MARK_AXIS_UPRIGHT,
   MARK_DIMENSION_SIGNED,
+  WALL_SIDES,
   addMark,
   addOutline,
   addRoom,
   addScheme,
+  addSchemeObject,
   addWall,
   applyMarkWalls,
   axisSeatOf,
+  axisUpField,
   createProject,
   findMark,
   markAxisSeat,
   markOnWall,
+  markPlace,
   markSizes,
   planMmToFraction,
   setMarkDimensions,
+  setMarkObject,
   setPlanOrigin,
   setPlanScale,
   setSchemeWallHeight,
   typeAxisSeat,
   typeSizes,
+  wallElevation,
 } from "../src/model.js";
 import { strings } from "../src/strings.js";
 import { markSizesLabel, markSizesOrder, markSizesSummary } from "../src/panels/markSizes.js";
@@ -305,6 +311,116 @@ test("вещь на высоте без стены: объём кладёт её
   assert.equal(markSizesLabel("width", MARK_AXIS_UPRIGHT), "Высота, мм");
 });
 
+// ——— развёртка стены берёт высоту у того же правила (таск 264, G405) ———————
+//
+// Слова заказчика на вопрос «Плоско лежащая метка на развёртке: „РП“
+// показывает 350 × 350, потому что развёртка берёт высоту из `width`, а у
+// лежащей метки высота в `depth`. Править правило развёртки?»: «да».
+//
+// Проверяется **шов**, а не картинка: лист обязан мерять высоту тем же полем,
+// которое карточка подписывает «Высотой». Раньше лист брал `width` всегда —
+// это был второй ответ на вопрос, у которого уже была дверь.
+
+test("какое поле идёт вверх — сказано один раз, и подпись «Высота» стоит у него", () => {
+  assert.equal(axisUpField(MARK_AXIS_UPRIGHT), "width");
+  assert.equal(axisUpField(MARK_AXIS_FLAT), "depth");
+  // Незнакомая посадка читается стенной: так сборка вела себя до таска 161.
+  assert.equal(axisUpField(undefined), "width");
+  // Таблица одна на подпись и на геометрию: «Высотой» зовётся ровно то поле,
+  // которое идёт вверх, а порядок на экране ставит его третьим (Д · Ш · В).
+  for (const seat of [MARK_AXIS_UPRIGHT, MARK_AXIS_FLAT]) {
+    assert.equal(markSizesLabel(axisUpField(seat), seat), "Высота, мм", "посадка " + seat);
+    assert.equal(markSizesOrder(seat)[2], axisUpField(seat), "поле высоты встало не третьим: " + seat);
+  }
+});
+
+test("лист развёртки меряет высоту тем полем, которое карточка зовёт «Высотой»", () => {
+  const scene = roomScene();
+  let project = scene.project;
+  // Кондиционер на стене — стоячая вещь: вверх `width` (300), как было.
+  const conditioner = markAt(project, scene.schemeId, "К", [{ x: 0, y: -1400 }]);
+  project = conditioner.project;
+  // Полотенцесушитель — та самая вещь, которую развёртка не имеет права
+  // перевернуть: высота над полом у него задана, значит посадка стенная.
+  const dryer = markAt(project, scene.schemeId, "СУШ", [{ x: 800, y: -1400 }]);
+  project = dryer.project;
+  // Вертикальная лента заказчика: низ **на полу** (ноль), а вверх от него идут
+  // три метра. Это и есть «вещь на стене с высотой 0»: переверни её — и полоса
+  // света стала бы чёрточкой в толщину профиля.
+  const strip = markAt(project, scene.schemeId, "ЛВ", [{ x: -800, y: -1400 }], {
+    length: 40,
+    width: 3000,
+    depth: 15,
+    heightAboveFloor: 0,
+  });
+  project = strip.project;
+
+  const wall = project.walls.find((item) => item.aMm.y === -1500 && item.bMm.y === -1500);
+  const sides = WALL_SIDES.map((side) => wallElevation(project, wall.id, side));
+  const seen = new Map();
+  for (const view of sides) {
+    for (const mark of view.marks) seen.set(mark.id, mark);
+  }
+  assert.equal(seen.size, 3, "на листе не все три метки: " + seen.size);
+  // Шов: высота силуэта равна полю посадки, и это то же поле, что подписано
+  // «Высотой» в карточке. Второго правила в сборке нет — считается оно здесь
+  // ровно теми же двумя дверьми, какими его спрашивает лист.
+  for (const [markId, drawnMark] of seen) {
+    const mark = findMark(project, markId);
+    const seat = markAxisSeat(project, mark);
+    const sizes = markPlace(project, mark).sizes;
+    assert.equal(drawnMark.sizeMm.height, sizes[axisUpField(seat)], "лист и посадка разошлись: " + drawnMark.label);
+    assert.equal(drawnMark.sizeMm.width, sizes.length, "вдоль стены лист обязан мерять длину: " + drawnMark.label);
+  }
+  const byCode = (markId) => {
+    const mark = findMark(project, markId);
+    return project.markTypes.find((type) => type.id === mark.typeId).code;
+  };
+  const heights = new Map([...seen].map(([markId, drawnMark]) => [byCode(markId), drawnMark.sizeMm.height]));
+  assert.equal(heights.get("К"), 300, "кондиционер на листе стал другой высоты");
+  assert.equal(heights.get("СУШ"), 800, "развёртка перевернула полотенцесушитель");
+  assert.equal(heights.get("ЛВ"), 3000, "лента с низом на полу прочлась лежачей — это и есть испорченный лист");
+});
+
+test("лежачая вещь: лист берёт высоту из того же поля, что объём откладывает вверх", () => {
+  // Робота-пылесоса на листе стены показывает **связь с вещью** (таск 261): у
+  // связанного прибора габарит и посадку даёт вещь, и высота приходит её
+  // собственным числом — 95, а не стороной 350, лежащей в плане.
+  const scene = roomScene();
+  let project = scene.project;
+  const vacuum = markAt(project, scene.schemeId, "РП", [{ x: 0, y: 1300 }]);
+  project = vacuum.project;
+  const added = addSchemeObject(project, {
+    schemeId: scene.schemeId,
+    catalogKey: "robotVacuum",
+    shape: "rect",
+    atMm: { x: 0, y: 1300 },
+    widthMm: 350,
+    depthMm: 350,
+    heightMm: 95,
+    heightAboveFloorMm: 0,
+  });
+  project = setMarkObject(added.project, vacuum.markId, added.schemeObject.id).project;
+  project = applyMarkWalls(project, scene.schemeId).project;
+
+  const mark = findMark(project, vacuum.markId);
+  const sizes = markPlace(project, mark).sizes;
+  assert.equal(sizes.heightAboveFloor, 47.5, "посадка связанного прибора — середина вещи");
+  assert.equal(markAxisSeat(project, mark), MARK_AXIS_UPRIGHT, "середина робота выше пола — посадка стоячая");
+  const wall = project.walls.find((item) => item.aMm.y === 1500 && item.bMm.y === 1500);
+  const drawnMark = WALL_SIDES.map((side) => wallElevation(project, wall.id, side))
+    .flatMap((view) => view.marks)
+    .find((item) => item.id === vacuum.markId);
+  assert.ok(drawnMark, "связанный робот не попал ни на один лист");
+  assert.deepEqual(
+    { width: drawnMark.sizeMm.width, height: drawnMark.sizeMm.height },
+    { width: 350, height: 95 },
+    "силуэт робота на листе — не его габарит",
+  );
+  // И то же число объём откладывает вверх: шов держится и здесь.
+  assert.equal(drawn(project, scene.schemeId, vacuum.markId).upMm, 95);
+});
+
 // ——— справочник типов, где метки ещё нет —————————————————————————————————
 
 test("справочник типов: посадку решает умолчание высоты над полом", () => {
@@ -381,5 +497,21 @@ test("объект прежнего формата читается ровно �
     "В 2600 · от пола 1300 мм",
     "вертикальная лента заказчика: 2600 — её высота",
   );
+  // **Лист прежнего объекта не изменился ни одним силуэтом** (таск 264, G68).
+  // Высота вещи на листе теперь считается посадкой, а не ключом `width`, — и у
+  // объекта, где все метки стенные, это одно и то же число. Сверяется прямо:
+  // на каждом листе высота силуэта равна прежнему полю.
+  let drawnMarks = 0;
+  for (const wall of project.walls || []) {
+    for (const side of WALL_SIDES) {
+      const view = wallElevation(project, wall.id, side);
+      for (const drawnMark of view.marks) {
+        drawnMarks += 1;
+        const sizes = markPlace(project, findMark(project, drawnMark.id)).sizes;
+        assert.equal(drawnMark.sizeMm.height, sizes.width, "силуэт прежнего объекта поехал: " + drawnMark.label);
+      }
+    }
+  }
+  assert.ok(drawnMarks > 0, "в фикстуре не нашлось ни одного листа с меткой — сверять нечего");
   assert.equal(JSON.stringify(project), before, "чтение посадки тронуло объект — это запрещено прямо (G68)");
 });

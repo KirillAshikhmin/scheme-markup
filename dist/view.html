@@ -16243,6 +16243,13 @@ if (heightAboveFloor === null || heightAboveFloor === undefined) return MARK_AXI
 if (heightAboveFloor === 0 && !onWall) return MARK_AXIS_FLAT;
 return MARK_AXIS_UPRIGHT;
 }
+const MARK_AXIS_UP_FIELD = {
+[MARK_AXIS_UPRIGHT]: "width",
+[MARK_AXIS_FLAT]: "depth",
+};
+function axisUpField(seat) {
+return MARK_AXIS_UP_FIELD[seat] || MARK_AXIS_UP_FIELD[MARK_AXIS_UPRIGHT];
+}
 function markOnWall(project, mark) {
 const binding = markWall(mark);
 const wall = binding ? findWall(project, binding.wallId) : null;
@@ -19873,6 +19880,7 @@ const style = styleOf(project, mark.typeId);
 const place = markPlace(project, mark);
 const sizes = place.sizes;
 const type = findType(project, mark.typeId);
+const seat = axisSeatOf(sizes.heightAboveFloor, markOnWall(project, mark));
 const span =
 binding.toMm === null
 ? { fromMm: sideAlong(length, binding.atMm, view), toMm: null }
@@ -19887,7 +19895,7 @@ kind: mark.kind === "line" ? "line" : "point",
 fromMm: Math.round(span.fromMm),
 toMm: span.toMm === null ? null : Math.round(span.toMm),
 heightMm: sizes.heightAboveFloor,
-sizeMm: { width: sizes.length, height: sizes.width },
+sizeMm: { width: sizes.length, height: sizes[axisUpField(seat)] },
 heightOwn: sizes.heightAboveFloorOwn,
 heightFrom: sizes.heightAboveFloorFrom,
 view: typeObjectView(type),
@@ -61140,7 +61148,7 @@ refresh(getState());
 registerPanel(PANEL_IDS.headerLinks, mountLinksPanel);
 
 // src/panels/markSizes.js
-const MARK_SIZES_SEATED = ["width", "depth"];
+const MARK_SIZES_SEATED = [axisUpField(MARK_AXIS_UPRIGHT), axisUpField(MARK_AXIS_FLAT)];
 function markSizesKey(field, seat, suffix = "") {
 const flat = seat === MARK_AXIS_FLAT && MARK_SIZES_SEATED.includes(field);
 return "markSizes." + (flat ? "flat." : "") + field + suffix;
@@ -61149,8 +61157,9 @@ function markSizesLabel(field, seat = MARK_AXIS_UPRIGHT) {
 return text(markSizesKey(field, seat), { unit: strings.markSizes.unit });
 }
 function markSizesOrder(seat = MARK_AXIS_UPRIGHT) {
-if (seat !== MARK_AXIS_FLAT) return MARK_DIMENSION_FIELDS;
-return ["length", "width", "depth", "heightAboveFloor"];
+const up = axisUpField(seat);
+const across = MARK_SIZES_SEATED.find((field) => field !== up);
+return ["length", across, up, "heightAboveFloor"];
 }
 function markSizesNumber(value) {
 return String(value).replace(".", ",");
