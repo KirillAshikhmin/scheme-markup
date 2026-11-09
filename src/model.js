@@ -920,7 +920,17 @@ const TEMPLATE_TYPES = [
   { category: "sensors", code: "ДО", name: strings.types.opening, shape: "square-split", sizes: { length: 70, width: 40, depth: 15, heightAboveFloor: 2000 } },
   { category: "sensors", code: "ДПр", name: strings.types.leak, shape: "drop", sizes: { length: 60, width: 60, depth: 15, heightAboveFloor: 0 } },
   { category: "panel", code: "ЩС", name: strings.types.panelLow, shape: "square-cross", view: "panelBox", sizes: { length: 300, width: 400, depth: 90, heightAboveFloor: 1400 } },
-  { category: "appliances", code: "РП", name: strings.types.vacuum, shape: "trapezoid-bar", sizes: { length: 350, width: 100, depth: 100, heightAboveFloor: 0 } },
+  // Робот-пылесос: габарит **самого робота**, круглого (таск 261, G403, слова
+  // заказчика: «поправь габарит РП»). Было 350 × 100 при выступе 100 — размер
+  // шайбы **сбоку**, каким нарисовано её изображение, — и в объёме из него
+  // выходил овал: доли тела считаются от габарита. Теперь 350 × 350 в плане
+  // при высоте 95: ходовой домашний робот, те же числа, что у вещи каталога
+  // `robotVacuum`. У метки на полу вверх идёт `depth` (`MARK_AXIS_FLAT`).
+  //
+  // **Чужих объектов это не касается** (G68): справочник копируется при
+  // создании объекта, и у кого «РП» уже размечен, там остаются его числа —
+  // менять их он будет сам в своём справочнике типов. Миграции нет нарочно.
+  { category: "appliances", code: "РП", name: strings.types.vacuum, shape: "trapezoid-bar", sizes: { length: 350, width: 350, depth: 95, heightAboveFloor: 0 } },
   { category: "plumbing", code: "ВР", name: strings.types.waterOutlet, view: "waterOutlet", sizes: { length: 60, width: 60, depth: 20, heightAboveFloor: 600 } },
   { category: "plumbing", code: "КН", name: strings.types.sewer, shape: "circle-drain", view: "drain", sizes: { length: 110, width: 110, depth: 40, heightAboveFloor: 100 } },
   { category: "plumbing", code: "КВ", name: strings.types.waterValve, shape: "circle-valve", sizes: { length: 100, width: 100, depth: 60, heightAboveFloor: 400 } },

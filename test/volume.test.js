@@ -4500,19 +4500,20 @@ test("осушитель у стены стоит на полу, а не пол�
 test("робот-пылесос посреди комнаты лежит на полу и лицом вверх", () => {
   const scene = roomScene();
   // Середина комнаты: до стен больше порога автопривязки — вещь стоит в своём
-  // месте по плану, а не на стене. Вверх у неё идёт выступ (100 мм).
+  // месте по плану, а не на стене. Вверх у неё идёт выступ — с таска 261 это
+  // 95 мм, рост настоящего робота с башенкой (было 100).
   const put = markAt(scene.project, scene.schemeId, "РП", [{ x: 0, y: 0 }]);
   const built = volumeScene(put.project, scene.schemeId, {});
   const place = placeOf(built, put.markId);
   assert.equal(place.mode, VOLUME_MARK_ROOM);
   const span = faceSpanZ(place);
   assert.equal(span.bottomMm, 0, "низ на полу");
-  assert.equal(span.topMm, 100, "вверх — выступ вещи");
-  assert.equal(place.heightMm, 50);
+  assert.equal(span.topMm, 95, "вверх — выступ вещи");
+  assert.equal(place.heightMm, 47.5);
   // Лицо смотрит вверх: оставь его внизу — изображение легло бы в плоскость
   // пола, ушло бы под неё вместе с контуром и отсеклось бы по нормали.
   assert.equal(place.face.normal.z, 1);
-  assert.equal(place.face.origin.z, 100);
+  assert.equal(place.face.origin.z, 95);
   assert.ok(volumeMarkViewLines(place).length > 0, "контур вещи есть");
   for (const line of volumeMarkViewLines(place)) {
     for (const point of line.p) assert.ok(point.z > 0, "контур не ушёл под пол: " + point.z);
