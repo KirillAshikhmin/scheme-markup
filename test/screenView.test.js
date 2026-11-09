@@ -39,7 +39,7 @@ import {
   setPlanScale,
   setSchemeAnchor,
 } from "../src/model.js";
-import { drawDrawingGrid, drawRuler, drawScheme, drawingBridge, drawingUnitBridge, planToScreen, rulerTicks } from "../src/render.js";
+import { drawDrawingGrid, drawGuideStrip, drawScheme, drawingBridge, drawingUnitBridge, planToScreen, guideStripTicks } from "../src/render.js";
 import {
   SCREEN_LOOK_VIEWS,
   SCREEN_OPEN_MAX,
@@ -410,14 +410,14 @@ test("G293: линейка чертежа мерит миллиметры и х�
   // нет: лист бесконечен в обе стороны, и миллиметры бывают отрицательными.
   const box = { width: 800, height: 500 };
   const view = { zoom: 0.1, offsetX: 400, offsetY: 250 };
-  const bounded = rulerTicks(WORKSHOP_UNIT, view, box);
-  const open = rulerTicks(WORKSHOP_UNIT, view, box, { bounded: false });
+  const bounded = guideStripTicks(WORKSHOP_UNIT, view, box);
+  const open = guideStripTicks(WORKSHOP_UNIT, view, box, { bounded: false });
   assert.ok(open.top.length > bounded.top.length, "лист без краёв не дал делений: " + open.top.length);
   assert.ok(open.top.some((tick) => tick.at < 0), "в минус линейка чертежа не пошла");
   assert.ok(open.step >= 100, "деления чертежа — круглые миллиметры: " + open.step);
   // И рисуется та же линейка тем же кодом.
   const log = [];
-  drawRuler(scribe(log), WORKSHOP_UNIT, view, box, { bounded: false });
+  drawGuideStrip(scribe(log), WORKSHOP_UNIT, view, box, { bounded: false });
   assert.ok(log.some((call) => call.startsWith("fillRect(")), "полоса линейки не залита");
 });
 

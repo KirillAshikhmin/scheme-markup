@@ -163,14 +163,14 @@ import {
   drawMeasure,
   drawPathHandles,
   drawPressRing,
-  drawRuler,
+  drawGuideStrip,
   drawSchemeGuides,
   drawSnapCorner,
   guideFraction,
   hitSchemeGuide,
-  rulerAxis,
+  guideStripAxis,
   snapToSchemeGuides,
-  RULER_SIZE,
+  GUIDE_STRIP_PX,
   planToScreen,
   screenToPlan,
   drawMarkLive,
@@ -711,8 +711,9 @@ export function canvasSummaryLines(state) {
 // ——— подсказка: отступ от края и знак «текст сменился» ————————————————
 //
 // Шкала с делениями (таск 59; до таска 237 она звалась линейкой — слово отдано
-// инструменту измерения, G357) занимает полосу в `RULER_SIZE` пикселей сверху и
-// слева холста, и подсказка, стоявшая в самом углу, наехала на неё. Отступ
+// инструменту измерения, G357, а имена в коде разведены таском 267) занимает
+// полосу в `GUIDE_STRIP_PX` пикселей сверху и слева холста, и подсказка,
+// стоявшая в самом углу, наехала на неё. Отступ
 // считается здесь, а не в стилях: шкалу прячут отметкой в «Интерфейсе», и
 // вместе с ней обязан уходить отступ — иначе подсказка висит с пустым полем.
 export function canvasHintInset(state) {
@@ -723,7 +724,7 @@ export function canvasHintInset(state) {
   // переключатель с полным экраном висеть на пустом поле.
   const screen = state && state.screen ? state.screen : SCREEN_DEFAULT;
   if (screen === "volume") return 0;
-  return canvasGuidesShown(state) ? RULER_SIZE : 0;
+  return canvasGuidesShown(state) ? GUIDE_STRIP_PX : 0;
 }
 
 // ——— полный экран ————————————————————————————————————————————————————
@@ -806,7 +807,7 @@ export function canvasFullscreenToggle(doc, element) {
   return enter ? Promise.resolve(element[enter]()) : Promise.reject(new Error("no enter"));
 }
 
-// Свёрнутость — оснастка рабочего места, как и отметка линейки: живёт в
+// Свёрнутость — оснастка рабочего места, как и отметка шкалы: живёт в
 // настройках браузера, в объект и в файл проекта не попадает.
 const CANVAS_HINT_SETTING = "canvasHintCollapsed";
 // Свёрнутость сводки — своя (G228): свернул сводку, а подсказка осталась.
@@ -1284,14 +1285,14 @@ function canvasPaint() {
   const guidesOn = canvasGuidesShown(state);
   if (guidesOn) {
     const live = canvasDrag && canvasDrag.kind === "guideMove" ? canvasDrag.guideId : null;
-    // Утащенная на линейку направляющая по отпусканию снимется — пусть это
+    // Утащенная на шкалу направляющая по отпусканию снимется — пусть это
     // будет видно до того, как кнопка отпущена, а не после.
     const dropping = canvasDrag && canvasDrag.kind === "guideMove" && canvasDrag.drop ? canvasDrag.guideId : null;
     drawSchemeGuides(canvasCtx, canvasFrameGuides(state, canvasPreview, scheme), scheme, view, box, {
       activeId: live,
       dropId: dropping,
     });
-    // Новая направляющая, которую сейчас тянут с линейки: в объекте её ещё нет.
+    // Новая направляющая, которую сейчас тянут со шкалы: в объекте её ещё нет.
     if (canvasDrag && canvasDrag.kind === "guideNew") {
       drawSchemeGuides(
         canvasCtx,
@@ -1336,7 +1337,7 @@ function canvasPaint() {
     }
   }
   // Шкала — последней: она поверх всего, и с неё тянут направляющие.
-  if (guidesOn) drawRuler(canvasCtx, scheme, view, box);
+  if (guidesOn) drawGuideStrip(canvasCtx, scheme, view, box);
 
   // Отрезок линейки — поверх и шкалы: это мерка, а не часть плана. В
   // `drawScheme` его нет вовсе, значит в PNG, в печать и в лист «Схема» он не
@@ -1715,7 +1716,7 @@ function canvasPlacedTypeId(state) {
 // Куда целится вставка **до** каскада. Три случая, по убыванию точности:
 //   1. Курсор над планом — точка под ним. Прямые слова заказчика; притяжка к
 //      направляющим та же, что у клика, иначе вставка мимо перекрестия.
-//   2. Курсора над планом нет (он на панели, на линейке, за краем плана) —
+//   2. Курсора над планом нет (он на панели, на шкале, за краем плана) —
 //      рядом с исходной меткой, на шаг блока вправо-вниз. Её только что
 //      скопировали, она на виду, и копия встаёт у неё под боком: ровно жест
 //      «розетка у кровати слева — такую же справа», где копию потом оттащат.
@@ -1735,10 +1736,10 @@ function canvasPasteBase(state, scheme, view, step) {
 }
 
 // Доли плана под курсором — или `null`, когда курсора над планом нет. Полоса
-// линейки планом не считается: там вытягивают направляющие, а не ставят метки.
+// шкалы планом не считается: там вытягивают направляющие, а не ставят метки.
 function canvasCursorPlan(state, scheme, view) {
   if (!canvasCursor || !scheme) return null;
-  if (canvasGuidesShown(state) && canvasOnRuler(canvasCursor)) return null;
+  if (canvasGuidesShown(state) && canvasOnGuideStrip(canvasCursor)) return null;
   const plan = screenToPlan(canvasCursor, scheme, view);
   if (!(plan.x >= 0 && plan.x <= 1 && plan.y >= 0 && plan.y <= 1)) return null;
   return plan;
@@ -2282,9 +2283,9 @@ function canvasGridLayer(state, project) {
   return step > 0 ? { stepMm: step, box: canvasBox() } : null;
 }
 
-// Полоса линейки: клик по ней вытягивает новую направляющую, а не идёт в план.
-function canvasOnRuler(point) {
-  return rulerAxis(point) !== null;
+// Полоса шкалы: клик по ней вытягивает новую направляющую, а не идёт в план.
+function canvasOnGuideStrip(point) {
+  return guideStripAxis(point) !== null;
 }
 
 // Доля плана, в которую сядет направляющая, вытянутая из-под этой точки.
@@ -3179,9 +3180,10 @@ function canvasScaleClick(plan, screen, free) {
 
 // ——— линейка измерения на плане (таск 237, G356) —————————————————————————
 //
-// Не путать со **шкалой** по краям поля (`drawRuler`, `rulerAxis`): до таска 237
-// она звалась линейкой, но слово заказчик отдал инструменту, который меряет
-// (G357). Имена в коде у шкалы остались прежними — `ruler*`.
+// Не путать со **шкалой** по краям поля (`drawGuideStrip`, `guideStripAxis`):
+// до таска 237 она звалась линейкой, но слово заказчик отдал инструменту,
+// который меряет (G357), а таск 267 развёл и имена в коде — у шкалы они
+// теперь `guideStrip*`.
 //
 // Жест тот же, что у калибровки: показали два конца. Магниты тоже **те же** —
 // своих линейка не заводит (`canvasDraftSnap` для калибровки и рисования,
@@ -4195,7 +4197,7 @@ function canvasPointerDown(event) {
   // Палец. Жест **всегда начинается панорамой** — иначе план перестанет
   // листаться, — а чем он был на самом деле, решают время и сдвиг:
   //
-  // - повели сразу → панорама (или новая направляющая, если начали с линейки);
+  // - повели сразу → панорама (или новая направляющая, если начали со шкалы);
   // - подержали на месте `CANVAS_PRESS_MS` → взяли то, что под пальцем, и
   //   дальше ведение переносит его («зажали иконку и потом потащили»);
   // - отпустили, не сдвинув → тап, и что он делает, решает `canvasTapKind`.
@@ -4214,10 +4216,10 @@ function canvasPointerDown(event) {
     canvasTouchAt = canvasNow();
     const touchState = canvasState();
     const touchScheme = canvasScheme(touchState);
-    // Линейка отдаёт палец направляющей — ровно как мыши: полоса узкая и
+    // Шкала отдаёт палец направляющей — ровно как мыши: полоса узкая и
     // заведена для того, чтобы с неё тянули.
-    if (canvasEditAllowed(touchState) && canvasGuidesShown(touchState) && rulerAxis(at)) {
-      const axis = rulerAxis(at);
+    if (canvasEditAllowed(touchState) && canvasGuidesShown(touchState) && guideStripAxis(at)) {
+      const axis = guideStripAxis(at);
       canvasDrag = {
         kind: "guideNew",
         axis,
@@ -4293,11 +4295,11 @@ function canvasPointerDown(event) {
     }
   }
 
-  // Линейка забирает клик себе: с неё тянут новую направляющую. Она лежит
+  // Шкала забирает клик себе: с неё тянут новую направляющую. Она лежит
   // поверх плана, и отдавать её клик метке нельзя.
-  const rulerUnder = editable && canvasGuidesShown(state) ? rulerAxis(point) : null;
-  if (rulerUnder) {
-    const axis = rulerUnder;
+  const stripUnder = editable && canvasGuidesShown(state) ? guideStripAxis(point) : null;
+  if (stripUnder) {
+    const axis = stripUnder;
     canvasDrag = {
       kind: "guideNew",
       axis,
@@ -4308,7 +4310,7 @@ function canvasPointerDown(event) {
     return;
   }
 
-  // Линейка забирает клик себе — раньше ручек, метки, контура и калибровки, и
+  // Шкала забирает клик себе — раньше ручек, метки, контура и калибровки, и
   // **без вопроса о правке**: она ничего не правит и работает в просмотре.
   // Шкала выше не случайно: с неё тянут направляющую, по которой и мерят.
   if (canvasMeasuring(state)) {
@@ -4891,8 +4893,8 @@ function canvasPointerMove(event) {
         canvasPreview = null;
       }
     }
-    // Утащенная обратно на линейку направляющая снимается — это её «корзина».
-    canvasDrag.drop = canvasOnRuler(point);
+    // Утащенная обратно на шкалу направляющая снимается — это её «корзина».
+    canvasDrag.drop = canvasOnGuideStrip(point);
     canvasRedraw();
     return;
   }
@@ -4921,16 +4923,16 @@ function canvasPointerUp(event) {
   const state = canvasState();
 
   if (drag.kind === "guideNew") {
-    // Не вытянули с линейки — направляющей и не было: клик по самой линейке
+    // Не вытянули со шкалы — направляющей и не было: клик по самой шкале
     // ничего не создаёт.
-    if (drag.moved && !canvasOnRuler(point)) canvasGuideAdd(drag.axis, drag.at);
+    if (drag.moved && !canvasOnGuideStrip(point)) canvasGuideAdd(drag.axis, drag.at);
     canvasRedraw();
     return;
   }
   if (drag.kind === "guideMove") {
     const after = canvasPreview;
     canvasPreview = null;
-    if (canvasOnRuler(point)) canvasGuideRemove(drag.guideId);
+    if (canvasOnGuideStrip(point)) canvasGuideRemove(drag.guideId);
     else if (drag.moved && after) canvasCommit(drag.before, after, strings.history.guideMove);
     canvasRedraw();
     return;
@@ -5103,11 +5105,11 @@ function canvasDoubleAt(at, slack = 0) {
   if (state.mode === CANVAS_MODE_BLOCK_JOIN) return false;
   const scheme = canvasScheme(state);
   const view = canvasViewOf(state);
-  // Двойной клик по линейке ставит направляющую в точке клика — это второй
+  // Двойной клик по шкале ставит направляющую в точке клика — это второй
   // способ к перетаскиванию, и просил его пользователь: «двойной клик по
   // линейке должен создавать линию».
   if (canvasGuidesShown(state)) {
-    const axis = rulerAxis(at);
+    const axis = guideStripAxis(at);
     if (axis) {
       canvasGuideAdd(axis, canvasGuideAt(axis, at, scheme, view));
       return true;
@@ -5449,8 +5451,8 @@ function canvasCursorAt(state, point) {
   const view = canvasViewOf(state);
   const editable = canvasEditAllowed(state);
   const handles = canvasHandlesShown(state);
-  // Линейка лежит поверх плана и забирает клик себе: с неё тянут направляющую.
-  if (editable && canvasGuidesShown(state) && rulerAxis(point)) return { pull: true };
+  // Шкала лежит поверх плана и забирает клик себе: с неё тянут направляющую.
+  if (editable && canvasGuidesShown(state) && guideStripAxis(point)) return { pull: true };
   // Ручки подписи выделенной метки: поворот и поводок — нажимаются, не тянутся.
   if (handles && state.selectedMarkIds.length === 1) {
     const target = labelTargetOf(state.project, scheme, state.selectedMarkIds[0], state.filter);
@@ -5671,7 +5673,7 @@ function mountCanvasHint(host, api) {
   const render = () => {
     const state = api.getState();
     const value = canvasHintText(state);
-    // Отступ от линейки — до проверки на пустоту: он нужен подсказке в любом
+    // Отступ от шкалы — до проверки на пустоту: он нужен подсказке в любом
     // виде, и свёрнутой тоже.
     hint.style.setProperty("--canvas-hint-inset", canvasHintInset(state) + "px");
     // Условие показа живёт здесь, а не в чужих стилях: подсказки нет, когда
@@ -5743,7 +5745,7 @@ function mountCanvasHint(host, api) {
 
 // Кнопка полного экрана: правый верхний угол холста, зеркально подсказке в
 // левом. Тот же приём — рисованный значок поверх плана, клики берёт только
-// сама кнопка (поле наложения сквозное), — и та же мера отступа от линейки.
+// сама кнопка (поле наложения сквозное), — и та же мера отступа от шкалы.
 function mountCanvasFullscreen(host, api) {
   const doc = typeof document === "undefined" ? null : document;
   // Разворачивается страница целиком: полный экран одного холста оставил бы
@@ -5794,7 +5796,7 @@ function mountCanvasFullscreen(host, api) {
     button.title = label;
     button.setAttribute("aria-label", label);
     button.setAttribute("aria-pressed", on ? "true" : "false");
-    // Линейка занимает полосу сверху — кнопка начинается за ней, как и
+    // Шкала занимает полосу сверху — кнопка начинается за ней, как и
     // подсказка, и мера у них общая.
     button.style.setProperty("--canvas-hint-inset", canvasHintInset(state) + "px");
   };
@@ -5805,7 +5807,7 @@ function mountCanvasFullscreen(host, api) {
       "layout" in changed ||
       // Кнопка одна на все три режима — она и есть обещанный тикетом
       // полноэкранный показ чертежа и объёма (таск 153), — но мера отступа у
-      // режимов разная: линейка есть только у плана.
+      // режимов разная: шкала есть только у плана.
       "screen" in changed
     ) {
       render();

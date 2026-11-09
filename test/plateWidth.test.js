@@ -22,7 +22,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import { LAYOUT_NARROW_WIDTH } from "../src/app.js";
-import { RULER_SIZE } from "../src/render.js";
+import { GUIDE_STRIP_PX } from "../src/render.js";
 
 const CANVAS_CSS = readFileSync(new URL("../src/panels/canvas.css", import.meta.url), "utf8");
 const APP_CSS = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
@@ -102,7 +102,7 @@ test("предел укладывается в самое узкое поле н
   const cornerBody = RULES.find((rule) => prop(rule.body, "--canvas-corner-edge") !== null).body;
   const corner = { edge: px(prop(cornerBody, "--canvas-corner-edge")), size: px(prop(cornerBody, "--canvas-corner-size")) };
   // Подсказке слева мешает линейка, сводке справа — полоса под угловые кнопки.
-  const hintRoom = field - 12 - RULER_SIZE;
+  const hintRoom = field - 12 - GUIDE_STRIP_PX;
   const infoRoom = field - (corner.edge + corner.size + 8);
   assert.ok(PLATE_MIN <= hintRoom, "подсказке в самом узком поле остаётся " + hintRoom + ", а предел " + PLATE_MIN);
   assert.ok(PLATE_MIN <= infoRoom, "сводке в самом узком поле остаётся " + infoRoom + ", а предел " + PLATE_MIN);

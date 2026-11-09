@@ -24,7 +24,7 @@ import {
 import { canvasHintInset, canvasHintText, canvasOnScreen, canvasSummaryLines } from "../src/canvas.js";
 import { plateUnseen } from "../src/panels/plate.js";
 import { workshopPlacement, workshopStatus, workshopSummaryLines } from "../src/panels/workshop.js";
-import { RULER_SIZE } from "../src/render.js";
+import { GUIDE_STRIP_PX } from "../src/render.js";
 import { addScheme, createProject } from "../src/model.js";
 import { strings } from "../src/strings.js";
 
@@ -145,9 +145,9 @@ test("план уступает экран: подсказка и линейка
   // линейку рисуют и план, и чертёж, отметка у них одна, и ряд кнопок над полем
   // обязан стоять на одной высоте в обоих режимах. В объёме линейки нет вовсе —
   // там переключатель с полным экраном висел бы на пустом поле.
-  assert.equal(canvasHintInset(stateOf({})), RULER_SIZE);
+  assert.equal(canvasHintInset(stateOf({})), GUIDE_STRIP_PX);
   assert.equal(canvasHintInset(stateOf({ screen: "volume" })), 0);
-  assert.equal(canvasHintInset(stateOf({ screen: "drawing" })), RULER_SIZE);
+  assert.equal(canvasHintInset(stateOf({ screen: "drawing" })), GUIDE_STRIP_PX);
   // Спрятали линейку — отступ уходит из обоих.
   assert.equal(canvasHintInset(stateOf({ screen: "drawing", guidesShown: false })), 0);
   assert.equal(canvasHintInset(stateOf({ screen: "scheme", guidesShown: false })), 0);

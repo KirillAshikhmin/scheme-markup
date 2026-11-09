@@ -13,7 +13,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { canvasHintInset, canvasHintText } from "../src/canvas.js";
 import { plateUnseen } from "../src/panels/plate.js";
-import { RULER_SIZE } from "../src/render.js";
+import { GUIDE_STRIP_PX } from "../src/render.js";
 import { strings } from "../src/strings.js";
 import { addScheme, createProject } from "../src/model.js";
 
@@ -34,8 +34,8 @@ const stateOf = (patch) => ({
 test("отступ подсказки берётся у линейки, а не из своего числа", () => {
   // Мера одна на холст и на подсказку: разойдись она — подсказка снова
   // наедет на линейку или отъедет от неё на пустое поле.
-  assert.equal(canvasHintInset(stateOf({})), RULER_SIZE);
-  assert.ok(RULER_SIZE > 0, "линейка нулевой ширины — мера потерялась");
+  assert.equal(canvasHintInset(stateOf({})), GUIDE_STRIP_PX);
+  assert.ok(GUIDE_STRIP_PX > 0, "линейка нулевой ширины — мера потерялась");
 });
 
 test("линейку спрятали — отступа нет", () => {
@@ -45,8 +45,8 @@ test("линейку спрятали — отступа нет", () => {
 test("линейка по умолчанию есть: состояние без отметки считается «показана»", () => {
   // Отметка приходит из настроек браузера асинхронно, и до ответа хранилища
   // поля в состоянии может не быть вовсе.
-  assert.equal(canvasHintInset(stateOf({ guidesShown: undefined })), RULER_SIZE);
-  assert.equal(canvasHintInset(null), RULER_SIZE);
+  assert.equal(canvasHintInset(stateOf({ guidesShown: undefined })), GUIDE_STRIP_PX);
+  assert.equal(canvasHintInset(null), GUIDE_STRIP_PX);
 });
 
 test("свёрнутая подсказка помечается, когда текст сменился", () => {

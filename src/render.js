@@ -341,7 +341,7 @@ const GUIDE_DASH = [2, 5];
 // ярче: двенадцать штук на плане не должны спорить с самим планом.
 const GUIDE_LINE = "rgba(9, 105, 218, 0.38)";
 const GUIDE_LINE_ACTIVE = "rgba(9, 105, 218, 0.85)";
-// Направляющая, утащенная обратно на линейку: гаснет и рвётся — её снимут.
+// Направляющая, утащенная обратно на шкалу: гаснет и рвётся — её снимут.
 const GUIDE_DROP_DASH = [3, 4];
 const GUIDE_DROP_ALPHA = 0.45;
 const GUIDE_WIDTH = 1;
@@ -1816,7 +1816,7 @@ export function snapToCorners(corners, point, scheme, view, options = {}) {
  * предпросмотра, и для клика — разойтись им негде. `points` — уже поставленные
  * вершины, `cursor` — точка под курсором в долях плана. `options.free` снимает
  * всё разом, `options.planGuides` — направляющие схемы, которые пользователь
- * поставил с линейки, `options.corners` — углы чертежа (таск 266).
+ * поставил со шкалы, `options.corners` — углы чертежа (таск 266).
  *
  * **Порядок разрешения споров — один на всю сборку: занятую ось не двигает
  * никто, а старшинство идёт сверху вниз.**
@@ -1898,25 +1898,35 @@ export function draftSnap(points, cursor, scheme, view, options = {}) {
   };
 }
 
-// ——— линейка и направляющие схемы ————————————————————————————————————
+// ——— шкала и направляющие схемы ——————————————————————————————————————
 //
 // Заказчик: «добавь „линейку“ по бокам у схемы, просто шкала с метками, без
 // единиц измерения». Единиц у плана и правда нет: подложка — картинка,
 // масштаба она не знает, и подписать деления метрами значило бы соврать.
 // Шкала нужна, чтобы **ставить направляющие** и видеть, что они стоят ровно.
 //
-// Рисуется всё это только холстом: `drawScheme` о линейке и направляющих не
+// **Имена здесь — `guideStrip*`, и слова «линейка» среди них нет** (таск 267,
+// G387). Словом «Линейка» заказчик назвал инструмент измерения (таск 237,
+// G357), а эту полосу — «Шкала и направляющие»; пока код звал линейкой и то
+// и другое, читающий не мог понять, о чём речь, не выяснив заново. Имени
+// вроде `scale*` шкала не получила нарочно: оно занято масштабом плана
+// (`setPlanScale`, `zoom`), и тёзка вышла бы не лучше прежней. `guideStrip` —
+// полоса, с которой тянут направляющие: отметка у них одна («Шкала и
+// направляющие»), ключ настройки тоже один, и по имени видно, зачем полоса
+// заведена.
+//
+// Рисуется всё это только холстом: `drawScheme` о шкале и направляющих не
 // знает вовсе, поэтому в PNG, в печать и в лист «Схема» они не попадают —
 // монтажнику на бумаге они не нужны.
 
-// Ширина полосы линейки в пикселях экрана.
-export const RULER_SIZE = 18;
+// Ширина полосы шкалы в пикселях экрана.
+export const GUIDE_STRIP_PX = 18;
 // Реже этого деления на экране не ставятся: частая гребёнка читается заливкой.
-const RULER_STEP_MIN_PX = 48;
+const GUIDE_STRIP_STEP_MIN_PX = 48;
 // Каждое пятое деление — длинное: по ним глаз считает.
-const RULER_MAJOR_EVERY = 5;
-const RULER_TICK = 5;
-const RULER_TICK_MAJOR = 10;
+const GUIDE_STRIP_MAJOR_EVERY = 5;
+const GUIDE_STRIP_TICK = 5;
+const GUIDE_STRIP_TICK_MAJOR = 10;
 
 // Попадание по направляющей и порог притяжки — в пикселях экрана, как у
 // направляющих черновика: иначе на разном зуме всё ведёт себя по-разному.
@@ -1927,11 +1937,11 @@ export const GUIDE_CROSS_PX = 13;
 
 // Шаг делений в пикселях плана: 1, 2, 5 и их десятки. Берётся самый мелкий, у
 // которого на экране остаётся разборчивый просвет.
-export function rulerStep(zoom) {
+export function guideStripStep(zoom) {
   const scale = zoom > 0 ? zoom : 1;
   let step = 1;
   let guard = 0;
-  while (step * scale < RULER_STEP_MIN_PX && guard < 40) {
+  while (step * scale < GUIDE_STRIP_STEP_MIN_PX && guard < 40) {
     const digit = Number(String(step)[0]);
     step = digit === 1 ? step * 2 : digit === 2 ? (step / 2) * 5 : step * 2;
     guard += 1;
@@ -1940,18 +1950,18 @@ export function rulerStep(zoom) {
 }
 
 /**
- * Деления линейки для видимой части холста. `box` — размер холста в его
+ * Деления шкалы для видимой части холста. `box` — размер холста в его
  * собственных пикселях. Возвращает `{step, top, left}`; в списках — экранная
  * координата деления и признак длинного.
  */
-export function rulerTicks(scheme, view, box, options = {}) {
+export function guideStripTicks(scheme, view, box, options = {}) {
   const state = renderView(view);
-  const step = rulerStep(state.zoom);
+  const step = guideStripStep(state.zoom);
   // У подложки деления стоят только там, где есть картинка: за её краем мерить
   // нечего. У чертежа краёв нет вовсе — лист бесконечен в обе стороны, и
   // миллиметры там бывают отрицательными (таск 193). Поэтому границы
   // необязательны, а не выведены из «схемы»: подставь мастерская свою мерку в
-  // один миллиметр — линейка в чертеже показала бы одно деление.
+  // один миллиметр — шкала в чертеже показала бы одно деление.
   const bounded = options.bounded !== false;
   const ticks = (size, offset, planSize) => {
     const list = [];
@@ -1960,7 +1970,7 @@ export function rulerTicks(scheme, view, box, options = {}) {
     for (let index = first; index <= last; index += 1) {
       const at = index * step;
       if (bounded && (at < 0 || at > planSize)) continue;
-      list.push({ at, screen: offset + at * state.zoom, major: index % RULER_MAJOR_EVERY === 0 });
+      list.push({ at, screen: offset + at * state.zoom, major: index % GUIDE_STRIP_MAJOR_EVERY === 0 });
     }
     return list;
   };
@@ -1971,56 +1981,56 @@ export function rulerTicks(scheme, view, box, options = {}) {
   };
 }
 
-// Линейка: полоса с делениями сверху и слева. Без чисел — подписывать деления
+// Шкала: полоса с делениями сверху и слева. Без чисел — подписывать деления
 // нечем, план масштаба не знает.
-export function drawRuler(ctx, scheme, view, box, options = {}) {
+export function drawGuideStrip(ctx, scheme, view, box, options = {}) {
   const state = renderView(view);
-  const ticks = rulerTicks(scheme, state, box, options);
+  const ticks = guideStripTicks(scheme, state, box, options);
   ctx.save();
   ctx.fillStyle = "rgba(246, 248, 250, 0.94)";
-  ctx.fillRect(0, 0, box.width, RULER_SIZE);
-  ctx.fillRect(0, 0, RULER_SIZE, box.height);
+  ctx.fillRect(0, 0, box.width, GUIDE_STRIP_PX);
+  ctx.fillRect(0, 0, GUIDE_STRIP_PX, box.height);
   ctx.strokeStyle = "#d0d7de";
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(0, RULER_SIZE + 0.5);
-  ctx.lineTo(box.width, RULER_SIZE + 0.5);
-  ctx.moveTo(RULER_SIZE + 0.5, 0);
-  ctx.lineTo(RULER_SIZE + 0.5, box.height);
+  ctx.moveTo(0, GUIDE_STRIP_PX + 0.5);
+  ctx.lineTo(box.width, GUIDE_STRIP_PX + 0.5);
+  ctx.moveTo(GUIDE_STRIP_PX + 0.5, 0);
+  ctx.lineTo(GUIDE_STRIP_PX + 0.5, box.height);
   ctx.stroke();
   ctx.strokeStyle = "#8c959f";
   ctx.beginPath();
   for (const tick of ticks.top) {
     const x = Math.round(tick.screen) + 0.5;
-    if (x < RULER_SIZE) continue;
-    ctx.moveTo(x, RULER_SIZE);
-    ctx.lineTo(x, RULER_SIZE - (tick.major ? RULER_TICK_MAJOR : RULER_TICK));
+    if (x < GUIDE_STRIP_PX) continue;
+    ctx.moveTo(x, GUIDE_STRIP_PX);
+    ctx.lineTo(x, GUIDE_STRIP_PX - (tick.major ? GUIDE_STRIP_TICK_MAJOR : GUIDE_STRIP_TICK));
   }
   for (const tick of ticks.left) {
     const y = Math.round(tick.screen) + 0.5;
-    if (y < RULER_SIZE) continue;
-    ctx.moveTo(RULER_SIZE, y);
-    ctx.lineTo(RULER_SIZE - (tick.major ? RULER_TICK_MAJOR : RULER_TICK), y);
+    if (y < GUIDE_STRIP_PX) continue;
+    ctx.moveTo(GUIDE_STRIP_PX, y);
+    ctx.lineTo(GUIDE_STRIP_PX - (tick.major ? GUIDE_STRIP_TICK_MAJOR : GUIDE_STRIP_TICK), y);
   }
   ctx.stroke();
   ctx.restore();
 }
 
 /**
- * Какая линейка лежит под точкой экрана и какую направляющую она ставит.
+ * Какая полоса шкалы лежит под точкой экрана и какую направляющую она ставит.
  *
- * **Левая (вертикальная) линейка задаёт высоту — значит ставит горизонтальную
+ * **Левая (вертикальная) полоса задаёт высоту — значит ставит горизонтальную
  * направляющую; верхняя задаёт положение по ширине — значит вертикальную.**
  * Слова заказчика: «по вертикальной линейке горизонтальную линию, а по
  * горизонтальной — вертикальную». Угол, где полосы сходятся, отдан верхней:
  * решать его пополам было бы гаданием, а так правило одно и предсказуемое.
  *
- * `null` — точка не на линейке.
+ * `null` — точка не на шкале.
  */
-export function rulerAxis(point) {
+export function guideStripAxis(point) {
   if (!point) return null;
-  if (point.y <= RULER_SIZE) return "v";
-  if (point.x <= RULER_SIZE) return "h";
+  if (point.y <= GUIDE_STRIP_PX) return "v";
+  if (point.x <= GUIDE_STRIP_PX) return "h";
   return null;
 }
 
@@ -2052,7 +2062,7 @@ export function drawSchemeGuides(ctx, guides, scheme, view, box, options = {}) {
     const at = Math.round(guideScreen(guide, scheme, state)) + 0.5;
     const live = guide.id === active;
     const drop = guide.id === dropping;
-    // Утащенная обратно на линейку гаснет и рвётся пунктиром: по отпусканию её
+    // Утащенная обратно на шкалу гаснет и рвётся пунктиром: по отпусканию её
     // снимут, и знать об этом надо до, а не после.
     ctx.setLineDash(drop ? GUIDE_DROP_DASH : []);
     ctx.strokeStyle = drop ? GUIDE_LINE : live ? GUIDE_LINE_ACTIVE : GUIDE_LINE;
@@ -3840,7 +3850,7 @@ export function hitLabelTurn(project, scheme, target, point, view, filter, extra
 //
 // **Переключатель на метку, а не на схему.** Поводок — часть чертежа: он
 // рисуется `drawScheme`, значит уезжает в PNG, в печать и в лист «Схема».
-// Общая настройка вида (как линейка) живёт в браузере и в файл не попадает —
+// Общая настройка вида (как шкала) живёт в браузере и в файл не попадает —
 // значит, распечатка у второго участника вышла бы другой. И жалоба заказчика
 // адресная: пропадает поводок у той подписи, которую он только что оттащил, —
 // вернуть его нужно ей, а не всем сразу.
@@ -4381,7 +4391,7 @@ function drawHandlePlus(ctx, handle, tint, alpha) {
  * отведено на нажатие (`progress` 0…1), и рисуется **только там, где есть что
  * взять**: обещать перенос над пустым планом нельзя.
  *
- * Рисуется поверх всего, включая линейку: это ответ руке, а не часть чертежа.
+ * Рисуется поверх всего, включая шкалу: это ответ руке, а не часть чертежа.
  * В PNG, в печать и в лист «Схема» не попадает — `drawScheme` о нём не знает.
  */
 export function drawPressRing(ctx, at, progress, color) {
@@ -4440,9 +4450,9 @@ export function drawSnapCorner(ctx, at, color) {
 
 // ——— линейка измерения (таск 237, G356) ——————————————————————————————————
 //
-// Не путать со шкалой по краям поля (`drawRuler` выше): та с таска 237 так и
-// называется — «Шкала и направляющие», — а слово «Линейка» отдано инструменту,
-// который меряет расстояния (G357).
+// Не путать со шкалой по краям поля (`drawGuideStrip` выше): та называется
+// «Шкала и направляющие» и в коде зовётся `guideStrip*` (таск 267, G387), а
+// слово «Линейка» отдано инструменту, который меряет расстояния (G357).
 //
 // Отрезок мерки — **одно рисование на три поля**: «Чертёж», «Схема» и «Объём»
 // дают сюда готовые экранные точки и готовые строки, а как это выглядит,

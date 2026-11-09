@@ -31,14 +31,14 @@ import { canvasDraftPoint, canvasFrameGuides } from "../src/canvas.js";
 import {
   GUIDE_CROSS_PX,
   GUIDE_HIT_PX,
-  RULER_SIZE,
+  GUIDE_STRIP_PX,
   drawScheme,
   drawSchemeGuides,
   guideFraction,
   hitSchemeGuide,
-  rulerAxis,
-  rulerStep,
-  rulerTicks,
+  guideStripAxis,
+  guideStripStep,
+  guideStripTicks,
   draftSnap,
   snapToSchemeGuides,
 } from "../src/render.js";
@@ -226,21 +226,21 @@ test("схема прежней разметки открывается без �
 test("шаг линейки растёт и мельчает вместе с масштабом, а деления стоят на местах плана", () => {
   // Шаг — «круглый»: 1, 2, 5 и их десятки, иначе деления читаются как случайные.
   for (const zoom of [0.1, 0.25, 0.5, 1, 2, 4, 8]) {
-    const step = rulerStep(zoom);
+    const step = guideStripStep(zoom);
     assert.ok([1, 2, 5].includes(Number(String(step)[0])), "шаг не круглый: " + step);
     assert.ok(step * zoom >= 48, "деления на экране гуще предела: " + step * zoom);
   }
-  assert.ok(rulerStep(0.2) > rulerStep(4), "при мелком масштабе шаг обязан быть крупнее");
+  assert.ok(guideStripStep(0.2) > guideStripStep(4), "при мелком масштабе шаг обязан быть крупнее");
 
   // Деление соответствует одному и тому же месту плана на любом масштабе.
-  const at = (zoom, offset) => rulerTicks(PLAN, viewOf({ zoom, offsetX: offset }), BOX).top;
+  const at = (zoom, offset) => guideStripTicks(PLAN, viewOf({ zoom, offsetX: offset }), BOX).top;
   const plain = at(1, 0).find((tick) => tick.at === 100);
   assert.equal(plain.screen, 100);
   const zoomed = at(2, 40).find((tick) => tick.at === 100);
   assert.equal(zoomed.screen, 40 + 200);
   // За края плана деления не ставятся: линейка меряет план, а не пустое поле.
   assert.ok(at(1, 0).every((tick) => tick.at >= 0 && tick.at <= PLAN.width));
-  assert.ok(RULER_SIZE > 0);
+  assert.ok(GUIDE_STRIP_PX > 0);
 });
 
 test("перекрестие ловит шире одиночной направляющей", () => {
@@ -422,21 +422,21 @@ test("направляющих нет в том, что уходит в PNG, в 
 
 // Заказчик: «по вертикальной линейке горизонтальную линию, а по горизонтальной
 // — вертикальную». В тикете 59 это было записано наоборот, и перетаскивание
-// работало зеркально — правило считает `rulerAxis`, и оно одно на
+// работало зеркально — правило считает `guideStripAxis`, и оно одно на
 // перетаскивание и на двойной клик.
 test("левая линейка даёт горизонтальную направляющую, верхняя — вертикальную", () => {
   // Верхняя полоса: клик где угодно по ширине ставит вертикальную.
-  assert.equal(rulerAxis({ x: 300, y: 4 }), "v");
-  assert.equal(rulerAxis({ x: 300, y: RULER_SIZE }), "v");
+  assert.equal(guideStripAxis({ x: 300, y: 4 }), "v");
+  assert.equal(guideStripAxis({ x: 300, y: GUIDE_STRIP_PX }), "v");
   // Левая полоса: горизонтальную.
-  assert.equal(rulerAxis({ x: 4, y: 300 }), "h");
-  assert.equal(rulerAxis({ x: RULER_SIZE, y: 300 }), "h");
+  assert.equal(guideStripAxis({ x: 4, y: 300 }), "h");
+  assert.equal(guideStripAxis({ x: GUIDE_STRIP_PX, y: 300 }), "h");
   // Угол, где полосы сходятся, отдан верхней — решать его пополам было бы
   // гаданием.
-  assert.equal(rulerAxis({ x: 3, y: 3 }), "v");
+  assert.equal(guideStripAxis({ x: 3, y: 3 }), "v");
   // Сам план линейке не принадлежит.
-  assert.equal(rulerAxis({ x: RULER_SIZE + 1, y: RULER_SIZE + 1 }), null);
-  assert.equal(rulerAxis(null), null);
+  assert.equal(guideStripAxis({ x: GUIDE_STRIP_PX + 1, y: GUIDE_STRIP_PX + 1 }), null);
+  assert.equal(guideStripAxis(null), null);
 });
 
 // ——— что уходит в кадр ————————————————————————————————————————————————

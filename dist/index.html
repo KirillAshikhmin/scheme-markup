@@ -26435,27 +26435,27 @@ held: own.held,
 corner: null,
 };
 }
-const RULER_SIZE = 18;
-const RULER_STEP_MIN_PX = 48;
-const RULER_MAJOR_EVERY = 5;
-const RULER_TICK = 5;
-const RULER_TICK_MAJOR = 10;
+const GUIDE_STRIP_PX = 18;
+const GUIDE_STRIP_STEP_MIN_PX = 48;
+const GUIDE_STRIP_MAJOR_EVERY = 5;
+const GUIDE_STRIP_TICK = 5;
+const GUIDE_STRIP_TICK_MAJOR = 10;
 const GUIDE_HIT_PX = 5;
 const GUIDE_CROSS_PX = 13;
-function rulerStep(zoom) {
+function guideStripStep(zoom) {
 const scale = zoom > 0 ? zoom : 1;
 let step = 1;
 let guard = 0;
-while (step * scale < RULER_STEP_MIN_PX && guard < 40) {
+while (step * scale < GUIDE_STRIP_STEP_MIN_PX && guard < 40) {
 const digit = Number(String(step)[0]);
 step = digit === 1 ? step * 2 : digit === 2 ? (step / 2) * 5 : step * 2;
 guard += 1;
 }
 return step;
 }
-function rulerTicks(scheme, view, box, options = {}) {
+function guideStripTicks(scheme, view, box, options = {}) {
 const state = renderView(view);
-const step = rulerStep(state.zoom);
+const step = guideStripStep(state.zoom);
 const bounded = options.bounded !== false;
 const ticks = (size, offset, planSize) => {
 const list = [];
@@ -26464,7 +26464,7 @@ const last = Math.ceil((size - offset) / (step * state.zoom));
 for (let index = first; index <= last; index += 1) {
 const at = index * step;
 if (bounded && (at < 0 || at > planSize)) continue;
-list.push({ at, screen: offset + at * state.zoom, major: index % RULER_MAJOR_EVERY === 0 });
+list.push({ at, screen: offset + at * state.zoom, major: index % GUIDE_STRIP_MAJOR_EVERY === 0 });
 }
 return list;
 };
@@ -26474,42 +26474,42 @@ top: ticks(box.width, state.offsetX, schemeWidthPx(scheme)),
 left: ticks(box.height, state.offsetY, schemeHeightPx(scheme)),
 };
 }
-function drawRuler(ctx, scheme, view, box, options = {}) {
+function drawGuideStrip(ctx, scheme, view, box, options = {}) {
 const state = renderView(view);
-const ticks = rulerTicks(scheme, state, box, options);
+const ticks = guideStripTicks(scheme, state, box, options);
 ctx.save();
 ctx.fillStyle = "rgba(246, 248, 250, 0.94)";
-ctx.fillRect(0, 0, box.width, RULER_SIZE);
-ctx.fillRect(0, 0, RULER_SIZE, box.height);
+ctx.fillRect(0, 0, box.width, GUIDE_STRIP_PX);
+ctx.fillRect(0, 0, GUIDE_STRIP_PX, box.height);
 ctx.strokeStyle = "#d0d7de";
 ctx.lineWidth = 1;
 ctx.beginPath();
-ctx.moveTo(0, RULER_SIZE + 0.5);
-ctx.lineTo(box.width, RULER_SIZE + 0.5);
-ctx.moveTo(RULER_SIZE + 0.5, 0);
-ctx.lineTo(RULER_SIZE + 0.5, box.height);
+ctx.moveTo(0, GUIDE_STRIP_PX + 0.5);
+ctx.lineTo(box.width, GUIDE_STRIP_PX + 0.5);
+ctx.moveTo(GUIDE_STRIP_PX + 0.5, 0);
+ctx.lineTo(GUIDE_STRIP_PX + 0.5, box.height);
 ctx.stroke();
 ctx.strokeStyle = "#8c959f";
 ctx.beginPath();
 for (const tick of ticks.top) {
 const x = Math.round(tick.screen) + 0.5;
-if (x < RULER_SIZE) continue;
-ctx.moveTo(x, RULER_SIZE);
-ctx.lineTo(x, RULER_SIZE - (tick.major ? RULER_TICK_MAJOR : RULER_TICK));
+if (x < GUIDE_STRIP_PX) continue;
+ctx.moveTo(x, GUIDE_STRIP_PX);
+ctx.lineTo(x, GUIDE_STRIP_PX - (tick.major ? GUIDE_STRIP_TICK_MAJOR : GUIDE_STRIP_TICK));
 }
 for (const tick of ticks.left) {
 const y = Math.round(tick.screen) + 0.5;
-if (y < RULER_SIZE) continue;
-ctx.moveTo(RULER_SIZE, y);
-ctx.lineTo(RULER_SIZE - (tick.major ? RULER_TICK_MAJOR : RULER_TICK), y);
+if (y < GUIDE_STRIP_PX) continue;
+ctx.moveTo(GUIDE_STRIP_PX, y);
+ctx.lineTo(GUIDE_STRIP_PX - (tick.major ? GUIDE_STRIP_TICK_MAJOR : GUIDE_STRIP_TICK), y);
 }
 ctx.stroke();
 ctx.restore();
 }
-function rulerAxis(point) {
+function guideStripAxis(point) {
 if (!point) return null;
-if (point.y <= RULER_SIZE) return "v";
-if (point.x <= RULER_SIZE) return "h";
+if (point.y <= GUIDE_STRIP_PX) return "v";
+if (point.x <= GUIDE_STRIP_PX) return "h";
 return null;
 }
 function guideScreen(guide, scheme, view) {
@@ -53287,7 +53287,7 @@ return lines;
 function canvasHintInset(state) {
 const screen = state && state.screen ? state.screen : SCREEN_DEFAULT;
 if (screen === "volume") return 0;
-return canvasGuidesShown(state) ? RULER_SIZE : 0;
+return canvasGuidesShown(state) ? GUIDE_STRIP_PX : 0;
 }
 const FULLSCREEN_ENTER = ["requestFullscreen", "webkitRequestFullscreen"];
 const FULLSCREEN_EXIT = ["exitFullscreen", "webkitExitFullscreen"];
@@ -53601,7 +53601,7 @@ if (mark && mark.kind === "point" && mark.schemeId === scheme.id) {
 drawHandles(canvasCtx, scheme, mark, view, canvasHandleColor(state, mark), canvasStacks(state, scheme));
 }
 }
-if (guidesOn) drawRuler(canvasCtx, scheme, view, box);
+if (guidesOn) drawGuideStrip(canvasCtx, scheme, view, box);
 if (canvasMeasuring(state)) canvasPaintMeasure(state, scheme, view);
 if (canvasPress) {
 const held = canvasPress.pick && canvasPress.pick.markId ? findMark(project, canvasPress.pick.markId) : null;
@@ -53800,7 +53800,7 @@ return screenToPlan({ x: box.width / 2, y: box.height / 2 }, scheme, view);
 }
 function canvasCursorPlan(state, scheme, view) {
 if (!canvasCursor || !scheme) return null;
-if (canvasGuidesShown(state) && canvasOnRuler(canvasCursor)) return null;
+if (canvasGuidesShown(state) && canvasOnGuideStrip(canvasCursor)) return null;
 const plan = screenToPlan(canvasCursor, scheme, view);
 if (!(plan.x >= 0 && plan.x <= 1 && plan.y >= 0 && plan.y <= 1)) return null;
 return plan;
@@ -54111,8 +54111,8 @@ if (!state || state.gridShown === false) return null;
 const step = gridStepOf(project);
 return step > 0 ? { stepMm: step, box: canvasBox() } : null;
 }
-function canvasOnRuler(point) {
-return rulerAxis(point) !== null;
+function canvasOnGuideStrip(point) {
+return guideStripAxis(point) !== null;
 }
 function canvasGuideAt(axis, point, scheme, view) {
 return guideFraction(axis, axis === "h" ? point.y : point.x, scheme, view);
@@ -55346,8 +55346,8 @@ const at = canvasPointOf(event);
 canvasTouchAt = canvasNow();
 const touchState = canvasState();
 const touchScheme = canvasScheme(touchState);
-if (canvasEditAllowed(touchState) && canvasGuidesShown(touchState) && rulerAxis(at)) {
-const axis = rulerAxis(at);
+if (canvasEditAllowed(touchState) && canvasGuidesShown(touchState) && guideStripAxis(at)) {
+const axis = guideStripAxis(at);
 canvasDrag = {
 kind: "guideNew",
 axis,
@@ -55403,9 +55403,9 @@ canvasDrag = { kind: "done", start: point, moved: false };
 return;
 }
 }
-const rulerUnder = editable && canvasGuidesShown(state) ? rulerAxis(point) : null;
-if (rulerUnder) {
-const axis = rulerUnder;
+const stripUnder = editable && canvasGuidesShown(state) ? guideStripAxis(point) : null;
+if (stripUnder) {
+const axis = stripUnder;
 canvasDrag = {
 kind: "guideNew",
 axis,
@@ -55745,7 +55745,7 @@ canvasPreview = moveSchemeGuide(canvasDrag.before, state.schemeId, canvasDrag.gu
 canvasPreview = null;
 }
 }
-canvasDrag.drop = canvasOnRuler(point);
+canvasDrag.drop = canvasOnGuideStrip(point);
 canvasRedraw();
 return;
 }
@@ -55769,14 +55769,14 @@ if (drag.sim) canvasSimEnd(drag.sim, drag.moved || event.type === "pointercancel
 const point = canvasPointOf(event);
 const state = canvasState();
 if (drag.kind === "guideNew") {
-if (drag.moved && !canvasOnRuler(point)) canvasGuideAdd(drag.axis, drag.at);
+if (drag.moved && !canvasOnGuideStrip(point)) canvasGuideAdd(drag.axis, drag.at);
 canvasRedraw();
 return;
 }
 if (drag.kind === "guideMove") {
 const after = canvasPreview;
 canvasPreview = null;
-if (canvasOnRuler(point)) canvasGuideRemove(drag.guideId);
+if (canvasOnGuideStrip(point)) canvasGuideRemove(drag.guideId);
 else if (drag.moved && after) canvasCommit(drag.before, after, strings.history.guideMove);
 canvasRedraw();
 return;
@@ -55874,7 +55874,7 @@ if (state.mode === CANVAS_MODE_BLOCK_JOIN) return false;
 const scheme = canvasScheme(state);
 const view = canvasViewOf(state);
 if (canvasGuidesShown(state)) {
-const axis = rulerAxis(at);
+const axis = guideStripAxis(at);
 if (axis) {
 canvasGuideAdd(axis, canvasGuideAt(axis, at, scheme, view));
 return true;
@@ -56090,7 +56090,7 @@ if (!scheme) return {};
 const view = canvasViewOf(state);
 const editable = canvasEditAllowed(state);
 const handles = canvasHandlesShown(state);
-if (editable && canvasGuidesShown(state) && rulerAxis(point)) return { pull: true };
+if (editable && canvasGuidesShown(state) && guideStripAxis(point)) return { pull: true };
 if (handles && state.selectedMarkIds.length === 1) {
 const target = labelTargetOf(state.project, scheme, state.selectedMarkIds[0], state.filter);
 if (target && hitLabelTurn(state.project, scheme, target, point, view, state.filter)) return { press: true };
@@ -75426,7 +75426,7 @@ function paintGuides(box) {
 if (!layerOn("guidesShown")) return;
 const bridge = drawingUnitBridge(view);
 drawDrawingGuides(ctx, bridge, project(), schemeId, schemeGuides(project(), schemeId), box);
-drawRuler(ctx, WORKSHOP_UNIT, view, box, { bounded: false });
+drawGuideStrip(ctx, WORKSHOP_UNIT, view, box, { bounded: false });
 }
 function paintPlan(spot, box) {
 const bitmap = image();
