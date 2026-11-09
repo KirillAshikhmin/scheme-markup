@@ -15323,6 +15323,12 @@ lists: { links: "marks" },
 const ID_OWNER_KEYS = Object.freeze(
 ID_OWNERS.flatMap((owner) => (owner.nestedKey ? [owner.key, owner.nestedKey] : [owner.key])),
 );
+const ID_OWNER_REFS = Object.freeze(
+ID_OWNERS.flatMap((owner) => [
+...Object.entries(owner.refs || {}).map(([field, to]) => Object.freeze({ owner: owner.key, field, to, many: false })),
+...Object.entries(owner.lists || {}).map(([field, to]) => Object.freeze({ owner: owner.key, field, to, many: true })),
+]),
+);
 function idOwnList(project, owner) {
 const list = project[owner.key];
 return Array.isArray(list) ? list : [];

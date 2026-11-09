@@ -1453,6 +1453,27 @@ export const ID_OWNER_KEYS = Object.freeze(
   ID_OWNERS.flatMap((owner) => (owner.nestedKey ? [owner.key, owner.nestedKey] : [owner.key])),
 );
 
+/**
+ * Все **простые** поля-ссылки объекта поимённо: `[{owner, field, to, many}]` —
+ * чья это запись, имя поля, вид, на который поле смотрит, и держит ли оно
+ * список. Снято с той же таблицы `ID_OWNERS`, по которой идёт перенумерация, и
+ * существует ради тестов: свой перечень ссылок они не ведут. Поле, которое
+ * перенумерация не переписала, — это объект, у которого розетка управляет
+ * чужим светильником, и проверять такое надо на фикстуре, где заполнена
+ * **каждая** ссылка, а полноту такой фикстуры сверяют с этим перечнем.
+ *
+ * Ссылок непростой формы здесь нет: `mark.controls`, `mark.device.doorId`,
+ * дерево блоков сценария, ключи принятых предупреждений и адреса в опциях
+ * привязок названы поимённо в `idsRewrite` — и в фикстуре тоже называются
+ * поимённо.
+ */
+export const ID_OWNER_REFS = Object.freeze(
+  ID_OWNERS.flatMap((owner) => [
+    ...Object.entries(owner.refs || {}).map(([field, to]) => Object.freeze({ owner: owner.key, field, to, many: false })),
+    ...Object.entries(owner.lists || {}).map(([field, to]) => Object.freeze({ owner: owner.key, field, to, many: true })),
+  ]),
+);
+
 function idOwnList(project, owner) {
   const list = project[owner.key];
   return Array.isArray(list) ? list : [];
