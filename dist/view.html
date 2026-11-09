@@ -29512,6 +29512,12 @@ if (got <= room) return value;
 }
 return own;
 }
+function elevationNameFit(name, room, measure) {
+const value = String(name || "");
+if (!value || !(room > 0) || typeof measure !== "function") return value;
+const got = measure(value);
+return Number.isFinite(got) && got > room ? "" : value;
+}
 function drawElevation(ctx, elevation, box, options = {}) {
 if (!elevation) return null;
 const unit = options.unit > 0 ? options.unit : 1;
@@ -29602,18 +29608,44 @@ unknown.forEach(namesObject);
 for (const row of rows) {
 if (row.names) row.members.forEach(namesObject);
 }
+const drawnObjects = new Set();
+for (const row of rows) {
+row.members.forEach((mark, index) => {
+if (mark.objectId && row.boxes[index].view) drawnObjects.add(mark.objectId);
+});
+}
+const objectLabels = elevation.objects.filter(
+(object) =>
+object.name &&
+!namedObjects.has(object.id) &&
+(object.toMm - object.fromMm) * scale >= ELEVATION_LABEL_MIN_PX * unit,
+);
+const labelPlaces = [
+...lines.map((mark) => (atX(mark.fromMm) + atX(mark.toMm)) / 2),
+...rows.map((row) => atX(row.centreMm)),
+...objectLabels.map((object) => (atX(object.fromMm) + atX(object.toMm)) / 2),
+];
+const labelRooms = elevationLabelRooms(labelPlaces);
+const objectRooms = new Map(
+objectLabels.map((object, at) => [object.id, labelRooms[lines.length + rows.length + at]]),
+);
 for (const object of elevation.objects) {
 const top = object.topMm === null ? elevation.heightShownMm : object.topMm;
 const y = atY(top);
 const height = Math.max(thin, (top - object.floorMm) * scale);
+if (!drawnObjects.has(object.id)) {
 ctx.fillStyle = DRAWING_OBJECT_FILL;
 ctx.fillRect(atX(object.fromMm), y, Math.max(thin, (object.toMm - object.fromMm) * scale), height);
 ctx.lineWidth = 1.2 * unit;
 ctx.strokeStyle = DRAWING_OBJECT;
 ctx.strokeRect(atX(object.fromMm), y, Math.max(thin, (object.toMm - object.fromMm) * scale), height);
+}
 if ((object.toMm - object.fromMm) * scale < ELEVATION_LABEL_MIN_PX * unit) continue;
 if (!namedObjects.has(object.id)) {
-elevationText(ctx, object.name, (atX(object.fromMm) + atX(object.toMm)) / 2, y - 8 * unit, "center", unit);
+const name = elevationNameFit(object.name, objectRooms.get(object.id), labelWidth);
+if (name) {
+elevationText(ctx, name, (atX(object.fromMm) + atX(object.toMm)) / 2, y - 8 * unit, "center", unit);
+}
 }
 if (object.topMm !== null) {
 elevationText(ctx, String(object.topMm), atX(object.toMm) + 2 * unit, y + 9 * unit, "left", unit);
@@ -29631,11 +29663,6 @@ if (opening.floorMm > 0) {
 elevationText(ctx, String(opening.floorMm), x + width / 2, top + height + 9 * unit, "center", unit);
 }
 }
-const labelPlaces = [
-...lines.map((mark) => (atX(mark.fromMm) + atX(mark.toMm)) / 2),
-...rows.map((row) => atX(row.centreMm)),
-];
-const labelRooms = elevationLabelRooms(labelPlaces);
 for (let index = 0; index < lines.length; index += 1) {
 const mark = lines[index];
 const y = atY(mark.heightMm);

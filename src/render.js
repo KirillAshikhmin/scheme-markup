@@ -7175,6 +7175,38 @@ export function elevationLabelFit(parts, room, measure) {
 }
 
 /**
+ * **Имя вещи на листе встаёт целиком или не встаёт вовсе** (таск 279).
+ *
+ * Мера тесноты у развёртки одна — `elevationLabelRooms`, — и подписи вещей
+ * стоят в её списке наравне с подписями меток: до этого таска имя вещи меру не
+ * занимало и не спрашивало, и на снимке приёмки таска 276 «Телевизор» был
+ * перечёркнут подписями двух розеток.
+ *
+ * А вот **сдаёт** вещь не то, что метка, и поэтому дверь своя, а не ветка в
+ * `elevationLabelFit`:
+ *
+ *   - у метки сдавать есть что — имя вещи, потом высоту, — а обозначение
+ *     остаётся всегда: по нему прибор находят в таблице (таск 273);
+ *   - у вещи в подписи **только имя**, и частей в нём нет. Обрезать его
+ *     многоточием значило бы завести на листе второй вид сдачи — не «часть
+ *     ушла», а «слово ушло наполовину», — а «Телеви…» не найти ни в списке
+ *     стены, ни в таблице, ни в каталоге.
+ *
+ * Поэтому ответ «не влезло» у вещи — пустая строка, и это **тот же** ответ,
+ * какой лист уже даёт узкой вещи (`ELEVATION_LABEL_MIN_PX`): места нет — имени
+ * нет. Нарисованной вещь при этом остаётся, и верх её подписан числом.
+ *
+ * `measure` — ширина строки в точках тем же шрифтом, которым будем рисовать;
+ * мерки нет — имя остаётся целым (соврать о ширине хуже, чем не спрятать).
+ */
+export function elevationNameFit(name, room, measure) {
+  const value = String(name || "");
+  if (!value || !(room > 0) || typeof measure !== "function") return value;
+  const got = measure(value);
+  return Number.isFinite(got) && got > room ? "" : value;
+}
+
+/**
  * Нарисовать развёртку в заданный прямоугольник.
  *
  * Возвращает геометрию поля (`{x, y, width, height, scale}`) — по ней
@@ -7395,20 +7427,93 @@ export function drawElevation(ctx, elevation, box, options = {}) {
     if (row.names) row.members.forEach(namesObject);
   }
 
+  // **И нарисован прибор на листе тоже один раз** (таск 279). До этой правки у
+  // связанного прибора рисовались и прямоугольник вещи, и изображение её метки
+  // — в том же месте, тем же габаритом и в том же масштабе: телевизор стоял
+  // внутри светлого прямоугольника (снимок приёмки таска 276).
+  //
+  // **Рисует метка, а уступает вещь**, и это не расхождение с «Объёмом», а то
+  // же правило: там прибор рисует тот, у кого есть **тело** (таск 255, вещь с
+  // моделью), здесь — тот, у кого есть **изображение** (`objectViews`), а
+  // уступает тот, чей рисунок — один габарит. На листе габарит и есть
+  // прямоугольник вещи: внутри него ничего, а изображение метки стоит ровно в
+  // нём — тем же лицом (`length` × поле посадки), той же серединой и тем же
+  // углом, потому что всё это дала ей сама вещь (`markPlace`). Обводить
+  // нарисованный прибор его же габаритом незачем.
+  //
+  // **Уступает вещь только изображению, и ни знаку, ни отрезку, ни полосе под
+  // полом.** Знак не изображает вещь и масштаба не обещает (`elevationMarkBox`,
+  // отметка «Изображения» снята), отрезок линейной метки — её ход по стене, а
+  // метка без высоты стоит вовсе под полом. Во всех этих случаях прямоугольник
+  // вещи — единственное, что о её размере на листе говорит, и он остаётся.
+  //
+  // **Связь приносит модель, та же дверь** `objectId`, что у имени (таск 276):
+  // сличать места здесь нельзя — это догадка, а не связь.
+  //
+  // Подписи правило не касается ни одной: имя вещи печатается по правилу таска
+  // 276 (`namedObjects`), верх — числом у правого края того же прямоугольника,
+  // в котором стоит изображение. Метки на листе нет, а вещь есть — вещь
+  // рисуется и называет себя, как рисовала (у заказчика это 20 случаев из 27).
+  const drawnObjects = new Set();
+  for (const row of rows) {
+    row.members.forEach((mark, index) => {
+      if (mark.objectId && row.boxes[index].view) drawnObjects.add(mark.objectId);
+    });
+  }
+
+  // **Запас у подписей считается разом** (таск 273): теснит их друг друга одна
+  // и та же стена, и мерка у них одна — до ближайшего соседа
+  // (`elevationLabelRooms`). Линейные метки и ряды стоят в одном списке
+  // нарочно: подпись ленты налезает на подпись розетки так же, как на подпись
+  // соседней ленты.
+  //
+  // **Подписи вещей стоят в том же списке** (таск 279): стена у них общая, а
+  // имя вещи наезжало на соседнюю подпись ровно так же — второй меры рядом с
+  // этой не заводится. В список идёт то место, **где подпись и правда будет**:
+  // вещь, названная меткой (таск 276), узкая вещь без подписи
+  // (`ELEVATION_LABEL_MIN_PX`) и вещь без имени места не занимают — пустое
+  // место тесноты не создаёт.
+  //
+  // Мера считается **раз, по местам**, а не по напечатанному: спрятанное имя
+  // запаса соседкам не возвращает. Иначе ответ зависел бы от порядка, в котором
+  // подписи сдаются, и две соседки по очереди уступали бы место друг другу.
+  const objectLabels = elevation.objects.filter(
+    (object) =>
+      object.name &&
+      !namedObjects.has(object.id) &&
+      (object.toMm - object.fromMm) * scale >= ELEVATION_LABEL_MIN_PX * unit,
+  );
+  const labelPlaces = [
+    ...lines.map((mark) => (atX(mark.fromMm) + atX(mark.toMm)) / 2),
+    ...rows.map((row) => atX(row.centreMm)),
+    ...objectLabels.map((object) => (atX(object.fromMm) + atX(object.toMm)) / 2),
+  ];
+  const labelRooms = elevationLabelRooms(labelPlaces);
+  const objectRooms = new Map(
+    objectLabels.map((object, at) => [object.id, labelRooms[lines.length + rows.length + at]]),
+  );
+
   // Объекты на полу — под всем остальным: розетка над столешницей обязана
   // остаться видной поверх неё.
   for (const object of elevation.objects) {
     const top = object.topMm === null ? elevation.heightShownMm : object.topMm;
     const y = atY(top);
     const height = Math.max(thin, (top - object.floorMm) * scale);
-    ctx.fillStyle = DRAWING_OBJECT_FILL;
-    ctx.fillRect(atX(object.fromMm), y, Math.max(thin, (object.toMm - object.fromMm) * scale), height);
-    ctx.lineWidth = 1.2 * unit;
-    ctx.strokeStyle = DRAWING_OBJECT;
-    ctx.strokeRect(atX(object.fromMm), y, Math.max(thin, (object.toMm - object.fromMm) * scale), height);
+    // Прибор, нарисованный изображением своей метки, вещь вторым габаритом не
+    // обводит (таск 279).
+    if (!drawnObjects.has(object.id)) {
+      ctx.fillStyle = DRAWING_OBJECT_FILL;
+      ctx.fillRect(atX(object.fromMm), y, Math.max(thin, (object.toMm - object.fromMm) * scale), height);
+      ctx.lineWidth = 1.2 * unit;
+      ctx.strokeStyle = DRAWING_OBJECT;
+      ctx.strokeRect(atX(object.fromMm), y, Math.max(thin, (object.toMm - object.fromMm) * scale), height);
+    }
     if ((object.toMm - object.fromMm) * scale < ELEVATION_LABEL_MIN_PX * unit) continue;
     if (!namedObjects.has(object.id)) {
-      elevationText(ctx, object.name, (atX(object.fromMm) + atX(object.toMm)) / 2, y - 8 * unit, "center", unit);
+      const name = elevationNameFit(object.name, objectRooms.get(object.id), labelWidth);
+      if (name) {
+        elevationText(ctx, name, (atX(object.fromMm) + atX(object.toMm)) / 2, y - 8 * unit, "center", unit);
+      }
     }
     if (object.topMm !== null) {
       elevationText(ctx, String(object.topMm), atX(object.toMm) + 2 * unit, y + 9 * unit, "left", unit);
@@ -7432,17 +7537,6 @@ export function drawElevation(ctx, elevation, box, options = {}) {
       elevationText(ctx, String(opening.floorMm), x + width / 2, top + height + 9 * unit, "center", unit);
     }
   }
-
-  // **Запас у подписей считается разом** (таск 273): теснит их друг друга одна
-  // и та же стена, и мерка у них одна — до ближайшего соседа
-  // (`elevationLabelRooms`). Линейные метки и ряды стоят в одном списке
-  // нарочно: подпись ленты налезает на подпись розетки так же, как на подпись
-  // соседней ленты.
-  const labelPlaces = [
-    ...lines.map((mark) => (atX(mark.fromMm) + atX(mark.toMm)) / 2),
-    ...rows.map((row) => atX(row.centreMm)),
-  ];
-  const labelRooms = elevationLabelRooms(labelPlaces);
 
   // Метки: знак или изображение на своём месте и высоте, подпись рядом.
   // Линия — отрезком.

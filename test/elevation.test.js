@@ -42,7 +42,14 @@ import {
   wallObjectsOn,
   wallRoomId,
 } from "../src/model.js";
-import { drawElevation, elevationLabelFit, elevationLabelRooms, visibleMarks } from "../src/render.js";
+import {
+  DRAWING_OBJECT_FILL,
+  drawElevation,
+  elevationLabelFit,
+  elevationLabelRooms,
+  elevationNameFit,
+  visibleMarks,
+} from "../src/render.js";
 import {
   ELEVATION_HEIGHT_PX,
   elevationHeight,
@@ -533,7 +540,7 @@ test("на плотной стене подпись прибора уклады�
 
 // Та же пара связанных телевизоров плюс **несвязанная** вещь между ними: её
 // лист обязан называть как называл.
-function linkedPairAndRadiator(gapMm) {
+function linkedPairAndRadiator(gapMm, atX = 0) {
   const scene = linkedPair(gapMm);
   const kinds = ensureSchemeObjectKinds(scene.project);
   let project = kinds.project;
@@ -542,8 +549,13 @@ function linkedPairAndRadiator(gapMm) {
     schemeId: scene.schemeId,
     kindId: radiator.id,
     shape: "rect",
-    // Внутри комнаты (правая сторона стены), между телевизорами.
-    atMm: { x: -200, y: 1380 },
+    // Внутри комнаты (правая сторона стены), по умолчанию **ровно посередине**
+    // между телевизорами. Середина здесь нарочно: с таска 279 подпись вещи
+    // стоит в той же мере тесноты, что подписи меток, и радиатор, сдвинутый к
+    // одному из приборов, отбирает у него имя. Эти тесты — о таске 276 («имя
+    // печатается один раз»), а мера тесноты проверяется своим тестом ниже, и
+    // сдвигается радиатор ради него.
+    atMm: { x: atX, y: 1380 },
     widthMm: 800,
     depthMm: 100,
     heightMm: 500,
@@ -691,4 +703,214 @@ test("лист бумаги называет прибор теми же слов
   // бумаги: второго счёта подписей у листа нет и не заводится.
   const paper = elevationLabels(view, { x: 0, y: 0, width: 1400, height: 800 }, { views: true, unit: 2 });
   assert.deepEqual(paper.texts, screen.texts);
+});
+
+// ——— прибор нарисован один раз, и мера тесноты одна на всех (таск 279) ————
+//
+// Два долга со снимков приёмки таска 276. Первый: у связанного прибора на листе
+// рисовались **и** прямоугольник вещи, **и** изображение её метки — в том же
+// месте и тем же габаритом (телевизор внутри светлого прямоугольника). Второй:
+// подписи вещей не стояли в мере «не шире, чем до соседа» (таск 273), и имя
+// вещи наезжало на соседнюю подпись.
+//
+// Правило первого — то же, что в «Объёме» (таск 255), только лист выбирает
+// другого: рисует прибор тот, у кого он **нарисован** (изображение метки), а
+// уступает тот, чей рисунок — один габарит (прямоугольник вещи). Уступает
+// только изображению: знак, отрезок линейной метки и полоса под полом вещь не
+// изображают, и её габарит при них остаётся.
+
+/**
+ * Журнал габаритов вещей на листе: прямоугольники, залитые краской вещи
+ * (`DRAWING_OBJECT_FILL`). Изображение метки заливки не знает вовсе
+ * (`drawObjectView` рисует контур), поэтому один этот журнал и отвечает на
+ * «сколько раз прибор нарисован».
+ */
+function elevationObjectRects(elevation, box, options = { views: true }) {
+  const rects = [];
+  const now = { fillStyle: "" };
+  const ctx = new Proxy(
+    { measureText: (value) => ({ width: String(value).length * 6 }) },
+    {
+      get: (target, key) =>
+        key in target
+          ? target[key]
+          : (...args) => {
+              if (key === "fillRect" && now.fillStyle === DRAWING_OBJECT_FILL) rects.push(args);
+            },
+      set: (target, key, value) => {
+        now[key] = value;
+        return true;
+      },
+    },
+  );
+  const field = drawElevation(ctx, elevation, box, options);
+  // Ширина прямоугольника обратно в миллиметры: по ней видно, **чей** габарит
+  // на листе остался (радиатор 800, телевизор 600).
+  return { field, widthsMm: rects.map((rect) => Math.round(rect[2] / field.scale)) };
+}
+
+test("связанный прибор нарисован на листе один раз: изображением метки, а не внутри габарита вещи", () => {
+  const box = { x: 0, y: 0, width: 700, height: 400 };
+  const scene = linkedPairAndRadiator(2600);
+  const view = wallElevation(scene.project, scene.wallId, "right");
+  assert.equal(view.objects.length, 3, "пример не тот: вещей на листе не три");
+
+  // С изображениями габарит остаётся только у несвязанного радиатора: два
+  // телевизора нарисованы изображениями своих меток.
+  const withViews = elevationObjectRects(view, box, { views: true });
+  assert.deepEqual(withViews.widthsMm, [800], "габарит связанного прибора нарисован вторым разом");
+
+  // Без изображений метка — условный знак: он вещь не изображает и масштаба не
+  // обещает, поэтому габариты всех трёх вещей на листе остаются.
+  const noViews = elevationObjectRects(view, box, { views: false });
+  assert.deepEqual(noViews.widthsMm.sort(), [600, 600, 800], "знак отобрал у вещи габарит");
+});
+
+test("метки на листе нет — вещь рисуется, как рисовалась", () => {
+  const box = { x: 0, y: 0, width: 700, height: 400 };
+  const scene = linkedPair(2600);
+  // Привязку к стене у первой метки снимаем: прибор с листа ушёл, вещь на нём
+  // осталась — и рисует её вещь, как рисовала. У заказчика это 20 случаев из
+  // 27 связанных вещей на листах.
+  const loose = setMarkWall(scene.project, scene.project.marks[0].id, null).project;
+  const view = wallElevation(loose, scene.wallId, "right");
+  assert.equal(view.marks.length, 1, "пример не тот: метка осталась на листе");
+  assert.deepEqual(elevationObjectRects(view, box).widthsMm, [600], "вещь ушедшей метки не нарисована");
+});
+
+test("знаку, отрезку и полосе под полом вещь габарит не уступает", () => {
+  const box = { x: 0, y: 0, width: 700, height: 400 };
+  const scene = withRoom(wallScene(), null);
+  const kinds = ensureSchemeObjectKinds(scene.project);
+  const kindOf = (name) => schemeObjectKindsInOrder(kinds.project).find((kind) => kind.name === name).id;
+  // Вещь **без своей высоты** («во всю высоту помещения»): середины у неё нет,
+  // значит нет её и у связанной метки — такая метка стоит в полосе под полом
+  // знаком, а не изображением на стене.
+  const tall = addSchemeObject(kinds.project, {
+    schemeId: scene.schemeId,
+    kindId: kindOf("Колонна"),
+    shape: "rect",
+    atMm: { x: 1200, y: 1300 },
+    widthMm: 900,
+    depthMm: 600,
+    heightAboveFloorMm: 0,
+  });
+  let project = tall.project;
+  const typeId = project.markTypes.find((type) => type.code === "ТВ").id;
+  const high = addMark(project, {
+    schemeId: scene.schemeId,
+    typeId,
+    kind: "point",
+    points: [fraction(project, scene.schemeId, { x: 1200, y: 1300 })],
+  });
+  project = setMarkObject(high.project, high.mark.id, tall.schemeObject.id).project;
+
+  // И вещь с линейной меткой: столешница с подсветкой — обычное дело
+  // (`markPlace`), а отрезок ленты её габарита не изображает.
+  const top = addSchemeObject(project, {
+    schemeId: scene.schemeId,
+    kindId: kindOf("Столешница"),
+    shape: "rect",
+    atMm: { x: -1200, y: 1300 },
+    widthMm: 1600,
+    depthMm: 600,
+    heightMm: 40,
+    heightAboveFloorMm: 850,
+  });
+  project = top.project;
+  const tapeId = project.markTypes.find((type) => type.code === "ТР").id;
+  const tape = addMark(project, {
+    schemeId: scene.schemeId,
+    typeId: tapeId,
+    kind: "line",
+    points: [
+      fraction(project, scene.schemeId, { x: -400, y: 1330 }),
+      fraction(project, scene.schemeId, { x: -2000, y: 1330 }),
+    ],
+  });
+  project = setMarkObject(tape.project, tape.mark.id, top.schemeObject.id).project;
+  project = applyMarkWalls(project).project;
+
+  const view = wallElevation(project, scene.wallId, "right");
+  assert.deepEqual(
+    view.marks.map((mark) => mark.kind).sort(),
+    ["line", "point"],
+    JSON.stringify(view.marks.map((mark) => [mark.label, mark.kind, mark.heightMm])),
+  );
+  assert.equal(view.marks.every((mark) => mark.objectId), true, "связь у записей листа не названа");
+  // Обе вещи нарисованы, хотя обе связаны: ни отрезок, ни знак в полосе под
+  // полом вещь не изображают.
+  assert.deepEqual(elevationObjectRects(view, box).widthsMm.sort(), [1600, 900]);
+});
+
+test("имя вещи встаёт целиком или не встаёт вовсе", () => {
+  const measure = (value) => String(value).length * 6;
+  assert.equal(elevationNameFit("Радиатор", 100, measure), "Радиатор");
+  assert.equal(elevationNameFit("Радиатор", 40, measure), "", "имя не спряталось");
+  // Сокращения у имени нет нарочно: «Радиато…» не найти ни в списке стены, ни в
+  // таблице. Мерки нет — имя остаётся целым, как у подписи метки.
+  assert.equal(elevationNameFit("Радиатор", 40, null), "Радиатор");
+  assert.equal(elevationNameFit("Радиатор", Infinity, measure), "Радиатор");
+  assert.equal(elevationNameFit("", 10, measure), "");
+});
+
+test("подпись вещи стоит в той же мере тесноты, что подписи меток", () => {
+  const box = { x: 0, y: 0, width: 700, height: 400 };
+  // Радиатор ближе к одному телевизору, чем телевизоры друг к другу: до таска
+  // его подпись меры не занимала, и «ТВ2 · Телевизор · 1400» ложилась на
+  // «Радиатор». Теперь имя вещи уходит у метки первым (порядок сдачи таска 273).
+  const scene = linkedPairAndRadiator(2600, -200);
+  const view = wallElevation(scene.project, scene.wallId, "right");
+  const { texts } = elevationLabels(view, box);
+  assert.ok(texts.includes("Радиатор"), JSON.stringify(texts));
+  assert.ok(texts.includes("ТВ1 · Телевизор · 1400"), "далёкой соседке тесноты прибавилось");
+  assert.ok(texts.includes("ТВ2 · 1400"), "подпись метки радиатора не заметила: " + JSON.stringify(texts));
+});
+
+/** Три радиатора 300 мм на своих местах вдоль стены, все несвязанные. */
+function threeThings(places) {
+  const scene = wallScene();
+  const kinds = ensureSchemeObjectKinds(scene.project);
+  let project = kinds.project;
+  const radiator = schemeObjectKindsInOrder(project).find((kind) => kind.name === "Радиатор");
+  for (const x of places) {
+    project = addSchemeObject(project, {
+      schemeId: scene.schemeId,
+      kindId: radiator.id,
+      shape: "rect",
+      atMm: { x, y: 1380 },
+      widthMm: 300,
+      depthMm: 100,
+      heightMm: 500,
+      heightAboveFloorMm: 150,
+    }).project;
+  }
+  return { ...scene, project };
+}
+
+test("на тесной стене имя вещи прячется, а у дальней соседки остаётся", () => {
+  const box = { x: 0, y: 0, width: 700, height: 400 };
+  const roomy = threeThings([-1200, 0, 1200]);
+  const far = elevationLabels(wallElevation(roomy.project, roomy.wallId, "right"), box);
+  assert.equal(far.texts.filter((value) => value === "Радиатор").length, 3, JSON.stringify(far.texts));
+
+  // Две вещи встали в 350 мм друг от друга — имени там не стоит, а третья
+  // далеко, и её имя на месте: мера у каждой подписи своя, прячется не всё
+  // разом.
+  const tight = threeThings([-1700, 0, 350]);
+  const view = wallElevation(tight.project, tight.wallId, "right");
+  const near = elevationLabels(view, box);
+  assert.equal(near.texts.filter((value) => value === "Радиатор").length, 1, JSON.stringify(near.texts));
+  // Нарисованы при этом все три, и верх подписан у каждой.
+  assert.equal(elevationObjectRects(view, box).widthsMm.length, 3);
+  assert.equal(near.texts.filter((value) => value === "650").length, 3, JSON.stringify(near.texts));
+});
+
+test("лист бумаги рисует прибор столько же раз, сколько экран", () => {
+  const scene = linkedPairAndRadiator(2600);
+  const view = wallElevation(scene.project, scene.wallId, "right");
+  const screen = elevationObjectRects(view, { x: 0, y: 0, width: 700, height: 400 }, { views: true });
+  // Лист ГОСТ, печать, ч/б и архив — тот же `drawElevation` с единицей бумаги.
+  const paper = elevationObjectRects(view, { x: 0, y: 0, width: 1400, height: 800 }, { views: true, unit: 2 });
+  assert.deepEqual(paper.widthsMm, screen.widthsMm);
 });
