@@ -159,12 +159,49 @@ export const VOLUME_WALL_SAME_DEG = 20;
  * перенос случаются по событию — дверь, лестница, падение, — а не в кадре.
  */
 
-/** Ящик этажа опустел: дерева нет, точки резов и состав пачки брошены. */
+/**
+ * Ящик этажа забыл дерево: неподвижные грани, дерево по ним, их точки резов и
+ * состав пачки брошены (таск 265 — память пачки стала памятью неподвижных
+ * граней, как у сцены одной схемы).
+ */
 export function volumeBoxEmpty(box) {
   if (!box) return;
-  box.tree = null;
+  box.statics = null;
+  box.base = null;
+  box.baseCuts = 0;
   box.pack = null;
   if (box.cuts) box.cuts.length = 0;
+}
+
+/**
+ * **То же значение или нет** — сверка вглубь на `depth` уровней.
+ *
+ * Хозяин сверки один на весь «Объём», и это не прихоть: по ней решают, годится
+ * ли готовое дерево порядка (`volumeFacesSame`) и собран ли этаж стопки из того
+ * же (`volumeFloorKeySame`). Разойдись две такие сверки — один и тот же вопрос
+ * «это то же самое?» получил бы два ответа, и промах стоил бы не времени, а
+ * картинки.
+ *
+ * Ссылка сверяется первой: совпала — дальше не смотрим. Поэтому сверка дешева
+ * там, где её звали из-за одной переменной части: метка, связанная с вещью,
+ * приходит кадру **копией** (`render.visibleMark` подменяет ей точки), и все
+ * прочие её поля — те же объекты, что в самой метке.
+ *
+ * Глубже `depth` — «не те же». Промах в эту сторону безопасен: дерево строится
+ * заново, этаж собирается заново, и стоит это времени, а не правды.
+ */
+export function volumeValueSame(a, b, depth) {
+  if (a === b) return true;
+  if (!a || !b || typeof a !== "object" || typeof b !== "object" || depth <= 0) return false;
+  if (Array.isArray(a)) {
+    if (!Array.isArray(b) || a.length !== b.length) return false;
+    for (let index = 0; index < a.length; index += 1) if (!volumeValueSame(a[index], b[index], depth - 1)) return false;
+    return true;
+  }
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  for (const key of keys) if (!volumeValueSame(a[key], b[key], depth - 1)) return false;
+  return true;
 }
 
 /** Снизу и сверху: насколько грани уходят по вертикали. `null` — граней нет. */

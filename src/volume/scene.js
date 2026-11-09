@@ -194,12 +194,17 @@ export function volumeStackScene(project, plan, optionsOf, was = null) {
       sub,
       known,
       key: volumeFloorKey(project, item.schemeId, options, cover, upper, known),
-      cuts: [],
-      tree: null,
-      pack: null,
-      // Собран заново — значит грани у него новые, и прежнее дерево пачки на
-      // них уже не ссылается.
-      fresh: true,
+      // **Память дерева переживает грани, из которых оно построено** (таск
+      // 265). Этаж собран заново — но дверь не меняет ни одной неподвижной
+      // грани, и у двусвета, где дерево на пачку одно, это единственный способ
+      // не платить за него: сверка поле в поле (`volumeOrderTree`) увидит, что
+      // неподвижное то же, и возьмёт дерево как есть. Не сойдётся — построит
+      // заново, как строило.
+      cuts: ready ? ready.cuts : [],
+      baseCuts: ready ? ready.baseCuts || 0 : 0,
+      statics: ready ? ready.statics : null,
+      base: ready ? ready.base : null,
+      pack: ready ? ready.pack : null,
       move: { dx: 0, dy: 0, dz: 0 },
       at: {
         baseMm: Number(item.baseMm) || 0,
