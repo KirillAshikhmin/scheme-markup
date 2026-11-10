@@ -218,6 +218,7 @@ import {
   volumeNightShare,
   volumeSkyColors,
   volumeTintRgb,
+  volumeLiveLight,
   volumeMood,
   volumeMoodMs,
   VOLUME_MOOD_MS,
@@ -241,6 +242,7 @@ import {
   volumeSchemeOriginMm,
   volumeStackRoomAlias,
   volumeStackScene,
+  volumeOrderAll,
   volumeOrderStack,
   VOLUME_SLAB_MM,
   VOLUME_SLAB_RGB,
@@ -6751,7 +6753,26 @@ function stackCacheScene() {
   return { ...house, project, doors, marks };
 }
 
-/** Подпись грани: место, цвет, ярусы и хозяева — всё, чем она попадает в кадр. */
+/**
+ * Ключи помещений грани: свой и после связи двусвета, с обеих сторон.
+ *
+ * **Ими светит свет** (`volumeLiveLight`, `volumeLampOpenings`), а кадр без
+ * ламп о них не говорит ничего — поэтому они названы здесь, в подписи грани, и
+ * сверяются у каждой грани стопки и у каждого куска её дерева порядка (таск
+ * 289). До таска сверка кадра пропустила бы перепутанные помещения целиком: в
+ * гостиной просто стало бы темнее.
+ */
+const roomSign = (face) =>
+  [
+    face.room === undefined ? "u" : face.room === null ? "n" : face.room,
+    face.roomOwn === undefined ? "u" : face.roomOwn === null ? "n" : face.roomOwn,
+    face.backRoom === undefined ? "u" : face.backRoom === null ? "n" : face.backRoom,
+    face.backRoomOwn === undefined ? "u" : face.backRoomOwn === null ? "n" : face.backRoomOwn,
+    face.sides ? face.sides.key : "-",
+    face.sidesOwn ? face.sidesOwn.key : "-",
+  ].join("/");
+
+/** Подпись грани: место, цвет, ярусы, хозяева и помещения — всё, чем она попадает в кадр и в свет. */
 const faceSign = (face) =>
   [
     face.line ? "l" : "f",
@@ -6762,6 +6783,7 @@ const faceSign = (face) =>
     face.channel === undefined || face.channel === null ? "-" : face.channel,
     face.floor === undefined || face.floor === null ? "-" : face.floor,
     face.both ? "b" : "-",
+    roomSign(face),
     face.p.map((point) => [point.x, point.y, point.z].map((v) => Math.round(v * 1000) / 1000 + 0).join(",")).join(";"),
   ].join("|");
 
@@ -6777,11 +6799,21 @@ const shotSign = (polygon) =>
     polygon.channel === undefined || polygon.channel === null ? "-" : polygon.channel,
   ].join("|");
 
-/** Сцена к сцене: грани, кадр с четырёх ракурсов и поля, за которые держится ходьба. */
+/** Сцена к сцене: грани, куски дерева, кадр с четырёх ракурсов и поля, за которые держится ходьба. */
 function sameStack(kept, plain, what) {
   assert.equal(kept.faces.length, plain.faces.length, what + ": граней стало другое число");
   for (let at = 0; at < kept.faces.length; at += 1) {
     assert.equal(faceSign(kept.faces[at]), faceSign(plain.faces[at]), what + ": грань " + at + " разошлась");
+  }
+  // Куски дерева порядка — то, что рисует кадр и на что ложатся кольца ламп.
+  // Сверяются они целиком, подписью грани: у куска низа плиты помещение
+  // пробуется **своей** серединой, и кусок, связанный не так, как связался бы
+  // заново, — это потемневшая комната (таск 289).
+  const keptPieces = volumeOrderAll(kept.order, []).map(faceSign);
+  const plainPieces = volumeOrderAll(plain.order, []).map(faceSign);
+  assert.equal(keptPieces.length, plainPieces.length, what + ": кусков дерева стало другое число");
+  for (let at = 0; at < keptPieces.length; at += 1) {
+    assert.equal(keptPieces[at], plainPieces[at], what + ": кусок дерева " + at + " разошёлся");
   }
   const box = { width: 320, height: 240 };
   const bounds = kept.stackMm.boundsMm;
@@ -7053,6 +7085,213 @@ test("память пачки, собранная заранее, даёт ту 
   // этаж поставлен, в его ключ не входит (`volumeFloorPlace`).
   const landed = stackOf(project, house.third, open, afterDoor);
   sameStack(landed, stackOf(project, house.third, open), "второй полёт после приземления");
+});
+
+/**
+ * Дом с двусветом: у комнаты сверху снят пол, комнате снизу задана высота в два
+ * этажа. Под потолком каждого этажа — светильник (`lamps`): свет двусвета и
+ * сверяется ими (таск 289).
+ */
+function voidStand() {
+  const house = stackCacheScene();
+  const off = setRoomFloor(house.project, house.secondRoomId, false).project;
+  let project = setRoomWallHeight(off, house.firstRoomId, 5800).project;
+  const lamps = {};
+  const type = project.markTypes.find((item) => item.code === "С");
+  for (const [name, schemeId] of [
+    ["first", house.first],
+    ["second", house.second],
+    ["third", house.third],
+  ]) {
+    const put = addMark(project, {
+      schemeId,
+      typeId: type.id,
+      kind: "point",
+      points: [planMmToFraction(project, schemeId, { x: 0, y: 0 })],
+    });
+    project = applyMarkWalls(put.project, schemeId).project;
+    lamps[name] = put.marks[0].id;
+  }
+  return { ...house, project, lamps };
+}
+
+test("связь двусвета кладётся на то, что ею не помечено (таск 289)", () => {
+  // Таск 289, вторая половина слова заказчика G419 («а далее уже плавно пусть
+  // всё»): сборка стопки из готовой памяти стоила 7,7 мс на объекте
+  // заказчика, и 4,4 мс из них — связь двусвета по всем 19 346 граням и
+  // 25 192 кускам дерева, которая на каждой сборке получала **тот же** ответ.
+  //
+  // Проверяется то, на чём стоит пропуск: ответ тот же (`sameStack` сверяет и
+  // ключи помещений — у граней и у кусков), проход и правда не идёт, а промах
+  // ключа связывает заново, а не оставляет старое.
+  const house = voidStand();
+  const project = house.project;
+  const shut = () => ({ openDoorIds: new Set(), openCurtainIds: new Set(), hiddenObjectIds: [] });
+  const warm = stackOf(project, house.second, shut);
+  const was = warm.stackParts.map((part) => ({ part, join: part.join, base: part.base }));
+  assert.ok(
+    was.every((item) => item.join),
+    "первая сборка обязана пометить этажи ключом связи",
+  );
+  // Ничего не менялось: ни один этаж не связывается заново — ключ у ящика
+  // **тот же объект**, а новый ключ связи собирается на каждой сборке.
+  const fell = stackOf(project, house.second, shut, warm);
+  for (let at = 0; at < was.length; at += 1) {
+    assert.equal(fell.stackParts[at].join, was[at].join, "этаж " + at + " связан заново при готовой памяти");
+  }
+  sameStack(fell, stackOf(project, house.second, shut), "связь при готовой памяти");
+  // Промах ключа связывает заново: открытая дверь пересобирает свой этаж, и
+  // ключ связи появляется у него новый, у готовых остаётся прежний.
+  const open = () => ({ openDoorIds: new Set([house.doors.second]), openCurtainIds: new Set(), hiddenObjectIds: [] });
+  const afterDoor = stackOf(project, house.second, open, fell);
+  assert.notEqual(afterDoor.stackParts[1].join, was[1].join, "этаж с дверью связан не заново");
+  assert.equal(afterDoor.stackParts[0].join, was[0].join, "готовый этаж связан заново из-за чужой двери");
+  sameStack(afterDoor, stackOf(project, house.second, open), "связь после открытой двери");
+  // Смена этажа: места этажей в ключе есть, и связь кладётся заново у всех.
+  const moved = stackOf(project, house.third, shut, afterDoor);
+  for (let at = 0; at < was.length; at += 1) {
+    assert.notEqual(moved.stackParts[at].join, was[at].join, "этаж " + at + " не связан заново после смены этажа");
+  }
+  sameStack(moved, stackOf(project, house.third, shut), "связь после смены этажа");
+  // **Проход не идёт вовсе**, а не «идёт и ничего не меняет»: подделанный ключ
+  // помещения переживает сборку из памяти — и у грани, и у куска дерева.
+  // Иначе выигрыша не было бы, а был бы тот же проход с теми же числами.
+  // Подделка — последним шагом: сцена после неё врёт про помещения нарочно.
+  const hole = moved.faces.find((face) => face.roomOwn === house.secondRoomId && face.room === house.firstRoomId);
+  assert.ok(hole, "граней дыры в стопке нет — стенд собран не двусветом");
+  const piece = volumeOrderAll(moved.order, []).find((face) => face.roomOwn === house.secondRoomId);
+  assert.ok(piece, "кусков дыры в дереве нет");
+  hole.room = "подделка";
+  piece.room = "подделка";
+  const idle = stackOf(project, house.third, shut, moved);
+  assert.ok(idle.faces.includes(hole), "подделанная грань пропала из сцены — стенд не о том");
+  assert.equal(hole.room, "подделка", "грани связались заново, хотя связь та же");
+  assert.equal(piece.room, "подделка", "куски дерева связались заново, хотя связь та же");
+  // И тот же промах ключа подделку исправляет: сборка на другом этаже связывает всё.
+  stackOf(project, house.second, shut, idle);
+  assert.equal(hole.room, house.firstRoomId, "промах ключа оставил подделанный ключ помещения");
+});
+
+test("этажи разъехались в плане — связь двусвета считается заново, хоть этаж и готов (таск 289)", () => {
+  // Самое опасное для света: этаж взят **готовым**, а связь двусвета у него
+  // уже другая. Сегодня в «Объёме» места этажей сходятся по началам схем, но
+  // привязка схем — объявленный шов (таск 205), и ключ связи назван так, чтобы
+  // этот день не стал днём потемневшей гостиной: в нём есть и объект, и места
+  // этажей (`volumeStackJoinKey`).
+  const house = voidStand();
+  const project = house.project;
+  const shut = () => ({ openDoorIds: new Set(), openCurtainIds: new Set(), hiddenObjectIds: [] });
+  const plan = volumeFloorPlan(project, house.second);
+  const first = volumeStackScene(project, plan, shut, null);
+  const holeRoom = (scene) => scene.faces.filter((face) => face.roomOwn === house.secondRoomId).map((face) => face.room);
+  assert.ok(holeRoom(first).includes(house.firstRoomId), "дыра над комнатой первого этажа не связана");
+  // Нижний этаж уехал в плане на пять метров: объект тот же, дыра стоит уже не
+  // над его комнатой. Верхние этажи от этого не пересобираются — их накрытие
+  // не менялось.
+  const away = {
+    ...plan,
+    floors: plan.floors.map((item, at) => (at === 0 ? { ...item, shiftMm: { x: item.shiftMm.x + 5000, y: item.shiftMm.y } } : item)),
+  };
+  const after = volumeStackScene(project, away, shut, first);
+  assert.equal(after.stackParts[1].sub.faces, first.stackParts[1].sub.faces, "этаж дыры пересобран — стенд проверяет не то");
+  assert.ok(!holeRoom(after).includes(house.firstRoomId), "дыра осталась связанной с комнатой, которая из-под неё уехала");
+  sameStack(after, volumeStackScene(project, away, shut, null), "этажи разъехались в плане");
+});
+
+test("свет двусвета не зависит от того, собрана стопка из памяти или заново (таск 289)", () => {
+  // Тикет просит сверить **свет отдельно**, и вот почему: ключ помещения у
+  // грани читает не кадр, а свет (`volumeLiveLight`), и ошибка в нём гасит или
+  // зажигает комнату целиком. Кадр без ламп о помещениях не говорит ничего.
+  const house = voidStand();
+  const project = house.project;
+  const shut = () => ({ openDoorIds: new Set(), openCurtainIds: new Set(), hiddenObjectIds: [] });
+  // Все метки стенда — лампы: свет считается физическим, с кольцами и тенями,
+  // и ночью, чтобы небо и тон часа тоже участвовали.
+  const live = new Map();
+  for (const [name, roomId] of [
+    ["first", house.firstRoomId],
+    ["second", house.secondRoomId],
+    ["third", house.thirdRoomId],
+  ]) {
+    live.set(house.lamps[name], { on: true, level: 1, kind: "light", roomId });
+  }
+  const tint = volumeMood({ minutes: 23 * 60 }).tint;
+  /** Подпись света: светлота помещений, кольца и тени — с помещением куска, на который легли. */
+  const hostSign = (map) =>
+    [...(map || new Map())]
+      .map(([host, items]) =>
+        [
+          host.room === undefined ? "u" : host.room,
+          host.roomOwn === undefined ? "u" : host.roomOwn,
+          host.p.map((point) => [point.x, point.y, point.z].map((v) => Math.round(v * 100) / 100 + 0).join(",")).join(";"),
+          (items || [])
+            .map((item) => [item.markId, Math.round((item.alpha || 0) * 1e4), Math.round((item.own || 0) * 1e4), (item.mix || []).join(":"), (item.gone || []).join(":")].join("/"))
+            .join(" "),
+        ].join("|"),
+      )
+      .sort();
+  const lightSign = (scene) => {
+    const light = volumeLiveLight(scene, live, { physical: true, tint });
+    assert.ok(light, "света нет вовсе — стенд собран без ламп");
+    return {
+      rooms: [...light.rooms].map(([key, share]) => key + ":" + Math.round(share * 1e4)).sort(),
+      decals: hostSign(light.decals),
+      shades: hostSign(light.shades),
+      sky: hostSign(light.skyDecals),
+    };
+  };
+  // Человек стоит на **первом** этаже: пятна лампы кладутся по помещениям той
+  // схемы, которая открыта, и лампа двусветной гостиной светит отсюда и верх
+  // её стен — те самые грани дыры, которым связь отдала помещение.
+  const warm = stackOf(project, house.first, shut);
+  const plain = lightSign(stackOf(project, house.first, shut));
+  assert.ok(plain.rooms.length > 0, "ни одно помещение не светится — свет мерить нечем");
+  assert.ok(plain.decals.length > 0, "колец нет — физический свет не считался");
+  assert.ok(
+    plain.decals.some((sign) => sign.startsWith(house.firstRoomId + "|" + house.secondRoomId + "|")),
+    "кольца не легли на грани дыры — свет двусвета этим стендом не мерится",
+  );
+  // Стопка из готовой памяти (шаг в дыру), после открытой двери и после смены
+  // этажа: свет обязан сойтись с собранным заново на каждом шаге.
+  const fell = stackOf(project, house.first, shut, warm);
+  assert.deepEqual(lightSign(fell), plain, "свет стопки из памяти разошёлся");
+  const open = () => ({ openDoorIds: new Set([house.doors.first]), openCurtainIds: new Set(), hiddenObjectIds: [] });
+  const afterDoor = stackOf(project, house.first, open, fell);
+  assert.deepEqual(lightSign(afterDoor), lightSign(stackOf(project, house.first, open)), "свет после открытой двери разошёлся");
+  const moved = stackOf(project, house.second, shut, afterDoor);
+  assert.deepEqual(lightSign(moved), lightSign(stackOf(project, house.second, shut)), "свет после смены этажа разошёлся");
+  // И случай, в котором связь двусвета **правда** другая, а этаж готов: этажи
+  // разъехались в плане (шов таска 205). Светом он проверяется затем, что
+  // именно свет читает ключ помещения: не пересчитай связь — и кольца лампы
+  // лягут на грани уехавшей комнаты.
+  const plan = volumeFloorPlan(project, house.first);
+  const away = {
+    ...plan,
+    floors: plan.floors.map((item, at) => (at === 0 ? { ...item, shiftMm: { x: item.shiftMm.x + 5000, y: item.shiftMm.y } } : item)),
+  };
+  const apart = volumeStackScene(project, away, shut, stackOf(project, house.first, shut));
+  const apartKept = lightSign(apart);
+  const apartPlain = lightSign(volumeStackScene(project, away, shut, null));
+  assert.ok(apartKept.decals.length > 0, "у разъехавшихся этажей колец нет — сверять нечего");
+  assert.deepEqual(apartKept, apartPlain, "свет разъехавшихся этажей разошёлся");
+});
+
+test("полотно двери не бывает низом плиты (таск 289)", () => {
+  // На этом стоит дешёвый случай: полотна вставляются в готовое дерево на
+  // каждой сборке, и куски у них новые. Пробы низа плиты им не нужны — ключ
+  // помещения кусок получает копией с грани полотна, уже связанной, — и верно
+  // это ровно потому, что краской плиты и потолка полотно не бывает (пробу
+  // заводит эта краска, см. `volumeStackRoomsJoin`). Покрасят — тест упадёт, и
+  // пропуск придётся сузить.
+  const house = voidStand();
+  const all = new Set(Object.values(house.doors));
+  const scene = stackOf(house.project, house.second, () => ({ openDoorIds: all, openCurtainIds: new Set(), hiddenObjectIds: [] }));
+  const leaves = [...scene.faces, ...volumeOrderAll(scene.order, [])].filter((face) => face.doorId);
+  assert.ok(leaves.length > 0, "полотен в сцене нет — стенд собран без дверей");
+  for (const face of leaves) {
+    assert.notEqual(face.rgb, VOLUME_SLAB_RGB, "полотно покрашено плитой");
+    assert.notEqual(face.rgb, VOLUME_CEILING_RGB, "полотно покрашено потолком");
+  }
 });
 
 test("двусвет — одно помещение для света: дыра этажом выше получает ключ комнаты под ней (правка 2026-10-27)", () => {
