@@ -803,7 +803,14 @@ export function volumeRatio(devicePixelRatio) {
 export const VOLUME_MOTION_RATIO = 1;
 /** Кадр позже прошлого на столько — уже не ход, а новое движение с места, мс. */
 export const VOLUME_MOTION_GAP_MS = 150;
-/** Сколько стоять, чтобы кадр стал чётким, мс. */
+/**
+ * Сколько стоять, чтобы поле считалось вставшим, мс.
+ *
+ * Спрашивают её двое, и это одна мерка нарочно: по ней кадр перерисовывается
+ * чётким и по ней же поле считается простаивающим, когда готовит память пачки
+ * этажей (таск 285, `fallWarmTick`). Второго числа «сколько стоять» у поля быть
+ * не должно — разойдись они, у вопроса «поле стоит?» стало бы два ответа.
+ */
 export const VOLUME_MOTION_SETTLE_MS = 160;
 
 /** Плотность кадра: `full` — по экрану (`volumeRatio`), на ходу пальцем — не больше `VOLUME_MOTION_RATIO`. */
@@ -1527,16 +1534,49 @@ function createVolume({ api, hosts }) {
   let fallShown = false;
   const stacking = (state, plan) =>
     (volumeParamsRead().floorsAll === true || fallShown) && (plan || floorPlan(state)).can;
+  // ——— память пачки живёт в запасе, пока стопки не видно (таск 285, G417) ———
+  //
+  // Цена таска 265 была названа честно: стопка поднимается в тот самый тик,
+  // которым человек уходит с кромки, и собирается она **холодной** — 108 мс на
+  // объекте заказчика, то есть заминка в начале полёта. Из них 85 — дерево
+  // порядка по 17 041 грани; сцены самих этажей стоят 15, остальное — накрытие,
+  // связь двусвета и сборка списков. Пересборка той же стопки с готовой памятью
+  // стоит 8 мс (замер таска 265 воспроизведён). Значит вопрос не «держать ли
+  // стопку», а **когда у пачки появляется память**.
+  //
+  // Поэтому память пачки лежит **в одном месте из двух**: показана стопка — в
+  // самой сцене (`scene.stackParts`, таск 232), показан один этаж — в этом
+  // запасе. Никогда в обоих разом: на одни и те же этажи, переезжающие с базы
+  // на базу, двух хозяев быть не может — второй переставил бы грани второй раз.
+  // Спрашивают её все трое (сборка сцены, подготовка, сама стопка) одной дверью
+  // `stackMemory`.
+  //
+  // Второго ответа на «что показано» от этого не заводится: `fallShown` остаётся
+  // признаком руки, а запас — памятью, а не сценой. Его не рисуют, по нему не
+  // ходят и не падают, у него не спрашивают ни помещения, ни дверей; `sceneOf`
+  // отдаёт его `volumeStackScene` ровно тем же доводом `was`, которым отдавала
+  // прошлую сцену.
+  let fallWarm = null;
+  // Заказанная подготовка: `null` — не заказана. Таймер один, и переспрашивает
+  // он сам себя, пока поле не встанет (`fallWarmTick`).
+  let fallWarmTimer = null;
+  const stackMemory = () => (scene && scene.stackParts ? scene : fallWarm);
   // Сцена объёма — одна на поверхность, и её же прошлое состояние идёт доводом
   // сборки (таск 232): стопка разобрана в ней на этажи, и каждый берётся
   // готовым, если собран из того же. Открытая дверь чужих этажей не касается, а
   // смена этажа прибытия — переставляет их, а не пересобирает. Второго ответа о
   // сцене это не заводит: доводом идёт она сама.
   let scene = null;
+  // **Стопку в поле собирает одна дверь**, и спрашивают её двое: сборка
+  // показанной сцены и подготовка памяти в простое (таск 285). Доводы у них
+  // одни и те же вплоть до памяти — разойдись они, подготовленная память не
+  // подошла бы той стопке, ради которой готовилась.
+  const stackSceneOf = (state, plan) =>
+    volumeStackScene(state.project, plan, (id) => sceneOptions(state, id), stackMemory());
   const sceneOf = (state) => {
     const plan = floorPlan(state);
     if (stacking(state, plan)) {
-      const stack = volumeStackScene(state.project, plan, (id) => sceneOptions(state, id), scene);
+      const stack = stackSceneOf(state, plan);
       if (stack) return stack;
     }
     return volumeScene(state.project, schemeId, sceneOptions(state, schemeId));
@@ -1626,6 +1666,12 @@ function createVolume({ api, hosts }) {
   let backingRatio = null;
   let lastCameraKey = null;
   let lastPaintAt = -Infinity;
+  // Когда камера **сдвинулась** в последний раз. Отдельно от `lastPaintAt`
+  // потому, что кадры заказывает не только рука: разгорающаяся лампа и бегущие
+  // часы рисуют поле тридцать раз в секунду при стоящей камере (разбор — у
+  // `VOLUME_MOTION_GAP_MS`). По кадрам такое поле «никогда не стоит», а по
+  // камере стоит — и ровно это нужно подготовке пачки (таск 285).
+  let lastCameraMoveAt = -Infinity;
   let settleTimer = null;
   // Табло термостата (таск 257): чью уставку меняли и когда (`volumeSetpointShow`),
   // и один таймер на поверхность, которым показ гасится.
@@ -2527,7 +2573,12 @@ function createVolume({ api, hosts }) {
 
   /** Сцена, тень и свет меняются вместе: все трое держатся за геометрию. */
   function setScene(state) {
+    const was = scene;
     scene = sceneOf(state) || scene;
+    // Память пачки переезжает из сцены в запас и обратно **здесь** — там, где
+    // сцена меняется (таск 285): это единственное место, которое знает и
+    // прежнюю сцену, и новую.
+    if (scene !== was) fallWarmKeep(was);
     // Пол под ногами считается по сцене: пересобрали — прежний ответ и зарок
     // падения устарели (таск 229, G342).
     fallSnap = null;
@@ -2768,7 +2819,9 @@ function createVolume({ api, hosts }) {
     const spot = camera();
     const key = [spot.at.x, spot.at.y, spot.at.z, spot.yaw, spot.pitch].map((value) => Math.round(value * 1000)).join(",");
     const time = now();
-    const moving = lastCameraKey !== null && key !== lastCameraKey && time - lastPaintAt < VOLUME_MOTION_GAP_MS;
+    const stirred = lastCameraKey !== null && key !== lastCameraKey;
+    const moving = stirred && time - lastPaintAt < VOLUME_MOTION_GAP_MS;
+    if (stirred) lastCameraMoveAt = time;
     lastCameraKey = key;
     lastPaintAt = time;
     const ratio = volumeMotionRatio(full, { moving, touch: touching });
@@ -4006,6 +4059,106 @@ function createVolume({ api, hosts }) {
     if (fallShown === want) return;
     fallShown = want;
     rebuildScene();
+  }
+
+  // ——— подготовка пачки в простое (таск 285, G417) —————————————————————————
+  //
+  // Из чего складывается заминка и где лежит память — у объявления `fallWarm`.
+  // Здесь — три руки: переложить память при смене сцены, заказать подготовку и
+  // сделать её, когда поле простаивает.
+
+  /**
+   * Память пачки после смены сцены: показана стопка — она в сцене, и запас
+   * **снимается**; стопку сменил один этаж — ушедшая с экрана стопка сама
+   * становится запасом.
+   *
+   * Второе и есть ответ на «откуда память после приземления»: собранная на
+   * полёт стопка никуда не делась, её просто перестали рисовать. Тем же путём
+   * дешевеет снятая и снова взведённая отметка «Все этажи».
+   */
+  function fallWarmKeep(was) {
+    if (scene && scene.stackParts) fallWarm = null;
+    else if (was && was.stackParts) fallWarm = was;
+    fallWarmWant();
+  }
+
+  /**
+   * Заказать подготовку памяти пачки.
+   *
+   * Зовётся из `setScene` — то есть на каждую смену сцены: сборка поверхности,
+   * дверь, штора, отметка окна, правка объекта, смена этажа, приземление. Сама
+   * подготовка после этого **сверяет, а не пересобирает** (`volumeFloorKey` и
+   * сверка граней поле в поле), поэтому заказ можно отдавать щедро: при
+   * непорченой памяти он стоит 8 мс, а после двери — пересборки одного этажа.
+   *
+   * **Где у поверхности простой.** Кадры поле рисует по событию, и стоячее поле
+   * не заказывает ни одного (§6.4 карты): простой — это стоящий человек, и
+   * другого простоя у поля нет. Поэтому подготовка ждёт тишины (`fallWarmTick`)
+   * и **в кадре не делает ничего**: отнятые у ходьбы кадры хуже заминки при
+   * падении.
+   *
+   * Чем простой ограничен честно: человек, который идёт в дыру не
+   * останавливаясь с самого входа в режим, подготовки не дождётся и получит
+   * прежнюю холодную сборку.
+   */
+  function fallWarmWant() {
+    if (fallWarmTimer !== null || closed) return;
+    if (typeof setTimeout !== "function") return;
+    if (!fallWarmNeeded()) return;
+    fallWarmTimer = setTimeout(fallWarmTick, VOLUME_MOTION_SETTLE_MS);
+  }
+
+  /**
+   * Нужна ли подготовка вообще. Три условия, и все три — про показанное, а не
+   * про память: этажей больше одного (`plan.can`), стопки на экране нет (иначе
+   * память уже в сцене), и на этом этаже есть дыра — то есть падать откуда-то
+   * есть. Места человека здесь нет нарочно: подход не мерится, потому что
+   * простой бывает у стоящего, а не у подходящего.
+   */
+  function fallWarmNeeded() {
+    if (screenMode() !== "volume") return false;
+    const state = getState();
+    const plan = floorPlan(state);
+    if (!plan.can || stacking(state, plan)) return false;
+    return (scene.rooms || []).some((room) => room.hasFloor === false);
+  }
+
+  /**
+   * Поле стоит — готовим; что-то движется — переспрашиваем позже, тем же
+   * таймером. Переспрос стоит трёх сверок, кадра не заказывает и в кадр не
+   * попадает.
+   *
+   * «Стоит» — это три условия, и каждое про своего движителя:
+   *
+   *   `walking`                  — ход или полёт держат клавишей, пальцем, стойкой;
+   *   `frame`                    — кадр уже заказан: свет в пути, часы идут;
+   *   камера сдвинулась только что — взгляд водят мышью или свайпом.
+   *
+   * Мерка «встал» у поля одна (`VOLUME_MOTION_SETTLE_MS`): по ней же кадр
+   * становится чётким. Второго числа здесь не заводится.
+   */
+  function fallWarmTick() {
+    fallWarmTimer = null;
+    if (closed || !fallWarmNeeded()) return;
+    if (walking || frame || now() - lastCameraMoveAt < VOLUME_MOTION_SETTLE_MS) {
+      fallWarmTimer = setTimeout(fallWarmTick, VOLUME_MOTION_SETTLE_MS);
+      return;
+    }
+    fallWarmBuild();
+  }
+
+  /**
+   * Собрать память пачки, не показывая её. Собирается она тем же
+   * `volumeStackScene` и с тем же доводом памяти (`stackMemory`), которым
+   * собирается показанная стопка: второй сборки стопки в поле нет.
+   *
+   * Вышла не стопка (у открытой схемы пустой чертёж) — запас не трогаем:
+   * память, которая была, лучше той, которой нет.
+   */
+  function fallWarmBuild() {
+    const state = getState();
+    const stack = stackSceneOf(state, floorPlan(state));
+    if (stack && stack.stackParts) fallWarm = stack;
   }
 
   /**
@@ -5637,6 +5790,11 @@ function createVolume({ api, hosts }) {
     closed = true;
     if (fpsTimer !== null) clearInterval(fpsTimer);
     if (settleTimer !== null) clearTimeout(settleTimer);
+    // Подготовка пачки (таск 285) живёт ровно столько, сколько поверхность:
+    // разобранной готовить нечего, и память уходит вместе со сценой.
+    if (fallWarmTimer !== null) clearTimeout(fallWarmTimer);
+    fallWarmTimer = null;
+    fallWarm = null;
     if (setpointTimer !== null) clearTimeout(setpointTimer);
     setpointTimer = null;
     volumeSurface = null;
@@ -5737,6 +5895,10 @@ function createVolume({ api, hosts }) {
           refreshHour();
           syncClock();
           sync();
+          // Вернулись в режим — поле снова рисует кадры, и его простой снова
+          // наш: память пачки готовится здесь (таск 285). За кадром её не
+          // готовят — кадры в это время рисует чужое поле.
+          fallWarmWant();
           // Вошли — дом запускается по отметке (история 2.2), свет и шторы,
           // которые жили без поля, сверяются.
           homeStale = true;
@@ -5849,6 +6011,11 @@ function createVolume({ api, hosts }) {
   resize();
   if (volumeFitsOnArrive({ empty: scene.empty, looked, view })) fit();
   if (typeof stage.focus === "function") stage.focus({ preventScroll: true });
+  // Первая сборка сцены идёт не через `setScene`, поэтому заказ подготовки
+  // стоит здесь (таск 285): вошедший в режим стоит, и это первый — а на объекте
+  // без правок и единственный — простой, в который память пачки успевает
+  // собраться до того, как человек дойдёт до кромки дыры.
+  fallWarmWant();
 
   // ——— дом (таск 09 сценариев) ———
   //

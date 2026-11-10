@@ -7012,6 +7012,49 @@ test("двусвет слипает этажи в одно дерево — и �
   sameStack(again, stackOf(project, house.second, shut), "двусвет: вторая смена этажа подряд");
 });
 
+test("память пачки, собранная заранее, даёт ту же стопку и не строит дерево заново (таск 285)", () => {
+  // Таск 285: заминка при шаге в дыру — это **холодная** сборка стопки в тот
+  // тик, которым человек уходит с кромки (108 мс на объекте заказчика, из них
+  // 85 — дерево порядка). Ответ — память пачки, собранная в простое поля: поле
+  // держит её в запасе (`fallWarm`), пока показан один этаж, и отдаёт тем же
+  // доводом `was`, которым отдаёт прошлую сцену.
+  //
+  // Проверяется ровно то, на чём это стоит: стопка, собранная **из запаса**,
+  // совпадает со собранной заново, а этажи и дерево берутся готовыми. Разойдись
+  // первое — человек в полёте увидел бы не тот дом; не выполнись второе —
+  // подготовка не стоила бы ничего, кроме памяти.
+  const house = stackCacheScene();
+  // Двусвет объекта заказчика: этажи продеты друг в друга, дерево у пачки одно
+  // — худший случай, ради которого всё и делается.
+  const off = setRoomFloor(house.project, house.secondRoomId, false).project;
+  const project = setRoomWallHeight(off, house.firstRoomId, 5800).project;
+  const shut = () => ({ openDoorIds: new Set(), openCurtainIds: new Set(), hiddenObjectIds: [] });
+  // Так выглядит подготовка в простое: стопку собрали, но не показали.
+  const warm = stackOf(project, house.second, shut);
+  const was = warm.stackParts.map((part) => ({ part, faces: part.sub.faces, base: part.base }));
+  assert.ok(was[0].base, "дерево пачки должно лежать у её головы");
+  // Шаг в дыру: `fallShown` поднят, стопка собирается **из запаса**.
+  const fell = stackOf(project, house.second, shut, warm);
+  for (let at = 0; at < was.length; at += 1) {
+    assert.equal(fell.stackParts[at], was[at].part, "этаж " + at + " собран заново при готовой памяти");
+    assert.equal(fell.stackParts[at].sub.faces, was[at].faces);
+  }
+  assert.equal(fell.stackParts[0].base, was[0].base, "дерево пачки построено заново при готовой памяти");
+  sameStack(fell, stackOf(project, house.second, shut), "шаг в дыру с подготовленной памятью");
+  // Память, подготовленную **до** открытой двери, шаг в дыру тоже принимает:
+  // собирается заново один этаж, дерево пачки остаётся готовым. Поэтому запас
+  // не выбрасывается на каждую дверь — он сверяется (`volumeFloorKey`).
+  const open = () => ({ openDoorIds: new Set([house.doors.second]), openCurtainIds: new Set(), hiddenObjectIds: [] });
+  const afterDoor = stackOf(project, house.second, open, fell);
+  assert.equal(afterDoor.stackParts[0].base, was[0].base, "дерево пачки построено заново из-за двери");
+  sameStack(afterDoor, stackOf(project, house.second, open), "шаг в дыру после открытой двери");
+  // И приземление: стопка, ушедшая с экрана, становится запасом сама, поэтому
+  // второй полёт — уже с памятью. Схема прибытия другая, а части те же: куда
+  // этаж поставлен, в его ключ не входит (`volumeFloorPlace`).
+  const landed = stackOf(project, house.third, open, afterDoor);
+  sameStack(landed, stackOf(project, house.third, open), "второй полёт после приземления");
+});
+
 test("двусвет — одно помещение для света: дыра этажом выше получает ключ комнаты под ней (правка 2026-10-27)", () => {
   // «Метки освещения правильно расставились, с гостиной наверху, но вот
   // освещение работает неверно»: лампы комнаты под дырой не светили верх стен

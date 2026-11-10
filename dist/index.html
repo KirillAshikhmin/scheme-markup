@@ -70788,11 +70788,16 @@ const floorPlan = (state) => volumeFloorPlan(state.project, schemeId);
 let fallShown = false;
 const stacking = (state, plan) =>
 (volumeParamsRead().floorsAll === true || fallShown) && (plan || floorPlan(state)).can;
+let fallWarm = null;
+let fallWarmTimer = null;
+const stackMemory = () => (scene && scene.stackParts ? scene : fallWarm);
 let scene = null;
+const stackSceneOf = (state, plan) =>
+volumeStackScene(state.project, plan, (id) => sceneOptions(state, id), stackMemory());
 const sceneOf = (state) => {
 const plan = floorPlan(state);
 if (stacking(state, plan)) {
-const stack = volumeStackScene(state.project, plan, (id) => sceneOptions(state, id), scene);
+const stack = stackSceneOf(state, plan);
 if (stack) return stack;
 }
 return volumeScene(state.project, schemeId, sceneOptions(state, schemeId));
@@ -70833,6 +70838,7 @@ let touching = volumeTouchLikely();
 let backingRatio = null;
 let lastCameraKey = null;
 let lastPaintAt = -Infinity;
+let lastCameraMoveAt = -Infinity;
 let settleTimer = null;
 const setpoints = volumeSetpointMemo();
 let setpointTimer = null;
@@ -71255,7 +71261,9 @@ if (rect && rect.left < box.width / 2) top = Math.max(top, rect.bottom + gap);
 return { top, bottom: box.height - VOLUME_STICK_EDGE_PX - VOLUME_STICK_RADIUS * 2 - gap };
 }
 function setScene(state) {
+const was = scene;
 scene = sceneOf(state) || scene;
+if (scene !== was) fallWarmKeep(was);
 fallSnap = null;
 fallAt = null;
 measureSeenDrop();
@@ -71403,7 +71411,9 @@ const full = volumeRatio(typeof window !== "undefined" ? window.devicePixelRatio
 const spot = camera();
 const key = [spot.at.x, spot.at.y, spot.at.z, spot.yaw, spot.pitch].map((value) => Math.round(value * 1000)).join(",");
 const time = now();
-const moving = lastCameraKey !== null && key !== lastCameraKey && time - lastPaintAt < VOLUME_MOTION_GAP_MS;
+const stirred = lastCameraKey !== null && key !== lastCameraKey;
+const moving = stirred && time - lastPaintAt < VOLUME_MOTION_GAP_MS;
+if (stirred) lastCameraMoveAt = time;
 lastCameraKey = key;
 lastPaintAt = time;
 const ratio = volumeMotionRatio(full, { moving, touch: touching });
@@ -72090,6 +72100,38 @@ const want = show && volumeParamsRead().floorsAll !== true;
 if (fallShown === want) return;
 fallShown = want;
 rebuildScene();
+}
+function fallWarmKeep(was) {
+if (scene && scene.stackParts) fallWarm = null;
+else if (was && was.stackParts) fallWarm = was;
+fallWarmWant();
+}
+function fallWarmWant() {
+if (fallWarmTimer !== null || closed) return;
+if (typeof setTimeout !== "function") return;
+if (!fallWarmNeeded()) return;
+fallWarmTimer = setTimeout(fallWarmTick, VOLUME_MOTION_SETTLE_MS);
+}
+function fallWarmNeeded() {
+if (screenMode() !== "volume") return false;
+const state = getState();
+const plan = floorPlan(state);
+if (!plan.can || stacking(state, plan)) return false;
+return (scene.rooms || []).some((room) => room.hasFloor === false);
+}
+function fallWarmTick() {
+fallWarmTimer = null;
+if (closed || !fallWarmNeeded()) return;
+if (walking || frame || now() - lastCameraMoveAt < VOLUME_MOTION_SETTLE_MS) {
+fallWarmTimer = setTimeout(fallWarmTick, VOLUME_MOTION_SETTLE_MS);
+return;
+}
+fallWarmBuild();
+}
+function fallWarmBuild() {
+const state = getState();
+const stack = stackSceneOf(state, floorPlan(state));
+if (stack && stack.stackParts) fallWarm = stack;
 }
 function fallTo(floor) {
 const state = getState();
@@ -73027,6 +73069,9 @@ stopHome = null;
 closed = true;
 if (fpsTimer !== null) clearInterval(fpsTimer);
 if (settleTimer !== null) clearTimeout(settleTimer);
+if (fallWarmTimer !== null) clearTimeout(fallWarmTimer);
+fallWarmTimer = null;
+fallWarm = null;
 if (setpointTimer !== null) clearTimeout(setpointTimer);
 setpointTimer = null;
 volumeSurface = null;
@@ -73096,6 +73141,7 @@ volumeParamsArrive(Date.now());
 refreshHour();
 syncClock();
 sync();
+fallWarmWant();
 homeStale = true;
 homeEnsure();
 if (typeof stage.focus === "function") stage.focus({ preventScroll: true });
@@ -73156,6 +73202,7 @@ sync();
 resize();
 if (volumeFitsOnArrive({ empty: scene.empty, looked, view })) fit();
 if (typeof stage.focus === "function") stage.focus({ preventScroll: true });
+fallWarmWant();
 let homeRunning = simRunning();
 stopHome = simWatch((payload) => {
 if (closed) return;
