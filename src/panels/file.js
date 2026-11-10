@@ -21,6 +21,7 @@ import {
   adoptLoadedProject,
   autosaveAdoptFolder,
   autosaveAgoText,
+  autosaveDropBase,
   autosaveFlush,
   autosaveForget,
   autosaveGrant,
@@ -34,6 +35,7 @@ import {
   autosavePickFolder,
   autosaveReady,
   autosaveRemoveSnapshots,
+  autosaveResetSync,
   autosaveRestore,
   autosaveSchedule,
   autosaveSnapshotName,
@@ -327,6 +329,10 @@ function mountFilePanel(host, api) {
         for (const scheme of current.schemes || []) {
           if (scheme.imageId) await deleteImage(scheme.imageId);
         }
+        // Номер объекта остался прежним, а содержимое — чужое: прежний
+        // снимок-предок к нему отношения не имеет (таск 287). Новый поднимет
+        // первая же запись в папку.
+        await autosaveDropBase(current.id);
       }
       notify(text("file.loaded", { name: adopted.project.name }), "success");
     } catch (error) {
@@ -585,6 +591,12 @@ function mountFilePanel(host, api) {
         ),
       ],
       [strings.merge.renumbered, result.renumbered.map((item) => text("merge.renumberedItem", item))],
+      // Задвоенные сущности: называются там же, где слияние говорит о прочем.
+      // Список непуст только у слияния без общего предка (`merge.mergeDoubled`).
+      [
+        text("merge.doubled", { count: result.doubled.length }),
+        result.doubled.map((item) => text("merge.doubledItem", { label: item.label })),
+      ],
     ];
     for (const [title, lines] of sections) {
       if (lines.length === 0) continue;
@@ -592,6 +604,11 @@ function mountFilePanel(host, api) {
       const list = uiEl("ul", { class: "merge-list" });
       for (const line of lines) list.append(uiEl("li", { text: line }));
       body.push(list);
+    }
+    // Почему задвоилось — отдельной строкой под списком: в самой строке списка
+    // этому места нет, а без довода «похоже, пришло дважды» звучит приговором.
+    if (result.doubled.length > 0) {
+      body.push(uiEl("p", { class: "modal__hint", text: strings.merge.doubledWhy }));
     }
     if (result.plans) {
       body.push(uiEl("p", { class: "modal__text", text: text("merge.plans", { count: result.plans }) }));
@@ -612,7 +629,14 @@ function mountFilePanel(host, api) {
     const state = getState();
     if (!result || !result.project || !state.project) return;
     // Пока читали папку, объект могли переключить — тогда это не его правка.
-    if (result.project.id !== state.project.id) return;
+    // Слияние не применено, а файл напарника уже записан предком для
+    // следующего спора с ним (таск 287) — и это неверно: предком его делает
+    // применённое слияние. Сбрасываем общие точки сеанса; их поднимет первая
+    // же запись в папку и следующий заход опроса.
+    if (result.project.id !== state.project.id) {
+      autosaveResetSync();
+      return;
+    }
     // Тихое слияние: не изменилось ничего, кроме служебных полей — постоянного
     // ключа проекта и отметки времени. Ключ до объекта доехать должен (после
     // этого родство перестаёт быть догадкой), но работой это не является:
@@ -627,7 +651,9 @@ function mountFilePanel(host, api) {
     // Ctrl+Z отменяет действия пользователя, а не чужие: откат поверх слияния
     // стёр бы чужую работу молча, поэтому стек истории здесь обрывается.
     clearHistory();
-    const loud = result.counts.conflicts > 0;
+    // Задвоение — такой же повод открыть список, как и спор: человеку надо
+    // посмотреть на план и удалить лишнее.
+    const loud = result.counts.conflicts > 0 || result.doubled.length > 0;
     notify(loud ? strings.merge.toastConflicts : text("merge.toast", result.counts), loud ? "error" : "info");
     if (loud || result.counts.renumbered > 0) mergeReport(result);
     autosaveSchedule(result.project, { onDone: onFolderWritten });

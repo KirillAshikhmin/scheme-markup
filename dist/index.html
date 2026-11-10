@@ -7909,6 +7909,10 @@ incoming: "Пришло со стороны",
 conflicts: "Разошлось",
 renumbered: "Номера совпали у двоих и были разведены",
 renumberedItem: "{code}{from} → {code}{to}",
+doubled: "Могло задвоиться: {count}",
+doubledItem: "{label} — похоже, одно и то же пришло дважды",
+doubledWhy:
+"Общего снимка у сторон не было: кто что завёл, слияние не видело, а номера у разошедшихся копий одни. Поэтому спорные сущности оставлены обе — лишнее видно на плане, удалите его как обычно.",
 added: "добавлено: {label}",
 updated: "изменено: {label}",
 removed: "удалено: {label}",
@@ -24093,6 +24097,11 @@ function mergeMergeKeys(ourKey, theirKey) {
 if (ourKey && theirKey) return ourKey < theirKey ? ourKey : theirKey;
 return ourKey || theirKey || null;
 }
+const MERGE_SUBJECTS = {
+groups: strings.subjects.group,
+outlines: strings.subjects.outline,
+placements: strings.subjects.placement,
+};
 function mergeLabel(entity, item, typeCodes) {
 if (!item) return "";
 if (entity === "marks") {
@@ -24489,8 +24498,19 @@ return winner === "theirs"
 ? { ours: moved.project, theirs, reissued }
 : { ours, theirs: moved.project, reissued };
 }
+function mergeDoubled(reissued, merged, ancestor, typeCodes) {
+if (ancestor || reissued.length === 0) return [];
+const doubled = [];
+for (const item of reissued) {
+const list = Array.isArray(merged[item.entity]) ? merged[item.entity] : [];
+const moved = list.find((one) => one && one.id === item.now) || null;
+const label = mergeLabel(item.entity, moved, typeCodes) || MERGE_SUBJECTS[item.entity] || item.now;
+doubled.push({ entity: item.entity, id: item.now, label });
+}
+return doubled;
+}
 function mergeProjects(ours, theirs, base, options = {}) {
-if (!ours || !theirs) return { project: ours || theirs || null, changed: false, changes: [], conflicts: [], renumbered: [], reissued: [], counts: { added: 0, updated: 0, removed: 0, conflicts: 0, renumbered: 0 } };
+if (!ours || !theirs) return { project: ours || theirs || null, changed: false, changes: [], conflicts: [], renumbered: [], reissued: [], doubled: [], counts: { added: 0, updated: 0, removed: 0, conflicts: 0, renumbered: 0, doubled: 0 } };
 const winner = options.winner === "ours" || options.winner === "theirs" ? options.winner : mergeWinner(ours, theirs);
 const ancestor = base && areRelatedProjects(ours, base) ? base : null;
 const report = { changes: [], conflicts: [], renumbered: [], reissued: [] };
@@ -24537,12 +24557,14 @@ const typeCodes = new Map(merged.markTypes.map((type) => [type.id, type.code]));
 typeCodes.set(COMMENT_TYPE_ID, commentCodeOf(merged));
 for (const change of report.changes) change.label = mergeLabel(change.entity, change.item, typeCodes);
 for (const conflict of report.conflicts) conflict.label = mergeLabel(conflict.entity, conflict.item, typeCodes);
+const doubled = mergeDoubled(report.reissued, merged, ancestor, typeCodes);
 const counts = {
 added: report.changes.filter((change) => change.action === "added").length,
 updated: report.changes.filter((change) => change.action === "updated").length,
 removed: report.changes.filter((change) => change.action === "removed").length,
 conflicts: report.conflicts.length,
 renumbered: report.renumbered.length,
+doubled: doubled.length,
 };
 const quiet = mergeSame({ ...ours, key: merged.key, updatedAt: merged.updatedAt }, merged);
 return {
@@ -24553,6 +24575,7 @@ changes: report.changes,
 conflicts: report.conflicts,
 renumbered: report.renumbered,
 reissued: report.reissued,
+doubled,
 counts,
 };
 }
@@ -24561,6 +24584,7 @@ counts,
 const AUTOSAVE_FOLDER_KEY = "autosaveFolder";
 const AUTOSAVE_EXPORT_KEY = "lastFileExport";
 const AUTOSAVE_STALE_KEY = "staleKept";
+const AUTOSAVE_BASE_KEY = "mergeBase";
 const AUTOSAVE_DELAY_MS = 1500;
 const AUTOSAVE_VERIFY_MS = 10 * 60 * 1000;
 const AUTOSAVE_WATCH_MS = 5000;
@@ -24575,6 +24599,7 @@ let autosavePending = null;
 let autosaveLastError = null;
 let autosaveVerified = null;
 let autosaveBase = null;
+let autosaveFileBases = new Map();
 let autosaveSyncSince = 0;
 let autosaveSeen = new Map();
 let autosaveWatchTimer = null;
@@ -24808,7 +24833,7 @@ await verifyProjectFile(written, project, packedFile.images, { member });
 autosaveMarkVerified(project, packedFile.images, date);
 }
 autosaveLastError = null;
-autosaveBase = project;
+await autosaveKeepBase(project);
 if (typeof fileHandle.getFile === "function") {
 const stamp = await fileHandle.getFile();
 autosaveSyncSince = Math.max(autosaveSyncSince, stamp.lastModified || 0);
@@ -24856,8 +24881,57 @@ return result;
 function autosaveBaseProject() {
 return autosaveBase;
 }
+function autosaveBaseKey(projectId) {
+return AUTOSAVE_BASE_KEY + ":" + projectId;
+}
+function autosaveFolderName() {
+return autosaveHandle && autosaveHandle.name ? String(autosaveHandle.name) : "";
+}
+async function autosaveKeepBase(project) {
+autosaveBase = project || null;
+if (!project || !project.id) return;
+try {
+await setSetting(autosaveBaseKey(project.id), {
+folder: autosaveFolderName(),
+at: Date.now(),
+project,
+});
+} catch (error) {
+}
+}
+async function autosaveStoredBase(project) {
+if (!project || !project.id) return null;
+let saved = null;
+try {
+saved = await getSetting(autosaveBaseKey(project.id));
+} catch (error) {
+return null;
+}
+if (!saved || !saved.project || saved.project.id !== project.id) return null;
+if (String(saved.folder || "") !== autosaveFolderName()) return null;
+return saved.project;
+}
+function autosaveFileBaseKey(project, name) {
+return (project && project.id ? project.id : "") + "|" + name;
+}
+function autosaveFileBase(project, name) {
+return autosaveFileBases.get(autosaveFileBaseKey(project, name)) || autosaveBase;
+}
+function autosaveKeepFileBase(project, name, loaded) {
+if (!loaded) return;
+autosaveFileBases.set(autosaveFileBaseKey(project, name), loaded);
+}
+async function autosaveDropBase(projectId) {
+if (!projectId) return;
+if (autosaveBase && autosaveBase.id === projectId) autosaveBase = null;
+try {
+await setSetting(autosaveBaseKey(projectId), null);
+} catch (error) {
+}
+}
 function autosaveResetSync() {
 autosaveBase = null;
+autosaveFileBases = new Map();
 autosaveSyncSince = 0;
 autosaveSeen = new Map();
 }
@@ -24905,11 +24979,14 @@ return checked.map(({ name, at }) => ({ name, at }));
 async function autosaveAdoptFolder(project) {
 if (!project || !autosaveReady()) return null;
 await autosaveMemberId();
-const own = await autosaveOwnEntries(project);
-if (own.length === 0) return null;
-const current = autosaveSnapshotName(project);
 if (autosaveBase && autosaveBase.id !== project.id) autosaveBase = null;
-let base = null;
+if (!autosaveBase) autosaveBase = await autosaveStoredBase(project);
+const own = await autosaveOwnEntries(project);
+if (own.length === 0) {
+return autosaveBase ? { base: autosaveBase, name: null, at: 0, stale: [] } : null;
+}
+const current = autosaveSnapshotName(project);
+let base = autosaveBase;
 let from = null;
 const read = new Map();
 for (const item of own) {
@@ -25003,7 +25080,8 @@ continue;
 }
 if (autosaveWroteArchive(project, loaded, autosaveMember)) continue;
 if (!areRelatedProjects(project, loaded.project)) continue;
-const merged = mergeProjects(project, loaded.project, autosaveBase);
+const merged = mergeProjects(project, loaded.project, autosaveFileBase(project, entry.name));
+autosaveKeepFileBase(project, entry.name, loaded.project);
 if (!merged.changed) continue;
 const plans = await autosaveAdoptImages(merged.project, loaded.images);
 return { ...merged, file: entry.name, at, plans };
@@ -61157,6 +61235,7 @@ if (mode === "replace" && current) {
 for (const scheme of current.schemes || []) {
 if (scheme.imageId) await deleteImage(scheme.imageId);
 }
+await autosaveDropBase(current.id);
 }
 notify(text("file.loaded", { name: adopted.project.name }), "success");
 } catch (error) {
@@ -61365,6 +61444,10 @@ side: mergeSideName(conflict.kept),
 ),
 ],
 [strings.merge.renumbered, result.renumbered.map((item) => text("merge.renumberedItem", item))],
+[
+text("merge.doubled", { count: result.doubled.length }),
+result.doubled.map((item) => text("merge.doubledItem", { label: item.label })),
+],
 ];
 for (const [title, lines] of sections) {
 if (lines.length === 0) continue;
@@ -61372,6 +61455,9 @@ body.push(uiEl("p", { class: "modal__text", text: title }));
 const list = uiEl("ul", { class: "merge-list" });
 for (const line of lines) list.append(uiEl("li", { text: line }));
 body.push(list);
+}
+if (result.doubled.length > 0) {
+body.push(uiEl("p", { class: "modal__hint", text: strings.merge.doubledWhy }));
 }
 if (result.plans) {
 body.push(uiEl("p", { class: "modal__text", text: text("merge.plans", { count: result.plans }) }));
@@ -61386,7 +61472,10 @@ actions: [uiButton(strings.merge.close, { on: { click: () => modal.close() } })]
 function applyExternal(result) {
 const state = getState();
 if (!result || !result.project || !state.project) return;
-if (result.project.id !== state.project.id) return;
+if (result.project.id !== state.project.id) {
+autosaveResetSync();
+return;
+}
 if (result.quiet) {
 setState({ project: result.project, dirty: true });
 autosaveSchedule(result.project, { onDone: onFolderWritten });
@@ -61395,7 +61484,7 @@ return;
 }
 setState({ project: result.project, dirty: true });
 clearHistory();
-const loud = result.counts.conflicts > 0;
+const loud = result.counts.conflicts > 0 || result.doubled.length > 0;
 notify(loud ? strings.merge.toastConflicts : text("merge.toast", result.counts), loud ? "error" : "info");
 if (loud || result.counts.renumbered > 0) mergeReport(result);
 autosaveSchedule(result.project, { onDone: onFolderWritten });
@@ -65336,6 +65425,7 @@ for (const scheme of project.schemes) {
 if (scheme.imageId) await deleteImage(scheme.imageId);
 }
 await deleteProject(project.id);
+await autosaveDropBase(project.id);
 if (Array.isArray(known)) known = known.filter((item) => item.id !== project.id);
 setState({ project: null, schemeId: null, selectedMarkIds: [], activeTypeId: null });
 notify(text("projects.removed", { name: project.name }), "success");

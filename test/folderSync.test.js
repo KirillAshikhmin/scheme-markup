@@ -468,3 +468,107 @@ test("снимок прежней сборки опознан своим, при
   assert.ok(folder.files.has(written.name), "удалён текущий снимок");
   autosaveResetSync();
 });
+
+// ——— снимок-предок хранится всегда (таск 287) —————————————————————————
+//
+// Без предка слияние вырождается в объединение, и часть сущностей задваивается:
+// «каждый завёл своё» и «одно правили оба» снаружи выглядят одинаково, а номера
+// у разошедшихся копий одни. Поэтому предок лежит в хранилище браузера, а не
+// только в памяти вкладки, и для спора с напарником берётся его прежний файл.
+
+async function bytesOfProject(project) {
+  const blob = await packProject(project, new Map());
+  return new Uint8Array(await blob.arrayBuffer());
+}
+
+test("предок лежит в хранилище и переживает вкладку, даже если свой архив не читается", async () => {
+  folder.files.clear();
+  autosaveResetSync();
+  const { project, schemeId } = await objectWithPlan("Квартира у парка");
+  const withSecond = addMark(project, {
+    schemeId,
+    typeId: project.markTypes[0].id,
+    points: [{ x: 0.6, y: 0.6 }],
+  }).project;
+  await autosavePickFolder();
+  const written = await autosaveWrite(withSecond);
+  assert.equal(written.ok, true, written.error && written.error.message);
+
+  // Коллега удалил вторую метку и выложил свой файл.
+  const gone = withSecond.marks[1].id;
+  const copy = JSON.parse(JSON.stringify(withSecond));
+  copy.id = "peer-" + copy.id.slice(5);
+  const peer = {
+    ...deleteMark(copy, gone).project,
+    updatedAt: new Date(Date.now() + 60000).toISOString(),
+  };
+  folder.put("коллега.zip", await bytesOfProject(peer), Date.now() + 70000);
+
+  // Новая вкладка — и наш собственный архив в папке испорчен. Прежний ход,
+  // «распаковать свой снимок ради предка», не сработал бы вовсе.
+  autosaveResetSync();
+  folder.put(written.name, new TextEncoder().encode("это не архив"), Date.now());
+  const adopted = await autosaveAdoptFolder(withSecond);
+  assert.ok(adopted && adopted.base, "предок не поднялся из хранилища");
+  assert.equal(adopted.name, null, "предок пришёл из архива, а не из хранилища");
+  assert.equal(adopted.base.marks.length, withSecond.marks.length, "предок не тот");
+
+  // И удаление коллеги доезжает: без предка «сущности нет» и «сущность удалили»
+  // выглядят одинаково, и метка вернулась бы.
+  const seen = await autosaveScanExternal(withSecond);
+  assert.ok(seen, "чужое удаление не замечено");
+  assert.equal(
+    seen.project.marks.some((mark) => mark.id === gone),
+    false,
+    "удаление коллеги не доехало — предка не было",
+  );
+  autosaveResetSync();
+});
+
+test("предок на напарника — его прежний файл, и та же метка не задваивается", async () => {
+  folder.files.clear();
+  autosaveResetSync();
+  const { project, schemeId } = await objectWithPlan("Студия на Невском");
+  await autosavePickFolder();
+  const written = await autosaveWrite(project);
+  assert.equal(written.ok, true, written.error && written.error.message);
+
+  // Напарник поставил метку. Номер ей выдал тот же счётчик, что и у нас, —
+  // значит, нашему снимку этот номер неизвестен.
+  const peerBase = JSON.parse(JSON.stringify(project));
+  peerBase.id = "peer-" + peerBase.id.slice(5);
+  const added = addMark(peerBase, {
+    schemeId,
+    typeId: peerBase.markTypes[1].id,
+    points: [{ x: 0.8, y: 0.8 }],
+  });
+  const fresh = added.mark.id;
+  const one = { ...added.project, updatedAt: new Date(Date.now() + 60000).toISOString() };
+  folder.put("напарник.zip", await bytesOfProject(one), Date.now() + 61000);
+
+  const first = await autosaveScanExternal(project);
+  assert.ok(first, "метка напарника не приехала");
+  assert.ok(first.project.marks.some((mark) => mark.id === fresh), "метки напарника нет в объекте");
+
+  // Он подвинул её и переписал свой файл. Нашей записи между этим не было: в
+  // работе так и бывает — папку опрашивают чаще, чем доезжает запись на диск,
+  // а запись ещё и может не пройти вовсе.
+  const two = {
+    ...one,
+    marks: one.marks.map((mark) => (mark.id === fresh ? { ...mark, points: [{ x: 0.3, y: 0.3 }] } : mark)),
+    updatedAt: new Date(Date.now() + 120000).toISOString(),
+  };
+  folder.put("напарник.zip", await bytesOfProject(two), Date.now() + 121000);
+
+  const second = await autosaveScanExternal(first.project);
+  assert.ok(second, "правка напарника не замечена");
+  assert.deepEqual(second.reissued, [], "та же метка поехала на другой номер");
+  assert.equal(
+    second.project.marks.length,
+    first.project.marks.length,
+    "метка задвоилась: в объекте стало две таких",
+  );
+  const moved = second.project.marks.find((mark) => mark.id === fresh);
+  assert.equal(moved.points[0].x, 0.3, "правка напарника не доехала");
+  autosaveResetSync();
+});

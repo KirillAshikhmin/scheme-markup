@@ -12,6 +12,7 @@ import {
   migrateTypeKinds,
   projectFormatVersion,
 } from "../model.js";
+import { autosaveDropBase } from "../autosave.js";
 import { scenarioLibIndex, scenarioLibRefOf } from "../scenarioLib.js";
 import {
   deleteImage,
@@ -394,6 +395,10 @@ function mountProjectsPanel(host, api) {
       if (scheme.imageId) await deleteImage(scheme.imageId);
     }
     await deleteProject(project.id);
+    // Снимок-предок общей папки уходит вместе с объектом (таск 287): без этого
+    // копия `project.json` осталась бы лежать в хранилище и рассказывать про
+    // объект, которого больше нет.
+    await autosaveDropBase(project.id);
     // Удалённый уходит из списка сразу: про него мы знаем больше базы, и
     // перечитка, которая не состоится, не должна вернуть его в шапку (268).
     if (Array.isArray(known)) known = known.filter((item) => item.id !== project.id);

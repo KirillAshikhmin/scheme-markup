@@ -281,6 +281,16 @@ function mergeMergeKeys(ourKey, theirKey) {
   return ourKey || theirKey || null;
 }
 
+// Род сущности для отчёта. Нужен тем видам, у которых нет ни обозначения, ни
+// имени: строка «похоже, пришло дважды» без подлежащего не говорит ничего.
+// Стена, проём, объект схемы и привязка логики названы в `mergeLabel` — там
+// слово нужно всегда, а здесь только когда имени не нашлось.
+const MERGE_SUBJECTS = {
+  groups: strings.subjects.group,
+  outlines: strings.subjects.outline,
+  placements: strings.subjects.placement,
+};
+
 function mergeLabel(entity, item, typeCodes) {
   if (!item) return "";
   if (entity === "marks") {
@@ -887,8 +897,14 @@ function mergeReferences(merged, report, sources, winner) {
  *     видно, — но он есть;
  *   — **сущность доехала до нас и напарник её правил**, а наш снимок-предок
  *     этого ещё не видел: содержимое разошлось, и переезд задвоит её. Поэтому
- *     снимок-предок и пишется на каждую нашу запись (`autosaveBase`): свежий
- *     предок закрывает этот случай совсем.
+ *     предком для спора с напарником берётся **прежде прочитанный файл этого
+ *     же напарника** (`autosave.autosaveFileBase`, таск 287): в нём сущность
+ *     есть, и спорить не о чем. Сам снимок-предок с таска 287 лежит в
+ *     хранилище браузера, а не только в памяти вкладки, — и состояния «предка
+ *     нет вовсе» у объекта в общей папке больше не бывает.
+ *
+ * Где предка всё-таки нет — слияние об этом **говорит вслух**: переехавшие без
+ * предка сущности идут в отчёт списком `doubled` (`mergeDoubled`).
  *
  * Сторона выбрана по правилу самого слияния: «вернуть лишнюю метку — минута
  * работы, восстановить потерянную — некому». Из двух слепот первая теряет, а
@@ -952,20 +968,53 @@ function mergeIdClash(ours, theirs, base, winner) {
 }
 
 /**
+ * **Задвоенные сущности — то, о чём слияние до таска 287 молчало.**
+ *
+ * Переезд номера (`reissued`) бывает двух родов, и различает их **наличие
+ * общего предка**:
+ *
+ *   — предок есть: столкнувшиеся сущности заведены **после** расхождения, то
+ *     есть это две разные вещи, которым счётчик выдал один номер. Разводить их
+ *     правильно, человеку сказать нечего — номер сущности он не видит;
+ *   — предка нет: «каждый завёл своё» и «одно правили оба» снаружи выглядят
+ *     одинаково (шапка `mergeIdClash`), и переезд мог развести **одну** вещь на
+ *     две. Вот об этом и говорится вслух: что именно могло задвоиться и сколько.
+ *
+ * Поэтому список пуст ровно тогда, когда предок был, — и это же делает таск 287
+ * проверяемым: предок у общей папки есть всегда, значит строка о задвоении на
+ * общей папке не появляется вовсе.
+ *
+ * Отчёт `reissued` при этом не тронут (на нём стоят таски 272 и 275): список
+ * считается **из** него, по слитому объекту, и ничего в нём не меняет.
+ */
+function mergeDoubled(reissued, merged, ancestor, typeCodes) {
+  if (ancestor || reissued.length === 0) return [];
+  const doubled = [];
+  for (const item of reissued) {
+    const list = Array.isArray(merged[item.entity]) ? merged[item.entity] : [];
+    const moved = list.find((one) => one && one.id === item.now) || null;
+    const label = mergeLabel(item.entity, moved, typeCodes) || MERGE_SUBJECTS[item.entity] || item.now;
+    doubled.push({ entity: item.entity, id: item.now, label });
+  }
+  return doubled;
+}
+
+/**
  * Сливает два экземпляра одного объекта.
  *
  * `base` — общий предок (последний снимок, который видели обе стороны); без
  * него слияние становится объединением: удаления не видны, потому что «нет
  * сущности» и «сущность удалили» снаружи выглядят одинаково.
  *
- * Возвращает `{project, changed, changes, conflicts, renumbered, reissued, counts}`:
- * `changes` — что пришло со стороны (added | updated | removed) с подписью
- * каждой сущности, `conflicts` — где стороны разошлись и чей вариант оставлен,
- * `reissued` — сущности, чей номер переехал из-за столкновения
- * (`mergeIdClash`).
+ * Возвращает `{project, changed, changes, conflicts, renumbered, reissued,
+ * doubled, counts}`: `changes` — что пришло со стороны (added | updated |
+ * removed) с подписью каждой сущности, `conflicts` — где стороны разошлись и
+ * чей вариант оставлен, `reissued` — сущности, чей номер переехал из-за
+ * столкновения (`mergeIdClash`), `doubled` — те из них, которые могли
+ * задвоиться, потому что общего предка не было (`mergeDoubled`).
  */
 export function mergeProjects(ours, theirs, base, options = {}) {
-  if (!ours || !theirs) return { project: ours || theirs || null, changed: false, changes: [], conflicts: [], renumbered: [], reissued: [], counts: { added: 0, updated: 0, removed: 0, conflicts: 0, renumbered: 0 } };
+  if (!ours || !theirs) return { project: ours || theirs || null, changed: false, changes: [], conflicts: [], renumbered: [], reissued: [], doubled: [], counts: { added: 0, updated: 0, removed: 0, conflicts: 0, renumbered: 0, doubled: 0 } };
 
   const winner = options.winner === "ours" || options.winner === "theirs" ? options.winner : mergeWinner(ours, theirs);
   const ancestor = base && areRelatedProjects(ours, base) ? base : null;
@@ -1039,12 +1088,15 @@ export function mergeProjects(ours, theirs, base, options = {}) {
   for (const change of report.changes) change.label = mergeLabel(change.entity, change.item, typeCodes);
   for (const conflict of report.conflicts) conflict.label = mergeLabel(conflict.entity, conflict.item, typeCodes);
 
+  const doubled = mergeDoubled(report.reissued, merged, ancestor, typeCodes);
+
   const counts = {
     added: report.changes.filter((change) => change.action === "added").length,
     updated: report.changes.filter((change) => change.action === "updated").length,
     removed: report.changes.filter((change) => change.action === "removed").length,
     conflicts: report.conflicts.length,
     renumbered: report.renumbered.length,
+    doubled: doubled.length,
   };
 
   // Слияние, в котором не изменилось ничего, кроме служебных полей — ключа
@@ -1066,6 +1118,10 @@ export function mergeProjects(ours, theirs, base, options = {}) {
     // видит, — но тому, кто держит состояние по `markId` (выделение, живое
     // состояние дома), нужно знать, что ключ сменился.
     reissued: report.reissued,
+    // Что из переехавшего могло оказаться одной и той же сущностью дважды:
+    // список непуст только там, где общего предка не было (`mergeDoubled`).
+    // Об этом слияние говорит человеку словами — в отчёте панели.
+    doubled,
     counts,
   };
 }

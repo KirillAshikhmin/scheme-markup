@@ -25,6 +25,33 @@ const AUTOSAVE_EXPORT_KEY = "lastFileExport";
 // Хранится по имени файла; имя несёт хвосты объекта и участника, так что
 // спутать его с файлом из другой папки практически нечем.
 const AUTOSAVE_STALE_KEY = "staleKept";
+/**
+ * Снимок-предок общей папки лежит в хранилище браузера (таск 287).
+ *
+ * Зачем: без предка слияние становится объединением, и часть сущностей
+ * **задваивается** — «каждый завёл своё» и «одно правили оба» снаружи выглядят
+ * одинаково, а номера у разошедшихся копий одни (`merge.mergeIdClash`). На
+ * настоящих объектах заказчика это 8–63 парные сущности за один обмен файлами.
+ *
+ * Где он был до этого: только в памяти сеанса. Переживал он перезагрузку
+ * единственным способом — `autosaveAdoptFolder` распаковывал **наш же файл** из
+ * папки. Архив битый, папка на миг недоступна, файл унесла синхронизация — и
+ * предка нет вовсе.
+ *
+ * Ключ — на объект (`mergeBase:<id>`): объектов в одной папке бывает несколько,
+ * и предок у каждого свой. Хранится `{folder, at, project}`: имя папки
+ * сверяется, потому что предок одной папки для другой слишком новый —
+ * удаления чужой стороны он показал бы там, где их не было. Записывается
+ * **только** `autosaveKeepBase` и только после удачной записи в папку: предок —
+ * это то, что видела вторая сторона.
+ *
+ * Цена названа: это копия `project.json` без планов. У самого большого объекта
+ * заказчика 578 КБ — столько же, сколько сам документ объекта в базе, то есть
+ * место под объект в браузере удваивается (у объекта с самым тяжёлым архивом —
+ * 382 КБ, 28 % от его zip). Формат файла не тронут (G68): в архив предок не
+ * идёт, и вес файла не меняется ни на байт.
+ */
+const AUTOSAVE_BASE_KEY = "mergeBase";
 // Задержка больше, чем у сохранения в браузер (400 мс): запись на диск дороже,
 // и пачка правок должна уложиться в одну запись.
 const AUTOSAVE_DELAY_MS = 1500;
@@ -50,8 +77,14 @@ let autosaveRunning = false;
 let autosavePending = null;
 let autosaveLastError = null;
 let autosaveVerified = null;
-// Последний снимок, который видели обе стороны: общий предок для слияния.
+// Последний снимок, который мы отдали в папку: общий предок для слияния.
+// Сдвигает его одно место — `autosaveKeepBase` на удачной записи, она же
+// кладёт его в хранилище браузера.
 let autosaveBase = null;
+// Предок на каждого напарника: имя его файла -> объект, прочитанный из этого
+// файла в прошлый раз. Доводы — у `autosaveFileBase`. Только память сеанса:
+// после перезагрузки папка перечитывается целиком, и предки встают заново.
+let autosaveFileBases = new Map();
 // Время записи нашего снимка в папку. Всё, что старше, мы уже учли — и это
 // же защита от «протухшего» файла соседа: попади он в слияние, откатил бы нашу
 // работу. Свои снимки отсекаются раньше и по имени (`autosaveOwnSnapshot`).
@@ -433,8 +466,10 @@ export async function autosaveWrite(project, options = {}) {
     }
     autosaveLastError = null;
     // Записанный снимок — новая общая точка отсчёта: с ней сливаются чужие
-    // правки, и по её времени отсекаются файлы, которые мы уже учли.
-    autosaveBase = project;
+    // правки, и по её времени отсекаются файлы, которые мы уже учли. Он же
+    // ложится в хранилище браузера: вкладку он переживает, а распаковывать
+    // ради него свой архив больше не надо (таск 287).
+    await autosaveKeepBase(project);
     if (typeof fileHandle.getFile === "function") {
       const stamp = await fileHandle.getFile();
       autosaveSyncSince = Math.max(autosaveSyncSince, stamp.lastModified || 0);
@@ -505,9 +540,118 @@ export function autosaveBaseProject() {
   return autosaveBase;
 }
 
-// Забыть общую точку: другая папка — другая история.
+// ——— снимок-предок: хранится всегда (таск 287) —————————————————————————
+
+function autosaveBaseKey(projectId) {
+  return AUTOSAVE_BASE_KEY + ":" + projectId;
+}
+
+function autosaveFolderName() {
+  return autosaveHandle && autosaveHandle.name ? String(autosaveHandle.name) : "";
+}
+
+/**
+ * Предок сдвинулся и доехал до папки — значит, его видела вторая сторона.
+ * **Единственное место, которое пишет предка в хранилище.** Отказ записи
+ * ничего не ломает: предок остаётся в памяти сеанса, как и до таска 287.
+ */
+async function autosaveKeepBase(project) {
+  autosaveBase = project || null;
+  if (!project || !project.id) return;
+  try {
+    await setSetting(autosaveBaseKey(project.id), {
+      folder: autosaveFolderName(),
+      at: Date.now(),
+      project,
+    });
+  } catch (error) {
+    /* хранилище могло отказать — предок жив в памяти сеанса */
+  }
+}
+
+/**
+ * Предок этого объекта из хранилища. Отдаётся, только если он того же объекта
+ * и той же папки: предок другой папки нам слишком новый — он показал бы
+ * удаления там, где их не было.
+ */
+async function autosaveStoredBase(project) {
+  if (!project || !project.id) return null;
+  let saved = null;
+  try {
+    saved = await getSetting(autosaveBaseKey(project.id));
+  } catch (error) {
+    return null;
+  }
+  if (!saved || !saved.project || saved.project.id !== project.id) return null;
+  if (String(saved.folder || "") !== autosaveFolderName()) return null;
+  return saved.project;
+}
+
+function autosaveFileBaseKey(project, name) {
+  return (project && project.id ? project.id : "") + "|" + name;
+}
+
+/**
+ * **Предок на напарника, а не один на всех** (таск 287).
+ *
+ * Трёхстороннее слияние требует от предка одного: быть предком **обеих**
+ * сторон. Наш снимок в папке годится на это, только пока напарник его
+ * прочитал, — а узнать это нечем, и для напарника, который ещё его не видел,
+ * наш снимок не предок, а будущее.
+ *
+ * Прежде прочитанный файл напарника на роль предка годится без этой догадки:
+ * он предок его нынешнего файла (напарник идёт только вперёд) и предок нашего
+ * объекта (мы его слили — значит, всё из него у нас либо есть, либо удалено
+ * нами с тех пор). Поэтому для напарника, чей файл мы уже читали, предком
+ * берётся этот файл, и только для первой встречи — наш снимок, как и прежде.
+ *
+ * Что это чинит, кроме задвоения (замер на объектах заказчика — в отчёте таска):
+ *
+ *   — **свою свежую сущность больше не считают удалённой**. Наш снимок её
+ *     содержит, файл напарника — нет, и прежнее правило читало это как «они
+ *     удалили». Прежний файл напарника её не содержит вовсе — и она остаётся;
+ *   — **наше удаление чужой сущности не отменяется** её же файлом, в котором
+ *     она цела и не правлена.
+ *
+ * Объявленная цена: правку, которую напарник внёс в **нашу** сущность, взяв её
+ * из нашего же файла, слияние покажет спором `bothChanged`, а не тихим
+ * «изменено» — в его прежнем файле этой сущности не было. Правило спора решит
+ * то же самое, и строка в отчёте честная.
+ *
+ * Чего это **не** чинит: первую встречу с напарником. Его файла мы ещё не
+ * читали, и предком остаётся наш снимок — со всеми его догадками.
+ */
+function autosaveFileBase(project, name) {
+  return autosaveFileBases.get(autosaveFileBaseKey(project, name)) || autosaveBase;
+}
+
+function autosaveKeepFileBase(project, name, loaded) {
+  if (!loaded) return;
+  autosaveFileBases.set(autosaveFileBaseKey(project, name), loaded);
+}
+
+/**
+ * Забыть предка насовсем: объект удалили или заменили содержимым файла. Без
+ * этого запись осталась бы лежать в хранилище и рассказывать про объект,
+ * которого больше нет.
+ */
+export async function autosaveDropBase(projectId) {
+  if (!projectId) return;
+  if (autosaveBase && autosaveBase.id === projectId) autosaveBase = null;
+  try {
+    await setSetting(autosaveBaseKey(projectId), null);
+  } catch (error) {
+    /* не удалилось — запись перепишет первая же наша запись в папку */
+  }
+}
+
+// Забыть общую точку в этом сеансе: другая папка — другая история. Запись в
+// хранилище при этом остаётся: она названа своей папкой и своим объектом, и
+// `autosaveStoredBase` сам решит, годится ли она. Снять её насовсем — дело
+// `autosaveDropBase`.
 export function autosaveResetSync() {
   autosaveBase = null;
+  autosaveFileBases = new Map();
   autosaveSyncSince = 0;
   autosaveSeen = new Map();
 }
@@ -578,12 +722,17 @@ export async function autosaveOwnSnapshots(project) {
 }
 
 /**
- * Открыли папку — поднимаем из неё общего предка. До первой своей записи
+ * Открыли папку — поднимаем общего предка. До первой своей записи
  * `autosaveBase` пуст, а без предка слияние становится объединением: «сущности
- * нет» и «сущность удалили» снаружи выглядят одинаково, и чужой файл возвращает
- * удалённое. Наш собственный снимок на это годится ровно так же, как он годится
- * после записи: это последнее, что мы отдали в папку, — и именно его видела
- * вторая сторона.
+ * нет» и «сущность удалили» снаружи выглядят одинаково, чужой файл возвращает
+ * удалённое, а часть сущностей задваивается. Наш собственный снимок на это
+ * годится ровно так же, как он годится после записи: это последнее, что мы
+ * отдали в папку, — и именно его видела вторая сторона.
+ *
+ * Берётся он в двух местах, и порядок назван: сперва хранилище браузера
+ * (`autosaveStoredBase`, таск 287), потом распаковка своего архива. Второе —
+ * запасной ход: для папки, в которую этот браузер ещё не писал, и для файла
+ * прежней сборки.
  *
  * Заодно отдаёт список прежних снимков этого объекта (`stale`) — всё, что лежит
  * в папке помимо текущего файла.
@@ -595,13 +744,23 @@ export async function autosaveOwnSnapshots(project) {
 export async function autosaveAdoptFolder(project) {
   if (!project || !autosaveReady()) return null;
   await autosaveMemberId();
-  const own = await autosaveOwnEntries(project);
-  if (own.length === 0) return null;
-  const current = autosaveSnapshotName(project);
   // Предок чужого объекта предком не бывает: объект переключили — прежний
   // снимок к этому спору отношения не имеет.
   if (autosaveBase && autosaveBase.id !== project.id) autosaveBase = null;
-  let base = null;
+  // Предок из хранилища — первым (таск 287): это наш же снимок, только лежит
+  // рядом с объектом, а не внутри архива, и читать его дешевле, чем
+  // распаковывать мегабайтный zip. Распаковка осталась запасным ходом — для
+  // папки, в которую этот браузер ещё не писал.
+  if (!autosaveBase) autosaveBase = await autosaveStoredBase(project);
+  const own = await autosaveOwnEntries(project);
+  // Своего файла в папке нет вовсе — но предок мог сохраниться: файл унесла
+  // синхронизация или его удалили руками. Прежних файлов этого объекта тогда
+  // тем более нет, и говорить о них нечего.
+  if (own.length === 0) {
+    return autosaveBase ? { base: autosaveBase, name: null, at: 0, stale: [] } : null;
+  }
+  const current = autosaveSnapshotName(project);
+  let base = autosaveBase;
   let from = null;
   // Что открыли по дороге — сверке пригодится, второй раз файл не читаем.
   const read = new Map();
@@ -738,7 +897,11 @@ export async function autosaveScanExternal(project, options = {}) {
       // какого из наших объектов файл писан: раз писали мы — не чужая работа.
       if (autosaveWroteArchive(project, loaded, autosaveMember)) continue;
       if (!areRelatedProjects(project, loaded.project)) continue;
-      const merged = mergeProjects(project, loaded.project, autosaveBase);
+      const merged = mergeProjects(project, loaded.project, autosaveFileBase(project, entry.name));
+      // Прочитанный файл напарника — предок для следующего спора с **ним**
+      // (таск 287). Ставится и тогда, когда слияние ничего не изменило: раз
+      // ничего нового в файле нет, наш объект его уже содержит.
+      autosaveKeepFileBase(project, entry.name, loaded.project);
       if (!merged.changed) continue;
       const plans = await autosaveAdoptImages(merged.project, loaded.images);
       return { ...merged, file: entry.name, at, plans };

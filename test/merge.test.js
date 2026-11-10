@@ -6,6 +6,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { mergeProjects, mergeWinner, areRelatedProjects } from "../src/merge.js";
+import { strings } from "../src/strings.js";
 import {
   createProject,
   addScheme,
@@ -260,6 +261,81 @@ test("без общего предка два разных прибора под
   // на один номер.
   const ids = merged.project.marks.map((mark) => mark.id);
   assert.equal(new Set(ids).size, ids.length, "в итоге два прибора с одним номером");
+});
+
+// ——— задвоение называется вслух (таск 287) ————————————————————————————
+//
+// Переезд номера бывает двух родов, и различает их наличие предка: при предке
+// столкнувшиеся сущности заведены после расхождения, то есть это две разные
+// вещи; без предка переезд мог развести **одну** вещь на две, и о таких
+// слияние теперь говорит человеку. Пусто там, где предок был, — ровно поэтому
+// у объекта в общей папке, где предок есть всегда, строки о задвоении нет.
+
+test("без предка переехавшая сущность названа задвоенной — с обозначением и числом", () => {
+  const { project: base, schemeId } = ancestor();
+  const typeId = base.markTypes[0].id;
+  const mine = addMark(base, { schemeId, typeId, points: [{ x: 0.1, y: 0.1 }] });
+  const alien = addMark(copyOf(base), { schemeId, typeId, points: [{ x: 0.9, y: 0.9 }] });
+  const ours = stamp(mine.project, "2026-09-17T10:00:00.000Z");
+  const theirs = stamp(alien.project, "2026-09-17T10:05:00.000Z");
+
+  const merged = mergeProjects(ours, theirs, null);
+  assert.equal(merged.reissued.length, 1, "пример не тот: номер не переезжал");
+  assert.equal(merged.counts.doubled, 1, "о задвоении не сказано ни слова");
+  assert.deepEqual(merged.doubled.map((item) => item.entity), ["marks"], "вид задвоенного не назван");
+  // Подпись — обозначение метки, а не её номер: номер человек не видит.
+  const code = merged.project.markTypes.find((type) => type.id === typeId).code;
+  assert.ok(merged.doubled[0].label.startsWith(code), "подпись не обозначение: " + merged.doubled[0].label);
+  // Названа именно переехавшая сущность — она в объекте и есть.
+  assert.ok(
+    merged.project.marks.some((mark) => mark.id === merged.doubled[0].id),
+    "названа сущность, которой в слитом объекте нет",
+  );
+});
+
+test("с предком переезд номера задвоением не называется: это две разные сущности", () => {
+  const { project: base, schemeId } = ancestor();
+  const typeId = base.markTypes[0].id;
+  const mineMark = addMark(base, { schemeId, typeId, points: [{ x: 0.1, y: 0.1 }] });
+  const mine = addRoom(mineMark.project, { name: "Наша комната" });
+  const alienMark = addMark(copyOf(base), { schemeId, typeId, points: [{ x: 0.9, y: 0.9 }] });
+  const alien = addRoom(alienMark.project, { name: "Их комната" });
+  const ours = stamp(mine.project, "2026-09-17T10:00:00.000Z");
+  const theirs = stamp(alien.project, "2026-09-17T10:05:00.000Z");
+
+  const merged = mergeProjects(ours, theirs, base);
+  assert.equal(merged.reissued.length, 2, "пример не тот: номера не переезжали");
+  assert.deepEqual(merged.doubled, [], "предок был, а задвоение названо");
+  assert.equal(merged.counts.doubled, 0);
+});
+
+test("у сущности без имени задвоение названо родом, а не номером", () => {
+  const { project: base, schemeId } = ancestor();
+  const mine = addOutline(base, {
+    schemeId,
+    roomId: base.rooms[0].id,
+    points: [
+      { x: 0.1, y: 0.1 },
+      { x: 0.2, y: 0.1 },
+      { x: 0.2, y: 0.2 },
+    ],
+  });
+  const alien = addOutline(copyOf(base), {
+    schemeId,
+    roomId: base.rooms[0].id,
+    points: [
+      { x: 0.8, y: 0.8 },
+      { x: 0.9, y: 0.8 },
+      { x: 0.9, y: 0.9 },
+    ],
+  });
+  assert.equal(mine.outline.id, alien.outline.id, "пример не тот: номера разошлись сами");
+  const ours = stamp(mine.project, "2026-09-17T10:00:00.000Z");
+  const theirs = stamp(alien.project, "2026-09-17T10:05:00.000Z");
+
+  const merged = mergeProjects(ours, theirs, null);
+  assert.equal(merged.counts.doubled, 1, "о задвоении контура не сказано");
+  assert.equal(merged.doubled[0].label, strings.subjects.outline, "контур назван не родом");
 });
 
 // Номер свой у каждого вида (ADR 038), и пересечение между видами — обычное
