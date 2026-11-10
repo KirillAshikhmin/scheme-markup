@@ -778,6 +778,82 @@ test("падают и при одном показанном этаже: сто�
   assert.ok(body.indexOf("fallShown = false") < body.indexOf("setScene"), "стопка снимается после сборки сцены");
 });
 
+test("память пачки готовится в простое поля, а не в тик падения (таск 285, G417)", () => {
+  // Подготовка живёт в замыкании поверхности, и позвать её тестом нечем:
+  // обещания таска проверяются по исходнику. Их три, и каждое — про то, чем
+  // таск мог бы испортиться молча.
+  const panel = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "..", "src", "panels", "volume.js"),
+    "utf8",
+  );
+  const code = stripComments(panel);
+  // **Память пачки лежит в одном месте из двух, и дверь к ней одна.** Показана
+  // стопка — память в сцене; показан один этаж — в запасе. Спрашивают её сборка
+  // сцены и подготовка, и обе — `stackMemory`.
+  assert.equal((code.match(/const stackMemory = /g) || []).length, 1, "у памяти пачки завелась вторая дверь");
+  assert.ok(/const stackMemory = \(\) => \(scene && scene\.stackParts \? scene : fallWarm\)/.test(code), "память пачки перестала быть одной");
+  // **Стопку в поле собирает одна дверь**, и память в неё приходит только
+  // оттуда: заведись вторая сборка — подготовленная память не подошла бы той
+  // стопке, ради которой готовилась.
+  assert.equal((code.match(/volumeStackScene\(/g) || []).length, 1, "стопку в поле собирают не одной дверью");
+  assert.ok(/volumeStackScene\(state\.project, plan, \(id\) => sceneOptions\(state, id\), stackMemory\(\)\)/.test(code), "стопка собирается мимо памяти");
+  // **Второго ответа на «что показано» не завелось**: запас — это память, и ни
+  // кадр, ни ходьба, ни падение его не спрашивают. Единственный читатель —
+  // `stackMemory`, единственные писатели — подготовка и перекладка.
+  // Пять попаданий: объявление, две записи перекладки, запись подготовки и
+  // снятие вместе с поверхностью.
+  const writes = code.match(/fallWarm = /g) || [];
+  assert.equal(writes.length, 5, "у запаса памяти завелись лишние писатели");
+  for (const name of ["function paint(", "function paintScene(", "function walkTick(", "function fallFloorNow("]) {
+    const at = code.indexOf(name);
+    assert.ok(at > 0, "в поле нет " + name);
+    const body = code.slice(at, code.indexOf("\n  }\n", at));
+    assert.ok(!body.includes("fallWarm"), name + " платит за подготовку пачки");
+  }
+  // **Перекладка — одна дверь, и зовёт её смена сцены.** Ушедшая с экрана
+  // стопка становится запасом сама (приземление, снятая отметка «Все этажи»), а
+  // поднятая на экран — память сцене отдаёт.
+  assert.equal((code.match(/function fallWarmKeep\(/g) || []).length, 1, "у перекладки памяти завелась вторая дверь");
+  assert.ok(/if \(scene !== was\) fallWarmKeep\(was\)/.test(code), "смена сцены память не перекладывает");
+  const keep = code.slice(code.indexOf("function fallWarmKeep("));
+  const keepBody = keep.slice(0, keep.indexOf("\n  }\n"));
+  assert.ok(keepBody.includes("scene.stackParts) fallWarm = null"), "показанная стопка оставила вторую память");
+  assert.ok(keepBody.includes("was.stackParts) fallWarm = was"), "ушедшая стопка память не отдаёт");
+  // **Подготовка идёт только в простое.** Три условия, и каждое про своего
+  // движителя: ход, заказанный кадр, недавно сдвинувшаяся камера. Своего числа
+  // «сколько стоять» не заводится — мерка у поля одна.
+  const tick = code.slice(code.indexOf("function fallWarmTick("));
+  const tickBody = tick.slice(0, tick.indexOf("\n  }\n"));
+  assert.ok(/walking \|\| frame \|\| now\(\) - lastCameraMoveAt < VOLUME_MOTION_SETTLE_MS/.test(tickBody), "подготовка перестала ждать простоя");
+  assert.ok(!/\d{2,}/.test(tickBody), "у простоя завелось своё число: " + tickBody);
+  assert.equal((code.match(/function fallWarmBuild\(/g) || []).length, 1, "у подготовки завелась вторая дверь");
+  // Два попадания — объявление и единственный зов (из простоя).
+  assert.equal((code.match(/fallWarmBuild\(\)/g) || []).length, 2, "подготовку зовут не из одного места");
+  assert.ok(tickBody.includes("fallWarmBuild()"), "подготовку зовёт не простой");
+  // Камера, сдвинувшаяся в кадре, отмечается **в кадре и только там**: по
+  // одним кадрам стоячее поле не узнать — свет и часы рисуют его при стоящей
+  // камере (`VOLUME_MOTION_GAP_MS`).
+  // Два попадания — объявление и единственная запись, та самая, в кадре.
+  assert.equal((code.match(/lastCameraMoveAt = /g) || []).length, 2, "«когда камера сдвинулась» пишут не в одном месте");
+  assert.ok(/if \(stirred\) lastCameraMoveAt = time/.test(code), "кадр перестал отмечать сдвиг камеры");
+  // **Объявлены запас и таймер до первой сборки сцены** — та же ловушка, на
+  // которой таск 265 поймал `fallShown`: `stacking` и `sceneOf` зовутся выше
+  // раздела падения, и `let`, объявленный там, уронил бы поверхность.
+  const first = code.indexOf("scene = sceneOf(getState())");
+  for (const name of ["let fallWarm =", "let fallWarmTimer ="]) {
+    assert.ok(code.indexOf(name) >= 0 && code.indexOf(name) < first, name + " стоит после первой сборки сцены — поверхность упадёт");
+  }
+  // Первая сборка сцены идёт не через `setScene`, поэтому заказ подготовки
+  // стоит и в хвосте сборки поверхности, и на возвращении в режим: простой
+  // вошедшего — тот единственный, в который память успевает собраться.
+  assert.equal((code.match(/fallWarmWant\(\)/g) || []).length, 4, "заказ подготовки зовут не оттуда, где поле встало");
+  // Разобранная поверхность память не держит и таймера не оставляет.
+  const gone = code.slice(code.indexOf("function destroy("));
+  const goneBody = gone.slice(0, gone.indexOf("\n  }\n"));
+  assert.ok(goneBody.includes("clearTimeout(fallWarmTimer)"), "таймер подготовки переживает поверхность");
+  assert.ok(goneBody.includes("fallWarm = null"), "память пачки переживает поверхность");
+});
+
 test("поворот взгляда считает одно место на оба вида (таск 207, G312)", () => {
   const panel = readFileSync(
     join(dirname(fileURLToPath(import.meta.url)), "..", "src", "panels", "volume.js"),
