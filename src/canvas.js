@@ -624,14 +624,14 @@ export function canvasHintText(state) {
   // Правка ломаной — это режим руки, и подсказка обязана сказать, что сейчас
   // делает двойной клик: он здесь занят вершинами, а не выделением.
   if (state.editPathId && state.project) {
-    if (findMark(state.project, state.editPathId)) return strings.canvas.hintLineEdit;
-    if (findOutline(state.project, state.editPathId)) return strings.canvas.hintOutlineEdit;
+    if (findMark(state.project, state.editPathId)) return canvasHintSnap(strings.canvas.hintLineEdit);
+    if (findOutline(state.project, state.editPathId)) return canvasHintSnap(strings.canvas.hintOutlineEdit);
   }
   const type = state.project && state.activeTypeId ? findType(state.project, state.activeTypeId) : null;
   const room = state.project && state.activeRoomId ? findRoom(state.project, state.activeRoomId) : null;
   // Калибровка — поверх всего остального: рука в этот момент занята отрезком,
   // и про метки с помещениями рассказывать нечего.
-  if (state.mode === CANVAS_MODE_SCALE) return strings.scale.hint;
+  if (state.mode === CANVAS_MODE_SCALE) return canvasHintSnap(strings.scale.hint);
   // Ожидание второй метки блока — тоже поверх всего: рука целится в метку, и
   // про постановку новых рассказывать сейчас нечего. Подсказка называет первую
   // метку — иначе, вернувшись к плану через минуту, человек не узнает, с какой
@@ -645,7 +645,7 @@ export function canvasHintText(state) {
   if (state.mode === CANVAS_MODE_ROOM_TRACE) {
     return text("canvas.hintRoomTrace", { name: room ? room.name : "" });
   }
-  if (state.mode === "room") return text("canvas.hintRoom", { name: room ? room.name : "" });
+  if (state.mode === "room") return canvasHintSnap(text("canvas.hintRoom", { name: room ? room.name : "" }));
   const adding = canvasAddKind(state);
   if (adding === "point" && type) {
     return canvasHintCopy(text("canvas.hintPoint", { label: type.code + " — " + type.name }));
@@ -653,7 +653,7 @@ export function canvasHintText(state) {
   if (adding === MARK_KIND_COMMENT && type) {
     return canvasHintCopy(text("canvas.hintComment", { label: type.code + " — " + type.name }));
   }
-  if (adding === "line" && type) return strings.canvas.hintLine;
+  if (adding === "line" && type) return canvasHintSnap(strings.canvas.hintLine);
   if (type) return canvasHintCopy(strings.canvas.hintSelectMode);
   return canvasHintCopy(strings.canvas.hintSelect);
 }
@@ -664,6 +664,15 @@ export function canvasHintText(state) {
 // в три строки — в неё дописывают то, что нужно прямо сейчас.
 function canvasHintCopy(hint) {
   return hint + " " + strings.canvas.hintCopy;
+}
+
+// Магнит угла дописывается тем же приёмом и по тому же правилу таска 213
+// (таск 282): строка о нём одна, и получают её ровно те занятия, где он
+// работает, — ломаная, контур помещения, калибровка и правка вершины. У
+// линейки свои слова (`measure.hintPlan`), и дважды она о магните не говорит;
+// «Выделение» и постановка точки его не получают — там его нет и самого.
+function canvasHintSnap(hint) {
+  return hint + " " + strings.canvas.hintCorner;
 }
 
 /**
@@ -1341,7 +1350,10 @@ function canvasPaint() {
 
   // Отрезок линейки — поверх и шкалы: это мерка, а не часть плана. В
   // `drawScheme` его нет вовсе, значит в PNG, в печать и в лист «Схема» он не
-  // попадёт ни при каких отметках — ровно как направляющие.
+  // попадёт ни при каких отметках — ровно как направляющие. Кольцо магнита
+  // рисуется там же и тем же правилом, но **раньше** и независимо от занятия:
+  // оно отвечает руке, а рука бывает занята и черновиком (таск 282).
+  canvasPaintSnapCorner(state, scheme, view, draftColor);
   if (canvasMeasuring(state)) canvasPaintMeasure(state, scheme, view);
 
   // Кольцо ожидания под пальцем — поверх всего: это ответ руке, а не часть
@@ -2496,18 +2508,26 @@ function canvasEditedPath(state, scheme) {
 // же ломаной. Опора — вершина, от которой считается угол; её `draftSnap` берёт
 // последней в списке. Из источников она и правимая вершина исключены: угол
 // меряется от опоры, а сама с собой вершина не выравнивается.
+//
+// Углы чертежа ведомая вершина ловит тем же доводом, что и рисуемая (таск
+// 282): обводка по стенам с первого раза не выходит, и ошибку на третьей
+// вершине из десяти правят третьей — отдай магнит рисованию и отними у правки,
+// и один и тот же угол стал бы ловиться и не ловиться на одном плане. Своего
+// угла в целях у вершины не бывает: цели — углы **стен**, а ведут здесь
+// вершину метки или контура (`skipWallIds` из таска 271 этому жесту не нужен).
 function canvasPathSnap(path, anchorIndex, skipIndex, target, free) {
   const state = canvasState();
   const scheme = canvasScheme(state);
   const points = path.points || [];
-  if (points.length < 2) return { point: target, guides: [] };
+  if (points.length < 2) return { point: target, guides: [], corner: null };
   const anchor = points[anchorIndex] || points[0];
   const sources = points.filter((item, at) => at !== skipIndex && at !== anchorIndex);
   const snap = draftSnap([...sources, anchor], target, scheme, canvasViewOf(state), {
     free: Boolean(free),
     planGuides: canvasSchemeGuides(state, scheme),
+    corners: canvasCornerTargets(state, scheme),
   });
-  return { point: snap.point, guides: snap.guides || [] };
+  return { point: snap.point, guides: snap.guides || [], corner: snap.corner || null };
 }
 
 // Опора у правимой вершины — соседняя: `index - 1`, у замкнутой линии для
@@ -2717,7 +2737,68 @@ function canvasDraftSnap(plan, free) {
   return canvasDraftPoint(canvasDraft, plan, scheme, canvasViewOf(state), {
     free: Boolean(free),
     planGuides: canvasSchemeGuides(state, scheme),
+    // Углы чертежа — тем же доводом и той же дверью, которой их получила
+    // линейка (таск 282, G417): три занятия черновика ходят через одну
+    // притяжку, и своего списка целей ни у одного из них нет.
+    corners: canvasCornerTargets(state, scheme),
   });
+}
+
+/**
+ * Ставит ли рука **сейчас** точку черновиком — вершину ломаной метки, вершину
+ * контура помещения или конец отрезка калибровки (таск 282, G417).
+ *
+ * Спрашивается это ради **кольца магнита**: оно живёт у руки и видно ещё до
+ * первой вершины (правило таска 266), а до таска рука над планом считала
+ * притяжку только тогда, когда черновик уже начат. Сам черновик сюда не
+ * заглядывает — функция чистая и проверяется тестом; «черновик уже есть»
+ * спрашивает место вызова.
+ *
+ * **Линейка стоит первой и забирает руку себе** — ровно как в подсказке над
+ * планом и в разборе нажатия (`canvasPointerDown`): её клик не доходит ни до
+ * линии, ни до контура, а кольцо на поле одно, и обещать притяжку черновику
+ * в эту минуту нечем.
+ *
+ * Точечная метка и комментарий сюда не входят: они встают **одним кликом** и
+ * идут мимо черновика (`canvasGhostUpdate` → `canvasGuideSnap`). Слова
+ * заказчика про них не было, а место метки на стене читается привязкой
+ * (`applyMarkWalls`) — точка ровно в узле двух стен выбирала бы стену за
+ * человека. Открытый вопрос, названный в отчёте таска 282.
+ */
+export function canvasDraftAims(state) {
+  if (!state || !canvasOnScreen(state) || !canvasEditAllowed(state)) return false;
+  if (canvasMeasuring(state)) return false;
+  if (state.mode === CANVAS_MODE_SCALE || state.mode === "room") return true;
+  return canvasAddKind(state) === "line";
+}
+
+/**
+ * Рука над планом в занятии черновика: куда сядет точка и какой угол пойман.
+ *
+ * Кадр заказывается по двум разным поводам, и это не одно и то же: с
+ * черновиком за рукой идёт сам отрезок (кадр на каждый ход), без черновика —
+ * только кольцо (кадр лишь когда пойманный угол сменился). Мышь ходит по плану
+ * десятками шагов в секунду, и перерисовывать поле впустую нельзя.
+ *
+ * Угол помечает **эта** функция, а не притяжка: ловушка таска 266 в силе —
+ * второй зов на один ход руки сравнил бы угол сам с собой, ответил «не
+ * менялось», и кольца не было бы при работающем магните.
+ */
+function canvasDraftHover(state, point, free) {
+  const scheme = canvasScheme(state);
+  if (!scheme) return;
+  const snap = canvasDraftSnap(screenToPlan(point, scheme, canvasViewOf(state)), free);
+  // Кольцо достаётся занятию, которому принадлежит рука: при включённой
+  // линейке оно её, и чужой черновик его не перебивает.
+  const moved = canvasDraftAims(state) && canvasSnapCornerSet(snap.corner);
+  if (!canvasDraft) {
+    if (moved) canvasRedraw();
+    return;
+  }
+  canvasDraft.cursor = snap.point;
+  canvasDraft.snapped = snap.snapped;
+  canvasDraft.guides = snap.guides || [];
+  canvasRedraw();
 }
 
 function canvasCancelDraft() {
@@ -3088,6 +3169,9 @@ function canvasDraftClick(plan, screen, free) {
     // следующие: перекрестия он ставил именно под неё. Ломаная и контур
     // помещения начинаются здесь оба — значит и притяжка у них одна.
     const start = canvasDraftSnap(plan, free);
+    // Пойманный угол помечает клик, а не притяжка: пальцем ход руки не
+    // слушается вовсе, и у тапа кольцо появляется здесь (правило таска 266).
+    canvasSnapCornerSet(start.corner);
     // Черновик помнит, чем его начали: ломаной линейного типа или контуром
     // помещения. По этой памяти его и заканчивают, когда режим или вид типа
     // сменились на ходу, — тип берётся тот, которым рисовали, а не тот,
@@ -3107,6 +3191,7 @@ function canvasDraftClick(plan, screen, free) {
   // Вершина встаёт ровно туда, где её показывал черновик: и предпросмотр, и
   // клик считают магнит одной функцией, разойтись им негде.
   const snap = canvasDraftSnap(plan, free);
+  canvasSnapCornerSet(snap.corner);
   const scheme = canvasScheme(state);
   const view = canvasViewOf(state);
   const points = canvasDraft.points;
@@ -3156,6 +3241,9 @@ function canvasScaleClick(plan, screen, free) {
   const scheme = canvasScheme(state);
   if (!scheme) return;
   const snap = canvasDraftSnap(plan, free);
+  // Кольцо помечает клик — по той же причине, по которой его помечает клик
+  // ломаной: пальцем кольца до тапа нет (правило таска 266).
+  canvasSnapCornerSet(snap.corner);
   if (!canvasDraft || canvasDraft.kind !== "scale") {
     canvasDraft = {
       kind: "scale",
@@ -3228,19 +3316,26 @@ export function canvasCornerTargets(state, scheme) {
   return corners;
 }
 
-// Угол **под рукой**, пока линейка включена: по нему кадр рисует кольцо магнита.
-// Хранится здесь, а не в мерке (`measure.js`), ровно по той причине, по которой
-// там не хранится и сам ход руки: это ответ на «куда сядет клик», а не часть
-// измерения, и в объект он не идёт никогда (G68). Кольцо поэтому видно и до
-// первого клика — когда предпросмотра отрезка ещё нет.
-let canvasMeasureCorner = null;
+// Угол **под рукой**: по нему кадр рисует кольцо магнита. Хранится здесь, а не
+// в мерке (`measure.js`), ровно по той причине, по которой там не хранится и
+// сам ход руки: это ответ на «куда сядет клик», а не часть измерения, и в
+// объект он не идёт никогда (G68). Кольцо поэтому видно и до первого клика —
+// когда предпросмотра отрезка ещё нет.
+//
+// **Дверь на поле одна** (правило таска 266), и с таска 282 за ней стоят все
+// занятия плана: линейка, вершина ломаной, контур помещения, калибровка и
+// правка вершины под рукой. Второй переменной «пойманный угол» здесь быть не
+// должно — два кольца на одном поле обещали бы две притяжки, которых нет. Чьё
+// кольцо сейчас, решает занятие (`canvasDraftAims`, `canvasMeasuring`), а не
+// вторая память.
+let canvasSnapCorner = null;
 
-function canvasMeasureCornerSet(corner) {
-  const was = canvasMeasureCorner;
-  canvasMeasureCorner = corner || null;
-  if (!was && !canvasMeasureCorner) return false;
-  if (!was || !canvasMeasureCorner) return true;
-  return was.x !== canvasMeasureCorner.x || was.y !== canvasMeasureCorner.y;
+function canvasSnapCornerSet(corner) {
+  const was = canvasSnapCorner;
+  canvasSnapCorner = corner || null;
+  if (!was && !canvasSnapCorner) return false;
+  if (!was || !canvasSnapCorner) return true;
+  return was.x !== canvasSnapCorner.x || was.y !== canvasSnapCorner.y;
 }
 
 /** Куда сядет конец отрезка: те же магниты, что у рисования и калибровки. */
@@ -3263,7 +3358,7 @@ function canvasMeasureClick(plan, screen, free) {
   const key = measureKeyOf(state);
   if (!scheme || !key) return;
   const snap = canvasMeasureSnap(state, scheme, plan, free);
-  canvasMeasureCornerSet(snap.corner);
+  canvasSnapCornerSet(snap.corner);
   measureAdd("scheme", key, snap.point);
   canvasRedraw();
 }
@@ -3277,7 +3372,7 @@ function canvasMeasureHover(state, point, free) {
   const snap = canvasMeasureSnap(state, scheme, plan, free);
   // Кольцо магнита живёт своим кадром: угол под рукой меняется и тогда, когда
   // мерка ещё не начата, — а она в этом случае кадра не просит.
-  const moved = canvasMeasureCornerSet(snap.corner);
+  const moved = canvasSnapCornerSet(snap.corner);
   if (measureAim("scheme", key, snap.point) || moved) canvasRedraw();
 }
 
@@ -3327,13 +3422,24 @@ function canvasPaintLinkable(state, project, scheme, view) {
   ctx.restore();
 }
 
+/**
+ * Кольцо пойманного угла — одно на все занятия поля и **до** того, что они
+ * рисуют (таск 282): мерки или черновика может не быть вовсе (первый клик ещё
+ * не сделан), а показать, куда сядет точка, надо как раз в эту минуту.
+ *
+ * Цвет даёт занятие, и второй таблицы цветов для кольца не заводится: у
+ * линейки её собственный, у всего остального — **тот самый** цвет черновика,
+ * которым этот же кадр рисует отрезок и направляющие (`canvasDraftColor`: у
+ * контура помещения цвет комнаты, у метки — её типа, у калибровки свой).
+ * Поэтому кольцо и подсказки одного жеста всегда одного цвета.
+ */
+function canvasPaintSnapCorner(state, scheme, view, draftColor) {
+  if (!canvasSnapCorner) return;
+  const color = canvasMeasuring(state) ? MEASURE_COLOR : draftColor;
+  drawSnapCorner(canvasCtx, planToScreen(canvasSnapCorner, scheme, view), color);
+}
+
 function canvasPaintMeasure(state, scheme, view) {
-  // Кольцо пойманного угла — **до** отрезка и независимо от него: мерки может
-  // не быть вовсе (первый клик ещё не сделан), а показать, куда сядет конец,
-  // надо как раз в эту минуту.
-  if (canvasMeasureCorner) {
-    drawSnapCorner(canvasCtx, planToScreen(canvasMeasureCorner, scheme, view), MEASURE_COLOR);
-  }
   const ends = measureEnds("scheme", measureKeyOf(state));
   if (!ends) return;
   const from = planToScreen(ends.from, scheme, view);
@@ -4728,6 +4834,9 @@ function canvasDragTo(point, free) {
       const origin = path.points[canvasDrag.index];
       const snap = canvasVertexSnap(path, canvasDrag.index, { x: origin.x + dx, y: origin.y + dy }, free);
       canvasDrag.guides = snap.guides;
+      // Угол помечает ведение, а не притяжка: оно перерисовывает поле на каждый
+      // ход руки (ловушка таска 266, то же правило, что у `workshop.dragTo`).
+      canvasSnapCornerSet(snap.corner);
       canvasPreview = canvasPathVertexMove(path, before, canvasDrag.index, snap.point);
     } else if (canvasDrag.kind === "pathAdd") {
       // Новая вершина ведётся от места ручки и притягивается ровно так же, как
@@ -4736,6 +4845,7 @@ function canvasDragTo(point, free) {
       const origin = canvasDrag.point;
       const snap = canvasAddSnap(canvasDrag, { x: origin.x + dx, y: origin.y + dy }, free);
       canvasDrag.guides = snap.guides;
+      canvasSnapCornerSet(snap.corner);
       canvasDrag.landing = snap.point;
       canvasPreview = canvasPathAdded(canvasDrag, snap.point);
     } else if (canvasDrag.kind === "outlineLabel") {
@@ -4857,13 +4967,12 @@ function canvasPointerMove(event) {
   // Пальцем этого хода нет — палец на экране означает панораму, а мерку он
   // ставит тапом; потому и спрашивается тип указателя.
   if (canvasMeasuring(state) && event.pointerType !== "touch") canvasMeasureHover(state, point, event.altKey);
-  if (canvasDraft) {
-    const scheme = canvasScheme(state);
-    const snap = canvasDraftSnap(screenToPlan(point, scheme, canvasViewOf(state)), event.altKey);
-    canvasDraft.cursor = snap.point;
-    canvasDraft.snapped = snap.snapped;
-    canvasDraft.guides = snap.guides || [];
-    canvasRedraw();
+  // Черновик идёт за рукой — и кольцо магнита тоже, **ещё до первой вершины**
+  // (таск 282): кольцо живёт у руки, а предпросмотра отрезка в эту минуту нет
+  // вовсе. Без черновика это слушается только мыши, как и линейка выше: палец
+  // над планом означает панораму, а точку он ставит тапом (правило таска 266).
+  if (canvasDraft || (canvasDraftAims(state) && event.pointerType !== "touch")) {
+    canvasDraftHover(state, point, event.altKey);
   }
   if (canvasHoverUpdate(state, point)) canvasRedraw();
   // Курсор — в тот же заход, что наведение: он отвечает про ту же точку, и
@@ -4923,6 +5032,10 @@ function canvasPointerUp(event) {
   const drag = canvasDrag;
   canvasDrag = null;
   if (!drag) return;
+  // Кольцо магнита гаснет вместе с ведением вершины — первым делом и до всего
+  // остального (правило таска 271): в правке магнит живёт только пока вершину
+  // ведут, и оставленное кольцо обещало бы притяжку там, где её уже нет.
+  if (drag.kind === "pathVertex" || drag.kind === "pathAdd") canvasSnapCornerSet(null);
   // Нажатие на устройство в запущенном доме доводится до конца первым делом.
   if (drag.sim) canvasSimEnd(drag.sim, drag.moved || event.type === "pointercancel");
   const point = canvasPointOf(event);
@@ -5339,7 +5452,7 @@ function canvasKeyDown(event) {
     // контура (`canvasTapKind`, `canvasPointerDown`).
     if (canvasMeasuring(state)) {
       measureDropAll();
-      canvasMeasureCornerSet(null);
+      canvasSnapCornerSet(null);
       canvasApi.setState({ measuring: false });
       return;
     }
@@ -5413,7 +5526,7 @@ function canvasPointerLeave() {
   canvasCursor = null;
   // Кольцо магнита уходит с рукой: угол под рукой — ответ на «куда сядет
   // клик», а руки над планом больше нет.
-  if (canvasMeasureCornerSet(null)) canvasRedraw();
+  if (canvasSnapCornerSet(null)) canvasRedraw();
   // Призрак уходит с курсором: обещать постановку там, где руки нет, нельзя.
   if (canvasGhostDrop()) canvasRedraw();
   // Курсора над планом нет — и подсвеченной ручки быть не должно: иначе она
@@ -5580,9 +5693,19 @@ function mountCanvas(host, api) {
       const held = state.selectedMarkIds.length === 1 ? findMark(state.project, state.selectedMarkIds[0]) : null;
       if (!held || held.schemeId !== state.schemeId || !canvasEditAllowed(state)) canvasStopBlockJoin();
     }
-    // Линейку включили или убрали — кольцо магнита к прежней руке не
-    // относится: инструмент выключен, и показывать «сюда сядет клик» нечему.
-    if ("measuring" in changed) canvasMeasureCornerSet(null);
+    // Кольцо магнита — ответ **этой** руке на **этом** плане, и всё, что
+    // меняет занятие, схему или видимость чертежа, его гасит: иначе оно
+    // осталось бы висеть на прежнем месте, пока рука не двинется. Линейку
+    // включили или убрали, сменили режим, перешли на другую схему, спрятали
+    // слой чертежа — целей больше нет, а обещание на экране осталось бы.
+    if (
+      "measuring" in changed ||
+      "mode" in changed ||
+      "schemeId" in changed ||
+      "drawingShown" in changed
+    ) {
+      canvasSnapCornerSet(null);
+    }
     if ("mode" in changed) {
       canvasSyncCursor();
       // Новое занятие — молчание начинается заново (таск 217, D66): про

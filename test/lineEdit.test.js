@@ -156,7 +156,11 @@ test("в правке линии подсказка рассказывает п�
     layout: "desktop",
     ...patch,
   });
-  assert.equal(canvasHintText(stateOf({ editPathId: base.markId })), strings.canvas.hintLineEdit);
+  // С таска 282 к ней дописана строка про магнит угла: ведомая вершина его
+  // ловит, и умолчать об этом нельзя (правило таска 213).
+  const hint = canvasHintText(stateOf({ editPathId: base.markId }));
+  assert.ok(hint.startsWith(strings.canvas.hintLineEdit));
+  assert.ok(hint.endsWith(strings.canvas.hintCorner));
   // Линии уже нет — подсказка возвращается к обычной: обещать правку нечему.
   // Сверяется начало: к обычной подсказке приписаны жесты копирования (таск 90).
   assert.ok(canvasHintText(stateOf({ editPathId: "нет-такой-метки" })).startsWith(strings.canvas.hintSelect));
@@ -244,7 +248,9 @@ test("в правке контура подсказка своя", () => {
     layout: "desktop",
     editPathId: outlined.outline.id,
   };
-  assert.equal(canvasHintText(state), strings.canvas.hintOutlineEdit);
+  const hint = canvasHintText(state);
+  assert.ok(hint.startsWith(strings.canvas.hintOutlineEdit));
+  assert.ok(hint.endsWith(strings.canvas.hintCorner), "магнит угла назван и в правке контура");
   assert.notEqual(strings.canvas.hintOutlineEdit, strings.canvas.hintLineEdit);
 });
 

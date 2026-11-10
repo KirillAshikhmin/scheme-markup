@@ -7340,6 +7340,8 @@ hintSelectMode:
 "Клик выбирает метку, перетаскивание двигает её или подпись, двойной клик по подписи возвращает её на место, Delete удаляет, Esc снимает выделение. Метка из блока везёт весь блок; с зажатым Ctrl едет одна она и ложится на сетку в полметки — так получаются ровные ряды и шахматный порядок, а Alt ведёт свободно. Клик по стенке контура выделяет помещение: вершину двигают перетаскиванием, «+» на стенке добавляет новую, двойной клик по вершине убирает. Стрелки листают план, как прокрутка, удержание разгоняет ход; «+» и «−» меняют масштаб. Перетаскивание с Shift или с зажатым пробелом — сдвиг: так план возят и поверх меток.",
 hintLine:
 "Добавление линией: клик — вершина. Двойной клик по последней завершает линию, по первой — замыкает. Backspace — убрать вершину, Esc — отменить, ещё раз — вернуться в «Выделение». Направление липнет к ровным углам через 15°, а курсор — к прежним вершинам ломаной по пунктирным направляющим; у курсора виден градус, Alt — рисовать свободно.",
+hintCorner:
+"Точка садится в угол чертежа — тот, что обведён кружком с буквой: пойманный показан кольцом, и он старше направляющей. Углы ловятся, пока на плане показан чертёж и задан масштаб.",
 hintComment:
 "Добавление: клик ставит плашку {label}. Двойной клик по плашке правит её текст, кнопка у плашки включает указатель на точку. С указателем плашку и точку возят по отдельности: текст — в свободное место, остриё — на розетку или угол. Esc снимает выделение, второй Esc возвращает в «Выделение».",
 commentTextTitle: "Текст комментария",
@@ -7369,7 +7371,7 @@ hintLineEdit:
 "Правка линии: вершина тащится мышью, двойной клик по вершине убирает её. Бледная ручка на середине отрезка разбивает его — нажмите или тяните; ручка за концом продолжает линию, и таких две, по одной на каждый конец. Направление липнет к ровным углам и к прежним вершинам, Alt — свободно. Esc заканчивает правку.",
 lineEditOn: "Правка линии: тащите вершины, ручка на середине отрезка разобьёт его, ручка за концом продолжит линию, двойной клик по вершине уберёт её",
 hintOutlineEdit:
-"Правка контура: вершина тащится мышью, двойной клик по вершине убирает её. Бледная ручка на середине стенки разбивает её — нажмите или тяните. Контур замкнут, продолжать его нечем, и меньше трёх вершин у него не бывает. Esc заканчивает правку.",
+"Правка контура: вершина тащится мышью, двойной клик по вершине убирает её. Бледная ручка на середине стенки разбивает её — нажмите или тяните. Контур замкнут, продолжать его нечем, и меньше трёх вершин у него не бывает. Направление липнет к ровным углам и к прежним вершинам, Alt — свободно. Esc заканчивает правку.",
 outlineEditOn: "Правка контура: тащите вершины, ручка на середине стенки разобьёт её, двойной клик по вершине уберёт её",
 draftFinished: "Начатая линия дочерчена: {label}. Ctrl+Z отменит",
 draftDropped: "Незаконченный черновик убран: в нём была одна вершина",
@@ -53477,12 +53479,12 @@ if (!appAllows("editHints", state)) return null;
 return canvasSimLocked(state) ? strings.sim.bar.editLocked : strings.mobile.viewOnly;
 }
 if (state.editPathId && state.project) {
-if (findMark(state.project, state.editPathId)) return strings.canvas.hintLineEdit;
-if (findOutline(state.project, state.editPathId)) return strings.canvas.hintOutlineEdit;
+if (findMark(state.project, state.editPathId)) return canvasHintSnap(strings.canvas.hintLineEdit);
+if (findOutline(state.project, state.editPathId)) return canvasHintSnap(strings.canvas.hintOutlineEdit);
 }
 const type = state.project && state.activeTypeId ? findType(state.project, state.activeTypeId) : null;
 const room = state.project && state.activeRoomId ? findRoom(state.project, state.activeRoomId) : null;
-if (state.mode === CANVAS_MODE_SCALE) return strings.scale.hint;
+if (state.mode === CANVAS_MODE_SCALE) return canvasHintSnap(strings.scale.hint);
 if (state.mode === CANVAS_MODE_BLOCK_JOIN && state.blockJoinWhat === "object") {
 return text("markObject.hintLink", { label: labelOf(state.project, state.selectedMarkIds[0]) });
 }
@@ -53492,7 +53494,7 @@ return text("canvas.hintBlockJoin", { label: labelOf(state.project, state.select
 if (state.mode === CANVAS_MODE_ROOM_TRACE) {
 return text("canvas.hintRoomTrace", { name: room ? room.name : "" });
 }
-if (state.mode === "room") return text("canvas.hintRoom", { name: room ? room.name : "" });
+if (state.mode === "room") return canvasHintSnap(text("canvas.hintRoom", { name: room ? room.name : "" }));
 const adding = canvasAddKind(state);
 if (adding === "point" && type) {
 return canvasHintCopy(text("canvas.hintPoint", { label: type.code + " — " + type.name }));
@@ -53500,12 +53502,15 @@ return canvasHintCopy(text("canvas.hintPoint", { label: type.code + " — " + ty
 if (adding === MARK_KIND_COMMENT && type) {
 return canvasHintCopy(text("canvas.hintComment", { label: type.code + " — " + type.name }));
 }
-if (adding === "line" && type) return strings.canvas.hintLine;
+if (adding === "line" && type) return canvasHintSnap(strings.canvas.hintLine);
 if (type) return canvasHintCopy(strings.canvas.hintSelectMode);
 return canvasHintCopy(strings.canvas.hintSelect);
 }
 function canvasHintCopy(hint) {
 return hint + " " + strings.canvas.hintCopy;
+}
+function canvasHintSnap(hint) {
+return hint + " " + strings.canvas.hintCorner;
 }
 function canvasSummaryLines(state) {
 if (!state || !state.project || !state.schemeId) return [];
@@ -53853,6 +53858,7 @@ drawHandles(canvasCtx, scheme, mark, view, canvasHandleColor(state, mark), canva
 }
 }
 if (guidesOn) drawGuideStrip(canvasCtx, scheme, view, box);
+canvasPaintSnapCorner(state, scheme, view, draftColor);
 if (canvasMeasuring(state)) canvasPaintMeasure(state, scheme, view);
 if (canvasPress) {
 const held = canvasPress.pick && canvasPress.pick.markId ? findMark(project, canvasPress.pick.markId) : null;
@@ -54458,14 +54464,15 @@ function canvasPathSnap(path, anchorIndex, skipIndex, target, free) {
 const state = canvasState();
 const scheme = canvasScheme(state);
 const points = path.points || [];
-if (points.length < 2) return { point: target, guides: [] };
+if (points.length < 2) return { point: target, guides: [], corner: null };
 const anchor = points[anchorIndex] || points[0];
 const sources = points.filter((item, at) => at !== skipIndex && at !== anchorIndex);
 const snap = draftSnap([...sources, anchor], target, scheme, canvasViewOf(state), {
 free: Boolean(free),
 planGuides: canvasSchemeGuides(state, scheme),
+corners: canvasCornerTargets(state, scheme),
 });
-return { point: snap.point, guides: snap.guides || [] };
+return { point: snap.point, guides: snap.guides || [], corner: snap.corner || null };
 }
 function canvasVertexSnap(path, index, target, free) {
 const points = path.points || [];
@@ -54602,7 +54609,28 @@ const scheme = canvasScheme(state);
 return canvasDraftPoint(canvasDraft, plan, scheme, canvasViewOf(state), {
 free: Boolean(free),
 planGuides: canvasSchemeGuides(state, scheme),
+corners: canvasCornerTargets(state, scheme),
 });
+}
+function canvasDraftAims(state) {
+if (!state || !canvasOnScreen(state) || !canvasEditAllowed(state)) return false;
+if (canvasMeasuring(state)) return false;
+if (state.mode === CANVAS_MODE_SCALE || state.mode === "room") return true;
+return canvasAddKind(state) === "line";
+}
+function canvasDraftHover(state, point, free) {
+const scheme = canvasScheme(state);
+if (!scheme) return;
+const snap = canvasDraftSnap(screenToPlan(point, scheme, canvasViewOf(state)), free);
+const moved = canvasDraftAims(state) && canvasSnapCornerSet(snap.corner);
+if (!canvasDraft) {
+if (moved) canvasRedraw();
+return;
+}
+canvasDraft.cursor = snap.point;
+canvasDraft.snapped = snap.snapped;
+canvasDraft.guides = snap.guides || [];
+canvasRedraw();
 }
 function canvasCancelDraft() {
 if (!canvasDraft) return false;
@@ -54858,6 +54886,7 @@ function canvasDraftClick(plan, screen, free) {
 const state = canvasState();
 if (!canvasDraft) {
 const start = canvasDraftSnap(plan, free);
+canvasSnapCornerSet(start.corner);
 canvasDraft = {
 kind: state.mode === "room" ? "room" : "line",
 typeId: state.mode === "room" ? null : state.activeTypeId,
@@ -54871,6 +54900,7 @@ canvasRedraw();
 return;
 }
 const snap = canvasDraftSnap(plan, free);
+canvasSnapCornerSet(snap.corner);
 const scheme = canvasScheme(state);
 const view = canvasViewOf(state);
 const points = canvasDraft.points;
@@ -54897,6 +54927,7 @@ const state = canvasState();
 const scheme = canvasScheme(state);
 if (!scheme) return;
 const snap = canvasDraftSnap(plan, free);
+canvasSnapCornerSet(snap.corner);
 if (!canvasDraft || canvasDraft.kind !== "scale") {
 canvasDraft = {
 kind: "scale",
@@ -54931,13 +54962,13 @@ if (at) corners.push({ x: at.x, y: at.y, letter: corner.letter });
 }
 return corners;
 }
-let canvasMeasureCorner = null;
-function canvasMeasureCornerSet(corner) {
-const was = canvasMeasureCorner;
-canvasMeasureCorner = corner || null;
-if (!was && !canvasMeasureCorner) return false;
-if (!was || !canvasMeasureCorner) return true;
-return was.x !== canvasMeasureCorner.x || was.y !== canvasMeasureCorner.y;
+let canvasSnapCorner = null;
+function canvasSnapCornerSet(corner) {
+const was = canvasSnapCorner;
+canvasSnapCorner = corner || null;
+if (!was && !canvasSnapCorner) return false;
+if (!was || !canvasSnapCorner) return true;
+return was.x !== canvasSnapCorner.x || was.y !== canvasSnapCorner.y;
 }
 function canvasMeasureSnap(state, scheme, plan, free) {
 const ends = measureEnds("scheme", measureKeyOf(state));
@@ -54954,7 +54985,7 @@ const scheme = canvasScheme(state);
 const key = measureKeyOf(state);
 if (!scheme || !key) return;
 const snap = canvasMeasureSnap(state, scheme, plan, free);
-canvasMeasureCornerSet(snap.corner);
+canvasSnapCornerSet(snap.corner);
 measureAdd("scheme", key, snap.point);
 canvasRedraw();
 }
@@ -54964,7 +54995,7 @@ const key = measureKeyOf(state);
 if (!scheme || !key) return;
 const plan = screenToPlan(point, scheme, canvasViewOf(state));
 const snap = canvasMeasureSnap(state, scheme, plan, free);
-const moved = canvasMeasureCornerSet(snap.corner);
+const moved = canvasSnapCornerSet(snap.corner);
 if (measureAim("scheme", key, snap.point) || moved) canvasRedraw();
 }
 function canvasPaintLinkable(state, project, scheme, view) {
@@ -55004,10 +55035,12 @@ ctx.stroke();
 }
 ctx.restore();
 }
-function canvasPaintMeasure(state, scheme, view) {
-if (canvasMeasureCorner) {
-drawSnapCorner(canvasCtx, planToScreen(canvasMeasureCorner, scheme, view), MEASURE_COLOR);
+function canvasPaintSnapCorner(state, scheme, view, draftColor) {
+if (!canvasSnapCorner) return;
+const color = canvasMeasuring(state) ? MEASURE_COLOR : draftColor;
+drawSnapCorner(canvasCtx, planToScreen(canvasSnapCorner, scheme, view), color);
 }
+function canvasPaintMeasure(state, scheme, view) {
 const ends = measureEnds("scheme", measureKeyOf(state));
 if (!ends) return;
 const from = planToScreen(ends.from, scheme, view);
@@ -55891,11 +55924,13 @@ const path = canvasDrag.path;
 const origin = path.points[canvasDrag.index];
 const snap = canvasVertexSnap(path, canvasDrag.index, { x: origin.x + dx, y: origin.y + dy }, free);
 canvasDrag.guides = snap.guides;
+canvasSnapCornerSet(snap.corner);
 canvasPreview = canvasPathVertexMove(path, before, canvasDrag.index, snap.point);
 } else if (canvasDrag.kind === "pathAdd") {
 const origin = canvasDrag.point;
 const snap = canvasAddSnap(canvasDrag, { x: origin.x + dx, y: origin.y + dy }, free);
 canvasDrag.guides = snap.guides;
+canvasSnapCornerSet(snap.corner);
 canvasDrag.landing = snap.point;
 canvasPreview = canvasPathAdded(canvasDrag, snap.point);
 } else if (canvasDrag.kind === "outlineLabel") {
@@ -55962,13 +55997,8 @@ return;
 }
 const state = canvasState();
 if (canvasMeasuring(state) && event.pointerType !== "touch") canvasMeasureHover(state, point, event.altKey);
-if (canvasDraft) {
-const scheme = canvasScheme(state);
-const snap = canvasDraftSnap(screenToPlan(point, scheme, canvasViewOf(state)), event.altKey);
-canvasDraft.cursor = snap.point;
-canvasDraft.snapped = snap.snapped;
-canvasDraft.guides = snap.guides || [];
-canvasRedraw();
+if (canvasDraft || (canvasDraftAims(state) && event.pointerType !== "touch")) {
+canvasDraftHover(state, point, event.altKey);
 }
 if (canvasHoverUpdate(state, point)) canvasRedraw();
 canvasSyncCursor();
@@ -56016,6 +56046,7 @@ if (canvasPointers.size < 2) canvasNav.pinchEnd();
 const drag = canvasDrag;
 canvasDrag = null;
 if (!drag) return;
+if (drag.kind === "pathVertex" || drag.kind === "pathAdd") canvasSnapCornerSet(null);
 if (drag.sim) canvasSimEnd(drag.sim, drag.moved || event.type === "pointercancel");
 const point = canvasPointOf(event);
 const state = canvasState();
@@ -56265,7 +56296,7 @@ return;
 if (event.key === "Escape") {
 if (canvasMeasuring(state)) {
 measureDropAll();
-canvasMeasureCornerSet(null);
+canvasSnapCornerSet(null);
 canvasApi.setState({ measuring: false });
 return;
 }
@@ -56319,7 +56350,7 @@ canvasSyncCursor();
 }
 function canvasPointerLeave() {
 canvasCursor = null;
-if (canvasMeasureCornerSet(null)) canvasRedraw();
+if (canvasSnapCornerSet(null)) canvasRedraw();
 if (canvasGhostDrop()) canvasRedraw();
 if (canvasHoverHandle) {
 canvasHoverHandle = null;
@@ -56428,7 +56459,14 @@ state.mode === CANVAS_MODE_BLOCK_JOIN &&
 const held = state.selectedMarkIds.length === 1 ? findMark(state.project, state.selectedMarkIds[0]) : null;
 if (!held || held.schemeId !== state.schemeId || !canvasEditAllowed(state)) canvasStopBlockJoin();
 }
-if ("measuring" in changed) canvasMeasureCornerSet(null);
+if (
+"measuring" in changed ||
+"mode" in changed ||
+"schemeId" in changed ||
+"drawingShown" in changed
+) {
+canvasSnapCornerSet(null);
+}
 if ("mode" in changed) {
 canvasSyncCursor();
 canvasSilentSaid = false;

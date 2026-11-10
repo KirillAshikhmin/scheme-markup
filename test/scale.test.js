@@ -303,7 +303,11 @@ test("в калибровке рука показывает точки отре�
   // Долгое нажатие не берёт ничего: рука занята отрезком.
   assert.equal(canvasGrabKind(state, { markId: base.tapeId }), null);
   // Подсказка над планом рассказывает про калибровку, а не про метки.
-  assert.equal(canvasHintText(state), strings.scale.hint);
+  const hint = canvasHintText(state);
+  assert.ok(hint.startsWith(strings.scale.hint));
+  // И про магнит угла: калибровка ловит его с таска 282 — на калиброванной
+  // схеме с показанным чертежом, то есть ровно при повторной калибровке.
+  assert.ok(hint.endsWith(strings.canvas.hintCorner));
   // Режим просмотра калибровать не даёт — там правок нет вовсе.
   assert.equal(canvasTapKind({ ...state, layout: "mobile" }, {}), "select");
 });
