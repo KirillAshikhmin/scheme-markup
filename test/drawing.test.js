@@ -866,6 +866,68 @@ test("G68: слияние двух одинаковых объектов пре�
   assert.equal(JSON.stringify(merged.project, null, 2), LEGACY_TEXT, "слияние дописало объекту поля чертежа");
 });
 
+// Предка у объекта прежней сборки может не быть вовсе: таск 287 завёл предку
+// место в хранилище, но у объекта, лежавшего там до него, этой записи нет.
+// Такой объект обязан сливаться ровно как раньше (G68).
+test("G68: объект прежней сборки без предка сливается как раньше", () => {
+  const ours = legacyProject();
+  const theirs = legacyProject();
+  const merged = mergeProjects(ours, theirs, null);
+  assert.equal(merged.changed, false);
+  assert.equal(merged.quiet, true);
+  assert.deepEqual(merged.conflicts, []);
+  assert.deepEqual(merged.reissued, [], "номера поехали на пустом месте");
+  assert.deepEqual(merged.doubled, [], "задвоение названо там, где его нет");
+  assert.equal(JSON.stringify(merged.project, null, 2), LEGACY_TEXT, "слияние без предка правит объект");
+});
+
+// А вот правка с двух сторон у объекта **без предка** задваивается — и это не
+// новость таска 287, а то самое, из-за чего он и завёлся: без предка слияние не
+// знает, завели сущность после расхождения или правили прежнюю, и разводит её.
+// Правило не тронуто (на нём стоят таски 272 и 275) — тронут только отчёт:
+// теперь о задвоении сказано словом. С предком того же объекта не двоится
+// ничего, и это та же проверка в одну строку ниже.
+test("G68: правка двух напарников у объекта прежней сборки без предка задваивается, и об этом сказано", () => {
+  const legacy = legacyProject();
+  const first = legacy.marks[0].id;
+  const second = legacy.marks[1].id;
+  const moved = (project, markId, x) => ({
+    ...project,
+    marks: project.marks.map((mark) =>
+      mark.id === markId ? { ...mark, points: mark.points.map((point) => ({ ...point, x })) } : mark,
+    ),
+  });
+  const ours = stamped(moved(legacyProject(), first, 0.11), "2026-10-09T10:00:00.000Z");
+  const theirs = stamped(moved(legacyProject(), second, 0.77), "2026-10-09T10:05:00.000Z");
+
+  const blind = mergeProjects(ours, theirs, null);
+  // Две метки правили по одной с каждой стороны — и обе развелись.
+  assert.equal(blind.project.marks.length, legacy.marks.length + 2, "задвоение исчезло, а правило не менялось");
+  assert.equal(blind.counts.doubled, 2, "о задвоении не сказано");
+  assert.deepEqual(
+    blind.doubled.map((item) => item.entity),
+    ["marks", "marks"],
+    "задвоенные названы не метками",
+  );
+  for (const item of blind.doubled) assert.ok(item.label.length > 0, "задвоенная сущность без подписи");
+  // Ни одного нового поля у объекта прежней сборки при этом не завелось.
+  for (const key of ["walls", "openings", "schemeObjects", "schemeObjectKinds"]) {
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(blind.project, key),
+      false,
+      "слияние без предка завело пустой список " + key,
+    );
+  }
+
+  // С предком — ни задвоения, ни переезда: обе правки просто складываются.
+  const seen = mergeProjects(ours, theirs, legacyProject());
+  assert.deepEqual(seen.doubled, [], "предок был, а задвоение названо");
+  assert.deepEqual(seen.reissued, [], "предок был, а номер переехал");
+  assert.equal(seen.project.marks.length, legacy.marks.length, "состав меток изменился");
+  assert.equal(seen.project.marks.find((mark) => mark.id === first).points[0].x, 0.11, "наша правка потерялась");
+  assert.equal(seen.project.marks.find((mark) => mark.id === second).points[0].x, 0.77, "чужая правка потерялась");
+});
+
 // ——— слияние чертежей двух напарников —————————————————————————————————
 
 // Общий предок: объект с чертежом из одной стены и справочником видов.
