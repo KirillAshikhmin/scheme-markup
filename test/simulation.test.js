@@ -15,6 +15,7 @@ import { workerBundle } from "../build.js";
 import { clockMsStamp, clockSimMs, volumeClockFixed } from "../src/clockMath.js";
 import { addLogicBinding, addMark, addScenario, createProject, deleteMark, setMarkControls, setMarkNumber } from "../src/model.js";
 import { createSimBridge } from "../src/sim/bridge.js";
+import { strings } from "../src/strings.js";
 import { markAccessory } from "../src/sim/home.js";
 import { simWorkerMain } from "../src/sim/worker.js";
 import {
@@ -726,7 +727,7 @@ test("сторож: зависший trigger — через 3 с поток пе
   assert.equal(hung[0].bindingId, bindingId);
   assert.equal(hung[0].vars.name, "Вечный цикл");
   assert.equal(hung[0].vars.label, "В2");
-  assert.equal(hung[0].vars.where, "trigger");
+  assert.equal(hung[0].vars.where, strings.sim.hungWhere.trigger, "место сказано человеку по-русски (таск 286)");
   assert.deepEqual(sim.hung().bindings, [bindingId]);
   assert.equal(sim.optionForms(bindingId).fault.code, "hung");
   assert.equal(sim.journal().filter((entry) => entry.code === "started").length, 1, "перезапуск потока — не «Дом запущен»");
@@ -761,7 +762,10 @@ test("сторож: верхний уровень скрипта завис на
   assert.equal(view.fault.code, "hung");
   assert.equal(view.active, false);
   assert.equal(sim.scenarios().find((scenario) => scenario.id === globalId).fault, null);
-  const told = sim.journal().filter((entry) => entry.code === "scenarioHung");
+  // Виновника назвал перебор, а не поток, и журнал говорит об этом догадкой
+  // (таск 286): прямое обвинение остаётся за подсказкой потока.
+  assert.deepEqual(sim.journal().filter((entry) => entry.code === "scenarioHung"), []);
+  const told = sim.journal().filter((entry) => entry.code === "scenarioHungGuess");
   assert.equal(told.length, 1);
   assert.equal(told[0].scenarioId, hungId);
   // Остальное работает.
@@ -772,6 +776,112 @@ test("сторож: верхний уровень скрипта завис на
   box.project = { ...box.project, scenarios: box.project.scenarios.map((item) => (item.id === hungId ? { ...item, source: logicSource("Исправлен", "") } : item)) };
   sim.sync(box.project);
   assert.deepEqual(sim.hung().scenarios, []);
+});
+
+// ——— проба сторожа (таск 286) ————————————————————————————————————————————
+//
+// Проба судит сценарий, а до сценария в ней успевает побывать подъём потока:
+// Worker из бандла создаёт **главная нить**, и занятая страница отъедала это
+// время у подсудимого. Отсюда три правила ниже: часы заводятся с «жив»,
+// неоживший поток — не приговор, а повод сказать «проверить не вышло».
+
+// Пробный поток, который так и не ожил: Worker создан, а сообщений от него
+// нет ни одного.
+function muteWorker() {
+  return { postMessage: () => {}, terminate: () => {}, addEventListener: () => {} };
+}
+
+// Пробный поток на заглушке: отвечает на `ping` — первый раз через `aliveMs`,
+// дальше сразу; `runMs` — сколько «исполняется» дом, прежде чем ответить на
+// второй `ping` (бесконечность — не отвечает вовсе).
+function probeWorker(timers, { aliveMs = 0, runMs = 0 } = {}) {
+  const outs = [];
+  let alive = false;
+  return {
+    postMessage: (message) => {
+      if (!message || message.type !== "ping") return;
+      const wait = alive ? runMs : aliveMs;
+      if (!Number.isFinite(wait)) return;
+      if (!alive) alive = true;
+      timers.setTimeout(() => {
+        for (const fn of outs) fn({ data: { type: "pong", n: message.n } });
+      }, wait);
+    },
+    terminate: () => {},
+    addEventListener: (type, fn) => {
+      if (type === "message") outs.push(fn);
+    },
+  };
+}
+
+test("проба сторожа: часы сценария заводятся с «жив» — медленный подъём потока не обвиняет никого", async () => {
+  const timers = fakeTimers();
+  // Поток оживает к самому порогу, а дом исполняет мгновенно.
+  const bridge = createSimBridge({ source: "x", spawn: () => probeWorker(timers, { aliveMs: 2900 }), timers, onMessage: () => {} });
+  let answer = null;
+  bridge.probe([{ type: "load" }]).then((result) => {
+    answer = result;
+  });
+  await until(() => answer !== null, timers, { step: 100, limit: 60 });
+  assert.deepEqual(answer, { ok: true, trace: null, cold: false }, "подъём потока записан сценарию в вину");
+  bridge.close();
+});
+
+test("проба сторожа: поток не ожил вовсе — «проверить не вышло», а не «виновен»", async () => {
+  const timers = fakeTimers();
+  const bridge = createSimBridge({ source: "x", spawn: () => muteWorker(), timers, onMessage: () => {} });
+  let answer = null;
+  bridge.probe([{ type: "load" }]).then((result) => {
+    answer = result;
+  });
+  await until(() => answer !== null, timers, { step: 250, limit: 40 });
+  assert.deepEqual(answer, { ok: true, trace: null, cold: true });
+  bridge.close();
+});
+
+test("проба сторожа: ожил и встал на доме — это приговор", async () => {
+  const timers = fakeTimers();
+  const bridge = createSimBridge({ source: "x", spawn: () => probeWorker(timers, { aliveMs: 10, runMs: Infinity }), timers, onMessage: () => {} });
+  let answer = null;
+  bridge.probe([{ type: "load" }]).then((result) => {
+    answer = result;
+  });
+  await until(() => answer !== null, timers, { step: 250, limit: 40 });
+  assert.equal(answer.ok, false);
+  assert.equal(answer.cold, false);
+  bridge.close();
+});
+
+test("сторож: пробы не ожили — ни один сценарий не выключен, и журнал говорит почему", async () => {
+  const box = pressHouse();
+  const globalId = addScript(box, "global", "Утилиты", "global.helper = function () { return 1; };");
+  const hungId = addScript(box, "logic", "Зависает сразу", logicSource("Зависает сразу", "") + "\n/*HANG*/");
+  const timers = fakeTimers();
+  const marked = (spec) => Boolean(spec) && spec.scenarios.some((scenario) => typeof scenario.source === "string" && scenario.source.includes("/*HANG*/"));
+  const fake = freezable(timers, { onPost: (message, spec) => message.type === "trace" && (message.where === "load" || message.where === "start") && marked(spec) });
+  // Первый поток — настоящий (он и зависнет), пробные — неожившие, а тот, что
+  // мост поднимет после них, снова настоящий: дом обязан вернуться.
+  let made = 0;
+  const spawn = () => {
+    made += 1;
+    return made === 1 || made > 3 ? fake.spawn() : muteWorker();
+  };
+  const { sim } = session({ timers, spawn });
+  sim.sync(box.project);
+  sim.scenarios();
+  assert.ok(
+    await until(() => sim.journal().some((entry) => entry.code === "hungUnchecked"), timers, { step: 250, limit: 80 }),
+    "про непроверенную минуту журнал промолчал",
+  );
+  assert.deepEqual(sim.hung().scenarios, [], "выключен сценарий, которого никто не проверил");
+  assert.deepEqual(sim.hung().bindings, []);
+  // Ни обвинения, ни догадки, ни «гасим всех»: сказано только то, что знаем.
+  assert.deepEqual(sim.journal().filter((entry) => entry.code === "hungUnknown"), []);
+  assert.deepEqual(sim.journal().filter((entry) => entry.code === "scenarioHungGuess"), []);
+  assert.deepEqual(sim.journal().filter((entry) => entry.code === "scenarioHung"), []);
+  assert.ok(made > 3, "пробный ряд не пройден до конца");
+  // Оба скрипта в доме целы — а первым в очереди проб стоял глобальный.
+  for (const id of [globalId, hungId]) assert.ok(box.project.scenarios.some((scenario) => scenario.id === id));
 });
 
 test("сторож в настоящем потоке: while(true) в trigger из собранного бандла — поток погашен и поднят, свет включён", { timeout: 30000 }, async () => {
@@ -821,7 +931,7 @@ test("сторож в настоящем потоке: while(true) в trigger и
     assert.equal(threads.length, 2);
     const told = sim.journal().find((entry) => entry.code === "scenarioHung");
     assert.equal(told.kind, "error");
-    assert.equal(told.vars.where, "trigger");
+    assert.equal(told.vars.where, strings.sim.hungWhere.trigger);
   } finally {
     sim.close();
     await Promise.all(threads.map((thread) => thread.terminate()));

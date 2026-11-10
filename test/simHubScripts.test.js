@@ -314,3 +314,86 @@ test("MotionLightAutomation: списки устройств в опциях с�
   assert.deepEqual(lux, ["", home.address("ДОС1")]);
   assert.deepEqual(form.fields.find((field) => field.key === "offDelaySeconds").value, 30);
 });
+
+// ——— TurnOffAllLight (мастер-выключатель) ————————————————————————————————
+//
+// Таск 286, долг «правленый `MasterSwitch` виснет в имитации». Скрипт в
+// объекте заказчика — это библиотечный текст, у которого **срезан хвост с
+// тестами** (`runMasterSwitchTests`; без `global.hasUnitTests` он и в
+// библиотеке не исполняется, то есть срезано мёртвое). Поэтому здесь оба
+// текста гоняются на одном доме и сверяются: если когда-нибудь имитация
+// начнёт отвечать им по-разному, краснеть будет этот файл, а не заказчик.
+//
+// Второе, что держит файл: мастер-выключатель **отрабатывает и кончается**.
+// Ни ожидания, которого хаб не даёт, ни петли таймеров в нём нет: после
+// щелчка дом ждёт одну проверку через пять секунд и успокаивается.
+const MASTER_GLOBAL = readFileSync(new URL("../web/scenarios/TurnOffAllLight.MasterSwitch@8207b531ac8c27f2.js", import.meta.url), "utf8");
+const MASTER_LOGIC = readFileSync(new URL("../web/scenarios/TurnOffAllLight.MasterSwitch.Logic@e8b5e936b1da2cab.js", import.meta.url), "utf8");
+// Срез заказчика: всё до заголовка «ТЕСТЫ», без хвостовых переводов строки.
+const MASTER_TRIMMED = MASTER_GLOBAL.slice(0, MASTER_GLOBAL.indexOf("//#####")).trimEnd();
+
+// Дом фикстуры с мастер-выключателем: глобальный скрипт `source`, логический
+// — библиотечный, привязан к реле ОВ1 (настенный выключатель).
+function master(source) {
+  const box = simHouse();
+  simPut(box, "ОВ", { x: 0.26, y: 0.36 }, "hall");
+  const home = hubHome({
+    box,
+    scripts: [
+      { key: "g", kind: "global", name: "MasterSwitch", source },
+      { key: "l", kind: "logic", name: "Мастер-выключатель", source: MASTER_LOGIC },
+    ],
+      bindings: [{ script: "l", mark: "ОВ1", options: { singlePress: true, delayedTurnOffTime: 100 } }],
+  });
+  for (const label of ["С1", "С2", "Т1", "С3", "Р1"]) home.set(label, "On", true);
+  return home;
+}
+
+test("MasterSwitch: срезанный заказчиком текст — ровно начало библиотечного, и срезано только мёртвое", () => {
+  assert.ok(MASTER_TRIMMED.length > 40000, "срез не нашёлся — поменялся заголовок тестов");
+  assert.ok(MASTER_GLOBAL.startsWith(MASTER_TRIMMED), "срез обязан быть началом библиотечного текста");
+  // Тесты в библиотечном тексте не исполняются: без `global.hasUnitTests`
+  // `runMasterSwitchTests` выходит первой же строкой. Значит, два текста —
+  // одна и та же программа, и «виснет правленый, а библиотечный работает» не
+  // может быть свойством скрипта.
+  assert.match(MASTER_GLOBAL.slice(MASTER_TRIMMED.length), /if \(!isDeveloping \|\| !global\.hasUnitTests\)/);
+  for (const source of [MASTER_GLOBAL, MASTER_TRIMMED]) {
+    const read = hubScriptRead(source, "MasterSwitch.js");
+    assert.equal(read.error, undefined);
+    assert.equal(read.syntax, null);
+    assert.equal(read.kind, "global");
+  }
+});
+
+test("MasterSwitch: щелчок гасит свет и выключатели всего дома, розетку не трогает", () => {
+  const home = master(MASTER_GLOBAL);
+  home.set("ОВ1", "On", true);
+  for (const label of ["С1", "С2", "Т1", "С3"]) assert.equal(home.value(label, "On"), false, label + " не погашен");
+  assert.equal(home.value("ОВ1", "On"), false, "сам мастер-выключатель гаснет вместе с домом");
+  assert.equal(home.value("Р1", "On"), true, "розетка гаснет только по отдельной отметке");
+  noErrors(home);
+});
+
+test("MasterSwitch: срезанный текст ведёт себя как библиотечный — тот же дом и тот же журнал", () => {
+  const full = master(MASTER_GLOBAL);
+  const cut = master(MASTER_TRIMMED);
+  for (const home of [full, cut]) home.set("ОВ1", "On", true);
+  const state = (home) => ["С1", "С2", "Т1", "С3", "Р1", "ОВ1"].map((label) => label + "=" + home.value(label, "On"));
+  assert.deepEqual(state(cut), state(full));
+  const codes = (home) => home.recorder.log().map((entry) => entry.code);
+  assert.deepEqual(codes(cut), codes(full));
+  noErrors(cut);
+});
+
+test("MasterSwitch: после щелчка дом ждёт одну проверку и успокаивается — ни петли, ни вечного ожидания", () => {
+  const home = master(MASTER_TRIMMED);
+  home.set("ОВ1", "On", true);
+  // Ровно один отложенный шаг — повторное выключение через 5 с.
+  assert.equal(home.engine.nextAt(), T0 + 5 * SEC);
+  home.engine.advanceTo(T0 + 5 * SEC);
+  assert.equal(home.engine.nextAt(), null, "после проверки сценарий ничего не ждёт");
+  home.engine.advanceTo(T0 + 24 * 60 * MIN);
+  noErrors(home);
+  assert.deepEqual(home.log("timersCut"), []);
+  assert.deepEqual(home.log("eventsCut"), []);
+});

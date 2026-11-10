@@ -35,6 +35,10 @@ export const SIM_BRIDGE_HANG_MS = 3000;
 export const SIM_BRIDGE_CHECK_MS = 250;
 /** Неподтверждённые сообщения, которые новый поток получает повторно. */
 export const SIM_BRIDGE_REPLAY = Object.freeze(["act", "run", "active", "advance", "reset"]);
+/** Чем проба спрашивает пустой поток «жив?» — до того, как дать ему дом. */
+export const SIM_BRIDGE_PROBE_ALIVE = "probeAlive";
+/** Чем проба спрашивает поток с домом «отработал?». */
+export const SIM_BRIDGE_PROBE = "probe";
 
 // Адрес бандла один на сеанс: из него же поднимаются перезапуски и пробы.
 let simBridgeUrl = null;
@@ -90,6 +94,17 @@ function simBridgeClone(message) {
  * `probe(messages, ms)` — пробный поток: исполнить сообщения и ответить на
  * `ping`; `{ok: false, trace}` — не ответил за `ms`, `trace` — последняя его
  * подсказка. В странице проб нет — `{ok: true}`.
+ *
+ * **Время потоку отсчитывается с той минуты, как он ожил** (таск 286). Первым
+ * делом проба спрашивает пустой поток «жив?» и только на ответ даёт ему дом и
+ * заводит часы `ms`. Поднять поток — это создать Worker из бандла в 320 КБ и
+ * разобрать его, а делает это **главная нить**: занятая страница (а при
+ * перезапуске она занята всегда — сторож только что погасил поток, и дом
+ * собирается заново) отъедала это время у сценария, которого проба судит.
+ * Замер таска: при главной нити, занятой 1,5 с, поток пробы оживал через
+ * 1508 мс, а сам отвечал за 22 мс — две трети приговора приходились на
+ * страницу. Не ожил за `ms` вовсе — `{ok: true, cold: true}`: «проверить не
+ * вышло», и это **не** обвинение (`simulation.js` по нему никого не гасит).
  */
 export function createSimBridge(options = {}) {
   const given = options && typeof options === "object" ? options : {};
@@ -326,18 +341,18 @@ export function createSimBridge(options = {}) {
   }
 
   function probe(messages, ms = hangMs) {
-    if (page || closed) return Promise.resolve({ ok: true, trace: null });
+    if (page || closed) return Promise.resolve({ ok: true, trace: null, cold: false });
     let scratch;
     try {
       scratch = spawn(source);
     } catch (error) {
-      return Promise.resolve({ ok: true, trace: null });
+      return Promise.resolve({ ok: true, trace: null, cold: false });
     }
     return new Promise((resolve) => {
       let seen = null;
       let done = false;
       let timer = null;
-      const finish = (ok) => {
+      const finish = (ok, cold = false) => {
         if (done) return;
         done = true;
         if (timer !== null) timers.clearTimeout(timer);
@@ -346,18 +361,31 @@ export function createSimBridge(options = {}) {
         } catch (ignored) {
           /* уже погашен */
         }
-        resolve({ ok, trace: seen });
+        resolve({ ok, trace: seen, cold });
       };
       scratch.addEventListener("message", (event) => {
         const data = event && event.data;
         if (!data || typeof data !== "object") return;
-        if (data.type === "trace") seen = typeof data.where === "string" ? data : null;
-        else if (data.type === "pong" && data.n === "probe") finish(true);
+        if (data.type === "trace") {
+          seen = typeof data.where === "string" ? data : null;
+          return;
+        }
+        if (data.type !== "pong") return;
+        if (data.n === SIM_BRIDGE_PROBE_ALIVE) {
+          // Поток ожил: подъём и разбор бандла позади, часы сценария заводятся
+          // только сейчас. Подсказка пустого потока к делу не относится.
+          seen = null;
+          if (timer !== null) timers.clearTimeout(timer);
+          for (const message of Array.isArray(messages) ? messages : []) scratch.postMessage(message);
+          scratch.postMessage({ type: "ping", n: SIM_BRIDGE_PROBE });
+          timer = timers.setTimeout(() => finish(false), ms);
+          return;
+        }
+        if (data.n === SIM_BRIDGE_PROBE) finish(true);
       });
       scratch.addEventListener("error", () => finish(true));
-      for (const message of Array.isArray(messages) ? messages : []) scratch.postMessage(message);
-      scratch.postMessage({ type: "ping", n: "probe" });
-      timer = timers.setTimeout(() => finish(false), ms);
+      scratch.postMessage({ type: "ping", n: SIM_BRIDGE_PROBE_ALIVE });
+      timer = timers.setTimeout(() => finish(true, true), ms);
     });
   }
 
