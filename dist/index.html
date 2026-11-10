@@ -46527,9 +46527,14 @@ top.primary.click();
 };
 document.addEventListener("keydown", uiEscapeListener);
 }
+function uiFocusNode(node) {
+if (!node || typeof node.focus !== "function") return false;
+node.focus({ preventScroll: true });
+return true;
+}
 function uiFocusEntry(entry) {
 const target = entry.card.querySelector("input, select, textarea") || entry.primary || entry.card;
-if (target && typeof target.focus === "function") target.focus();
+uiFocusNode(target);
 }
 function uiReturnFocus(entry) {
 const opener = entry.opener;

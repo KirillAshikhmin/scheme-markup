@@ -564,9 +564,34 @@ function uiRefreshDialogs() {
   document.addEventListener("keydown", uiEscapeListener);
 }
 
+/**
+ * Фокус внутри окна, **не двигающий его прокрутку** (таск 290).
+ *
+ * Окно выше своего предела (`.modal`: `max-height: 90vh; overflow: auto`)
+ * прокручивается само, а `focus()` подтягивает к себе то, что получило фокус.
+ * У длинного окна это конец: кнопка там одна и стоит под всеми списками.
+ * Живой прогон поймал это на отчёте о слиянии без общего предка — окно
+ * открывалось сразу прокрученным, и ни заголовка, ни строки «Файл в папке»,
+ * ни первого списка человек не видел (снимок `A-predka-net-do-pravki.png`).
+ * Тестами такое не ловится: прокрутка — свойство живого браузера.
+ *
+ * Поэтому фокус ставится с `preventScroll`, и окно показывается с того места,
+ * где стоит само: свежее — с начала, а то, к которому вернулись из вложенного
+ * окна, — с прежнего места. Своего «прокрути наверх» здесь нет нарочно: оно
+ * увело бы читателя с места, на котором он остановился.
+ *
+ * Отдельной дверью, а не строкой внутри `uiFocusEntry`, — чтобы правило было
+ * проверяемо: живого браузера в прогоне нет, а вызов с `preventScroll` есть.
+ */
+export function uiFocusNode(node) {
+  if (!node || typeof node.focus !== "function") return false;
+  node.focus({ preventScroll: true });
+  return true;
+}
+
 function uiFocusEntry(entry) {
   const target = entry.card.querySelector("input, select, textarea") || entry.primary || entry.card;
-  if (target && typeof target.focus === "function") target.focus();
+  uiFocusNode(target);
 }
 
 // Фокус возвращается открывшему, если он ещё на странице (кнопка панели могла
