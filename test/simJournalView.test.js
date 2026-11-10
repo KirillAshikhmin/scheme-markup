@@ -50,8 +50,10 @@ const CONTRACT_CODES = [
   // адрес, которого в доме нет (таск 04 связи меток и вещей, G12): адреса в
   // сценариях заказчика сломались перенумерацией, и журнал называет адрес
   "hubAddressMissing",
-  // страница и поток (таск 07)
-  "pageReloaded", "editReset", "noWorker", "scenarioHung", "hungUnknown", "workerError",
+  // страница и поток (таск 07); `scenarioHungGuess` и `hungUnchecked` — таск
+  // 286: виновник, найденный перебором, назван догадкой, а минута, в которую
+  // проверить не вышло, не гасит никого
+  "pageReloaded", "editReset", "noWorker", "scenarioHung", "scenarioHungGuess", "hungUnknown", "hungUnchecked", "workerError",
   // команды (таск 13)
   "command", "commandUnknown",
   // повторное движение сработавшего датчика (ревью ветки, F1)

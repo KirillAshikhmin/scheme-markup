@@ -37,7 +37,9 @@
 //
 // Коды записей журнала, которые пишет страница (текст — `strings.sim.journal`):
 // `pageReloaded`, `editReset`, `noWorker`, `reset` (сброс остановленного дома),
-// `scenarioHung` (`{name, label, where}`), `hungUnknown` (`{count}`),
+// `scenarioHung` и `scenarioHungGuess` (`{name, label, where}` — виновника
+// назвал поток или перебор проб, таск 286), `hungUnknown` (`{count}`),
+// `hungUnchecked` (проверить не вышло — ничего не выключено),
 // `scenarioLibMissing` (`{name}` — библиотечный скрипт не доехал, таск 05
 // просмотра).
 import { appClockJump, appClockNow, appClockSimMs, appClockStep, appClockWatch } from "./appClock.js";
@@ -45,7 +47,7 @@ import { appWeatherRead, appWeatherWatch } from "./appWeather.js";
 import { deviceFollowers, findMark, findType, markControlsByChannel, roomAtPlace, roomsInOrder, scenariosInOrder } from "./model.js";
 import { scenarioLibRef, scenarioLibResolve } from "./scenarioLib.js";
 import { getSetting, setSetting } from "./store.js";
-import { text } from "./strings.js";
+import { strings, text } from "./strings.js";
 import { SIM_BRIDGE_REPLAY, createSimBridge } from "./sim/bridge.js";
 import { blocksCommandTexts, commandKey } from "./sim/blocks.js";
 import { simClamp } from "./sim/catalog.js";
@@ -217,6 +219,20 @@ function simScriptIds(home) {
     ...scenarios.filter((scenario) => scenario.kind === "global"),
     ...scenarios.filter((scenario) => scenario.kind === "logic"),
   ].map((scenario) => scenario.id);
+}
+
+/**
+ * Где встал код — словами, а не кодом подсказки (таск 286). Поток называет
+ * место по-английски (`trigger`, `load`, `timer`), и в журнале человеку
+ * доставалось именно оно: «завис (trigger)». Чинить свой сценарий по такой
+ * записи нельзя — она не говорит ни того, что это срабатывание от устройства,
+ * ни того, что место вообще известно. Незнакомое слово отдаётся как есть:
+ * новое место в потоке не должно молча превращаться в пустую скобку.
+ */
+export function simHungWhereText(where) {
+  const key = typeof where === "string" ? where : "";
+  const said = strings.sim.hungWhere[key];
+  return typeof said === "string" ? said : key;
 }
 
 // Подсказка потока, которая называет виновника прямо.
@@ -454,13 +470,31 @@ export function createSimulation(options = {}) {
 
   async function hangAnswer({ trace, pending } = {}) {
     let culprit = simCulpritOf(trace);
+    // Виновника назвал сам поток — это знание; нашли перебором проб — догадка,
+    // и человеку она показывается именно догадкой (таск 286).
+    let guessed = false;
+    let unchecked = false;
     if (!culprit) {
       const candidates = trace && Array.isArray(trace.candidates) ? trace.candidates : simScriptIds(home);
-      culprit = await probeCandidates(candidates, simList(pending), trace && trace.where);
+      const found = await probeCandidates(candidates, simList(pending), trace && trace.where);
+      culprit = found.culprit;
+      guessed = Boolean(culprit);
+      unchecked = found.unchecked;
     }
     if (culprit) {
-      markHung(culprit);
+      markHung(culprit, guessed);
       return { replay: true };
+    }
+    if (unchecked) {
+      // Проверить не вышло: пробный поток не ожил, пока страница была занята
+      // (таск 286). Гасить по догадке в такую минуту нельзя — виновным вышел
+      // бы первый в очереди, а первыми идут глобальные скрипты. Поэтому дом
+      // поднимается чистым, не выключив ничего, и не повторяет того, на чём
+      // встал: повтор привёл бы в ту же минуту ещё раз.
+      const entries = [entry("error", "hungUnchecked", {})];
+      addLog(entries);
+      notify({ log: entries });
+      return { replay: false };
     }
     // Виновника не нашли: скрипты гасятся все — лучше так, чем зависать по кругу.
     const ids = simScriptIds(home).filter((id) => !hungScenarios.has(id));
@@ -473,10 +507,14 @@ export function createSimulation(options = {}) {
 
   // Виновник среди нескольких (верхний уровень скриптов): пробные потоки с
   // первыми 1, 2, … скриптами в порядке исполнения — первый зависший и есть он.
+  // Ответ — `{culprit, unchecked}`: `unchecked` — хоть одна проба не ожила
+  // (`cold`), и значит ряд пройден не весь. Такая проба **никого не обвиняет**:
+  // её время ушло на подъём потока главной нитью, а не на код сценария.
   async function probeCandidates(candidates, pending, where) {
     const list = simList(candidates).filter((id) => typeof id === "string" && !hungScenarios.has(id));
-    if (!bridge || !home || list.length === 0) return null;
+    if (!bridge || !home || list.length === 0) return { culprit: null, unchecked: false };
     const replay = pending.filter((message) => message && SIM_BRIDGE_REPLAY.includes(message.type));
+    let unchecked = false;
     for (let i = 0; i < list.length; i += 1) {
       const off = new Set(list.slice(i + 1));
       const spec = overlay(home, off);
@@ -484,16 +522,23 @@ export function createSimulation(options = {}) {
       if (running && startPosted) messages.push({ type: "start", values: mirrorValues(), restore: true, memory });
       messages.push(...replay);
       const result = await bridge.probe(messages);
-      if (closed) return null;
+      if (closed) return { culprit: null, unchecked: false };
+      if (result && result.cold === true) {
+        unchecked = true;
+        continue;
+      }
       if (result && result.ok === false) {
-        return simCulpritOf(result.trace) || { where: typeof where === "string" ? where : "start", scenarioId: list[i], bindingIds: [] };
+        const named = simCulpritOf(result.trace) || { where: typeof where === "string" ? where : "start", scenarioId: list[i], bindingIds: [] };
+        return { culprit: named, unchecked };
       }
     }
-    return null;
+    return { culprit: null, unchecked };
   }
 
-  function markHung(culprit) {
+  function markHung(culprit, guessed = false) {
     const where = culprit.where || "start";
+    const said = simHungWhereText(where);
+    const code = guessed ? "scenarioHungGuess" : "scenarioHung";
     const entries = [];
     if (culprit.bindingIds.length > 0) {
       for (const bindingId of culprit.bindingIds) {
@@ -504,8 +549,8 @@ export function createSimulation(options = {}) {
         entries.push(
           entry(
             "error",
-            "scenarioHung",
-            { name: simScenarioName(scenarioById(scenarioId), scenarioId), label: accessory ? accessory.label || "" : "", where },
+            code,
+            { name: simScenarioName(scenarioById(scenarioId), scenarioId), label: accessory ? accessory.label || "" : "", where: said },
             { scenarioId, bindingId },
           ),
         );
@@ -514,7 +559,7 @@ export function createSimulation(options = {}) {
       const scenario = scenarioById(culprit.scenarioId);
       hungScenarios.set(culprit.scenarioId, { where, stamp: stampOf(scenario) });
       entries.push(
-        entry("error", "scenarioHung", { name: simScenarioName(scenario, culprit.scenarioId), label: "", where }, { scenarioId: culprit.scenarioId }),
+        entry("error", code, { name: simScenarioName(scenario, culprit.scenarioId), label: "", where: said }, { scenarioId: culprit.scenarioId }),
       );
     }
     addLog(entries);
