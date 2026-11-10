@@ -34,11 +34,17 @@
 //
 // Набор собран в таске 275, перенесён сюда таском 277 и заточен таском 278:
 // семнадцатое правило прикрыло дом (`sim/home.js`, ADR 041), а три порчи из
-// шестнадцати стали адресными. Таск 281 добавил тридцать два правила слияния
-// (`merge.js`) и обеих труб открытия (`deviceMigrate.js`, `projectFile.js`,
-// `panels/projects.js`) — ту область, где живёт G68 и где дважды находилась
-// молчаливая порча. Семь из них красного теста не имели вовсе: порча проходила
-// мимо **всего** прогона, и тесты на них заведены тем же таском.
+// шестнадцати стали адресными. Таск 281 добавил тридцать пять правил слияния
+// (`merge.js`), обеих труб открытия (`deviceMigrate.js`, `projectFile.js`,
+// `panels/projects.js`) и общей папки (`autosave.js`) — ту область, где живёт
+// G68 и где дважды находилась молчаливая порча. Восемь из них красного теста не
+// имели вовсе: порча проходила мимо **всего** прогона, и тесты на них заведены
+// тем же таском.
+//
+// Там же проверено на себе, от чего стережёт сверка данных: пока таск 281 шёл,
+// соседний таск 280 вписал в `projectFile.migrateProject` ещё одну миграцию, и
+// запись `libraryDoor` перестала прикладываться. Поймал это обычный прогон
+// (`test/breakRules.test.js`), а не тот, кто вспомнил позвать снасть.
 
 export const BREAK_RULES = [
   // ——— простые ссылки: вид назван в `ID_OWNERS` ——————————————————————————
@@ -470,6 +476,32 @@ export const BREAK_RULES = [
   if (won.topAzimuthDeg) site.topAzimuthDeg = won.topAzimuthDeg;`,
     tests: ["test/projectSite.test.js"],
   },
+  // ——— задвоение и предок общей папки (таск 287) —————————————————————————————
+  {
+    rule: "doubledBase",
+    said: "задвоенной сущность называется только там, где общего предка не было: при предке столкнувшиеся заведены после расхождения, то есть это две разные вещи (таск 287)",
+    file: "src/merge.js",
+    was: `  if (ancestor || reissued.length === 0) return [];`,
+    now: `  if (reissued.length === 0) return [];`,
+    tests: ["test/merge.test.js"],
+  },
+  {
+    rule: "fileBase",
+    said: "предком для спора с напарником берётся прежде прочитанный файл **этого же** напарника, а не наш снимок: иначе одна сущность разъезжается на две, а своя свежая метка читается как удалённая им (таск 287)",
+    file: "src/autosave.js",
+    was: `  return autosaveFileBases.get(autosaveFileBaseKey(project, name)) || autosaveBase;`,
+    now: `  return autosaveBase;`,
+    tests: ["test/folderSync.test.js"],
+  },
+  {
+    rule: "storedBaseFolder",
+    said: "предок из хранилища годится только для своей папки: предок другой папки нам слишком новый — он показал бы удаления там, где их не было (таск 287)",
+    file: "src/autosave.js",
+    was: `  if (String(saved.folder || "") !== autosaveFolderName()) return null;
+`,
+    now: "",
+    tests: ["test/folderSync.test.js"],
+  },
   {
     rule: "relatedByUuid",
     said: "общий номер родства не доказывает, общий uuid — доказывает: справочник двух объектов из одного шаблона нумеруется одинаково, и слияние складывало бы два чужих объекта (ADR 038)",
@@ -570,8 +602,8 @@ export const BREAK_RULES = [
     rule: "libraryDoor",
     said: "дверь узнавания библиотечного скрипта доезжает до миграции: иначе файл и база переводят сценарии на ссылку по-разному",
     file: "src/projectFile.js",
-    was: `      options.library,`,
-    now: `      null,`,
+    was: `migrateScenarioLib(migrateScenarios(dictionary).project, options.library).project,`,
+    now: `migrateScenarioLib(migrateScenarios(dictionary).project, null).project,`,
     tests: ["test/scenarioLibLegacy.test.js"],
   },
   {

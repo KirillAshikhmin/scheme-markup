@@ -19,7 +19,7 @@ import { packProject } from "../src/projectFile.js";
 import { createProject, addScheme, addMark, deleteMark } from "../src/model.js";
 import { putImage, getImage } from "../src/store.js";
 
-function fakeFolder() {
+function fakeFolder(folderName = "Общая") {
   const files = new Map();
   const entryFor = (name) => ({
     kind: "file",
@@ -32,7 +32,7 @@ function fakeFolder() {
     },
   });
   return {
-    name: "Общая",
+    name: folderName,
     files,
     put(name, bytes, at) {
       files.set(name, { bytes, at });
@@ -570,5 +570,36 @@ test("предок на напарника — его прежний файл, �
   );
   const moved = second.project.marks.find((mark) => mark.id === fresh);
   assert.equal(moved.points[0].x, 0.3, "правка напарника не доехала");
+  autosaveResetSync();
+});
+
+// Запись предка названа своей папкой, и для другой папки она не годится: в неё
+// этот браузер не писал, и наш снимок там не предок, а будущее — удаления,
+// которых никто не делал, он показал бы как чужие. Спрашивается это **у
+// двери**, а не словами в шапке: порча на месте сверки имени проходила мимо
+// всего прогона (снасть, таск 281).
+test("предок другой папки не берётся, даже когда он того же объекта", async () => {
+  folder.files.clear();
+  autosaveResetSync();
+  const { project } = await objectWithPlan("Квартира у моста");
+  await autosavePickFolder();
+  const written = await autosaveWrite(project);
+  assert.equal(written.ok, true, written.error && written.error.message);
+
+  // В своей папке предок поднимается из хранилища и без архива — это условие
+  // примера: проверять нечего, если его там нет вовсе.
+  autosaveResetSync();
+  folder.files.clear();
+  const mine = await autosaveAdoptFolder(project);
+  assert.ok(mine && mine.base, "предок своей папки не поднялся — пример не тот");
+
+  // Другая папка: имя другое, наших файлов в ней нет, значит и предка нет.
+  const other = fakeFolder("Другая");
+  globalThis.window = { showDirectoryPicker: async () => other };
+  autosaveResetSync();
+  await autosavePickFolder();
+  assert.equal(await autosaveAdoptFolder(project), null, "предок другой папки принят за свой");
+
+  globalThis.window = { showDirectoryPicker: async () => folder };
   autosaveResetSync();
 });

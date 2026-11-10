@@ -27,7 +27,7 @@ import { BREAK_RULES } from "../tools/breakRules.mjs";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 // Правил в наборе заведомо не меньше: сверка, позеленевшая на пустом или
 // обрезанном наборе, — это та же тишина, от которой набор и стерегут.
-const MIN_RULES = 45;
+const MIN_RULES = 48;
 
 const TEXT = new Map();
 function fileText(file) {
