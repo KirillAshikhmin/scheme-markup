@@ -10,6 +10,7 @@ import {
   migrateScenarioLib,
   migrateScenarios,
   migrateTypeKinds,
+  migrateVacuumShape,
   projectFormatVersion,
 } from "../model.js";
 import { scenarioLibIndex, scenarioLibRefOf } from "../scenarioLib.js";
@@ -45,12 +46,16 @@ const SAVE_DELAY_MS = 400;
  */
 export function projectsMigrateStored(stored, library = null) {
   const migrated = fillTypeSizes(migrateCommentType(migrateTypeKinds(stored).project).project).project;
+  // Знак «РП» (таск 280, G414) — тем же местом в череде, что у файла: трапеция
+  // прежнего шаблона становится кругом со срезом у типа с этим кодом, ровно
+  // этим знаком и без названного изображения. Меняется одно поле справочника.
+  const shaped = migrateVacuumShape(migrated).project;
   // Сценарии и привязки логики (таск 01 сценариев): терпимое чтение. Затем
   // ссылка на библиотечный скрипт (таск 06 просмотра): текст, совпавший с
   // библиотечным побайтово, уезжает в `scenario.lib`; двери узнавания нет —
   // объект остаётся прежним (G68). Затем аксессуары (правка после сборки
   // сценариев) — тем же порядком, что у файла.
-  const pinned = migrateScenarioLib(migrateScenarios(migrated).project, library).project;
+  const pinned = migrateScenarioLib(migrateScenarios(shaped).project, library).project;
   // Номера вместо uuid и вещи меткам приборов (G08–G11, G01) — тем же порядком,
   // что у файла: перенумерация после миграций, которые удаляют сущности, и до
   // перевода аксессуаров (он переселяет адреса в опциях привязок, а адрес — это

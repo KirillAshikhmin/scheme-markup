@@ -252,7 +252,19 @@ test("G68: старый объект доезжает через файл без
   // возвращаются прежними (`legacyIdsRestored`): открытие нумерует объект
   // (ADR 030), и перенумерация обязана быть **чистым** переименованием.
   const strip = (value) => JSON.stringify({ ...value, formatVersion: null }, null, 2);
-  assert.equal(strip(legacyIdsRestored(legacy(), loaded)), strip(legacy()), "открытие старого объекта что-то в нём поправило");
+  // Единственное, что открытие правит, — **знак «РП»** (таск 280, G414): круг
+  // со срезом вместо трапеции, доставшейся от прежнего шаблона. Названо здесь
+  // поимённо, чтобы следующая молчаливая правка справочника покраснела: сверка
+  // остаётся побайтовой, разрешено ровно одно поле у ровно одного типа.
+  const vacuumFixed = (value) => ({
+    ...value,
+    markTypes: value.markTypes.map((type) => (type.code === "РП" ? { ...type, shape: "circle-cut" } : type)),
+  });
+  assert.equal(
+    strip(legacyIdsRestored(legacy(), loaded)),
+    strip(vacuumFixed(legacy())),
+    "открытие старого объекта что-то в нём поправило",
+  );
   assert.equal(loaded.formatVersion, FORMAT_VERSION_KIND_IDS);
   // Ни у одного типа не появилось ни `view`, ни `icon` — в отличие от размеров
   // (D28), которые миграция и правда проставляет. Разница названа вслух:

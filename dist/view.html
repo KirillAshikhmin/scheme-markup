@@ -20789,6 +20789,21 @@ const code = String(main.code || "").trim();
 if (code && code !== COMMENT_TYPE_CODE) next.commentCode = code;
 return { project: next, changed: true, moved };
 }
+const VACUUM_TYPE_CODE = "РП";
+const VACUUM_SHAPE_WAS = "trapezoid-bar";
+const VACUUM_SHAPE_NOW = "circle-cut";
+function migrateVacuumShape(project) {
+if (!project || !Array.isArray(project.markTypes)) return { project, changed: false, fixed: 0 };
+let fixed = 0;
+const markTypes = project.markTypes.map((type) => {
+if (!type || type.code !== VACUUM_TYPE_CODE || type.shape !== VACUUM_SHAPE_WAS) return type;
+if (typeObjectView(type)) return type;
+fixed += 1;
+return { ...type, shape: VACUUM_SHAPE_NOW };
+});
+if (fixed === 0) return { project, changed: false, fixed: 0 };
+return { project: { ...project, markTypes }, changed: true, fixed };
+}
 function typeKindReview(project) {
 const rows = [];
 for (const type of (project && project.markTypes) || []) {
@@ -23605,11 +23620,11 @@ outlines: Array.isArray(loaded.outlines) ? loaded.outlines : [],
 groups: Array.isArray(loaded.groups) ? loaded.groups : [],
 counters: loaded.counters && typeof loaded.counters === "object" ? loaded.counters : {},
 };
+const dictionary = migrateVacuumShape(
+fillTypeSizes(migrateCommentType(migrateTypeKinds(filled).project).project).project,
+).project;
 const renumbered = idsMigrate(
-migrateScenarioLib(
-migrateScenarios(fillTypeSizes(migrateCommentType(migrateTypeKinds(filled).project).project).project).project,
-options.library,
-).project,
+migrateScenarioLib(migrateScenarios(dictionary).project, options.library).project,
 ).project;
 const numbered = thingMarksMigrated(loaded) ? renumbered : migrateThingMarks(renumbered).project;
 const migrated = migrateDevices(numbered).project;
@@ -65002,7 +65017,8 @@ return { close };
 const SAVE_DELAY_MS = 400;
 function projectsMigrateStored(stored, library = null) {
 const migrated = fillTypeSizes(migrateCommentType(migrateTypeKinds(stored).project).project).project;
-const pinned = migrateScenarioLib(migrateScenarios(migrated).project, library).project;
+const shaped = migrateVacuumShape(migrated).project;
+const pinned = migrateScenarioLib(migrateScenarios(shaped).project, library).project;
 const renumbered = idsMigrate(pinned).project;
 const numbered = thingMarksMigrated(stored) ? renumbered : migrateThingMarks(renumbered).project;
 const devices = migrateDevices(numbered).project;

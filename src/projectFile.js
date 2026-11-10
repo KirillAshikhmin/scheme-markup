@@ -14,6 +14,7 @@ import {
   migrateScenarioLib,
   migrateScenarios,
   migrateTypeKinds,
+  migrateVacuumShape,
   projectFormatVersion,
 } from "./model.js";
 
@@ -404,6 +405,9 @@ function migrateProject(loaded, options = {}) {
   // Размеры по умолчанию (D28) доходят до справочника, заведённого раньше них:
   // у типа без размеров они проставляются по шаблону. Трогается только
   // справочник — метки новых полей не получают.
+  // Знак «РП» (таск 280, G414): трапеция, доставшаяся от прежнего шаблона,
+  // становится кругом со срезом — у типа с этим кодом, ровно этим знаком и без
+  // названного изображения. Меняется одно поле справочника, метки не трогаются.
   // Сценарии (таск 01): терпимое чтение, у объекта без них — тот же объект.
   // Ссылка на библиотечный скрипт (таск 06 просмотра): текст, совпавший с
   // библиотечным побайтово, уезжает в `scenario.lib`; без реестра — ничего.
@@ -417,11 +421,11 @@ function migrateProject(loaded, options = {}) {
   // идут за номерами всего прежнего. Вещи достраиваются **один раз на объект**
   // (`thingMarksMigrated`): файл, уже прошедший эту сборку, приходит версией 8,
   // и снятую рукой связь второе открытие не возвращает.
+  const dictionary = migrateVacuumShape(
+    fillTypeSizes(migrateCommentType(migrateTypeKinds(filled).project).project).project,
+  ).project;
   const renumbered = idsMigrate(
-    migrateScenarioLib(
-      migrateScenarios(fillTypeSizes(migrateCommentType(migrateTypeKinds(filled).project).project).project).project,
-      options.library,
-    ).project,
+    migrateScenarioLib(migrateScenarios(dictionary).project, options.library).project,
   ).project;
   const numbered = thingMarksMigrated(loaded) ? renumbered : migrateThingMarks(renumbered).project;
   const migrated = migrateDevices(numbered).project;

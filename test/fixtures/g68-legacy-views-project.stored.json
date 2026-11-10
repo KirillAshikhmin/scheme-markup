@@ -817,7 +817,7 @@
       "order": 39
     },
     {
-      "shape": "trapezoid-bar",
+      "shape": "circle-cut",
       "blockMode": "each",
       "kind": "point",
       "channels": 1,
