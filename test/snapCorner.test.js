@@ -17,6 +17,9 @@
 //    объект магнит не пишет ничего (G68).
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   addScheme,
@@ -41,7 +44,7 @@ import {
   workshopSnapMm,
 } from "../src/panels/workshop.js";
 import { strings } from "../src/strings.js";
-import { canvasCornerTargets } from "../src/canvas.js";
+import { canvasCornerTargets, canvasDraftAims, canvasDraftPoint, canvasHintText } from "../src/canvas.js";
 
 const viewOf = (patch) => ({ zoom: 1, offsetX: 0, offsetY: 0, markSize: 10, labelSize: 12, ...patch });
 
@@ -526,5 +529,223 @@ test("магнит ведомого в объект не пишет ни зна�
     workshopSnapMm([], at(5, 4), view, { gridMm: 500, gridSnap: true, corners });
     workshopMoveDeltaMm(at(1230, 870), at(2000, 2000), at(775, 1130), view, { gridMm: 500, gridSnap: true, corners });
   }
+  assert.equal(JSON.stringify(scene.project), before, "притяжка — про руку, в объекте от неё ни одного знака");
+});
+
+// ——— магнит угла остальным занятиям плана (таск 282, G417) ——————————————
+//
+// Ответ заказчика на пункт, оставленный таском 266, — «делай». Магнита по
+// углам не было у трёх занятий «Схемы», и все трое ходят через одну притяжку
+// (`canvasDraftPoint` → `render.draftSnap`): ломаная метка, контур помещения и
+// калибровка. С ними заодно его получила **правка вершины** того же пути: один
+// и тот же угол не может ловиться при рисовании и не ловиться при правке.
+//
+// Проверяется пять вещей:
+//
+// 1. **Мера та же.** Своего счёта у плана не появилось: цели — `wallCornerTargets`
+//    через мост `canvasCornerTargets`, порог — `GUIDE_CROSS_PX`, порядок —
+//    «угол старше направляющей» (всё это закрыто разделами тасков 266 и 271 выше).
+// 2. **Кто спрашивает магнит** — одна чистая дверь `canvasDraftAims`, и в ней
+//    названы ровно три занятия; линейка забирает руку себе.
+// 3. **Калибровка** получает магнит только там, где у плана есть миллиметр:
+//    до первой калибровки целей нет вовсе, и это не ловушка.
+// 4. **Сетка блока и угол не встречаются**: сетка живёт в ведении метки, угол —
+//    в постановке точки рукой. Ни одного общего вызова.
+// 5. **Подсказки называют магнит** у каждого занятия, где он появился (213), и
+//    в объект магнит не пишет ни знака (G68).
+
+const CANVAS_SOURCE = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "src", "canvas.js"), "utf8");
+
+// Тот же план с комнатой, что у линейки: доли считает модельный мост.
+function planRoom() {
+  const scene = withWalls(planScene(), ROOM);
+  const scheme = findScheme(scene.project, scene.schemeId);
+  return { ...scene, scheme, corners: canvasCornerTargets({ project: scene.project, drawingShown: true }, scheme) };
+}
+
+// Промах рукой: три точки экрана мимо угла (план 1200 × 800, зум 1).
+const missBy = (corner, dx = 3, dy = -2) => ({ x: corner.x + dx / 1200, y: corner.y + dy / 800 });
+
+test("вершина ломаной метки и контура помещения садится в угол стены", () => {
+  const scene = planRoom();
+  const view = viewOf({ zoom: 1 });
+  const corner = scene.corners[2];
+  const options = { corners: scene.corners };
+  // Первая вершина — черновика ещё нет вовсе, и дверь та же (таск 176).
+  const first = canvasDraftPoint(null, missBy(corner), scene.scheme, view, options);
+  assert.deepEqual(first.point, { x: corner.x, y: corner.y }, "первая вершина села ровно в угол");
+  assert.equal(first.corner.letter, "В", "пойманный угол назван — по нему рисуется кольцо");
+  // Следующая вершина — от предыдущей, и магнит угла старше ровного угла.
+  const next = canvasDraftPoint(
+    { points: [{ x: scene.corners[0].x, y: scene.corners[0].y }] },
+    missBy(scene.corners[3], 2, 2),
+    scene.scheme,
+    view,
+    options,
+  );
+  assert.deepEqual(next.point, { x: scene.corners[3].x, y: scene.corners[3].y });
+  assert.equal(next.snapped, false, "точка уже точная — «ровно» ей не обещают");
+  // Контур помещения обводят той же рукой и той же дверью: своих притяжек у
+  // него нет (`canvasDraftClick` на обоих режимах один).
+  const outline = canvasDraftPoint({ points: [] }, missBy(corner), scene.scheme, view, options);
+  assert.deepEqual(outline.point, first.point, "у контура и у ломаной притяжка одна");
+  // Alt снимает всё тем же `free`: второй клавиши «без магнита» не заведено.
+  const free = canvasDraftPoint(null, missBy(corner), scene.scheme, view, { ...options, free: true });
+  assert.deepEqual(free.point, missBy(corner), "с Alt точка легла туда, куда довела рука");
+  assert.equal(free.corner, null, "кольцу с Alt взяться негде");
+  // Углов нет — прежнее поведение цело до доли.
+  assert.deepEqual(canvasDraftPoint(null, missBy(corner), scene.scheme, view, {}).point, missBy(corner));
+});
+
+test("три занятия черновика берут цели одной дверью поля", () => {
+  // Своего списка целей ни у ломаной, ни у контура, ни у калибровки нет:
+  // `canvasDraftSnap` — одна дверь на все три, и углы в неё приходят мостом.
+  const from = CANVAS_SOURCE.indexOf("function canvasDraftSnap(");
+  assert.ok(from > 0, "пропала дверь притяжки черновика");
+  const body = CANVAS_SOURCE.slice(from, CANVAS_SOURCE.indexOf("\n}", from));
+  assert.ok(body.includes("corners: canvasCornerTargets(state, scheme)"), "черновик перестал спрашивать углы");
+  // Правка вершины идёт своей опорой, но целями — теми же (`canvasPathSnap`).
+  const edit = CANVAS_SOURCE.indexOf("function canvasPathSnap(");
+  const editBody = CANVAS_SOURCE.slice(edit, CANVAS_SOURCE.indexOf("\n}", edit));
+  assert.ok(editBody.includes("corners: canvasCornerTargets(state, scheme)"), "ведомая вершина углов не получила");
+  assert.ok(!editBody.includes("skipWallIds"), "цели — углы стен, а ведут вершину метки: исключать нечего");
+});
+
+test("магнит спрашивают ровно три занятия, и линейка забирает руку себе", () => {
+  const made = addScheme(createProject(), { name: "1 этаж", width: 1000, height: 500 });
+  const project = made.project;
+  const idOf = (code) => project.markTypes.find((item) => item.code === code).id;
+  const stateOf = (patch) => ({
+    project,
+    schemeId: made.scheme.id,
+    activeTypeId: null,
+    activeRoomId: null,
+    mode: "select",
+    layout: "desktop",
+    ...patch,
+  });
+  // «Л» — лента, тип линейный; «Р» — розетка, точечный.
+  assert.equal(canvasDraftAims(stateOf({ mode: "add", activeTypeId: idOf("Л") })), true, "ломаная метка");
+  assert.equal(canvasDraftAims(stateOf({ mode: "room" })), true, "контур помещения");
+  assert.equal(canvasDraftAims(stateOf({ mode: "scale" })), true, "калибровка");
+  // Точечная метка и комментарий встают одним кликом и идут мимо черновика:
+  // слова заказчика о них не было (открытый вопрос таска 282).
+  assert.equal(canvasDraftAims(stateOf({ mode: "add", activeTypeId: idOf("Р") })), false, "точечная метка");
+  assert.equal(canvasDraftAims(stateOf({ mode: "add", activeTypeId: null })), false, "тип не выбран");
+  assert.equal(canvasDraftAims(stateOf({})), false, "«Выделение»");
+  // Линейка стоит первой везде — в подсказке, в разборе нажатия и здесь:
+  // кольцо на поле одно, и в эту минуту оно её.
+  assert.equal(canvasDraftAims(stateOf({ mode: "room", measuring: true })), false, "линейка");
+  // В просмотре правок нет вовсе, и в чужом режиме экрана рука не над планом.
+  assert.equal(canvasDraftAims(stateOf({ mode: "room", layout: "mobile" })), false, "просмотр");
+  assert.equal(canvasDraftAims(stateOf({ mode: "room", screen: "volume" })), false, "чужое поле");
+  assert.equal(canvasDraftAims(null), false);
+});
+
+test("калибровка ловит угол там, где у плана есть миллиметр, — и нигде больше", () => {
+  // До первой калибровки миллиметра на плане не существует: мост отвечает
+  // `null`, целей нет, и магнит молчит сам — отдельного запрета ему не надо.
+  const raw = withWalls(
+    (() => {
+      const added = addScheme(createProject(), { name: "без масштаба", imageId: "p", width: 1200, height: 800 });
+      return { project: added.project, schemeId: added.scheme.id };
+    })(),
+    ROOM,
+  );
+  const rawScheme = findScheme(raw.project, raw.schemeId);
+  assert.equal(
+    canvasCornerTargets({ project: raw.project, drawingShown: true }, rawScheme).length,
+    0,
+    "первая калибровка целиться не во что: углы на плане ещё не стоят",
+  );
+  assert.ok(wallCornerTargets(raw.project, raw.schemeId).length > 0, "в чертеже углы при этом есть");
+  // А повторная калибровка идёт по плану, на котором чертёж уже нарисован, —
+  // и тот же угол ловит та же дверь.
+  const scene = planRoom();
+  const corner = scene.corners[1];
+  const snap = canvasDraftPoint(null, missBy(corner), scene.scheme, viewOf({ zoom: 1 }), { corners: scene.corners });
+  assert.deepEqual(snap.point, { x: corner.x, y: corner.y }, "конец отрезка калибровки сел в угол");
+  // Слой чертежа выключен — углов нет и здесь: ловить то, чего не видно,
+  // человек не может (правило таска 266).
+  assert.equal(canvasCornerTargets({ project: scene.project, drawingShown: false }, scene.scheme).length, 0);
+});
+
+test("сетка блока и угол не встречаются: у них разные жесты", () => {
+  // Сетка ведёт **метку** (таск 262), угол ловит точку, которую ставят рукой.
+  // Ни один жест не спрашивает обеих, и порядок между ними поэтому не нужен.
+  const drag = CANVAS_SOURCE.indexOf("function canvasDragTo(");
+  const dragBody = CANVAS_SOURCE.slice(drag, CANVAS_SOURCE.indexOf("\nfunction canvasHoverAt(", drag));
+  assert.ok(dragBody.includes("canvasGuideSnap(canvasBlockSnap("), "порядок таска 262 тронут");
+  assert.ok(!dragBody.includes("canvasDraftSnap("), "ведение метки полезло в притяжку черновика");
+  const draft = CANVAS_SOURCE.indexOf("function canvasDraftSnap(");
+  assert.ok(
+    !CANVAS_SOURCE.slice(draft, CANVAS_SOURCE.indexOf("\n}", draft)).includes("canvasBlockSnap"),
+    "черновик полез в сетку блока",
+  );
+  const path = CANVAS_SOURCE.indexOf("function canvasPathSnap(");
+  assert.ok(
+    !CANVAS_SOURCE.slice(path, CANVAS_SOURCE.indexOf("\n}", path)).includes("canvasBlockSnap"),
+    "правка вершины полезла в сетку блока",
+  );
+});
+
+test("кольцо на поле помнит одна дверь, и гасит её тот, кто кончил жест", () => {
+  // Второй памяти «пойманный угол» на плане быть не должно: два кольца
+  // обещали бы две притяжки, которых нет.
+  assert.equal(CANVAS_SOURCE.split("let canvasSnapCorner").length - 1, 1, "у кольца появилась вторая память");
+  assert.equal(CANVAS_SOURCE.split("drawSnapCorner(").length - 1, 1, "кольцо рисуется не в одном месте");
+  // Кольцо уходит с рукой и с занятием: ушла мышь, кончилось ведение,
+  // сменились режим, схема, видимость чертежа или линейка.
+  const leave = CANVAS_SOURCE.indexOf("function canvasPointerLeave(");
+  assert.ok(CANVAS_SOURCE.slice(leave, leave + 600).includes("canvasSnapCornerSet(null)"), "кольцо осталось без руки");
+  const up = CANVAS_SOURCE.indexOf("function canvasPointerUp(");
+  assert.ok(
+    CANVAS_SOURCE.slice(up, up + 800).includes('drag.kind === "pathVertex"'),
+    "кольцо ведения не гаснет по отпусканию",
+  );
+  for (const key of ["measuring", "mode", "schemeId", "drawingShown"]) {
+    assert.ok(CANVAS_SOURCE.includes('"' + key + '" in changed'), "кольцо не гаснет на смене " + key);
+  }
+});
+
+test("подсказки называют магнит у каждого занятия, где он появился (таск 213)", () => {
+  const scene = planRoom();
+  const idOf = (code) => scene.project.markTypes.find((item) => item.code === code).id;
+  const stateOf = (patch) => ({
+    project: scene.project,
+    schemeId: scene.schemeId,
+    activeTypeId: null,
+    activeRoomId: null,
+    mode: "select",
+    layout: "desktop",
+    ...patch,
+  });
+  const said = (patch) => canvasHintText(stateOf(patch)) || "";
+  for (const patch of [{ mode: "add", activeTypeId: idOf("Л") }, { mode: "room" }, { mode: "scale" }]) {
+    assert.ok(said(patch).includes(strings.canvas.hintCorner), "магнит не назван: " + JSON.stringify(patch));
+  }
+  // Постановка точки и «Выделение» его не получают — там магнита нет самого.
+  assert.equal(said({ mode: "add", activeTypeId: idOf("Р") }).includes(strings.canvas.hintCorner), false);
+  assert.equal(said({ activeTypeId: idOf("Р") }).includes(strings.canvas.hintCorner), false);
+  // Линейка говорит о магните своими словами и чужой строки не повторяет.
+  assert.ok(said({ measuring: true }).includes("угол чертежа"));
+  assert.equal(said({ measuring: true }).includes(strings.canvas.hintCorner), false);
+  // Условие названо словом: углы приходят из чертежа, и на плане их нет, пока
+  // слой выключен или масштаб не задан.
+  assert.ok(strings.canvas.hintCorner.includes("масштаб"));
+  assert.ok(strings.canvas.hintCorner.includes("кольцом"), "кольцо названо: молчащий магнит читается как сбой");
+});
+
+test("магнит плана в объект не пишет ни знака (G68)", () => {
+  const scene = planRoom();
+  const view = viewOf({ zoom: 1 });
+  const before = JSON.stringify(scene.project);
+  for (const corner of scene.corners) {
+    canvasDraftPoint(null, missBy(corner), scene.scheme, view, { corners: scene.corners });
+    canvasDraftPoint({ points: [missBy(corner, 20, 20)] }, missBy(corner), scene.scheme, view, {
+      corners: scene.corners,
+    });
+  }
+  canvasCornerTargets({ project: scene.project, drawingShown: true }, scene.scheme);
   assert.equal(JSON.stringify(scene.project), before, "притяжка — про руку, в объекте от неё ни одного знака");
 });

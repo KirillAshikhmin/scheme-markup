@@ -73,7 +73,11 @@ test("на десктопе подсказка прежняя — по режи�
   );
   assert.ok(canvasHintText(stateOf({ activeTypeId: scene.typeId })).startsWith(strings.canvas.hintSelectMode));
   // Режим добавления один, а подсказка разная: её выбирает вид типа.
-  assert.equal(canvasHintText(stateOf({ mode: "add", activeTypeId: scene.lineTypeId })), strings.canvas.hintLine);
+  // Рисование линии с таска 282 дописывает строку про магнит угла — сверяется
+  // начало и само дописанное: подсказка обязана назвать притяжку (правило 213).
+  const line = canvasHintText(stateOf({ mode: "add", activeTypeId: scene.lineTypeId }));
+  assert.ok(line.startsWith(strings.canvas.hintLine));
+  assert.ok(line.endsWith(strings.canvas.hintCorner));
   assert.ok(
     canvasHintText(stateOf({ mode: "add", activeTypeId: scene.typeId })).includes("Р — "),
     "подсказка постановки без типа",
