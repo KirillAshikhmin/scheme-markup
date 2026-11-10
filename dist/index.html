@@ -39803,6 +39803,9 @@ slot.column = column;
 }
 return column + 1;
 }
+function volumeBlockDrawnColumns(list, along, onWall) {
+return volumeBlockColumns(volumeBlockFrameRows(list, onWall, false), along);
+}
 function volumeBlockSeats(project, marks) {
 const seats = new Map();
 if (!project) return seats;
@@ -39881,8 +39884,8 @@ else tiers.set(slot.heightMm, [slot]);
 }
 const rows = [];
 let frames = 0;
-const frame = (split, lift, baseMm = null) => {
-const columns = volumeBlockColumns(split, along);
+const frame = (split, lift, baseMm = null, grid = 0) => {
+const columns = grid || volumeBlockColumns(split, along);
 const frameId = frames;
 frames += 1;
 for (let index = 0; index < split.length; index += 1) {
@@ -39896,7 +39899,11 @@ tightAlongMm: columns > 1 ? VOLUME_BLOCK_STEP_MM : null,
 });
 }
 };
-if (tiers.size === list.length && volumeBlockAlongWall(list, u, n)) {
+const noFrames = tiers.size === list.length;
+const drawn = noFrames ? volumeBlockDrawnColumns(list, along, onWall) : 0;
+if (noFrames && drawn < list.length) {
+for (const [heightMm, tier] of tiers) frame([tier], () => 0, heightMm, drawn);
+} else if (noFrames && volumeBlockAlongWall(list, u, n)) {
 frame([list.slice()], () => 0);
 } else {
 for (const [heightMm, tier] of tiers) {
