@@ -60,7 +60,10 @@ import {
   roomsInOrder,
   schemeObjectsOnScheme,
 } from "../model.js";
-import { drawDrawing, drawMeasure, drawingUnitBridge, visibleMarks } from "../render.js";
+// `GUIDE_CROSS_PX` и `drawSnapCorner` — магнит угла (таск 283): и порог в
+// точках экрана, и кольцо у «Объёма» те же, что у плана и чертежа (таск 266).
+// Своего числа и своего знака здесь не заводится — хозяин у обоих один.
+import { GUIDE_CROSS_PX, drawDrawing, drawMeasure, drawSnapCorner, drawingUnitBridge, visibleMarks } from "../render.js";
 import {
   MEASURE_COLOR,
   measureAdd,
@@ -2529,6 +2532,9 @@ function createVolume({ api, hosts }) {
     // падения устарели (таск 229, G342).
     fallSnap = null;
     fallAt = null;
+    // Линейка целится в грани (таск 237, 283): грани сменились — прежний ответ
+    // луча и пойманный угол к этой сцене не относятся.
+    measureSeenDrop();
     refreshShadow();
   }
 
@@ -3211,6 +3217,15 @@ function createVolume({ api, hosts }) {
   // сквозь стену — мерят как раз то, что по разные стороны, — и кадр не платит
   // ни одной новой заливки: сцена, порядок и свет остаются как были, а рисунок
   // мерки тот же, что на плане и в чертеже (`render.drawMeasure`).
+  //
+  // **Магнит угла** (таск 283, G417) — то же, что на плане: угол старше всего,
+  // порог `GUIDE_CROSS_PX` в точках экрана, Alt снимает, пойманное показано
+  // кольцом `render.drawSnapCorner`. Своего числа и своего знака у «Объёма» нет
+  // ни одного — число приходит из `render.js`, где его хозяин (таск 266), а что
+  // считается углом в трёх измерениях, решает `volumeSurfaceCorner`: вершина той
+  // грани, на которую садится конец. Поле делает две вещи — зовёт магнит одним
+  // зовом вместе с поверхностью (`measureSpotAt`) и помнит пойманный угол для
+  // кольца.
 
   // Отметка держится **своим полем**, а не спросом у состояния: `measuring()`
   // зовут и кадр, и каждый ход взгляда, а `getState()` на каждый зов копирует
@@ -3228,11 +3243,87 @@ function createVolume({ api, hosts }) {
     return measureKeyOf(getState());
   }
 
+  // **Alt живёт при руке, а не при клавиатуре** (таск 283): состояние приходит
+  // с событием мыши (`event.altKey`) — тем же путём, которым его читает план
+  // (`canvasMeasureHover`), — и помнится до следующего события, потому что
+  // магнит спрашивают и кадр, и прицел, у которых события нет вовсе (та же
+  // причина, по которой своим полем держится `measureWanted`). Клавиша Alt
+  // поле тоже правит: в «Объёме» она **уже занята** — отпускает захват мыши
+  // (G211), — и это правило старше, оно словами заказчика. Поэтому под
+  // захватом Alt сперва отдаёт курсор, а магнит снимает тем же нажатием; без
+  // захвата, то есть ровно там, где углом и целятся, он только снимает магнит.
+  let measureFree = false;
+
+  /**
+   * Держат ли Alt. Отпечаток `measureStamp` его помнит, поэтому смену магнита
+   * видит тот же зов, что и ход руки, — второго пути к кадру здесь нет.
+   */
+  function measureAlt(on) {
+    measureFree = on === true;
+  }
+
+  /** Пойманный угол: по нему кадр рисует кольцо. `true` — угол сменился. */
+  let measureCorner = null;
+
+  function measureCornerSet(corner) {
+    const was = measureCorner;
+    measureCorner = corner || null;
+    if (!was && !measureCorner) return false;
+    if (!was || !measureCorner) return true;
+    return was.x !== measureCorner.x || was.y !== measureCorner.y || was.z !== measureCorner.z;
+  }
+
+  /**
+   * Куда сядет конец мерки: `{point, kind, corner}` или `null`. Одна дверь на
+   * щелчок и на живой конец — разойдись они, кольцо обещало бы одно, а клик
+   * ставил другое.
+   */
+  function measureSpotAt(at) {
+    if (!at || scene.empty) return null;
+    return volumeSurfaceAt(scene, camera(), viewport(), at.x, at.y, {
+      corner: GUIDE_CROSS_PX,
+      free: measureFree,
+    });
+  }
+
+  // **Луч идёт на движение мерки, а не на кадр** (§6.4 карты). `syncAim` зовут
+  // двое — ход руки и каждый нарисованный кадр, — а ответ зависит ровно от
+  // трёх вещей: куда целятся, откуда смотрят и из чего собрана сцена. Поэтому
+  // здесь лежит отпечаток этих трёх: совпал — луч не идёт вовсе. Стоячее поле
+  // кадров не заказывает (кадр рисуется по событию), а разгорающаяся лампа
+  // заказывает их десятками — и за линейку они не платят ничего.
+  //
+  // Отпечаток сбрасывают те, от кого ответ зависит мимо него: сборка сцены
+  // (открыли дверь — грани другие) и первый щелчок (мерка стала живой, и
+  // второй конец обязан пойти за прицелом, не дожидаясь хода руки).
+  let measureSeen = null;
+
+  function measureSeenDrop() {
+    measureSeen = null;
+  }
+
+  function measureStamp(at) {
+    const spot = camera();
+    const box = viewport();
+    return [
+      at ? at.x : "-",
+      at ? at.y : "-",
+      spot.at.x,
+      spot.at.y,
+      spot.at.z,
+      spot.yaw,
+      spot.pitch,
+      box.width,
+      box.height,
+      measureFree ? 1 : 0,
+    ].join("|");
+  }
+
   /** Поставить конец отрезка туда, куда показали. Промах говорит, почему. */
   function measurePut(at) {
     const key = measureKey();
     if (!key || !at || scene.empty) return;
-    const found = volumeSurfaceAt(scene, camera(), viewport(), at.x, at.y);
+    const found = measureSpotAt(at);
     if (!found) {
       notify(strings.measure.volumeMissNone, "info");
       return;
@@ -3241,30 +3332,57 @@ function createVolume({ api, hosts }) {
       notify(strings.measure.volumeMissOther, "info");
       return;
     }
+    // Под пальцем кольца нет вовсе — ровно потому, почему там нет и живого
+    // предпросмотра отрезка (таск 237): хода руки пальцем не бывает, кольцо
+    // некому гасить, и оставленное оно обещало бы притяжку в точке, из которой
+    // взгляд уже увели свайпом. Сам тап в угол садится.
+    measureCornerSet(touching ? null : found.corner);
     measureAdd("volume", key, found.point);
+    // Мерка стала живой: второй конец пойдёт за прицелом с этого кадра, а не со
+    // следующего хода руки.
+    measureSeenDrop();
     redraw();
   }
 
   /**
-   * Второй конец идёт за прицелом: число живое, пока ведут руку. Пальцем этого
-   * хода нет — там взгляд водят свайпом, а конец ставят касанием.
+   * Прицел повело: второй конец идёт за ним, и кольцо магнита — тоже. Пальцем
+   * живого конца нет — там взгляд водят свайпом, а конец ставят касанием.
+   *
+   * **Кольцо живёт у прицела, а не у мерки** (правило таска 266): видно его ещё
+   * до первого клика, когда предпросмотра отрезка нет вовсе, и гаснет оно вместе
+   * с прицелом. Поэтому зов один на то и другое, и кадр он просит сам: угол
+   * сменился — кольцо надо перерисовать, даже если мерка ещё не начата.
    */
   function measureFollow() {
-    const key = measureKey();
-    if (!key) return;
-    const ends = measureEnds("volume", key);
-    if (!ends || !ends.live) return;
     const at = aimPoint();
-    const found = at && !scene.empty ? volumeSurfaceAt(scene, camera(), viewport(), at.x, at.y) : null;
-    const spot = found && volumeSurfaceHolds(found.kind) ? found.point : null;
-    if (measureAim("volume", key, spot)) redraw();
+    const stamp = measureStamp(at);
+    if (stamp === measureSeen) return;
+    measureSeen = stamp;
+    const found = measureSpotAt(at);
+    const holds = Boolean(found && volumeSurfaceHolds(found.kind));
+    // Угол негодной поверхности не помечается: конец туда не сядет, и кольцо
+    // обещало бы то, чего клик не сделает.
+    let want = measureCornerSet(holds ? found.corner : null);
+    const key = measureKey();
+    const ends = key ? measureEnds("volume", key) : null;
+    if (ends && ends.live && measureAim("volume", key, holds ? found.point : null)) want = true;
+    if (want) redraw();
   }
 
   /** Отрезок мерки поверх кадра: прямое расстояние и разложение под ним. */
   function paintMeasure(box) {
+    const spot = camera();
+    // Кольцо пойманного угла — **до** отрезка и независимо от него: мерки может
+    // не быть вовсе (первый клик ещё не сделан), а показать, куда сядет конец,
+    // надо как раз в эту минуту. Знак тот же, что на плане и в чертеже: белая
+    // подложка под цветным кольцом читается и на белой стене, и на ночном небе —
+    // тем же приёмом, которым сделаны сам прицел и отрезок мерки.
+    if (measureCorner) {
+      const ring = volumeScreenAt(measureCorner, spot, box);
+      if (ring) drawSnapCorner(ctx, ring, MEASURE_COLOR);
+    }
     const ends = measureEnds("volume", measureKey());
     if (!ends) return;
-    const spot = camera();
     const from = volumeScreenAt(ends.from, spot, box);
     const to = ends.to ? volumeScreenAt(ends.to, spot, box) : null;
     // Конец за спиной экранной точки не имеет — отрезок в этот кадр не идёт.
@@ -4338,6 +4456,10 @@ function createVolume({ api, hosts }) {
     // Палец на поле — ход или взгляд (`touchMove`): мышиному повороту его
     // движения не достаются.
     if (event.pointerType === "touch" && touchMove(event)) return;
+    // Alt у магнита линейки — тот же, что на плане, и читается он у руки (таск
+    // 283). Отметка ставится **до** всех веток: под захватом мыши ход уходит в
+    // поворот взгляда, а магнит и там обязан знать, держат ли Alt.
+    measureAlt(event.altKey === true);
     if (locked) {
       lookBy(event.movementX || 0, event.movementY || 0);
       return;
@@ -5133,7 +5255,17 @@ function createVolume({ api, hosts }) {
     // `preventDefault` здесь не ставится нарочно: Alt — системный модификатор
     // ввода, и перехватывать его целиком значило бы ломать набор в других
     // полях страницы. Нам нужно его нажатие, а не его смысл.
+    //
+    // **Тот же Alt снимает магнит линейки** (таск 283): второй клавиши «без
+    // магнита» в сборке нет ни в одном поле, а эта здесь была занята раньше —
+    // и правило захвата старше, оно словами заказчика. Поэтому под захватом
+    // Alt сперва отдаёт курсор, а магнит снимает тем же нажатием; без захвата
+    // — то есть ровно там, где углом и целятся рукой — он только снимает
+    // магнит. Кольцо гаснет сразу, не дожидаясь хода руки: `syncAim` зовётся
+    // здесь же.
     if (volumeAltKey(event)) {
+      measureAlt(true);
+      if (measuring()) syncAim();
       if (locked && typeof document.exitPointerLock === "function") document.exitPointerLock();
       return;
     }
@@ -5206,6 +5338,14 @@ function createVolume({ api, hosts }) {
   }
 
   function onKeyUp(event) {
+    // Отпустили Alt — магнит линейки вернулся (таск 283). `ours()` здесь не
+    // спрашивается по той же причине, что у Control: отпустить клавишу могли и
+    // в другом режиме, а снятый магнит остался бы висеть до следующего Alt.
+    if (volumeAltKey(event)) {
+      measureAlt(false);
+      if (measuring()) syncAim();
+      return;
+    }
     // Отпустили E — нажатие клавиши выключателя кончилось (таск 09 сценариев).
     // `ours()` не спрашивается: отпустить можно и в другом режиме.
     if (event.code === VOLUME_DOOR_KEY) {
@@ -5246,6 +5386,9 @@ function createVolume({ api, hosts }) {
     crouchStop();
     // То же с пробелом в обзоре: подниматься до следующего нажатия он не просил.
     riseStop();
+    // И то же с Alt (таск 283): его отпускание до нас не дойдёт, а магнит,
+    // снятый до следующего нажатия Alt, человек не просил.
+    measureAlt(false);
   }
 
   function onResize() {
@@ -5620,6 +5763,10 @@ function createVolume({ api, hosts }) {
         // Линейку включили или убрали (таск 237): меняются подсказка и кадр.
         if ("measuring" in changed) {
           measureWanted = state.measuring === true;
+          // Инструмент убрали — кольцо магнита уходит вместе с ним: оставленное,
+          // оно обещало бы притяжку там, где её уже нет (правило таска 271).
+          if (!measureWanted) measureCornerSet(null);
+          measureSeenDrop();
           syncHint();
           redraw();
         }

@@ -45,6 +45,11 @@ import {
 } from "../src/panels/workshop.js";
 import { strings } from "../src/strings.js";
 import { canvasCornerTargets, canvasDraftAims, canvasDraftPoint, canvasHintText } from "../src/canvas.js";
+// Магнит в «Объёме» (таск 283): сцена из стенда, обратная проекция и сам
+// магнит. Мерка расстояния — та же, что у линейки, своей здесь не заводится.
+import { volumeScene, volumeScreenAt, volumeSurfaceAt, volumeSurfaceCorner, volumeSurfaceHolds } from "../src/volume.js";
+import { measureSpan } from "../src/measure.js";
+import { benchFlat } from "../tools/bench/scenes.mjs";
 
 const viewOf = (patch) => ({ zoom: 1, offsetX: 0, offsetY: 0, markSize: 10, labelSize: 12, ...patch });
 
@@ -530,6 +535,202 @@ test("магнит ведомого в объект не пишет ни зна�
     workshopMoveDeltaMm(at(1230, 870), at(2000, 2000), at(775, 1130), view, { gridMm: 500, gridSnap: true, corners });
   }
   assert.equal(JSON.stringify(scene.project), before, "притяжка — про руку, в объекте от неё ни одного знака");
+});
+
+// ——— таск 283: магнит угла в «Объёме» ———————————————————————————————————
+//
+// Ответ заказчика на пункт, оставленный таском 266 открытым, — «Делай». Мера,
+// порог и Alt те же; новое здесь одно — **что считается углом в трёх
+// измерениях**: вершина той грани, на которую садится конец мерки. Проверяется
+// то, из-за чего это правило и выбрано:
+//
+//   осевой узел плана (`wallCornerTargets`) ни одной грани не принадлежит — он
+//     внутри кладки, и концом мерки быть не может (G356, G358);
+//   порог — те же `GUIDE_CROSS_PX` точек экрана: ровно 13 ловится, на волос
+//     дальше — нет, а в миллиметрах это издалека и вблизи разные расстояния;
+//   **видно — ловится**: спрятанная в толще чужой стены вершина не берётся,
+//     хотя на экране она ближе порога;
+//   Alt снимает, поверхность без углов рядом отвечает ровно как до таска, и в
+//     объект магнит не пишет ни знака.
+//
+// Сцена — стенд «квартира с мебелью» (`tools/bench/scenes.mjs`): стены 200 мм,
+// высота 2700, перегородки с дверями. Числа комнаты взяты из неё, а не выдуманы.
+
+const BOX283 = Object.freeze({ width: 900, height: 600 });
+// Угол гостиной у пола: оси наружных стен (−4500, −1800), толщина 200 — значит
+// видимый угол комнаты стоит на (−4400, −1700), в полтолщины от каждой оси.
+const CORNER283 = Object.freeze({ x: -4400, y: -1700, z: 0 });
+const NODE283 = Object.freeze({ x: -4500, y: -1800, z: 0 });
+
+function volumeScene283() {
+  const box = benchFlat();
+  return { box, scene: volumeScene(box.project, box.schemeId) };
+}
+
+/** Камера, смотрящая из точки `from` ровно в точку `to`. */
+function lookAt283(from, to) {
+  return {
+    at: { ...from },
+    yaw: Math.atan2(to.y - from.y, to.x - from.x),
+    pitch: Math.atan2(to.z - from.z, Math.hypot(to.x - from.x, to.y - from.y)),
+  };
+}
+
+const sameMm283 = (a, b, slack = 0.001) =>
+  Boolean(a) && Math.abs(a.x - b.x) < slack && Math.abs(a.y - b.y) < slack && Math.abs(a.z - b.z) < slack;
+
+test("угол в объёме — вершина грани, а осевой узел плана ею не бывает", () => {
+  const { box, scene } = volumeScene283();
+  // Узел плана на месте и носит букву — на плане магнит ловит его.
+  const letters = wallCornerTargets(box.project, box.schemeId);
+  assert.ok(
+    letters.some((corner) => corner.x === NODE283.x && corner.y === NODE283.y),
+    "узел плана у этой комнаты есть: " + JSON.stringify(letters),
+  );
+  // А в сцене его нет ни у одной грани: он внутри кладки, и концу мерки там не
+  // место (правило «только на поверхность», G356). Видимый угол комнаты,
+  // наоборот, — вершина сразу нескольких граней.
+  const holders = (point) => scene.faces.filter((face) => (face.p || []).some((spot) => sameMm283(spot, point, 1)));
+  assert.equal(holders(NODE283).length, 0, "осевой узел не лежит ни на одной грани");
+  assert.ok(holders(CORNER283).length >= 3, "видимый угол держат пол и обе стены: " + holders(CORNER283).length);
+});
+
+test("конец мерки садится в угол стены — и в низ ребра, и в верх", () => {
+  const { scene } = volumeScene283();
+  const eye = { x: -2750, y: 0, z: 1600 };
+  for (const corner of [CORNER283, { ...CORNER283, z: 2700 }]) {
+    const camera = lookAt283(eye, corner);
+    const screen = volumeScreenAt(corner, camera, BOX283);
+    const found = volumeSurfaceAt(scene, camera, BOX283, screen.x + 9, screen.y, { corner: GUIDE_CROSS_PX });
+    assert.equal(found.kind, "wall", "целились в стену: " + JSON.stringify(found));
+    assert.ok(sameMm283(found.corner, corner), "поймался угол " + JSON.stringify(found.corner));
+    assert.ok(sameMm283(found.point, corner), "конец сел ровно в него: " + JSON.stringify(found.point));
+    // Без магнита тот же прицел даёт точку рядом — промах руки в девять точек
+    // экрана, то есть десятки миллиметров.
+    const plain = volumeSurfaceAt(scene, camera, BOX283, screen.x + 9, screen.y);
+    assert.equal(plain.corner, null);
+    assert.ok(measureSpan(plain.point, corner) > 20, "промах без магнита: " + measureSpan(plain.point, corner));
+    // И `kind` магнитом не меняется: вершина принадлежит той же грани.
+    assert.equal(plain.kind, found.kind);
+  }
+});
+
+test("порог — те же 13 точек экрана: ровно 13 ловится, на волос дальше нет", () => {
+  const { scene } = volumeScene283();
+  const camera = lookAt283({ x: -2750, y: 0, z: 1600 }, CORNER283);
+  const screen = volumeScreenAt(CORNER283, camera, BOX283);
+  const atPx = (gap) => volumeSurfaceAt(scene, camera, BOX283, screen.x + gap, screen.y, { corner: GUIDE_CROSS_PX });
+  assert.ok(sameMm283(atPx(GUIDE_CROSS_PX).corner, CORNER283), "ровно порог — ловится");
+  assert.equal(atPx(GUIDE_CROSS_PX + 0.5).corner, null, "на волос дальше — нет");
+  assert.equal(atPx(40).corner, null);
+  // Ноль и отсутствие довода выключают магнит вовсе: ответ тот же, что до таска.
+  assert.equal(volumeSurfaceAt(scene, camera, BOX283, screen.x + 9, screen.y, { corner: 0 }).corner, null);
+  assert.equal(volumeSurfaceAt(scene, camera, BOX283, screen.x + 9, screen.y).corner, null);
+});
+
+test("порог экранный, а не миллиметровый: одни и те же 60 мм издалека ловятся, вблизи нет", () => {
+  const { scene } = volumeScene283();
+  // Прицел стоит в шестидесяти миллиметрах от угла вдоль стены — ровно в этой
+  // точке и кончается луч, как ни отходи. Меняется только одно: сколько это в
+  // точках экрана. Та же проверка, что у плана на мелком и крупном масштабе.
+  const spot = { x: CORNER283.x, y: CORNER283.y + 60, z: 0 };
+  const aimOf = (awayMm) => {
+    const step = awayMm / Math.SQRT2;
+    const camera = lookAt283({ x: CORNER283.x + step, y: CORNER283.y + step, z: 1600 }, spot);
+    const middle = { x: BOX283.width / 2, y: BOX283.height / 2 };
+    const screen = volumeScreenAt(CORNER283, camera, BOX283);
+    return {
+      px: Math.hypot(screen.x - middle.x, screen.y - middle.y),
+      plain: volumeSurfaceAt(scene, camera, BOX283, middle.x, middle.y),
+      found: volumeSurfaceAt(scene, camera, BOX283, middle.x, middle.y, { corner: GUIDE_CROSS_PX }),
+    };
+  };
+  const far = aimOf(4000);
+  const near = aimOf(1000);
+  // Луч упирается в одну и ту же точку с обоих мест — спорить тут не о чем.
+  assert.ok(sameMm283(far.plain.point, spot, 0.01), JSON.stringify(far.plain.point));
+  assert.ok(sameMm283(near.plain.point, far.plain.point, 0.01), JSON.stringify(near.plain.point));
+  assert.ok(far.px < GUIDE_CROSS_PX && near.px > GUIDE_CROSS_PX, "с четырёх метров угол в пороге, с одного — нет: " + far.px + " / " + near.px);
+  assert.ok(sameMm283(far.found.corner, CORNER283), "издалека те же 60 мм — это угол");
+  assert.equal(near.found.corner, null, "вблизи 60 мм — уже не угол, а место на стене");
+  assert.deepEqual(near.found.point, near.plain.point);
+});
+
+test("видно — ловится: вершина, спрятанная в толще чужой стены, не берётся", () => {
+  const { scene } = volumeScene283();
+  // Перегородка (ось x = −1000) упёрта в наружную стену (ось y = −1800). Её бок
+  // идёт **до оси** чужой стены, то есть его вершина (−1100, −1800) лежит на
+  // сто миллиметров внутри кладки, а видимый угол комнаты — (−1100, −1700).
+  const hidden = { x: -1100, y: -1800, z: 0 };
+  const shown = { x: -1100, y: -1700, z: 0 };
+  const side = scene.faces.find((face) => (face.p || []).some((spot) => sameMm283(spot, hidden, 1)) && face.n.x === -1);
+  assert.ok(side, "бок перегородки со спрятанной вершиной в сцене есть");
+  // Смотрим из дальнего угла гостиной: сто миллиметров превращаются в семь
+  // точек экрана, то есть спрятанная вершина — внутри порога.
+  const camera = lookAt283({ x: -4200, y: 1500, z: 1600 }, shown);
+  const screen = volumeScreenAt(shown, camera, BOX283);
+  const ghost = volumeScreenAt(hidden, camera, BOX283);
+  const gap = Math.hypot(ghost.x - screen.x, ghost.y - screen.y);
+  assert.ok(gap < GUIDE_CROSS_PX, "спрятанная вершина внутри порога: " + gap + " px");
+  assert.equal(
+    volumeSurfaceCorner(scene, side, camera, BOX283, screen.x, screen.y - 6, GUIDE_CROSS_PX),
+    null,
+    "её не видно — значит и не ловится",
+  );
+  // Угол этого примыкания ловится полом: вершина контура помещения стоит ровно
+  // в нём, и прицел, опущенный в угол, её берёт.
+  const floorCam = lookAt283({ x: -2500, y: -300, z: 1600 }, shown);
+  const floorScreen = volumeScreenAt(shown, floorCam, BOX283);
+  const onFloor = volumeSurfaceAt(scene, floorCam, BOX283, floorScreen.x, floorScreen.y + 4, {
+    corner: GUIDE_CROSS_PX,
+  });
+  assert.equal(onFloor.kind, "floor");
+  assert.ok(sameMm283(onFloor.corner, shown), "угол примыкания ловится полом: " + JSON.stringify(onFloor.corner));
+});
+
+test("Alt снимает магнит, а поверхность без углов рядом отвечает как до таска", () => {
+  const { scene } = volumeScene283();
+  const camera = lookAt283({ x: -2750, y: 0, z: 1600 }, CORNER283);
+  const screen = volumeScreenAt(CORNER283, camera, BOX283);
+  const free = volumeSurfaceAt(scene, camera, BOX283, screen.x + 9, screen.y, {
+    corner: GUIDE_CROSS_PX,
+    free: true,
+  });
+  const plain = volumeSurfaceAt(scene, camera, BOX283, screen.x + 9, screen.y);
+  assert.equal(free.corner, null, "Alt — свободно");
+  assert.deepEqual(free.point, plain.point, "и точка ровно под прицелом, как без магнита");
+  // Середина стены: углов рядом нет, и ответ совпадает с прежним до знака.
+  const middle = { x: -4400, y: 0, z: 1200 };
+  const midCam = lookAt283({ x: -2750, y: 0, z: 1600 }, middle);
+  const midScreen = volumeScreenAt(middle, midCam, BOX283);
+  const was = volumeSurfaceAt(scene, midCam, BOX283, midScreen.x, midScreen.y);
+  const now = volumeSurfaceAt(scene, midCam, BOX283, midScreen.x, midScreen.y, { corner: GUIDE_CROSS_PX });
+  assert.equal(now.corner, null);
+  assert.deepEqual(now.point, was.point);
+  assert.equal(now.kind, was.kind);
+  // Негодная поверхность остаётся негодной: решает это вызывающий, и магнит
+  // ответа не меняет.
+  assert.equal(volumeSurfaceHolds("other"), false);
+});
+
+test("подсказка «Объёма» называет магнит — правило таска 213", () => {
+  // Угол тут не плановый кружок с буквой, и сказано это своими словами: иначе
+  // человек ждал бы осевого узла чертежа.
+  assert.ok(strings.measure.hintVolume.includes("угол той поверхности"));
+  assert.ok(strings.measure.hintVolume.includes("кольцом"));
+  assert.ok(strings.measure.hintVolume.includes("Alt"));
+});
+
+test("магнит в объёме не пишет в объект ни знака (G68)", () => {
+  const { box, scene } = volumeScene283();
+  const before = JSON.stringify(box.project);
+  const camera = lookAt283({ x: -2750, y: 0, z: 1600 }, CORNER283);
+  const screen = volumeScreenAt(CORNER283, camera, BOX283);
+  for (const gap of [0, 5, 9, 13, 20]) {
+    volumeSurfaceAt(scene, camera, BOX283, screen.x + gap, screen.y, { corner: GUIDE_CROSS_PX });
+    volumeSurfaceAt(scene, camera, BOX283, screen.x + gap, screen.y, { corner: GUIDE_CROSS_PX, free: true });
+  }
+  assert.equal(JSON.stringify(box.project), before, "магнит — про прицел, в объекте от него ни одного знака");
 });
 
 // ——— магнит угла остальным занятиям плана (таск 282, G417) ——————————————
