@@ -41417,6 +41417,7 @@ baseCuts: ready ? ready.baseCuts || 0 : 0,
 statics: ready ? ready.statics : null,
 base: ready ? ready.base : null,
 pack: ready ? ready.pack : null,
+join: null,
 move: { dx: 0, dy: 0, dz: 0 },
 at: {
 baseMm: Number(item.baseMm) || 0,
@@ -41485,11 +41486,23 @@ baseMm: item.baseMm,
 bottomMm = Math.min(bottomMm, item.baseMm);
 topMm = Math.max(topMm, item.baseMm + item.heightMm);
 }
-const alias = volumeStackRoomAlias(project, floors);
-const under = volumeStackUnder(project, floors);
-volumeStackRoomsJoin(faces, alias, under);
+const key = volumeStackJoinKey(project, floors);
+let link = null;
+const linkOf = () => link || (link = { alias: volumeStackRoomAlias(project, floors), under: volumeStackUnder(project, floors) });
+let again = false;
+for (const part of boxes) {
+if (volumeStackJoinSame(part.join, key)) continue;
+const { alias, under } = linkOf();
+volumeStackRoomsJoin(part.sub.faces, alias, under);
+part.join = key;
+again = true;
+}
+const bases = boxes.map((part) => part.base);
 const order = volumeOrderStack(groups, boxes);
+if (again || boxes.some((part, at) => part.base !== bases[at])) {
+const { alias, under } = linkOf();
 volumeStackRoomsJoin(volumeOrderAll(order, []), alias, under);
+}
 return {
 ...base,
 faces,
@@ -41508,6 +41521,15 @@ boundsMm: stackBox
 : null,
 },
 };
+}
+function volumeStackJoinKey(project, floors) {
+const places = (floors || [])
+.map((item) => [item.schemeId, item.baseMm, item.shiftMm && item.shiftMm.x, item.shiftMm && item.shiftMm.y].join(":"))
+.join(" ");
+return { project, places };
+}
+function volumeStackJoinSame(was, now) {
+return !!was && !!now && was.project === now.project && was.places === now.places;
 }
 function volumeStackRoomAlias(project, floors) {
 const alias = new Map();
