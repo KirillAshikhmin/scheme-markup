@@ -8149,7 +8149,7 @@ hintPlan:
 hintDrawing:
 "Линейка: клик — начало отрезка, второй клик — конец, расстояние в миллиметрах чертежа. Третий клик начинает новый отрезок. Притяжка та же, что при рисовании, и в том же порядке: угол чертежа (кружок с буквой, пойманный показан кольцом), узел сетки, направляющие, ровный угол; Alt — свободно. Esc — убрать линейку.",
 hintVolume:
-"Линейка: клик — начало отрезка, второй клик — конец. Концы ложатся на стену, пол, потолок, дверь, окно и откосы проёма; в воздух и в небо точка не встанет, а прозрачную мебель линейка проходит насквозь и мерит до поверхности за ней. Третий клик начинает новый отрезок. Esc — убрать линейку.",
+"Линейка: клик — начало отрезка, второй клик — конец. Концы ложатся на стену, пол, потолок, дверь, окно и откосы проёма; в воздух и в небо точка не встанет, а прозрачную мебель линейка проходит насквозь и мерит до поверхности за ней. Конец садится в угол той поверхности, на которую смотрит прицел: низ и верх угла стены, стык с полом и потолком, углы проёма — пойманный угол показан кольцом, Alt — свободно. Третий клик начинает новый отрезок. Esc — убрать линейку.",
 volumeParts: "по полу {floor}, по высоте {rise}",
 volumeMissNone: "Мимо дома: конец отрезка ложится на стену, пол, потолок, дверь или окно",
 volumeMissOther: "Это не стена, не пол и не потолок: конец отрезка ложится на стену, пол, потолок, дверь или окно",
@@ -43964,16 +43964,15 @@ const VOLUME_SURFACE_SAME_MM = 0.5;
 function volumeSurfaceGlass(face) {
 return Boolean(face.glass) || face.rgb === VOLUME_GLASS_RGB;
 }
-function volumeSurfaceAt(scene, camera, box, x, y) {
-if (!scene || scene.empty || !Array.isArray(scene.faces) || !camera || !box) return null;
-const ray = volumeRayAt(camera, box, x, y);
+function volumeSurfaceRay(scene, ray, limit = Infinity, any = false) {
 let found = null;
-let near = Infinity;
+let near = limit;
 for (const face of scene.faces) {
 if (face.line) continue;
 if (face.clear && !volumeSurfaceGlass(face)) continue;
 const away = volumeFaceRayAway(face, ray, near + VOLUME_SURFACE_SAME_MM);
 if (away === null) continue;
+if (any) return { face, away };
 if (found && Math.abs(away - near) <= VOLUME_SURFACE_SAME_MM) {
 if (!(face.layer > found.layer)) continue;
 } else if (!(away < near)) {
@@ -43982,14 +43981,45 @@ continue;
 near = away;
 found = face;
 }
-if (!found) return null;
+return found ? { face: found, away: near } : null;
+}
+function volumeSurfaceShown(scene, camera, point) {
+const dx = point.x - camera.at.x;
+const dy = point.y - camera.at.y;
+const dz = point.z - camera.at.z;
+const away = Math.hypot(dx, dy, dz);
+if (!(away > 0)) return true;
+const ray = { at: camera.at, dir: { x: dx / away, y: dy / away, z: dz / away } };
+return volumeSurfaceRay(scene, ray, away - VOLUME_SURFACE_SAME_MM, true) === null;
+}
+function volumeSurfaceCorner(scene, face, camera, box, x, y, limit) {
+if (!scene || !face || !Array.isArray(face.p) || !camera || !box || !(limit > 0)) return null;
+let best = null;
+for (const point of face.p) {
+const screen = volumeScreenAt(point, camera, box);
+if (!screen) continue;
+const gap = Math.hypot(screen.x - x, screen.y - y);
+if (gap <= limit && (!best || gap < best.gap)) best = { gap, point };
+}
+if (!best || !volumeSurfaceShown(scene, camera, best.point)) return null;
+return { x: best.point.x, y: best.point.y, z: best.point.z };
+}
+function volumeSurfaceAt(scene, camera, box, x, y, options = {}) {
+if (!scene || scene.empty || !Array.isArray(scene.faces) || !camera || !box) return null;
+const ray = volumeRayAt(camera, box, x, y);
+const hit = volumeSurfaceRay(scene, ray);
+if (!hit) return null;
+const corner = options.free
+? null
+: volumeSurfaceCorner(scene, hit.face, camera, box, x, y, options.corner);
 return {
-point: {
-x: ray.at.x + ray.dir.x * near,
-y: ray.at.y + ray.dir.y * near,
-z: ray.at.z + ray.dir.z * near,
+point: corner || {
+x: ray.at.x + ray.dir.x * hit.away,
+y: ray.at.y + ray.dir.y * hit.away,
+z: ray.at.z + ray.dir.z * hit.away,
 },
-kind: volumeSurfaceKind(found),
+kind: volumeSurfaceKind(hit.face),
+corner,
 };
 }
 function volumeSurfaceHolds(kind) {
@@ -71084,6 +71114,7 @@ function setScene(state) {
 scene = sceneOf(state) || scene;
 fallSnap = null;
 fallAt = null;
+measureSeenDrop();
 refreshShadow();
 }
 function refreshShadow() {
@@ -71483,10 +71514,49 @@ return measureWanted;
 function measureKey() {
 return measureKeyOf(getState());
 }
+let measureFree = false;
+function measureAlt(on) {
+measureFree = on === true;
+}
+let measureCorner = null;
+function measureCornerSet(corner) {
+const was = measureCorner;
+measureCorner = corner || null;
+if (!was && !measureCorner) return false;
+if (!was || !measureCorner) return true;
+return was.x !== measureCorner.x || was.y !== measureCorner.y || was.z !== measureCorner.z;
+}
+function measureSpotAt(at) {
+if (!at || scene.empty) return null;
+return volumeSurfaceAt(scene, camera(), viewport(), at.x, at.y, {
+corner: GUIDE_CROSS_PX,
+free: measureFree,
+});
+}
+let measureSeen = null;
+function measureSeenDrop() {
+measureSeen = null;
+}
+function measureStamp(at) {
+const spot = camera();
+const box = viewport();
+return [
+at ? at.x : "-",
+at ? at.y : "-",
+spot.at.x,
+spot.at.y,
+spot.at.z,
+spot.yaw,
+spot.pitch,
+box.width,
+box.height,
+measureFree ? 1 : 0,
+].join("|");
+}
 function measurePut(at) {
 const key = measureKey();
 if (!key || !at || scene.empty) return;
-const found = volumeSurfaceAt(scene, camera(), viewport(), at.x, at.y);
+const found = measureSpotAt(at);
 if (!found) {
 notify(strings.measure.volumeMissNone, "info");
 return;
@@ -71495,23 +71565,32 @@ if (!volumeSurfaceHolds(found.kind)) {
 notify(strings.measure.volumeMissOther, "info");
 return;
 }
+measureCornerSet(touching ? null : found.corner);
 measureAdd("volume", key, found.point);
+measureSeenDrop();
 redraw();
 }
 function measureFollow() {
-const key = measureKey();
-if (!key) return;
-const ends = measureEnds("volume", key);
-if (!ends || !ends.live) return;
 const at = aimPoint();
-const found = at && !scene.empty ? volumeSurfaceAt(scene, camera(), viewport(), at.x, at.y) : null;
-const spot = found && volumeSurfaceHolds(found.kind) ? found.point : null;
-if (measureAim("volume", key, spot)) redraw();
+const stamp = measureStamp(at);
+if (stamp === measureSeen) return;
+measureSeen = stamp;
+const found = measureSpotAt(at);
+const holds = Boolean(found && volumeSurfaceHolds(found.kind));
+let want = measureCornerSet(holds ? found.corner : null);
+const key = measureKey();
+const ends = key ? measureEnds("volume", key) : null;
+if (ends && ends.live && measureAim("volume", key, holds ? found.point : null)) want = true;
+if (want) redraw();
 }
 function paintMeasure(box) {
+const spot = camera();
+if (measureCorner) {
+const ring = volumeScreenAt(measureCorner, spot, box);
+if (ring) drawSnapCorner(ctx, ring, MEASURE_COLOR);
+}
 const ends = measureEnds("volume", measureKey());
 if (!ends) return;
-const spot = camera();
 const from = volumeScreenAt(ends.from, spot, box);
 const to = ends.to ? volumeScreenAt(ends.to, spot, box) : null;
 if (!from) return;
@@ -72119,6 +72198,7 @@ homeGestureStart(event);
 }
 function onPointerMove(event) {
 if (event.pointerType === "touch" && touchMove(event)) return;
+measureAlt(event.altKey === true);
 if (locked) {
 lookBy(event.movementX || 0, event.movementY || 0);
 return;
@@ -72590,6 +72670,8 @@ if (typeof document.exitPointerLock === "function") document.exitPointerLock();
 return;
 }
 if (volumeAltKey(event)) {
+measureAlt(true);
+if (measuring()) syncAim();
 if (locked && typeof document.exitPointerLock === "function") document.exitPointerLock();
 return;
 }
@@ -72647,6 +72729,11 @@ if (!keys.has(event.code)) keys.set(event.code, now());
 walkSchedule();
 }
 function onKeyUp(event) {
+if (volumeAltKey(event)) {
+measureAlt(false);
+if (measuring()) syncAim();
+return;
+}
 if (event.code === VOLUME_DOOR_KEY) {
 homeRelease();
 return;
@@ -72670,6 +72757,7 @@ keyStop(null);
 homeRelease(true);
 crouchStop();
 riseStop();
+measureAlt(false);
 }
 function onResize() {
 if (closed) return;
@@ -72877,6 +72965,8 @@ homeEnsure();
 if ("selectedMarkIds" in changed || "linksShown" in changed) syncSelection();
 if ("measuring" in changed) {
 measureWanted = state.measuring === true;
+if (!measureWanted) measureCornerSet(null);
+measureSeenDrop();
 syncHint();
 redraw();
 }

@@ -418,6 +418,7 @@ import {
   volumePickAt,
   volumeSightAt,
   volumeSurfaceAt,
+  volumeSurfaceCorner,
   volumeSurfaceHolds,
   volumeSurfaceKind,
 } from "./volume/pick.js";
@@ -817,6 +818,7 @@ export {
   volumeSunSpotFaces,
   volumeSunSpotRgb,
   volumeSurfaceAt,
+  volumeSurfaceCorner,
   volumeSurfaceHolds,
   volumeSurfaceKind,
   volumeTintCss,
