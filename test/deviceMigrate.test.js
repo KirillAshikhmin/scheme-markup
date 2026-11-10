@@ -77,6 +77,41 @@ test("выключатель без реле: «Выключатель» на к
   assert.equal(migrateDevices(after).project, after, "второй проход снова переводит");
 });
 
+// Отвязку клавиши переводом спрашивают **у миграции**, а не у фикстуры.
+//
+// В проверке выше у В2 отвязка уже записана в объекте (`device.decoupled`), и
+// `services[1].decoupled === true` там верно и со сломанным переводом: ответ
+// даёт запись, а не `migrateKeyUses`. Поэтому здесь запись нарочно пустая —
+// только вид «без реле», — и отвязку обязан поставить сам перевод: привязанная
+// кнопка нажатий не шлёт (G11), и сценарий, стоящий на её нажатии, замолчал бы.
+test("перевод сам отвязывает клавишу, на нажатии которой стоит сценарий, и только её", () => {
+  const box = simHouse();
+  const В2 = box.marks["В2"];
+  // Объект прежней сборки без ответа про отвязку: вид «без реле» и ничего больше.
+  const bare = {
+    ...box.project,
+    marks: box.project.marks.map((mark) => (mark.id === В2 ? { ...mark, device: { kind: "switch" } } : mark)),
+  };
+  const profile = markDeviceOf(bare, В2);
+  assert.equal(profile.kind, "switch", "пример не тот: вид уже не «без реле»");
+  assert.deepEqual(profile.decoupled, [], "пример не тот: отвязка в объекте уже записана");
+
+  // Сценарий стоит на нажатии клавиши — её и обязан отвязать перевод.
+  const withScenario = blocks(bare, "По нажатию", [
+    when([cond(ref(В2, "ProgrammableSwitchEvent", 0), "eq", "SINGLE_PRESS", { trigger: true })], [
+      act(box.marks["С3"], 0, [{ char: "On", verb: "invert" }]),
+    ]),
+  ]).project;
+  const moved = migrateDevices(withScenario);
+  const keys = markDeviceOf(moved.project, В2).services.filter((service) => service.type === "StatelessProgrammableSwitch");
+  assert.deepEqual(keys.map((service) => service.decoupled), [true], "клавиша со сценарием на нажатие осталась привязанной и замолчала бы");
+
+  // А без сценария отвязка не выдумывается: это ответ человека, а не умолчание.
+  const alone = migrateDevices(bare);
+  const quiet = markDeviceOf(alone.project, В2).services.filter((service) => service.type === "StatelessProgrammableSwitch");
+  assert.deepEqual(quiet.map((service) => service.decoupled), [false], "перевод отвязал клавишу, которой никто не пользуется");
+});
+
 test("справочник: тип «без реле» переводится и без меток, вид «без реле» в окне аксессуара не выбрать", () => {
   const box = simHouse();
   const typeId = box.project.marks.find((mark) => mark.id === box.marks["В1"]).typeId;
@@ -174,6 +209,46 @@ test("кондиционер со своими сервисами: термос�
   // Нагреватель, добавленный руками рядом с термостатом, — решение человека.
   const both = setMarkDevice(moved.project, К1, { services: [...services.map(({ type, chars }) => ({ type, chars })), heater] }).project;
   assert.equal(migrateDevices(both).project, both, "перевод тронул нагреватель, добавленный после него");
+});
+
+// Кондиционер **без своей записи** переводить нечего: вид выводится по коду
+// типа и выводится заново при каждом чтении, то есть уже новый. Адреса в
+// опциях логики такому не переселяют нарочно — переселение случилось бы на
+// каждом открытии, и адрес уезжал бы всё дальше.
+test("кондиционер без своей записи: перевод не трогает ни объект, ни адрес в опциях логики", () => {
+  const box = simHouse();
+  const К1 = box.marks["К1"];
+  assert.equal(markDeviceOf(box.project, К1).derived, true, "пример не тот: у метки или типа есть своя запись");
+  // В фикстуре есть и выключатель без реле — его запись перевод правит, и с ней
+  // «объект тот же» было бы не о кондиционере. Убираем, остаётся один случай.
+  const plain = {
+    ...box.project,
+    marks: box.project.marks.map((mark) => {
+      if (mark.id !== box.marks["В2"]) return mark;
+      const { device: dropped, ...rest } = mark;
+      return rest;
+    }),
+  };
+  const logic = addScenario(plain, { kind: "logic", name: "Датчик", source: "info = {name: 'Датчик'};\nfunction trigger(){}" });
+  const aid = idNumberOf(К1);
+  const old = deviceIdsOf(MIGRATE_CONDITIONER_LEGACY)[0];
+  // Адрес выбран человеком, когда сервисом был прежний «Нагреватель-охладитель».
+  const address = aid + "." + old.sid + "." + old.cids[1];
+  const project = addLogicBinding(logic.project, {
+    scenarioId: logic.scenario.id,
+    markId: box.marks["С1"],
+    service: 0,
+    options: { sensor: address },
+  }).project;
+
+  const moved = migrateDevices(project);
+  assert.equal(moved.changed, false);
+  assert.equal(moved.project, project, "перевод тронул объект, которому нечего переводить");
+  assert.equal(
+    moved.project.logicBindings[0].options.sensor,
+    address,
+    "адрес сдвинут у профиля, который перевод не правит: следующее открытие сдвинуло бы его ещё раз",
+  );
 });
 
 test("прежний вид кондиционера описан тем составом, что выводился до перевода", () => {

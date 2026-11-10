@@ -18,6 +18,7 @@ import {
   addEquipment,
   addEquipmentType,
   addPlacement,
+  addSchemeObject,
   acceptProblem,
   deleteCategory,
   deleteEquipment,
@@ -25,8 +26,11 @@ import {
   deleteScheme,
   deleteType,
   MARK_NUMBER_MAX,
+  findMark,
   markDimensions,
+  markObjectId,
   setMarkDimensions,
+  setMarkObject,
   problemAccepted,
   repeatedNumbers,
   setMarkNumber,
@@ -327,6 +331,123 @@ test("столкнулись метка с меткой и помещение с
   // Имена целы у обеих сторон — переезд номера сущность не подменяет.
   const names = merged.project.rooms.map((room) => room.name);
   assert.ok(names.includes("Наша комната") && names.includes("Их комната"), "комната потеряла имя");
+});
+
+// Свободный номер на переезд берётся у счётчика, **сведённого по обеим
+// сторонам**. Здесь это и проверяется, потому что иначе проверять нечем:
+// у двух копий, которые обе поставили по одной метке, счётчики равны, и
+// переезд попадает на свободный номер даже со своим счётчиком. Разъехаться они
+// обязаны: напарник поставил ещё две метки, его счётчик ушёл вперёд, и номер,
+// свободный «у нас», у него занят живой меткой. Возьми слияние наш счётчик — и
+// переезд встал бы поверх его метки, то есть одна из двух пропала бы молча.
+test("переезд номера берёт счётчик, сведённый по обеим сторонам, а не свой", () => {
+  const { project: base, schemeId } = ancestor();
+  const typeId = base.markTypes[0].id;
+
+  // У нас одна новая метка; у них — своя под тем же номером и ещё две сверху.
+  const mine = addMark(base, { schemeId, typeId, points: [{ x: 0.1, y: 0.1 }] });
+  let theirsSource = copyOf(base);
+  const alien = addMark(theirsSource, { schemeId, typeId, points: [{ x: 0.9, y: 0.9 }] });
+  theirsSource = alien.project;
+  for (let i = 0; i < 2; i += 1) {
+    theirsSource = addMark(theirsSource, { schemeId, typeId, points: [{ x: 0.5, y: 0.1 + i / 10 }] }).project;
+  }
+  assert.equal(mine.mark.id, alien.mark.id, "пример не тот: номера разошлись сами");
+  const taken = new Set(theirsSource.marks.map((mark) => mark.id));
+  assert.equal(taken.size, 5, "пример не тот: у напарника не пять меток");
+
+  // Они правили позже — значит переезжает наша метка, и её новый номер обязан
+  // быть свободным **у обоих**.
+  const ours = stamp(mine.project, "2026-09-17T10:00:00.000Z");
+  const theirs = stamp(theirsSource, "2026-09-17T10:05:00.000Z");
+  const merged = mergeProjects(ours, theirs, base);
+
+  assert.equal(merged.project.marks.length, 6, "метка пропала, встав на номер, занятый у напарника");
+  const ids = merged.project.marks.map((mark) => mark.id);
+  assert.equal(new Set(ids).size, ids.length, "в итоге две метки с одним номером");
+  assert.equal(merged.reissued.length, 1);
+  assert.equal(merged.reissued[0].side, "ours");
+  assert.equal(taken.has(merged.reissued[0].now), false, "переезд встал на номер, занятый у напарника");
+  const places = merged.project.marks.map((mark) => mark.points[0].x + ":" + mark.points[0].y);
+  assert.ok(places.includes("0.1:0.1"), "наша метка пропала");
+  assert.ok(places.includes("0.9:0.9"), "их метка пропала");
+});
+
+// Вещь чертежа одна на связь (R01), и держится это **здесь**: у двух
+// участников с одной вещью связались разные метки, и в слитом объекте у прибора
+// появилось бы две строки в списке — то самое двоение, от которого пара и
+// заводится. Снятая связь при этом **убирает поле**, а не обнуляет его (G68):
+// метка без связи и метка со снятой связью обязаны читаться одинаково.
+test("двое связались с одной вещью — связь остаётся у одной метки, у второй поля нет вовсе", () => {
+  const { project: start, schemeId } = ancestor();
+  const thing = addSchemeObject(start, {
+    schemeId,
+    catalogKey: "tv",
+    shape: "rect",
+    atMm: { x: 1000, y: 500 },
+    widthMm: 1200,
+    depthMm: 80,
+    heightMm: 700,
+    heightAboveFloorMm: 1500,
+  });
+  const base = thing.project;
+  const objectId = thing.schemeObject.id;
+  const [first, second] = base.marks.map((mark) => mark.id);
+
+  const ours = stamp(setMarkObject(base, first, objectId).project, "2026-09-17T10:00:00.000Z");
+  const theirs = stamp(setMarkObject(copyOf(base), second, objectId).project, "2026-09-17T10:05:00.000Z");
+
+  const merged = mergeProjects(ours, theirs, base);
+  const linked = merged.project.marks.filter((mark) => markObjectId(mark) !== null);
+  assert.equal(linked.length, 1, "у вещи две метки: в списках и на развёртке прибор задвоится");
+  assert.equal(markObjectId(linked[0]), objectId);
+  // Связь сохраняет первая по массиву — по порядку постановки меток.
+  assert.equal(linked[0].id, first, "связь сохранила не та метка");
+  const loser = findMark(merged.project, second);
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(loser, "objectId"),
+    false,
+    "слияние обнулило поле связи вместо того, чтобы убрать",
+  );
+});
+
+// На обозначении остаётся тот, кто стоял на нём в общем предке: его номер и
+// написан на схеме, в таблице и в голове у монтажника, а переезжает новая
+// метка.
+//
+// Фикстура нарочно в десять меток. При равенстве спор решает меньший `id`
+// метки, а сравниваются они **строками**: «10» меньше «2». Поэтому на объекте
+// из двух-трёх меток правило «кто из общего предка» не проверяется ничем —
+// порядок по `id` там случайно совпадает с ответом, и порча проходит мимо
+// прогона. Здесь порядок по `id` ответу противоположен.
+test("на обозначении остаётся метка из общего предка, а не та, у которой `id` меньше по строке", () => {
+  let project = createProject();
+  const scheme = addScheme(project, { name: "1 этаж", imageId: "plan-1", width: 1000, height: 800 });
+  project = scheme.project;
+  const schemeId = scheme.scheme.id;
+  const typeId = project.markTypes[0].id;
+  for (let i = 0; i < 9; i += 1) {
+    project = addMark(project, { schemeId, typeId, points: [{ x: 0.1 + i / 20, y: 0.3 }] }).project;
+  }
+  const base = project;
+  const oldId = base.marks[1].id;
+  assert.equal(oldId, "2", "пример не тот: номера сущностей другие");
+
+  // У нас десятая метка получила следующее обозначение; у них то же
+  // обозначение поставили руками метке, которая была в общем предке.
+  const added = addMark(base, { schemeId, typeId, points: [{ x: 0.8, y: 0.8 }] });
+  const newId = added.mark.id;
+  assert.equal(newId, "10", "пример не тот: номер новой метки другой");
+  assert.ok(newId < oldId, "пример не тот: по строке `id` новой метки уже не меньше");
+  const ours = stamp(added.project, "2026-09-17T10:00:00.000Z");
+  const theirs = stamp(setMarkNumber(copyOf(base), oldId, added.mark.number).project, "2026-09-17T10:05:00.000Z");
+
+  const merged = mergeProjects(ours, theirs, base);
+  const numbers = numbersById(merged.project);
+  assert.equal(numbers[oldId], "Т" + added.mark.number, "метке из общего предка переписали номер");
+  assert.notEqual(numbers[newId], numbers[oldId], "номера остались одинаковыми");
+  assert.equal(merged.renumbered.length, 1);
+  assert.equal(merged.renumbered[0].markId, newId, "переехала не та метка");
 });
 
 test("чужой файл не сливается, а свой узнаётся", () => {

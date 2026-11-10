@@ -69,6 +69,7 @@ import {
   setPlanScale,
   setRoomWallHeight,
   setSchemeWallHeight,
+  updateMark,
   updateOpening,
   updateSchemeObject,
   updateWall,
@@ -1050,6 +1051,59 @@ test("схему удалили — её чертёж уходит с ней, а
   assert.equal(markWall(mark), null);
   assert.equal(Object.prototype.hasOwnProperty.call(mark, "wallId"), false, "слияние обнулило поле вместо того, чтобы убрать");
   assert.equal(Object.prototype.hasOwnProperty.call(mark, "wallAtMm"), false);
+});
+
+// Тот же ответ, но спрашивают его **у слияния**, а не у `deleteWall`.
+//
+// В проверке выше привязку снимает модель: стену удаляли мы, и `deleteWall` у
+// нас же сняла её с метки — к слиянию метка приходит уже чистой, и его
+// собственное правило не работает ни разу. Чтобы спросить именно слияние, нужна
+// метка, которая доехала до него **со ссылкой на стену, которой в слитом
+// объекте нет**: мы метку правили (привязка цела), напарник ту же стену удалил,
+// спор о метке выигрываем мы, а стену её чистое удаление уносит.
+test("слияние само снимает привязку к стене, которой не стало, и поля при этом убирает", () => {
+  const { project: base, schemeId, wallIds } = sharedDrawing();
+  const added = addMark(base, { schemeId, typeId: base.markTypes[0].id, points: [{ x: 0.3, y: 0.2 }] });
+  const markId = added.mark.id;
+  const prepared = setMarkWall(added.project, markId, { wallId: wallIds[0], atMm: 700 }).project;
+
+  const ours = stamped(updateMark(prepared, markId, { location: "у двери" }).project, "2026-10-09T10:05:00.000Z");
+  const theirs = stamped(deleteWall(copyOf(prepared), wallIds[0]).project, "2026-10-09T10:00:00.000Z");
+  const merged = mergeProjects(ours, theirs, prepared);
+
+  assert.equal(findWall(merged.project, wallIds[0]), null, "стена вернулась — проверять нечего");
+  const mark = findMark(merged.project, markId);
+  assert.equal(mark.location, "у двери", "спор о метке выиграла не наша сторона — проверять нечего");
+  assert.equal(markWall(mark), null, "метка осталась привязанной к стене, которой нет");
+  assert.equal(Object.prototype.hasOwnProperty.call(mark, "wallId"), false, "слияние обнулило поле вместо того, чтобы убрать");
+  assert.equal(Object.prototype.hasOwnProperty.call(mark, "wallAtMm"), false);
+});
+
+// Вещь встроенного каталога (таск 154) имени в объекте не несёт — оно лежит в
+// сборке, и справочнику видов она не ссылка. Спроси слияние с неё `kindId` — и
+// каждая вещь, поставленная напарником после каталога, вылетала бы при первом
+// же обмене файлами, то есть работа терялась бы молча.
+test("вещь встроенного каталога переживает слияние: вида в справочнике у неё нет", () => {
+  const { project: base, schemeId } = sharedDrawing();
+  const added = addSchemeObject(copyOf(base), {
+    schemeId,
+    catalogKey: "tv",
+    shape: "rect",
+    atMm: { x: 1000, y: 100 },
+    widthMm: 1200,
+    depthMm: 80,
+    heightMm: 700,
+    heightAboveFloorMm: 1500,
+  });
+  assert.equal(added.schemeObject.kindId, undefined, "пример не тот: у вещи каталога появился вид");
+  const ours = stamped(base, "2026-10-09T10:00:00.000Z");
+  const theirs = stamped(added.project, "2026-10-09T10:05:00.000Z");
+
+  const merged = mergeProjects(ours, theirs, base);
+  const live = merged.project.schemeObjects.filter((object) => object.catalogKey === "tv");
+  assert.equal(live.length, 1, "вещь каталога выброшена как объект без вида");
+  assert.equal(live[0].id, added.schemeObject.id);
+  assert.deepEqual(merged.conflicts, [], "вещь каталога сочли висячей ссылкой");
 });
 
 // ——— чертёж идёт за исправленным масштабом (таск 134, G186) ——————————————
