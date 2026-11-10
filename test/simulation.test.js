@@ -39,6 +39,7 @@ import {
   simRunning,
   simScenarioRun,
   simStart,
+  simStartedBy,
   simStep,
   simStop,
   simSync,
@@ -1008,7 +1009,27 @@ test("сторож не гасит живой поток, пока стояла 
 // ——— двери модуля ——————————————————————————————————————————————————————
 
 test("двери sim* — одна имитация на сеанс", async () => {
-  for (const fn of [simStart, simStop, simReset, simRunning, simAct, simPress, simValue, simLive, simWatch, simJournal, simJournalClear, simSync, simNextEvent, simStep, simPresence, simDoor, simScenarioRun, simOptionForms]) {
+  for (const fn of [
+    simStart,
+    simStop,
+    simReset,
+    simRunning,
+    simStartedBy,
+    simAct,
+    simPress,
+    simValue,
+    simLive,
+    simWatch,
+    simJournal,
+    simJournalClear,
+    simSync,
+    simNextEvent,
+    simStep,
+    simPresence,
+    simDoor,
+    simScenarioRun,
+    simOptionForms,
+  ]) {
     assert.equal(typeof fn, "function");
   }
   const box = pressHouse();
@@ -1019,6 +1040,9 @@ test("двери sim* — одна имитация на сеанс", async () =
     assert.equal(simSync(box.project), false, "тот же объект — синхронизировать нечего");
     assert.equal(simStart(), true);
     assert.equal(simRunning(), true);
+    // Запуск без имени хозяина — это рука (таск 288): дом, о котором не
+    // сказано, кто его поднял, сам не гаснет.
+    assert.equal(simStartedBy(), "hand");
     await settle();
     simPress(box.marks["В2"], 0, "single");
     simAct({ kind: "toggle", markId: box.marks["С1"] });

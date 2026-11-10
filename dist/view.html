@@ -45371,6 +45371,7 @@ const mirror = new Map();
 const pressed = new Map();
 let revision = 0;
 let running = false;
+let raisedBy = null;
 let startPosted = false;
 let loading = null;
 let scenarios = [];
@@ -45850,9 +45851,10 @@ if (rooms) post(rooms);
 post({ type: "start", values: mirrorValues() });
 for (const message of held.splice(0)) post(message);
 }
-function start() {
+function start(by) {
 if (closed || !project || running) return false;
 running = true;
+raisedBy = by === "mode" ? "mode" : "hand";
 if (loading === null) postStart();
 markDirty();
 notify({});
@@ -45860,6 +45862,7 @@ return true;
 }
 function stopNow() {
 running = false;
+raisedBy = null;
 memory = null;
 held.length = 0;
 if (startPosted) post({ type: "stop" });
@@ -45986,6 +45989,7 @@ start,
 stop,
 reset,
 running: () => running,
+startedBy: () => raisedBy,
 act,
 press: (markId, service, press) => act({ kind: "press", markId, service, press }),
 command: (said) => act({ kind: "command", text: typeof said === "string" ? said : String(said ?? ""), cause: "web" }),
@@ -46040,11 +46044,14 @@ function simSessionOf() {
 if (!simSession) simSession = createSimulation();
 return simSession;
 }
-function simStart() {
-return simSessionOf().start();
+function simStart(by) {
+return simSessionOf().start(by);
 }
 function simStop() {
 return simSessionOf().stop();
+}
+function simStartedBy() {
+return simSessionOf().startedBy();
 }
 function simReset() {
 return simSessionOf().reset();
@@ -67152,7 +67159,7 @@ function simBarMount(host, api) {
 host.classList.add("sim-bar");
 const start = uiButton("", {
 class: "ui-btn sim-bar__start",
-on: { click: () => (simRunning() ? (appKind() === "view" ? false : simStop()) : simStart()) },
+on: { click: () => (simRunning() ? (appKind() === "view" ? false : simStop()) : simStart("hand")) },
 });
 const status = uiEl("span", { class: "sim-bar__status" });
 const warn = uiEl("span", { class: "sim-bar__warn", text: strings.sim.bar.noWorker });
@@ -71907,13 +71914,15 @@ homeRefresh();
 }
 function homeEnsure() {
 if (closed || !homeReady) return;
-const start = volumeHomeStarts({
+const at = {
 simulation: volumeParamsRead().simulation === true,
 screen: screenMode(),
 kind: appKind(),
 running: simRunning(),
-});
-if (start) simStart();
+raisedBy: simStartedBy(),
+};
+if (volumeHomeStarts(at)) simStart("mode");
+else if (volumeHomeStops(at)) simStop();
 homeSync();
 }
 function placeCard() {
@@ -73147,6 +73156,11 @@ function volumeHomeStarts({ simulation, screen, kind, running }) {
 if (simulation !== true || running === true) return false;
 return kind === "view" || screen === "volume";
 }
+function volumeHomeStops({ simulation, screen, kind, running, raisedBy }) {
+if (running !== true || raisedBy !== "mode") return false;
+if (kind === "view") return false;
+return !(simulation === true && screen === "volume");
+}
 function volumeAllowed(state) {
 return appAllows("viewVolume", state);
 }
@@ -73173,18 +73187,20 @@ volumeSurface = createVolume({ api, hosts });
 }
 placeholder();
 };
-const homeStart = () => {
+const homeEnsure = () => {
 if (volumeSurface || !getState().project) return;
 Promise.resolve(volumeParamsReady())
 .then(() => {
 if (volumeSurface || !getState().project) return;
-const start = volumeHomeStarts({
+const at = {
 simulation: volumeParamsRead().simulation === true,
 screen: screenMode(),
 kind: appKind(),
 running: simRunning(),
-});
-if (start) simStart();
+raisedBy: simStartedBy(),
+};
+if (volumeHomeStarts(at)) simStart("mode");
+else if (volumeHomeStops(at)) simStop();
 })
 .catch(() => {});
 };
@@ -73195,12 +73211,12 @@ volumeScreenNow = state.screen;
 }
 if ("screen" in changed || "schemeId" in changed || "project" in changed) {
 build();
-homeStart();
+homeEnsure();
 }
 });
 volumeScreenNow = getState().screen;
 build();
-homeStart();
+homeEnsure();
 }
 registerPanel(PANEL_IDS.screenVolume, mountVolumeScreen);
 

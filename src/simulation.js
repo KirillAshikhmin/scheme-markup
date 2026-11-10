@@ -305,6 +305,13 @@ export function createSimulation(options = {}) {
   const pressed = new Map();
   let revision = 0;
   let running = false;
+  // Кто поднял дом (таск 288): `"hand"` — человек кнопкой полосы, `"mode"` —
+  // режим «Объёма» по отметке, `null` — дом стоит. Спрашивают это один раз и в
+  // одном месте — правило гашения `volumeHomeStops`: что завёл режим, то режим
+  // и гасит, а поднятое рукой гасит только рука. Состояние сеанса (ADR 015): в
+  // объект не идёт ничем, в память браузера — тоже (там лежит состояние дома, а
+  // не чей он).
+  let raisedBy = null;
   let startPosted = false;
   let loading = null;
   let scenarios = [];
@@ -888,9 +895,11 @@ export function createSimulation(options = {}) {
     for (const message of held.splice(0)) post(message);
   }
 
-  function start() {
+  function start(by) {
     if (closed || !project || running) return false;
     running = true;
+    // Не сказано, кто поднял, — значит рука: молчание не повод гасить дом сам.
+    raisedBy = by === "mode" ? "mode" : "hand";
     if (loading === null) postStart();
     markDirty();
     notify({});
@@ -899,6 +908,8 @@ export function createSimulation(options = {}) {
 
   function stopNow() {
     running = false;
+    // Дом стоит — хозяина у него нет: следующий запуск назовёт своего сам.
+    raisedBy = null;
     memory = null;
     held.length = 0;
     if (startPosted) post({ type: "stop" });
@@ -1045,6 +1056,7 @@ export function createSimulation(options = {}) {
     stop,
     reset,
     running: () => running,
+    startedBy: () => raisedBy,
     act,
     press: (markId, service, press) => act({ kind: "press", markId, service, press }),
     command: (said) => act({ kind: "command", text: typeof said === "string" ? said : String(said ?? ""), cause: "web" }),
@@ -1109,14 +1121,29 @@ function simSessionOf() {
   return simSession;
 }
 
-/** Запустить дом (история 2.3): поток получает зеркало целиком. */
-export function simStart() {
-  return simSessionOf().start();
+/**
+ * Запустить дом (история 2.3): поток получает зеркало целиком.
+ *
+ * `by` — **кто поднимает** (таск 288): `"mode"` — режим «Объёма» по отметке
+ * (такой дом режим сам и погасит, `volumeHomeStops`), что угодно другое, в том
+ * числе пропущенное, — рука человека, и тогда дом не гаснет сам.
+ */
+export function simStart(by) {
+  return simSessionOf().start(by);
 }
 
 /** Остановить дом: таймеры и подписки сняты, значения остались. */
 export function simStop() {
   return simSessionOf().stop();
+}
+
+/**
+ * Кто поднял идущий дом: `"hand"` (человек кнопкой полосы), `"mode"` (режим
+ * «Объёма») или `null` — дом стоит (таск 288). Это **состояние сеанса**, и
+ * спрашивает его одно правило — `volumeHomeStops`.
+ */
+export function simStartedBy() {
+  return simSessionOf().startedBy();
 }
 
 /** «Сбросить дом» (история 2.15). */
