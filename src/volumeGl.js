@@ -36,6 +36,7 @@ import {
   VOLUME_NIGHT_SHARE,
   volumeMeshArtLift,
   volumeMeshBuild,
+  volumeMeshGlowStrips,
   volumeMeshLampPick,
   volumeMeshLinear,
   volumeMeshThingShift,
@@ -122,6 +123,8 @@ export function volumeGlMake(THREE) {
     over: new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3, toneMapped: false }),
     overClear: new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, transparent: true, depthWrite: false, toneMapped: false }),
     overLine: new THREE.LineBasicMaterial({ vertexColors: true, toneMapped: false }),
+    // Полоса свечения ленты: складывается с тем, что под ней.
+    strip: new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }),
     // Земля плиты — только тень: сама земля нарисована фоном, и свой цвет у
     // плиты дал бы светлый прямоугольник вокруг дома.
     land: new THREE.ShadowMaterial({ opacity: 0.32 }),
@@ -158,13 +161,16 @@ export function volumeGlMake(THREE) {
   led.renderOrder = 1;
   const glow = new THREE.Mesh(empty(), mats.glow);
   glow.renderOrder = 1;
+  const strips = new THREE.Mesh(empty(), mats.strip);
+  strips.renderOrder = 2;
+  let stripKey = "";
   const overSolid = new THREE.Mesh(empty(), mats.over);
   overSolid.renderOrder = 3;
   const overClear = new THREE.Mesh(empty(), mats.overClear);
   overClear.renderOrder = 4;
   const overLines = new THREE.LineSegments(empty(), mats.overLine);
   overLines.renderOrder = 5;
-  world.add(solid, fixtures, land, glass, lines, led, glow, overSolid, overClear, overLines);
+  world.add(solid, fixtures, land, strips, glass, lines, led, glow, overSolid, overClear, overLines);
 
   const hemi = new THREE.HemisphereLight(0xdfe9f5, 0x8b8577, 1);
   const sun = new THREE.DirectionalLight(0xfff4d6, 0);
@@ -351,6 +357,19 @@ export function volumeGlMake(THREE) {
 
   function lampsPlace(list, eye) {
     const pick = volumeMeshLampPick(list || [], eye, { spots: VOLUME_GL_SPOTS, points: VOLUME_GL_POINTS });
+    // Полосы лент пересобираются, когда меняется набор горящих кусков.
+    let ribbons = "";
+    for (const item of list || []) if (item.line) ribbons += item.line + ":" + Math.round(item.x) + "," + Math.round(item.y) + "," + Math.round(item.z) + "," + Math.round(item.power * 20) + ";";
+    if (ribbons !== stripKey) {
+      stripKey = ribbons;
+      const built = ribbons ? volumeMeshGlowStrips(list) : null;
+      if (built && built.pos.length > 0) {
+        const next = new THREE.BufferGeometry();
+        next.setAttribute("position", new THREE.BufferAttribute(built.pos, 3));
+        next.setAttribute("color", new THREE.BufferAttribute(built.col, 4));
+        swap(strips, next);
+      } else swap(strips, empty());
+    }
     for (let at = 0; at < VOLUME_GL_SPOTS; at += 1) {
       const node = spots[at];
       const item = pick.spots[at];
@@ -450,7 +469,7 @@ export function volumeGlMake(THREE) {
   }
 
   function drop() {
-    for (const node of [solid, fixtures, land, glass, lines, led, glow, overSolid, overClear, overLines]) node.geometry.dispose();
+    for (const node of [solid, fixtures, land, strips, glass, lines, led, glow, overSolid, overClear, overLines]) node.geometry.dispose();
     for (const name of Object.keys(mats)) mats[name].dispose();
     renderer.dispose();
     sceneWas = null;

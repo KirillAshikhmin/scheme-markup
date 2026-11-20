@@ -6742,7 +6742,7 @@ display: none;
     var label = document.getElementById("splash-step");
     var canvas = document.getElementById("splash-model");
     var STEPS = ["Расставляем розетки…","Проектируем щит…","Настраиваем сценарии…","Подбираем оборудование…","Чертим стены…","Развешиваем люстры…","Тянем кабель…","Маркируем линии…","Считаем длину ленты…","Калибруем масштаб…","Проверяем автоматы…","Вешаем шторы на карнизы…","Ищем, где спрятать кондиционер…","Учим выключатели проходить…","Уговариваем датчик движения не реагировать на кота…","Объясняем люстре, что она не главная…","Прячем провода за плинтус…","Ищем фазу. Нашли. Больше не ищем…","Считаем розетки. Опять не хватает…","Мирим тёплый пол с ковром…","Договариваемся с роботом-пылесосом о маршруте…","Убеждаем щит, что места в нём достаточно…","Учим шторы просыпаться вовремя…","Проверяем, что лампочка действительно горит…","Напоминаем термостату, что зима кончилась…","Вспоминаем, от чего этот автомат…"];
-    var PAGE_BYTES = 3220347;
+    var PAGE_BYTES = 3222948;
     var calm = false;
     try {
     calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -45770,7 +45770,9 @@ const item = live ? live.get(markId) : null;
 const rgb = (light.colors && light.colors.get(markId)) || VOLUME_LAMP_LIGHT_RGB;
 const place = volumeMarkPlace(scene, markId);
 const chandelier = Boolean(place && place.view && place.view.name === "chandelier");
-for (const source of volumeLampSourcesOf(scene, markId, item ? item.roomId : undefined)) {
+const sources = volumeLampSourcesOf(scene, markId, item ? item.roomId : undefined);
+const line = sources.length >= 3 ? String(markId) : null;
+for (const source of sources) {
 if (!source || !source.at || !(source.power > 0)) continue;
 const wall = source.wall || null;
 const wash = Boolean(wall) && Number(source.beam) < 1;
@@ -45780,6 +45782,7 @@ x: source.at.x + (wall ? wall.x * off : 0),
 y: source.at.y + (wall ? wall.y * off : 0),
 z: source.at.z,
 ...(wall ? { wall: true } : {}),
+...(line ? { line } : {}),
 ...(wash ? { aim: { x: source.at.x - wall.x * 20, y: source.at.y - wall.y * 20, z: source.at.z - VOLUME_MESH_WASH_DROP_MM } } : {}),
 power: source.power * strength,
 down: wash || Boolean(source.dir && source.dir.z < 0) && !chandelier && !(ceilingMm > 0 && source.at.z < ceilingMm - VOLUME_MESH_HANG_MM),
@@ -45816,7 +45819,8 @@ near.hang = near.hang || lamp.hang;
 return out;
 }
 function volumeMeshLampPick(lamps, eye, limits = { spots: 8, points: 3 }) {
-const joined = volumeMeshLampJoin(lamps);
+const ribbons = lamps.filter((item) => item.line);
+const joined = volumeMeshLampJoin(lamps.filter((item) => !item.line));
 const near = (down) =>
 joined
 .filter((item) => item.down === down)
@@ -45828,8 +45832,8 @@ const points = near(false).slice(0, limits.points);
 let fx = 0;
 let fy = 0;
 let power = 0;
-const lead = spots[0] && points[0] ? ((spots[0].x - eye.x) ** 2 + (spots[0].y - eye.y) ** 2 <= (points[0].x - eye.x) ** 2 + (points[0].y - eye.y) ** 2 ? spots[0] : points[0]) : spots[0] || points[0] || null;
-for (const item of [...spots, ...points]) {
+const lead = spots[0] && points[0] ? ((spots[0].x - eye.x) ** 2 + (spots[0].y - eye.y) ** 2 <= (points[0].x - eye.x) ** 2 + (points[0].y - eye.y) ** 2 ? spots[0] : points[0]) : spots[0] || points[0] || ribbons.slice().sort((one, two) => (one.x - eye.x) ** 2 + (one.y - eye.y) ** 2 - ((two.x - eye.x) ** 2 + (two.y - eye.y) ** 2))[0] || null;
+for (const item of [...spots, ...points, ...ribbons]) {
 if (lead && item.room !== lead.room) continue;
 if (item.wall) continue;
 fx += item.x * item.power;
@@ -45856,6 +45860,49 @@ if (!face || !face.art) return 0;
 count += 1;
 return baseMm + count * 0.3;
 };
+}
+const VOLUME_MESH_GLOW_WIDTH_MM = 520;
+function volumeMeshGlowStrips(lamps) {
+const S = VOLUME_MESH_SCALE;
+const pos = [];
+const col = [];
+const byLine = new Map();
+for (const item of lamps || []) {
+if (!item.line) continue;
+if (!byLine.has(item.line)) byLine.set(item.line, []);
+byLine.get(item.line).push(item);
+}
+const W = VOLUME_MESH_GLOW_WIDTH_MM;
+for (const list of byLine.values()) {
+for (let at = 0; at + 1 < list.length; at += 1) {
+const a = list[at];
+const b = list[at + 1];
+const dx = b.x - a.x;
+const dy = b.y - a.y;
+const flat = Math.hypot(dx, dy);
+if (!(flat > 50) || Math.hypot(dx, dy, b.z - a.z) > 1700) continue;
+const px = (-dy / flat) * W;
+const py = (dx / flat) * W;
+const c = [volumeMeshLinear(a.rgb[0] / 255), volumeMeshLinear(a.rgb[1] / 255), volumeMeshLinear(a.rgb[2] / 255)];
+const glow = Math.max(0.12, Math.min(0.34, 0.14 + ((a.power + b.power) / 2) * 0.4));
+const za = a.z - 14;
+const zb = b.z - 14;
+for (const side of [1, -1]) {
+const quad = [
+[a.x, a.y, za, glow],
+[b.x, b.y, zb, glow],
+[b.x + px * side, b.y + py * side, zb, 0],
+[a.x + px * side, a.y + py * side, za, 0],
+];
+for (const index of [0, 1, 2, 0, 2, 3]) {
+const q = quad[index];
+pos.push(q[0] * S, q[2] * S, q[1] * S);
+col.push(c[0], c[1], c[2], q[3]);
+}
+}
+}
+}
+return { pos: new Float32Array(pos), col: new Float32Array(col) };
 }
 
 // src/volume/signs.js
@@ -73886,6 +73933,7 @@ glow: new THREE.MeshBasicMaterial({ vertexColors: true, polygonOffset: true, pol
 over: new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3, toneMapped: false }),
 overClear: new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, transparent: true, depthWrite: false, toneMapped: false }),
 overLine: new THREE.LineBasicMaterial({ vertexColors: true, toneMapped: false }),
+strip: new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }),
 land: new THREE.ShadowMaterial({ opacity: 0.32 }),
 };
 const empty = () => new THREE.BufferGeometry();
@@ -73915,13 +73963,16 @@ const led = new THREE.Mesh(empty(), mats.glow);
 led.renderOrder = 1;
 const glow = new THREE.Mesh(empty(), mats.glow);
 glow.renderOrder = 1;
+const strips = new THREE.Mesh(empty(), mats.strip);
+strips.renderOrder = 2;
+let stripKey = "";
 const overSolid = new THREE.Mesh(empty(), mats.over);
 overSolid.renderOrder = 3;
 const overClear = new THREE.Mesh(empty(), mats.overClear);
 overClear.renderOrder = 4;
 const overLines = new THREE.LineSegments(empty(), mats.overLine);
 overLines.renderOrder = 5;
-world.add(solid, fixtures, land, glass, lines, led, glow, overSolid, overClear, overLines);
+world.add(solid, fixtures, land, strips, glass, lines, led, glow, overSolid, overClear, overLines);
 const hemi = new THREE.HemisphereLight(0xdfe9f5, 0x8b8577, 1);
 const sun = new THREE.DirectionalLight(0xfff4d6, 0);
 sun.castShadow = true;
@@ -74080,6 +74131,18 @@ sun.intensity = 0;
 }
 function lampsPlace(list, eye) {
 const pick = volumeMeshLampPick(list || [], eye, { spots: VOLUME_GL_SPOTS, points: VOLUME_GL_POINTS });
+let ribbons = "";
+for (const item of list || []) if (item.line) ribbons += item.line + ":" + Math.round(item.x) + "," + Math.round(item.y) + "," + Math.round(item.z) + "," + Math.round(item.power * 20) + ";";
+if (ribbons !== stripKey) {
+stripKey = ribbons;
+const built = ribbons ? volumeMeshGlowStrips(list) : null;
+if (built && built.pos.length > 0) {
+const next = new THREE.BufferGeometry();
+next.setAttribute("position", new THREE.BufferAttribute(built.pos, 3));
+next.setAttribute("color", new THREE.BufferAttribute(built.col, 4));
+swap(strips, next);
+} else swap(strips, empty());
+}
 for (let at = 0; at < VOLUME_GL_SPOTS; at += 1) {
 const node = spots[at];
 const item = pick.spots[at];
@@ -74161,7 +74224,7 @@ renderer.render(world, camera);
 return canvas;
 }
 function drop() {
-for (const node of [solid, fixtures, land, glass, lines, led, glow, overSolid, overClear, overLines]) node.geometry.dispose();
+for (const node of [solid, fixtures, land, strips, glass, lines, led, glow, overSolid, overClear, overLines]) node.geometry.dispose();
 for (const name of Object.keys(mats)) mats[name].dispose();
 renderer.dispose();
 sceneWas = null;

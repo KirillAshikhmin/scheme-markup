@@ -305,7 +305,14 @@ export function volumeMeshLamps(scene, light, live = null) {
     // Люстра светит во все стороны, как бы высоко её ни повесили.
     const place = volumeMarkPlace(scene, markId);
     const chandelier = Boolean(place && place.view && place.view.name === "chandelier");
-    for (const source of volumeLampSourcesOf(scene, markId, item ? item.roomId : undefined)) {
+    // Лента и трек (источник на каждом метре): конусами они светили бы
+    // пятнами через метр-полтора (дефект заказчика: «почему ленты светят
+    // пятнами?»), да и конусов у видеокарты восемь. Куски ленты помечаются
+    // `line`: в конусы они не идут, а светят отражённым светом комнаты и
+    // полосой свечения вдоль себя (`volumeMeshGlowStrips`).
+    const sources = volumeLampSourcesOf(scene, markId, item ? item.roomId : undefined);
+    const line = sources.length >= 3 ? String(markId) : null;
+    for (const source of sources) {
       if (!source || !source.at || !(source.power > 0)) continue;
       // Настенный светильник (правка 2026-11-21, дефект заказчика: «странно бра
       // светят»): источник сцены стоит в трёх сантиметрах от стены — точечный
@@ -321,6 +328,7 @@ export function volumeMeshLamps(scene, light, live = null) {
         y: source.at.y + (wall ? wall.y * off : 0),
         z: source.at.z,
         ...(wall ? { wall: true } : {}),
+        ...(line ? { line } : {}),
         ...(wash ? { aim: { x: source.at.x - wall.x * 20, y: source.at.y - wall.y * 20, z: source.at.z - VOLUME_MESH_WASH_DROP_MM } } : {}),
         power: source.power * strength,
         down: wash || Boolean(source.dir && source.dir.z < 0) && !chandelier && !(ceilingMm > 0 && source.at.z < ceilingMm - VOLUME_MESH_HANG_MM),
@@ -367,7 +375,8 @@ export function volumeMeshLampJoin(lamps) {
  * потолок над лампами чёрный.
  */
 export function volumeMeshLampPick(lamps, eye, limits = { spots: 8, points: 3 }) {
-  const joined = volumeMeshLampJoin(lamps);
+  const ribbons = lamps.filter((item) => item.line);
+  const joined = volumeMeshLampJoin(lamps.filter((item) => !item.line));
   const near = (down) =>
     joined
       .filter((item) => item.down === down)
@@ -382,8 +391,8 @@ export function volumeMeshLampPick(lamps, eye, limits = { spots: 8, points: 3 })
   // Отражённый свет — у **ближайшего горящего помещения**: середина ламп
   // разных комнат пришлась бы в стену или к соседям, а сквозь стены он теперь
   // не ходит (у источника тень).
-  const lead = spots[0] && points[0] ? ((spots[0].x - eye.x) ** 2 + (spots[0].y - eye.y) ** 2 <= (points[0].x - eye.x) ** 2 + (points[0].y - eye.y) ** 2 ? spots[0] : points[0]) : spots[0] || points[0] || null;
-  for (const item of [...spots, ...points]) {
+  const lead = spots[0] && points[0] ? ((spots[0].x - eye.x) ** 2 + (spots[0].y - eye.y) ** 2 <= (points[0].x - eye.x) ** 2 + (points[0].y - eye.y) ** 2 ? spots[0] : points[0]) : spots[0] || points[0] || ribbons.slice().sort((one, two) => (one.x - eye.x) ** 2 + (one.y - eye.y) ** 2 - ((two.x - eye.x) ** 2 + (two.y - eye.y) ** 2))[0] || null;
+  for (const item of [...spots, ...points, ...ribbons]) {
     if (lead && item.room !== lead.room) continue;
     // Настенные в отражённый свет не идут: его середина легла бы на стену.
     if (item.wall) continue;
@@ -429,4 +438,57 @@ export function volumeMeshArtLift(baseMm = 1) {
     count += 1;
     return baseMm + count * 0.3;
   };
+}
+
+/** Полоса свечения ленты: на сколько она расходится в каждую сторону, мм. */
+export const VOLUME_MESH_GLOW_WIDTH_MM = 520;
+
+/**
+ * Полосы свечения вдоль горящих лент и треков: `{pos, col}` — треугольники с
+ * цветом и прозрачностью в вершинах (у ленты ярко, к краю — ноль). Кладутся на
+ * ту поверхность, по которой идёт лента, чуть ниже неё; рисуются сложением.
+ * Это не источник света, а его след: ровная светлая полоса вместо пятен.
+ */
+export function volumeMeshGlowStrips(lamps) {
+  const S = VOLUME_MESH_SCALE;
+  const pos = [];
+  const col = [];
+  const byLine = new Map();
+  for (const item of lamps || []) {
+    if (!item.line) continue;
+    if (!byLine.has(item.line)) byLine.set(item.line, []);
+    byLine.get(item.line).push(item);
+  }
+  const W = VOLUME_MESH_GLOW_WIDTH_MM;
+  for (const list of byLine.values()) {
+    for (let at = 0; at + 1 < list.length; at += 1) {
+      const a = list[at];
+      const b = list[at + 1];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const flat = Math.hypot(dx, dy);
+      // Разрыв (другой отрезок той же метки) и отвесный кусок — без полосы.
+      if (!(flat > 50) || Math.hypot(dx, dy, b.z - a.z) > 1700) continue;
+      const px = (-dy / flat) * W;
+      const py = (dx / flat) * W;
+      const c = [volumeMeshLinear(a.rgb[0] / 255), volumeMeshLinear(a.rgb[1] / 255), volumeMeshLinear(a.rgb[2] / 255)];
+      const glow = Math.max(0.12, Math.min(0.34, 0.14 + ((a.power + b.power) / 2) * 0.4));
+      const za = a.z - 14;
+      const zb = b.z - 14;
+      for (const side of [1, -1]) {
+        const quad = [
+          [a.x, a.y, za, glow],
+          [b.x, b.y, zb, glow],
+          [b.x + px * side, b.y + py * side, zb, 0],
+          [a.x + px * side, a.y + py * side, za, 0],
+        ];
+        for (const index of [0, 1, 2, 0, 2, 3]) {
+          const q = quad[index];
+          pos.push(q[0] * S, q[2] * S, q[1] * S);
+          col.push(c[0], c[1], c[2], q[3]);
+        }
+      }
+    }
+  }
+  return { pos: new Float32Array(pos), col: new Float32Array(col) };
 }
