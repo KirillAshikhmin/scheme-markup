@@ -18,7 +18,7 @@
 // (`objectCatalog.objectCatalogKeyByName`). Здесь этих слов больше нет
 // нарочно: один ключ — одно место, где он объявлен. Модель находят по ключу
 // (`objectModelByKey`), а имя в ключ переводит каталог.
-import { modelBox, modelCyl, modelFront, modelParts, modelTube } from "./kit.js";
+import { modelBox, modelCone, modelCyl, modelFront, modelParts, modelTube } from "./kit.js";
 import { MODELS_POWER } from "./power.js";
 import { MODELS_THINGS } from "./things.js";
 import { objectStairModel } from "./stairs.js";
@@ -657,13 +657,17 @@ export const MODELS_OBJECTS = {
 
   // ——— зелень и торшер (таск 216, G322) ———
   //
-  // Цветок: горшок, стебель и крона — три тела, двадцать шесть граней. Крона
-  // шире горшка и светлее: тем цветок и отличается от торшера, у которого
-  // абажур сидит на тонкой стойке высоко над полом.
+  // Цветок: горшок и **листва двумя конусами от самого горшка** (правка
+  // 2026-11-20). Прежний — горшок, тонкий стебель и цилиндр кроны — заказчик
+  // принял за торшер: «почему цветок напольный так похож на торшер?» И был
+  // прав: стойка с цилиндром наверху — это и есть торшер. Теперь стебля нет
+  // вовсе, листва начинается в горшке и сходится кверху остриём: куст в
+  // кадке, а у торшера абажур плоский и сидит на стойке высоко над полом.
+  // Горшок круглый; три тела, двадцать шесть граней.
   plant: modelParts(
-    modelBox("pot", { x: -0.35, width: 0.7, y: -0.35, depth: 0.7, z: 0, height: 0.3 }),
-    modelBox("stem", { x: -0.05, width: 0.1, y: -0.05, depth: 0.1, z: 0.3, height: 0.3, material: "dark" }),
-    modelCyl("crown", { x: -0.5, width: 1, y: -0.5, depth: 1, z: 0.5, height: 0.5, material: "light" }),
+    modelCyl("pot", { x: -0.3, width: 0.6, y: -0.3, depth: 0.6, z: 0, height: 0.24 }),
+    modelCone("leavesLow", { x: -0.5, width: 1, y: -0.5, depth: 1, z: 0.2, height: 0.5, material: "light" }),
+    modelCone("leavesHigh", { x: -0.36, width: 0.72, y: -0.36, depth: 0.72, z: 0.5, height: 0.5, material: "light" }),
   ),
   // Дерево: кадка, длинный ствол и крона **двумя ярусами** — этим оно и
   // отличается от цветка. Ярусы коробками, а не цилиндрами: два цилиндра сверх

@@ -3978,6 +3978,8 @@ const MARK_PATCH_FIELDS = [
   // Отметка «Висячая» у люстры (таск 256, G397) — такое же необязательное поле
   // метки, как сторона открывания шторы, и живёт по тем же правилам.
   "hanging",
+  // Отметка «В откосе» (правка 2026-11-20) — того же рода.
+  "reveal",
   // Связь с вещью чертежа (R01). Поле стоит здесь, а не правится в обход
   // белого списка, как ярус `z`: иначе оно молча исчезало бы на первой же
   // правке карточки. Правило у связи одно — `markObjectCan`, — и проверяется
@@ -4046,6 +4048,19 @@ export function updateMark(project, markId, patch) {
       delete changes.hanging;
     }
   }
+  // «В откосе» — тем же порядком: ставится только там, где откос рядом есть,
+  // снятая убирает ключ.
+  let unreveal = false;
+  if (Object.prototype.hasOwnProperty.call(changes, "reveal")) {
+    if (changes.reveal === true) {
+      if (!markRevealCan(project, project.marks.find((mark) => mark.id === markId))) {
+        throw modelError("revealNoOpening");
+      }
+    } else {
+      unreveal = true;
+      delete changes.reveal;
+    }
+  }
   // Связь с вещью: одно правило на обе двери. Пустое значение — «снять», и
   // поле тогда **убирается**, а не обнуляется (G68).
   let unlink = false;
@@ -4064,6 +4079,7 @@ export function updateMark(project, markId, patch) {
     if (mark.id !== markId) return mark;
     const next = { ...mark, ...changes };
     if (unhang) delete next.hanging;
+    if (unreveal) delete next.reveal;
     return unlink ? markWithoutObject(next) : next;
   });
   return { project: withProject(project, { marks }), mark: marks.find((mark) => mark.id === markId) };
@@ -9718,6 +9734,89 @@ export function setMarkHanging(project, markId, on) {
   return updateMark(project, markId, { hanging: on === true ? true : null });
 }
 
+// ——— метка в откосе (правка без автопилота, 2026-11-20) ————————————————————
+//
+// Слова заказчика: «про розетки в откосах — надо сделать как-то, это частая
+// история на объектах и надо их научиться размещать. Возможно просто им
+// параметр "В откосе", а на схеме ставить рядом с краем окна на нужную высоту
+// и тогда в рендере они переносятся на откос» — и на предложение: «Да, давай
+// отметкой».
+//
+// **Повторена механика «Висячей» люстры** (таск 256): необязательное поле
+// метки (`mark.reveal`), которое попадает в объект, только когда оно стоит;
+// вопрос «предлагается ли она здесь» (`markRevealCan`) и вопрос «стоит ли она»
+// (`markInReveal`) — разные двери; отметка у метки, которой она больше не
+// предлагается (метку увезли от окна), не значит ничего, но и не снимается
+// молча — вернётся к проёму, снова встанет в откос (G68).
+//
+// **На плане метка не двигается.** Её ставят у края проёма, как и просил
+// заказчик; в откос её переносит только «Объём» (`volume/marks.js`), а таблицы
+// дописывают «в откосе» к расположению (`markLocationText`). Проверка «метка в
+// проёме» про такую метку молчит: в проёме ей и место.
+//
+// Миграции у поля нет: нет его — метка стоит на стене, как стояла.
+
+/** Как далеко от края проёма вдоль стены метка ещё «у края» и может уйти в откос. */
+export const MARK_REVEAL_REACH_MM = 400;
+
+/**
+ * Откос, в который может встать метка: `{opening, edge, atMm}` или `null`.
+ * `edge` — `"from"` (край проёма ближе к началу стены) или `"to"`, `atMm` —
+ * место этого края вдоль стены.
+ *
+ * Условия: метка — точка, привязана к стене, стоит не дальше
+ * `MARK_REVEAL_REACH_MM` от края проёма (или в самом проёме) и по высоте
+ * попадает в проём — ниже подоконника откоса нет. Метка без высоты подходит:
+ * высоту ей ещё впишут. Из нескольких краёв — ближний.
+ */
+export function markRevealOpening(project, mark) {
+  if (!mark || mark.kind !== "point" || markIsComment(mark)) return null;
+  const binding = markWall(mark);
+  const wall = binding ? findWall(project, binding.wallId) : null;
+  if (!wall) return null;
+  const height = markDimensions(mark).heightAboveFloor;
+  let best = null;
+  for (const opening of openingsInWall(project, wall.id)) {
+    const from = Number(opening.atMm);
+    const to = from + Number(opening.widthMm);
+    const floor = Number(opening.heightAboveFloorMm) || 0;
+    if (height !== null && (height < floor || height > floor + Number(opening.heightMm))) continue;
+    for (const [edge, atMm] of [["from", from], ["to", to]]) {
+      const gap = Math.abs(binding.atMm - atMm);
+      if (gap > MARK_REVEAL_REACH_MM) continue;
+      if (!best || gap < best.gap) best = { opening, edge, atMm, gap };
+    }
+  }
+  return best ? { opening: best.opening, edge: best.edge, atMm: best.atMm } : null;
+}
+
+/** Предлагается ли метке отметка «В откосе». */
+export function markRevealCan(project, mark) {
+  return markRevealOpening(project, mark) !== null;
+}
+
+/** Стоит ли метка в откосе: отметка поставлена и откос рядом есть. */
+export function markInReveal(project, mark) {
+  if (!mark || mark.reveal !== true) return false;
+  return markRevealCan(project, mark);
+}
+
+/** Поставить или снять отметку «В откосе». Снятая **убирает** ключ, а не пишет `false`. */
+export function setMarkReveal(project, markId, on) {
+  return updateMark(project, markId, { reveal: on === true ? true : null });
+}
+
+/**
+ * Расположение метки словами для таблиц и выгрузок: вписанное человеком и —
+ * у метки в откосе — «в откосе» следом. Вписанное не меняется (G68).
+ */
+export function markLocationText(project, mark) {
+  const own = mark && typeof mark.location === "string" ? mark.location.trim() : "";
+  if (!markInReveal(project, mark)) return own;
+  if (own.toLowerCase().includes(strings.marks.revealPlace.toLowerCase())) return own;
+  return own ? own + ", " + strings.marks.revealPlace : strings.marks.revealPlace;
+}
+
 /**
  * Выбрана ли стена метки **рукой** (требование G202). Правило то же, что у
  * помещения (`markRoomManual`): выбрал человек — автоматика больше не
@@ -13615,6 +13714,8 @@ export function validate(project) {
   for (const mark of project.marks) {
     const opening = markOpeningHit(project, mark);
     if (!opening) continue;
+    // Метке в откосе в проёме и место (правка 2026-11-20).
+    if (markInReveal(project, mark)) continue;
     problems.push(
       problem(
         "markInOpening",

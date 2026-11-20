@@ -16,6 +16,7 @@ import {
   hexToRgb,
   labelOf,
   markHanging,
+  markRevealOpening,
   markIsComment,
   markObjectId,
   markPlace,
@@ -1250,18 +1251,39 @@ export function volumeMarkPlacement(project, mark, where = [], seat = null, poin
   // ——— на своей стене ———
   if (heightMm !== null && wall && vectors && side) {
     const sign = side === "left" ? 1 : -1;
-    const normal = { x: vectors.n.x * sign, y: vectors.n.y * sign, z: 0 };
-    const faceMm = Number(wall.thicknessMm) / 2 + VOLUME_MARK_LIFT_MM;
+    // **Метка в откосе** (правка 2026-11-20): та же посадка «на стене», только
+    // стена у неё — откос проёма. Лицо смотрит в проём (вдоль стены, от края к
+    // середине проёма), «вдоль» идёт поперёк стены — в комнату метки, а стоит
+    // метка на комнатной половине толщины: посередине у окна рама. Всё
+    // остальное — высота, выступ, модель, лицо — считается ниже тем же кодом.
+    const reveal = !line && mark.reveal === true ? markRevealOpening(project, mark) : null;
+    const wallNormal = { x: vectors.n.x * sign, y: vectors.n.y * sign };
+    const turn = reveal ? (reveal.edge === "from" ? 1 : -1) : 0;
+    const along = reveal ? wallNormal : { x: vectors.u.x, y: vectors.u.y };
+    const normal = reveal ? { x: vectors.u.x * turn, y: vectors.u.y * turn, z: 0 } : { x: wallNormal.x, y: wallNormal.y, z: 0 };
+    const origin = reveal
+      ? { x: Number(wall.aMm.x) + vectors.u.x * reveal.atMm, y: Number(wall.aMm.y) + vectors.u.y * reveal.atMm }
+      : { x: Number(wall.aMm.x), y: Number(wall.aMm.y) };
+    const faceMm = reveal ? VOLUME_MARK_LIFT_MM : Number(wall.thicknessMm) / 2 + VOLUME_MARK_LIFT_MM;
     // Отступ берётся из привязки **как есть**: зеркалит отступы только лист
     // развёртки (таск 129), а объёму нужны обе стороны стены разом.
     const to = binding.toMm === null ? binding.atMm : binding.toMm;
     const fromMm = Math.min(binding.atMm, to);
     const toMm = Math.max(binding.atMm, to);
-    const alongMm = line ? Math.max(VOLUME_MARK_MIN_MM, toMm - fromMm) : lengthMm;
+    // В откосе лицо не шире половины толщины стены: дальше — рама или улица.
+    const alongMm = line
+      ? Math.max(VOLUME_MARK_MIN_MM, toMm - fromMm)
+      : reveal
+        ? Math.max(VOLUME_MARK_MIN_MM, Math.min(lengthMm, Number(wall.thicknessMm) / 2))
+        : lengthMm;
     // Пост рамки блока старше привязки (таск 239): отступ ему посчитан по всему
     // блоку, а не по одной метке. Линия постом не бывает — блок собирается
     // только из точек (`addToGroup`).
-    const middle = seat && typeof seat.alongMm === "number" && !line ? seat.alongMm : (fromMm + toMm) / 2;
+    const middle = reveal
+      ? Number(wall.thicknessMm) / 4
+      : seat && typeof seat.alongMm === "number" && !line
+        ? seat.alongMm
+        : (fromMm + toMm) / 2;
     // Выступ идёт наружу от грани стены; утопленное (щит, выступ −30) уходит
     // внутрь, но лицом остаётся в плоскости стены — иначе его не было бы видно.
     const outer = recessed ? faceMm : faceMm + depthMm;
@@ -1276,8 +1298,8 @@ export function volumeMarkPlacement(project, mark, where = [], seat = null, poin
     // записанная высота, — разойтись они могут только у стоящего на полу.
     const centreMm = (bottomMm + topMm) / 2;
     const at = (across, alongMm = middle) => ({
-      x: Number(wall.aMm.x) + vectors.u.x * alongMm + normal.x * across,
-      y: Number(wall.aMm.y) + vectors.u.y * alongMm + normal.y * across,
+      x: origin.x + along.x * alongMm + normal.x * across,
+      y: origin.y + along.y * alongMm + normal.y * across,
     });
     const faceAt = at(outer);
     const coreMm = (outer + inner) / 2;
@@ -1289,7 +1311,7 @@ export function volumeMarkPlacement(project, mark, where = [], seat = null, poin
       heightMm: centreMm,
       prisms: [
         {
-          corners: volumeBoxCorners(at(coreMm), vectors.u, alongMm, Math.max(outer - inner, 1)),
+          corners: volumeBoxCorners(at(coreMm), along, alongMm, Math.max(outer - inner, 1)),
           bottomMm,
           topMm,
         },
@@ -1313,7 +1335,7 @@ export function volumeMarkPlacement(project, mark, where = [], seat = null, poin
       frame: {
         at: at((outer + inner) / 2),
         bottomMm,
-        u: { x: vectors.u.x, y: vectors.u.y },
+        u: { x: along.x, y: along.y },
         f: { x: -normal.x, y: -normal.y },
         widthMm: alongMm,
         depthMm: Math.max(outer - inner, 1),
@@ -1322,7 +1344,7 @@ export function volumeMarkPlacement(project, mark, where = [], seat = null, poin
       // Лицо вещи — её наружная грань: по нему рисуется изображение объекта.
       face: {
         origin: { x: faceAt.x, y: faceAt.y, z: centreMm },
-        u: { x: vectors.u.x, y: vectors.u.y, z: 0 },
+        u: { x: along.x, y: along.y, z: 0 },
         v: { x: 0, y: 0, z: 1 },
         normal,
         widthMm: alongMm,

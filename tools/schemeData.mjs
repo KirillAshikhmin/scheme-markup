@@ -200,7 +200,7 @@ function markRecord(project, mark) {
     scheme: scheme ? scheme.name : "",
     floor: model.schemeFloorOf(project, mark.schemeId),
     room: room ? room.name : "",
-    location: mark.location || "",
+    location: model.markLocationText(project, mark),
     original: mark.original || "",
     comment: model.markIsComment(mark) ? model.markCommentText(mark) : "",
     points: mark.points.length,

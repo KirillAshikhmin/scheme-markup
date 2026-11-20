@@ -33,6 +33,7 @@ import {
   styleOf,
   typeKindOf,
   typesInOrder,
+  markLocationText,
 } from "./model.js";
 import { colorNameHex } from "./colorName.js";
 import { visibleMarks } from "./render.js";
@@ -213,7 +214,7 @@ function tableEntryRow(project, entry, lengths) {
       }),
       ", ",
     ),
-    tableJoin(entry.marks.map((mark) => mark.location), "; "),
+    tableJoin(entry.marks.map((mark) => markLocationText(project, mark)), "; "),
     tableJoin(entry.marks.map((mark) => mark.original), ", "),
   ];
   return {
@@ -518,7 +519,7 @@ function tableLinkRow(project, mark, group, side) {
       markPairLabel(project, mark),
       type ? type.name : "",
       room ? room.name : "",
-      mark.location || "",
+      markLocationText(project, mark),
       // Канал числом, а не кружком: в колонке под своим заголовком кружок был
       // бы ребусом, а в CSV — знаком, который откроется не везде.
       group.channel === null ? "" : String(group.channel),
@@ -741,7 +742,7 @@ export function equipmentTable(project, filter, options = {}) {
         // появления справочника, типа нет, и это не поломка.
         kind ? kind.name : "",
         room ? room.name : "",
-        mark ? mark.location || "" : "",
+        mark ? markLocationText(project, mark) : "",
         links.join(", "),
       ],
       color: mark ? styleOf(project, mark.typeId).color : null,

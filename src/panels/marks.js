@@ -33,6 +33,8 @@ import {
   markCurtainSide,
   markHanging,
   markHangingCan,
+  markInReveal,
+  markRevealCan,
   markDimensions,
   markHasDimensions,
   markIsCurtain,
@@ -54,6 +56,7 @@ import {
   setMarkDimensions,
   setMarkFreeNumber,
   setMarkHanging,
+  setMarkReveal,
   setMarkNumber,
   setMarkWall,
   styleOf,
@@ -599,6 +602,8 @@ export function marksRowModel(project, row, options = {}) {
     // не «истинно ли»: снятая отметка обязана оставаться видимой — иначе
     // снять её было бы можно, а вернуть нет.
     hanging: markHangingCan(project, mark) ? markHanging(project, mark) : null,
+    // «В откосе» (правка 2026-11-20) — тем же порядком: `null` — не предлагается.
+    reveal: markRevealCan(project, mark) ? markInReveal(project, mark) : null,
     // Длина линейной метки по плану — в метрах, и только когда у схемы есть
     // калибровка масштаба. Пусто значит «посчитать неоткуда»: без масштаба
     // строка остаётся ровно такой, какой была до этой задачи. Размер изделия
@@ -1132,6 +1137,24 @@ function mountMarksPanel(host, api) {
     return uiCheckRow(box, strings.marks.hanging, strings.marks.hangingHint);
   }
 
+  /** «В откосе» (правка 2026-11-20) — отметкой, как «Висячая»: метка у края окна или двери уходит на откос. */
+  function revealField(state, mark, on) {
+    const box = uiEl("input", { type: "checkbox" });
+    box.checked = on === true;
+    if (!appAllows("editMarks", state)) box.disabled = true;
+    box.addEventListener("change", () => {
+      const now = getState();
+      if (!now.project) return;
+      try {
+        const next = setMarkReveal(now.project, mark.id, box.checked);
+        if (next.project !== now.project) canvasCommit(now.project, next.project, strings.history.markReveal);
+      } catch (error) {
+        fail(error);
+      }
+    });
+    return uiCheckRow(box, strings.marks.reveal, strings.marks.revealHint);
+  }
+
   function roomField(state, mark) {
     const manual = markRoomManual(mark);
     const select = uiEl("select", {
@@ -1355,6 +1378,9 @@ function mountMarksPanel(host, api) {
         view.fields && view.fields.curtain ? curtainField(state, mark, view.fields.curtain) : null,
         view.fields && view.fields.hanging !== null && view.fields.hanging !== undefined
           ? hangingField(state, mark, view.fields.hanging)
+          : null,
+        view.fields && view.fields.reveal !== null && view.fields.reveal !== undefined
+          ? revealField(state, mark, view.fields.reveal)
           : null,
         // «Расположение» и «Комментарий» — каждое на своей строке.
         //

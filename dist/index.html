@@ -7546,6 +7546,7 @@ markDevice: "аксессуар метки",
 markDeviceReset: "аксессуар как у типа",
 markCurtainSide: "сторона открывания шторы",
 markHanging: "вид люстры",
+markReveal: "метка в откосе",
 addScenario: "новый сценарий",
 editScenario: "правка сценария",
 removeScenario: "удаление сценария",
@@ -7621,6 +7622,7 @@ commentOnePoint: "У комментария одна точка: плашка с
 pointerOnlyComment: "Указатель бывает только у комментария",
 pointerUnknown: "Указатель или включён, или выключен",
 curtainSideUnknown: "Штора открывается влево, вправо или от центра",
+revealNoOpening: "В откос метка встаёт у края окна или двери: рядом с этой меткой проёма нет",
 hangingOnlyChandelier: "Висячей бывает люстра: у остальных меток висячего тела нет, и нарисовать его нечем",
 commentNoLinks: "Комментарий ничем не управляет — это надпись на плане, а не устройство",
 commentNoEquipment: "Оборудование ставится в точку, а не в комментарий",
@@ -8664,6 +8666,9 @@ marks: {
 curtainSide: "Сторона открывания",
 curtainSideHint: "Куда собирается ткань, когда штору открывают, — если смотреть на неё из комнаты",
 curtainSides: { left: "Влево", right: "Вправо", center: "От центра в стороны" },
+reveal: "В откосе",
+revealHint: "Метка стоит не на стене, а на откосе ближайшего окна или двери. На плане она остаётся у края проёма; в «Объёме» переезжает на откос, в таблицах к расположению дописывается «в откосе»",
+revealPlace: "в откосе",
 hanging: "Висячая",
 hangingHint: "Люстра на цепи от потолочной чашки, ярусами книзу. Видно в «Объёме»; на плане знак у обеих люстр один. Длина подвеса — из высоты метки",
 count: "Показано {shown} из {total}",
@@ -13840,9 +13845,9 @@ modelBox("shelfLow", { x: -0.44, width: 0.88, y: -0.4, depth: 0.8, z: 0.3, heigh
 modelBox("shelfHigh", { x: -0.44, width: 0.88, y: -0.4, depth: 0.8, z: 0.64, height: 0.06, material: "light" }),
 ),
 plant: modelParts(
-modelBox("pot", { x: -0.35, width: 0.7, y: -0.35, depth: 0.7, z: 0, height: 0.3 }),
-modelBox("stem", { x: -0.05, width: 0.1, y: -0.05, depth: 0.1, z: 0.3, height: 0.3, material: "dark" }),
-modelCyl("crown", { x: -0.5, width: 1, y: -0.5, depth: 1, z: 0.5, height: 0.5, material: "light" }),
+modelCyl("pot", { x: -0.3, width: 0.6, y: -0.3, depth: 0.6, z: 0, height: 0.24 }),
+modelCone("leavesLow", { x: -0.5, width: 1, y: -0.5, depth: 1, z: 0.2, height: 0.5, material: "light" }),
+modelCone("leavesHigh", { x: -0.36, width: 0.72, y: -0.36, depth: 0.72, z: 0.5, height: 0.5, material: "light" }),
 ),
 treePot: modelParts(
 modelBox("pot", { x: -0.32, width: 0.64, y: -0.32, depth: 0.64, z: 0, height: 0.22 }),
@@ -16519,6 +16524,7 @@ const MARK_PATCH_FIELDS = [
 "pointer",
 "curtainSide",
 "hanging",
+"reveal",
 "objectId",
 ...MARK_DIMENSION_FIELDS,
 ];
@@ -16562,6 +16568,17 @@ unhang = true;
 delete changes.hanging;
 }
 }
+let unreveal = false;
+if (Object.prototype.hasOwnProperty.call(changes, "reveal")) {
+if (changes.reveal === true) {
+if (!markRevealCan(project, project.marks.find((mark) => mark.id === markId))) {
+throw modelError("revealNoOpening");
+}
+} else {
+unreveal = true;
+delete changes.reveal;
+}
+}
 let unlink = false;
 if (Object.prototype.hasOwnProperty.call(changes, "objectId")) {
 const wanted = changes.objectId == null || changes.objectId === "" ? null : changes.objectId;
@@ -16578,6 +16595,7 @@ const marks = project.marks.map((mark) => {
 if (mark.id !== markId) return mark;
 const next = { ...mark, ...changes };
 if (unhang) delete next.hanging;
+if (unreveal) delete next.reveal;
 return unlink ? markWithoutObject(next) : next;
 });
 return { project: withProject(project, { marks }), mark: marks.find((mark) => mark.id === markId) };
@@ -19632,6 +19650,43 @@ return markHangingCan(project, mark);
 function setMarkHanging(project, markId, on) {
 return updateMark(project, markId, { hanging: on === true ? true : null });
 }
+const MARK_REVEAL_REACH_MM = 400;
+function markRevealOpening(project, mark) {
+if (!mark || mark.kind !== "point" || markIsComment(mark)) return null;
+const binding = markWall(mark);
+const wall = binding ? findWall(project, binding.wallId) : null;
+if (!wall) return null;
+const height = markDimensions(mark).heightAboveFloor;
+let best = null;
+for (const opening of openingsInWall(project, wall.id)) {
+const from = Number(opening.atMm);
+const to = from + Number(opening.widthMm);
+const floor = Number(opening.heightAboveFloorMm) || 0;
+if (height !== null && (height < floor || height > floor + Number(opening.heightMm))) continue;
+for (const [edge, atMm] of [["from", from], ["to", to]]) {
+const gap = Math.abs(binding.atMm - atMm);
+if (gap > MARK_REVEAL_REACH_MM) continue;
+if (!best || gap < best.gap) best = { opening, edge, atMm, gap };
+}
+}
+return best ? { opening: best.opening, edge: best.edge, atMm: best.atMm } : null;
+}
+function markRevealCan(project, mark) {
+return markRevealOpening(project, mark) !== null;
+}
+function markInReveal(project, mark) {
+if (!mark || mark.reveal !== true) return false;
+return markRevealCan(project, mark);
+}
+function setMarkReveal(project, markId, on) {
+return updateMark(project, markId, { reveal: on === true ? true : null });
+}
+function markLocationText(project, mark) {
+const own = mark && typeof mark.location === "string" ? mark.location.trim() : "";
+if (!markInReveal(project, mark)) return own;
+if (own.toLowerCase().includes(strings.marks.revealPlace.toLowerCase())) return own;
+return own ? own + ", " + strings.marks.revealPlace : strings.marks.revealPlace;
+}
 function markWallManual(mark) {
 return Boolean(mark && mark.wallManual);
 }
@@ -21765,6 +21820,7 @@ for (const [id, code] of behindTypes) problems.push(problem("counterBehind", { c
 for (const mark of project.marks) {
 const opening = markOpeningHit(project, mark);
 if (!opening) continue;
+if (markInReveal(project, mark)) continue;
 problems.push(
 problem(
 "markInOpening",
@@ -40074,21 +40130,36 @@ const vectors = wall ? wallVectors(wall) : null;
 const side = wall && vectors ? markWallSideOn(project, mark, wall.id) : null;
 if (heightMm !== null && wall && vectors && side) {
 const sign = side === "left" ? 1 : -1;
-const normal = { x: vectors.n.x * sign, y: vectors.n.y * sign, z: 0 };
-const faceMm = Number(wall.thicknessMm) / 2 + VOLUME_MARK_LIFT_MM;
+const reveal = !line && mark.reveal === true ? markRevealOpening(project, mark) : null;
+const wallNormal = { x: vectors.n.x * sign, y: vectors.n.y * sign };
+const turn = reveal ? (reveal.edge === "from" ? 1 : -1) : 0;
+const along = reveal ? wallNormal : { x: vectors.u.x, y: vectors.u.y };
+const normal = reveal ? { x: vectors.u.x * turn, y: vectors.u.y * turn, z: 0 } : { x: wallNormal.x, y: wallNormal.y, z: 0 };
+const origin = reveal
+? { x: Number(wall.aMm.x) + vectors.u.x * reveal.atMm, y: Number(wall.aMm.y) + vectors.u.y * reveal.atMm }
+: { x: Number(wall.aMm.x), y: Number(wall.aMm.y) };
+const faceMm = reveal ? VOLUME_MARK_LIFT_MM : Number(wall.thicknessMm) / 2 + VOLUME_MARK_LIFT_MM;
 const to = binding.toMm === null ? binding.atMm : binding.toMm;
 const fromMm = Math.min(binding.atMm, to);
 const toMm = Math.max(binding.atMm, to);
-const alongMm = line ? Math.max(VOLUME_MARK_MIN_MM, toMm - fromMm) : lengthMm;
-const middle = seat && typeof seat.alongMm === "number" && !line ? seat.alongMm : (fromMm + toMm) / 2;
+const alongMm = line
+? Math.max(VOLUME_MARK_MIN_MM, toMm - fromMm)
+: reveal
+? Math.max(VOLUME_MARK_MIN_MM, Math.min(lengthMm, Number(wall.thicknessMm) / 2))
+: lengthMm;
+const middle = reveal
+? Number(wall.thicknessMm) / 4
+: seat && typeof seat.alongMm === "number" && !line
+? seat.alongMm
+: (fromMm + toMm) / 2;
 const outer = recessed ? faceMm : faceMm + depthMm;
 const inner = recessed ? faceMm - depthMm : faceMm;
 const bottomMm = axisOnFloor(heightMm) ? 0 : heightMm - widthMm / 2;
 const topMm = bottomMm + widthMm;
 const centreMm = (bottomMm + topMm) / 2;
 const at = (across, alongMm = middle) => ({
-x: Number(wall.aMm.x) + vectors.u.x * alongMm + normal.x * across,
-y: Number(wall.aMm.y) + vectors.u.y * alongMm + normal.y * across,
+x: origin.x + along.x * alongMm + normal.x * across,
+y: origin.y + along.y * alongMm + normal.y * across,
 });
 const faceAt = at(outer);
 const coreMm = (outer + inner) / 2;
@@ -40100,7 +40171,7 @@ side,
 heightMm: centreMm,
 prisms: [
 {
-corners: volumeBoxCorners(at(coreMm), vectors.u, alongMm, Math.max(outer - inner, 1)),
+corners: volumeBoxCorners(at(coreMm), along, alongMm, Math.max(outer - inner, 1)),
 bottomMm,
 topMm,
 },
@@ -40115,7 +40186,7 @@ anchor: { x: faceAt.x, y: faceAt.y, z: centreMm },
 frame: {
 at: at((outer + inner) / 2),
 bottomMm,
-u: { x: vectors.u.x, y: vectors.u.y },
+u: { x: along.x, y: along.y },
 f: { x: -normal.x, y: -normal.y },
 widthMm: alongMm,
 depthMm: Math.max(outer - inner, 1),
@@ -40123,7 +40194,7 @@ heightMm: widthMm,
 },
 face: {
 origin: { x: faceAt.x, y: faceAt.y, z: centreMm },
-u: { x: vectors.u.x, y: vectors.u.y, z: 0 },
+u: { x: along.x, y: along.y, z: 0 },
 v: { x: 0, y: 0, z: 1 },
 normal,
 widthMm: alongMm,
@@ -49426,7 +49497,7 @@ return room ? room.name : "";
 }),
 ", ",
 ),
-tableJoin(entry.marks.map((mark) => mark.location), "; "),
+tableJoin(entry.marks.map((mark) => markLocationText(project, mark)), "; "),
 tableJoin(entry.marks.map((mark) => mark.original), ", "),
 ];
 return {
@@ -49657,7 +49728,7 @@ cells: [
 markPairLabel(project, mark),
 type ? type.name : "",
 room ? room.name : "",
-mark.location || "",
+markLocationText(project, mark),
 group.channel === null ? "" : String(group.channel),
 linked.join(", "),
 ],
@@ -49814,7 +49885,7 @@ mark ? markPairLabel(project, mark) : strings.tables.brokenLink,
 item ? item.name : strings.tables.equipmentLost,
 kind ? kind.name : "",
 room ? room.name : "",
-mark ? mark.location || "" : "",
+mark ? markLocationText(project, mark) : "",
 links.join(", "),
 ],
 color: mark ? styleOf(project, mark.typeId).color : null,
@@ -63912,6 +63983,7 @@ sizesInherited: MARK_DIMENSION_FIELDS.some((field) => sizes[field + "From"] === 
 device: deviceMarkField(project, mark.id),
 curtain: markIsCurtain(project, mark.id) ? markCurtainSide(project, mark.id) : null,
 hanging: markHangingCan(project, mark) ? markHanging(project, mark) : null,
+reveal: markRevealCan(project, mark) ? markInReveal(project, mark) : null,
 lengthText: marksLengthText(project, mark),
 wallText: marksWallText(project, mark),
 wallId: markWall(mark) ? mark.wallId : null,
@@ -64300,6 +64372,22 @@ fail(error);
 });
 return uiCheckRow(box, strings.marks.hanging, strings.marks.hangingHint);
 }
+function revealField(state, mark, on) {
+const box = uiEl("input", { type: "checkbox" });
+box.checked = on === true;
+if (!appAllows("editMarks", state)) box.disabled = true;
+box.addEventListener("change", () => {
+const now = getState();
+if (!now.project) return;
+try {
+const next = setMarkReveal(now.project, mark.id, box.checked);
+if (next.project !== now.project) canvasCommit(now.project, next.project, strings.history.markReveal);
+} catch (error) {
+fail(error);
+}
+});
+return uiCheckRow(box, strings.marks.reveal, strings.marks.revealHint);
+}
 function roomField(state, mark) {
 const manual = markRoomManual(mark);
 const select = uiEl("select", {
@@ -64472,6 +64560,9 @@ view.fields ? roomField(state, mark) : null,
 view.fields && view.fields.curtain ? curtainField(state, mark, view.fields.curtain) : null,
 view.fields && view.fields.hanging !== null && view.fields.hanging !== undefined
 ? hangingField(state, mark, view.fields.hanging)
+: null,
+view.fields && view.fields.reveal !== null && view.fields.reveal !== undefined
+? revealField(state, mark, view.fields.reveal)
 : null,
 view.fields
 ? uiEl("div", { class: "mark-row__fields" }, [
