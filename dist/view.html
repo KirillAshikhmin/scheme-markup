@@ -6705,7 +6705,7 @@ display: none;
     var label = document.getElementById("splash-step");
     var canvas = document.getElementById("splash-model");
     var STEPS = ["Расставляем розетки…","Проектируем щит…","Настраиваем сценарии…","Подбираем оборудование…","Чертим стены…","Развешиваем люстры…","Тянем кабель…","Маркируем линии…","Считаем длину ленты…","Калибруем масштаб…","Проверяем автоматы…","Вешаем шторы на карнизы…","Ищем, где спрятать кондиционер…","Учим выключатели проходить…","Уговариваем датчик движения не реагировать на кота…","Объясняем люстре, что она не главная…","Прячем провода за плинтус…","Ищем фазу. Нашли. Больше не ищем…","Считаем розетки. Опять не хватает…","Мирим тёплый пол с ковром…","Договариваемся с роботом-пылесосом о маршруте…","Убеждаем щит, что места в нём достаточно…","Учим шторы просыпаться вовремя…","Проверяем, что лампочка действительно горит…","Напоминаем термостату, что зима кончилась…","Вспоминаем, от чего этот автомат…"];
-    var PAGE_BYTES = 3149427;
+    var PAGE_BYTES = 3154691;
     var calm = false;
     try {
     calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -7787,6 +7787,7 @@ markDeviceReset: "аксессуар как у типа",
 markCurtainSide: "сторона открывания шторы",
 markHanging: "вид люстры",
 markReveal: "метка в откосе",
+markSquare: "форма зеркала",
 addScenario: "новый сценарий",
 editScenario: "правка сценария",
 removeScenario: "удаление сценария",
@@ -7864,6 +7865,7 @@ pointerUnknown: "Указатель или включён, или выключе
 curtainSideUnknown: "Штора открывается влево, вправо или от центра",
 revealNoOpening: "В откос метка встаёт у края окна или двери: рядом с этой меткой проёма нет",
 hangingOnlyChandelier: "Висячей бывает люстра: у остальных меток висячего тела нет, и нарисовать его нечем",
+squareOnlyMirror: "Квадратным бывает зеркало подсветки: у остальных меток квадратного тела нет",
 commentNoLinks: "Комментарий ничем не управляет — это надпись на плане, а не устройство",
 commentNoEquipment: "Оборудование ставится в точку, а не в комментарий",
 typeKindNotLine: "Метка нарисована линией, а тип {code} — точечный: линии подходят только линейные типы",
@@ -8929,6 +8931,8 @@ curtainSides: { left: "Влево", right: "Вправо", center: "От цен�
 reveal: "В откосе",
 revealHint: "Метка стоит не на стене, а на откосе ближайшего окна или двери. На плане она остаётся у края проёма; в «Объёме» переезжает на откос, в таблицах к расположению дописывается «в откосе»",
 revealPlace: "в откосе",
+square: "Квадратное",
+squareHint: "Зеркало подсветки не круглое, а квадратное: сторона — по большей стороне габарита метки. Видно в «Объёме»; на плане и на развёртке знак у обоих зеркал один",
 hanging: "Висячая",
 hangingHint: "Люстра на цепи от потолочной чашки, ярусами книзу. Видно в «Объёме»; на плане знак у обеих люстр один. Длина подвеса — из высоты метки",
 count: "Показано {shown} из {total}",
@@ -9229,6 +9233,8 @@ armchair: "Кресло",
 coffeeTable: "Журнальный стол",
 deskSet: "Компьютерный стол с креслом",
 stool: "Табуретка",
+chair: "Стул",
+billiardTable: "Бильярдный стол",
 treadmill: "Беговая дорожка",
 projectorScreen: "Экран проектора",
 stairsExit: "Выход с лестницы",
@@ -11120,6 +11126,28 @@ heightAboveFloorMm: 0,
 words: ["табурет"],
 },
 {
+key: "chair",
+category: "furniture",
+mount: "floor",
+shape: "rect",
+widthMm: 450,
+depthMm: 500,
+heightMm: 850,
+heightAboveFloorMm: 0,
+words: ["стул"],
+},
+{
+key: "billiardTable",
+category: "furniture",
+mount: "floor",
+shape: "rect",
+widthMm: 3200,
+depthMm: 1600,
+heightMm: 850,
+heightAboveFloorMm: 0,
+words: ["бильярд"],
+},
+{
 key: "dresser",
 category: "furniture",
 mount: "floor",
@@ -12435,6 +12463,18 @@ viewCircle(0, 0, 0.08),
 [-0.2, 0.2].flatMap((x) => [-0.2, 0.2].map((y) => viewCircle(x, y, 0.05))),
 ),
 },
+chair: {
+shapes: [],
+parts: viewParts(viewRect(-0.3, -0.26, 0.6, 0.6, 0.08), viewRect(-0.32, -0.38, 0.64, 0.12, 0.04)),
+},
+billiardTable: {
+shapes: [],
+parts: viewParts(
+viewRect(-0.46, -0.26, 0.92, 0.52, 0.03),
+viewRect(-0.4, -0.2, 0.8, 0.4, 0.01),
+[-0.4, 0, 0.4].flatMap((x) => [-0.2, 0.2].map((y) => viewCircle(x, y, 0.035))),
+),
+},
 dresser: {
 shapes: [],
 parts: viewParts(
@@ -13435,6 +13475,7 @@ return {
 ...modelPart("tube", name, part),
 axis: part.axis === "x" ? "x" : "y",
 round: part.round === true,
+sides: part.sides === 4 ? 4 : null,
 };
 }
 function modelCone(name, part = {}) {
@@ -13607,6 +13648,10 @@ mirror: modelParts(
 modelTube("glass", { axis: "y", round: true, x: -0.44, width: 0.88, y: -0.5, depth: 0.3, z: 0.06, height: 0.88, material: "glass" }),
 modelTube("glow", { axis: "y", round: true, y: -0.2, depth: 0.7, material: "light", lit: true }),
 ),
+mirrorSquare: modelParts(
+modelTube("glass", { axis: "y", round: true, sides: 4, x: -0.44, width: 0.88, y: -0.5, depth: 0.3, z: 0.06, height: 0.88, material: "glass" }),
+modelTube("glow", { axis: "y", round: true, sides: 4, y: -0.2, depth: 0.7, material: "light", lit: true }),
+),
 chandelier: modelParts(
 modelBox("canopy", { x: -0.2, width: 0.4, y: -0.2, depth: 0.4, z: 0.9, height: 0.1, material: "metal" }),
 modelBox("dropLong", { x: -0.42, width: 0.12, y: -0.1, depth: 0.2, z: 0, height: 0.9, material: "light", lit: true }),
@@ -13632,6 +13677,7 @@ modelBox("profile", { y: -0.2, depth: 0.7 }),
 ),
 };
 const MODELS_LIGHT_HANGING = Object.freeze({ chandelier: "chandelierHanging" });
+const MODELS_LIGHT_SQUARE = Object.freeze({ mirror: "mirrorSquare" });
 
 // src/objectModels/net.js
 const MODELS_NET = {
@@ -14073,6 +14119,26 @@ stool: modelParts(
 modelCyl("seat", { z: 0.8, height: 0.2, material: "light" }),
 modelCyl("leg", { x: -0.16, width: 0.32, y: -0.16, depth: 0.32, z: 0, height: 0.8 }),
 ),
+chair: modelParts(
+modelBox("seat", { x: -0.46, width: 0.92, y: -0.5, depth: 0.86, z: 0.48, height: 0.07, material: "light" }),
+modelBox("back", { x: -0.46, width: 0.92, y: 0.36, depth: 0.12, z: 0.55, height: 0.45, material: "light" }),
+modelBox("legFrontLeft", { x: -0.44, width: 0.09, y: -0.46, depth: 0.08, z: 0, height: 0.48, material: "dark" }),
+modelBox("legFrontRight", { x: 0.35, width: 0.09, y: -0.46, depth: 0.08, z: 0, height: 0.48, material: "dark" }),
+modelBox("legBackLeft", { x: -0.44, width: 0.09, y: 0.38, depth: 0.08, z: 0, height: 0.55, material: "dark" }),
+modelBox("legBackRight", { x: 0.35, width: 0.09, y: 0.38, depth: 0.08, z: 0, height: 0.55, material: "dark" }),
+),
+billiardTable: modelParts(
+modelBox("apron", { x: -0.5, width: 1, y: -0.5, depth: 1, z: 0.72, height: 0.2 }),
+modelBox("cloth", { x: -0.46, width: 0.92, y: -0.42, depth: 0.84, z: 0.92, height: 0.04, material: "light" }),
+modelBox("railFront", { x: -0.5, width: 1, y: -0.5, depth: 0.08, z: 0.92, height: 0.08 }),
+modelBox("railBack", { x: -0.5, width: 1, y: 0.42, depth: 0.08, z: 0.92, height: 0.08 }),
+modelBox("railLeft", { x: -0.5, width: 0.04, y: -0.42, depth: 0.84, z: 0.92, height: 0.08 }),
+modelBox("railRight", { x: 0.46, width: 0.04, y: -0.42, depth: 0.84, z: 0.92, height: 0.08 }),
+modelBox("legFrontLeft", { x: -0.46, width: 0.06, y: -0.42, depth: 0.12, z: 0, height: 0.72, material: "dark" }),
+modelBox("legFrontRight", { x: 0.4, width: 0.06, y: -0.42, depth: 0.12, z: 0, height: 0.72, material: "dark" }),
+modelBox("legBackLeft", { x: -0.46, width: 0.06, y: 0.3, depth: 0.12, z: 0, height: 0.72, material: "dark" }),
+modelBox("legBackRight", { x: 0.4, width: 0.06, y: 0.3, depth: 0.12, z: 0, height: 0.72, material: "dark" }),
+),
 fridge: modelParts(
 modelBox("doorHigh", { x: -0.46, width: 0.92, y: -0.5, depth: 0.18, z: 0.36, height: 0.62, material: "light" }),
 modelBox("doorLow", { x: -0.46, width: 0.92, y: -0.5, depth: 0.18, z: 0.02, height: 0.31, material: "light" }),
@@ -14328,6 +14394,7 @@ function objectModelFaceCount(model) {
 let faces = 0;
 for (const part of (model && model.parts) || []) {
 if (part.kind === "plate") faces += part.points.length + 2;
+else if (part.kind === "tube" && part.sides) faces += part.sides + 2;
 else faces += part.kind === "cyl" || part.kind === "tube" ? MODEL_CYL_SIDES + 2 : part.kind === "cone" ? MODEL_CYL_SIDES + 1 : 6;
 }
 return faces;
@@ -14345,6 +14412,15 @@ return Object.keys(MODELS_HANGING);
 }
 function objectModelHanging(model, hanging) {
 const key = model && hanging === true ? MODELS_HANGING[model.key] : null;
+const other = key ? objectModelByKey(key) : null;
+return other || model;
+}
+const MODELS_SQUARE = { ...MODELS_LIGHT_SQUARE };
+function objectModelSquareKeys() {
+return Object.keys(MODELS_SQUARE);
+}
+function objectModelSquare(model, square) {
+const key = model && square === true ? MODELS_SQUARE[model.key] : null;
 const other = key ? objectModelByKey(key) : null;
 return other || model;
 }
@@ -16909,6 +16985,7 @@ const MARK_PATCH_FIELDS = [
 "curtainSide",
 "hanging",
 "reveal",
+"square",
 "objectId",
 ...MARK_DIMENSION_FIELDS,
 ];
@@ -16963,6 +17040,17 @@ unreveal = true;
 delete changes.reveal;
 }
 }
+let unsquare = false;
+if (Object.prototype.hasOwnProperty.call(changes, "square")) {
+if (changes.square === true) {
+if (!markSquareCan(project, project.marks.find((mark) => mark.id === markId))) {
+throw modelError("squareOnlyMirror");
+}
+} else {
+unsquare = true;
+delete changes.square;
+}
+}
 let unlink = false;
 if (Object.prototype.hasOwnProperty.call(changes, "objectId")) {
 const wanted = changes.objectId == null || changes.objectId === "" ? null : changes.objectId;
@@ -16980,6 +17068,7 @@ if (mark.id !== markId) return mark;
 const next = { ...mark, ...changes };
 if (unhang) delete next.hanging;
 if (unreveal) delete next.reveal;
+if (unsquare) delete next.square;
 return unlink ? markWithoutObject(next) : next;
 });
 return { project: withProject(project, { marks }), mark: marks.find((mark) => mark.id === markId) };
@@ -20056,6 +20145,18 @@ return markHangingCan(project, mark);
 }
 function setMarkHanging(project, markId, on) {
 return updateMark(project, markId, { hanging: on === true ? true : null });
+}
+function markSquareCan(project, mark) {
+if (!mark || mark.kind !== "point" || markIsComment(mark)) return false;
+const name = typeViewName(project, mark.typeId);
+return name !== null && objectModelSquareKeys().includes(name);
+}
+function markSquare(project, mark) {
+if (!mark || mark.square !== true) return false;
+return markSquareCan(project, mark);
+}
+function setMarkSquare(project, markId, on) {
+return updateMark(project, markId, { square: on === true ? true : null });
 }
 const MARK_REVEAL_REACH_MM = 400;
 function markRevealOpening(project, mark) {
@@ -40594,9 +40695,12 @@ spare: box.guessed,
 objectId: null,
 postMm,
 model: view
-? objectModelHanging(
+? objectModelSquare(
+objectModelHanging(
 objectModelChannels(objectModelByKey(view.name), typeChannels(project, mark.typeId)),
 markHanging(project, mark),
+),
+markSquare(project, mark),
 )
 : null,
 };
@@ -40950,10 +41054,12 @@ const radiusMm = Math.max(acrossShare * 2 * acrossMm, part.height * frame.height
 acrossShare = acrossMm > 0 ? radiusMm / acrossMm : acrossShare;
 upShare = frame.heightMm > 0 ? radiusMm / frame.heightMm : upShare;
 }
+const sides = part.sides || volumeSidesNow;
+const reach = part.sides ? 1 / Math.cos(Math.PI / sides) : 1;
 const ring = [];
-for (let index = 0; index < volumeSidesNow; index += 1) {
-const angle = ((index + 0.5) * Math.PI * 2) / volumeSidesNow;
-ring.push({ across: across + Math.cos(angle) * acrossShare, z: middleZ + Math.sin(angle) * upShare });
+for (let index = 0; index < sides; index += 1) {
+const angle = ((index + 0.5) * Math.PI * 2) / sides;
+ring.push({ across: across + Math.cos(angle) * acrossShare * reach, z: middleZ + Math.sin(angle) * upShare * reach });
 }
 const node = (item, along) => (alongX ? at(along, item.across, item.z) : at(item.across, along, item.z));
 const axisAt = (along) => (alongX ? at(along, across, middleZ) : at(across, along, middleZ));
@@ -40982,7 +41088,7 @@ for (const part of parts) {
 const before = out.length;
 if (part.kind === "tube") volumeTubeFaces(frame, part, paint(part.material), out, own(part));
 else if (part.kind === "cone") volumeConeFaces(frame, part, paint(part.material), out, own(part));
-if (out.length > before) volumeSmoothTag(out, before);
+if (out.length > before && !part.sides) volumeSmoothTag(out, before);
 }
 for (const prism of volumeModelPrisms(frame, parts)) {
 const fill = paint(prism.material);
@@ -65622,6 +65728,7 @@ device: deviceMarkField(project, mark.id),
 curtain: markIsCurtain(project, mark.id) ? markCurtainSide(project, mark.id) : null,
 hanging: markHangingCan(project, mark) ? markHanging(project, mark) : null,
 reveal: markRevealCan(project, mark) ? markInReveal(project, mark) : null,
+square: markSquareCan(project, mark) ? markSquare(project, mark) : null,
 lengthText: marksLengthText(project, mark),
 wallText: marksWallText(project, mark),
 wallId: markWall(mark) ? mark.wallId : null,
@@ -66026,6 +66133,22 @@ fail(error);
 });
 return uiCheckRow(box, strings.marks.reveal, strings.marks.revealHint);
 }
+function squareField(state, mark, on) {
+const box = uiEl("input", { type: "checkbox" });
+box.checked = on === true;
+if (!appAllows("editMarks", state)) box.disabled = true;
+box.addEventListener("change", () => {
+const now = getState();
+if (!now.project) return;
+try {
+const next = setMarkSquare(now.project, mark.id, box.checked);
+if (next.project !== now.project) canvasCommit(now.project, next.project, strings.history.markSquare);
+} catch (error) {
+fail(error);
+}
+});
+return uiCheckRow(box, strings.marks.square, strings.marks.squareHint);
+}
 function roomField(state, mark) {
 const manual = markRoomManual(mark);
 const select = uiEl("select", {
@@ -66201,6 +66324,9 @@ view.fields && view.fields.hanging !== null && view.fields.hanging !== undefined
 : null,
 view.fields && view.fields.reveal !== null && view.fields.reveal !== undefined
 ? revealField(state, mark, view.fields.reveal)
+: null,
+view.fields && view.fields.square !== null && view.fields.square !== undefined
+? squareField(state, mark, view.fields.square)
 : null,
 view.fields
 ? uiEl("div", { class: "mark-row__fields" }, [

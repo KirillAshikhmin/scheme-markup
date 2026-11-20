@@ -418,6 +418,36 @@ export const MODELS_OBJECTS = {
     modelCyl("seat", { z: 0.8, height: 0.2, material: "light" }),
     modelCyl("leg", { x: -0.16, width: 0.32, y: -0.16, depth: 0.32, z: 0, height: 0.8 }),
   ),
+  // Стул (правка 2026-11-21): сиденье, спинка у задней кромки и четыре ножки.
+  // Ножки здесь отдельными телами нарочно — у табуретки их заменила одна нога,
+  // а стул без просвета под сиденьем читается тумбой. Сиденье и спинка светлые
+  // (обивка, «Цвет 2»), ножки тёмные. Доли от габарита 450 × 500 × 850:
+  // сиденье на 0.48…0.54 — это 410…460 мм, спинка до верха.
+  chair: modelParts(
+    modelBox("seat", { x: -0.46, width: 0.92, y: -0.5, depth: 0.86, z: 0.48, height: 0.07, material: "light" }),
+    modelBox("back", { x: -0.46, width: 0.92, y: 0.36, depth: 0.12, z: 0.55, height: 0.45, material: "light" }),
+    modelBox("legFrontLeft", { x: -0.44, width: 0.09, y: -0.46, depth: 0.08, z: 0, height: 0.48, material: "dark" }),
+    modelBox("legFrontRight", { x: 0.35, width: 0.09, y: -0.46, depth: 0.08, z: 0, height: 0.48, material: "dark" }),
+    modelBox("legBackLeft", { x: -0.44, width: 0.09, y: 0.38, depth: 0.08, z: 0, height: 0.55, material: "dark" }),
+    modelBox("legBackRight", { x: 0.35, width: 0.09, y: 0.38, depth: 0.08, z: 0, height: 0.55, material: "dark" }),
+  ),
+  // Бильярдный стол (правка 2026-11-21): массив царги, сукно в бортах и четыре
+  // ноги. Сукно — светлое тело («Цвет 2»): зелёным его делает человек, а без
+  // краски оно светлее корпуса, как столешница. Борта выше сукна на 0.04
+  // габарита (34 мм при 850) — по ним стол и узнают сверху и сбоку. Десять
+  // тел, шестьдесят граней.
+  billiardTable: modelParts(
+    modelBox("apron", { x: -0.5, width: 1, y: -0.5, depth: 1, z: 0.72, height: 0.2 }),
+    modelBox("cloth", { x: -0.46, width: 0.92, y: -0.42, depth: 0.84, z: 0.92, height: 0.04, material: "light" }),
+    modelBox("railFront", { x: -0.5, width: 1, y: -0.5, depth: 0.08, z: 0.92, height: 0.08 }),
+    modelBox("railBack", { x: -0.5, width: 1, y: 0.42, depth: 0.08, z: 0.92, height: 0.08 }),
+    modelBox("railLeft", { x: -0.5, width: 0.04, y: -0.42, depth: 0.84, z: 0.92, height: 0.08 }),
+    modelBox("railRight", { x: 0.46, width: 0.04, y: -0.42, depth: 0.84, z: 0.92, height: 0.08 }),
+    modelBox("legFrontLeft", { x: -0.46, width: 0.06, y: -0.42, depth: 0.12, z: 0, height: 0.72, material: "dark" }),
+    modelBox("legFrontRight", { x: 0.4, width: 0.06, y: -0.42, depth: 0.12, z: 0, height: 0.72, material: "dark" }),
+    modelBox("legBackLeft", { x: -0.46, width: 0.06, y: 0.3, depth: 0.12, z: 0, height: 0.72, material: "dark" }),
+    modelBox("legBackRight", { x: 0.4, width: 0.06, y: 0.3, depth: 0.12, z: 0, height: 0.72, material: "dark" }),
+  ),
   // Телевизор уехал к меткам (таск 186, G279): тело то же, лежит оно теперь в
   // `objectModels/things.js`.
 

@@ -35,6 +35,8 @@ import {
   markHangingCan,
   markInReveal,
   markRevealCan,
+  markSquare,
+  markSquareCan,
   markDimensions,
   markHasDimensions,
   markIsCurtain,
@@ -57,6 +59,7 @@ import {
   setMarkFreeNumber,
   setMarkHanging,
   setMarkReveal,
+  setMarkSquare,
   setMarkNumber,
   setMarkWall,
   styleOf,
@@ -604,6 +607,8 @@ export function marksRowModel(project, row, options = {}) {
     hanging: markHangingCan(project, mark) ? markHanging(project, mark) : null,
     // «В откосе» (правка 2026-11-20) — тем же порядком: `null` — не предлагается.
     reveal: markRevealCan(project, mark) ? markInReveal(project, mark) : null,
+    // «Квадратное» зеркало (правка 2026-11-21) — тем же порядком.
+    square: markSquareCan(project, mark) ? markSquare(project, mark) : null,
     // Длина линейной метки по плану — в метрах, и только когда у схемы есть
     // калибровка масштаба. Пусто значит «посчитать неоткуда»: без масштаба
     // строка остаётся ровно такой, какой была до этой задачи. Размер изделия
@@ -1155,6 +1160,24 @@ function mountMarksPanel(host, api) {
     return uiCheckRow(box, strings.marks.reveal, strings.marks.revealHint);
   }
 
+  /** «Квадратное» (правка 2026-11-21) — отметкой, как «Висячая»: зеркало подсветки в «Объёме» квадратное. */
+  function squareField(state, mark, on) {
+    const box = uiEl("input", { type: "checkbox" });
+    box.checked = on === true;
+    if (!appAllows("editMarks", state)) box.disabled = true;
+    box.addEventListener("change", () => {
+      const now = getState();
+      if (!now.project) return;
+      try {
+        const next = setMarkSquare(now.project, mark.id, box.checked);
+        if (next.project !== now.project) canvasCommit(now.project, next.project, strings.history.markSquare);
+      } catch (error) {
+        fail(error);
+      }
+    });
+    return uiCheckRow(box, strings.marks.square, strings.marks.squareHint);
+  }
+
   function roomField(state, mark) {
     const manual = markRoomManual(mark);
     const select = uiEl("select", {
@@ -1381,6 +1404,9 @@ function mountMarksPanel(host, api) {
           : null,
         view.fields && view.fields.reveal !== null && view.fields.reveal !== undefined
           ? revealField(state, mark, view.fields.reveal)
+          : null,
+        view.fields && view.fields.square !== null && view.fields.square !== undefined
+          ? squareField(state, mark, view.fields.square)
           : null,
         // «Расположение» и «Комментарий» — каждое на своей строке.
         //

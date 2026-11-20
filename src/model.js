@@ -16,7 +16,7 @@ import { objectViewByName, objectViewForShape } from "./objectViews/registry.js"
 // читает у него **один** список: у каких изображений есть висячий вариант тела
 // (таск 256). Своего списка здесь не заводится — отметка «Висячая» обязана
 // предлагаться ровно там, где её есть чем нарисовать.
-import { objectModelHangingKeys } from "./objectModels/registry.js";
+import { objectModelHangingKeys, objectModelSquareKeys } from "./objectModels/registry.js";
 // Словарь устройств имитации (таск 01 сценариев) — данные сборки, как
 // каталоги выше: объект хранит у типа и метки только ключи вида и сервисов,
 // а форматы и состав живут там.
@@ -3980,6 +3980,8 @@ const MARK_PATCH_FIELDS = [
   "hanging",
   // Отметка «В откосе» (правка 2026-11-20) — того же рода.
   "reveal",
+  // Отметка «Квадратное» у зеркала подсветки (правка 2026-11-21) — того же рода.
+  "square",
   // Связь с вещью чертежа (R01). Поле стоит здесь, а не правится в обход
   // белого списка, как ярус `z`: иначе оно молча исчезало бы на первой же
   // правке карточки. Правило у связи одно — `markObjectCan`, — и проверяется
@@ -4061,6 +4063,19 @@ export function updateMark(project, markId, patch) {
       delete changes.reveal;
     }
   }
+  // «Квадратное» зеркало — тем же порядком: ставится только там, где у
+  // изображения есть квадратный вариант, снятая убирает ключ.
+  let unsquare = false;
+  if (Object.prototype.hasOwnProperty.call(changes, "square")) {
+    if (changes.square === true) {
+      if (!markSquareCan(project, project.marks.find((mark) => mark.id === markId))) {
+        throw modelError("squareOnlyMirror");
+      }
+    } else {
+      unsquare = true;
+      delete changes.square;
+    }
+  }
   // Связь с вещью: одно правило на обе двери. Пустое значение — «снять», и
   // поле тогда **убирается**, а не обнуляется (G68).
   let unlink = false;
@@ -4080,6 +4095,7 @@ export function updateMark(project, markId, patch) {
     const next = { ...mark, ...changes };
     if (unhang) delete next.hanging;
     if (unreveal) delete next.reveal;
+    if (unsquare) delete next.square;
     return unlink ? markWithoutObject(next) : next;
   });
   return { project: withProject(project, { marks }), mark: marks.find((mark) => mark.id === markId) };
@@ -9781,6 +9797,40 @@ export function markHanging(project, mark) {
 /** Поставить или снять отметку «Висячая». Снятая **убирает** ключ, а не пишет `false`. */
 export function setMarkHanging(project, markId, on) {
   return updateMark(project, markId, { hanging: on === true ? true : null });
+}
+
+// ——— квадратное зеркало (правка без автопилота, 2026-11-21) ————————————————
+//
+// Слова заказчика: «если какие-то есть на дизайн проекте объекты, но таких у
+// нас нет — пусть добавит, если они важны. Например опция у зеркала —
+// квадратное». Метка «Подсветка зеркала» с таска 177 рисуется в «Объёме»
+// круглым зеркалом, а в дизайн-проектах зеркало над раковиной чаще
+// прямоугольное.
+//
+// **Повторена механика «Висячей» люстры** (таск 256): необязательное поле
+// метки (`mark.square`), которое попадает в объект, только когда оно стоит;
+// «предлагается ли» (`markSquareCan`) и «стоит ли» (`markSquare`) — разные
+// двери; отметка у метки, которой вариант больше не предлагается, не значит
+// ничего, но и не снимается молча (G68). Миграции у поля нет: нет его —
+// зеркало круглое, как было. Знак на плане и изображение на развёртке у обоих
+// зеркал общие — меняется только тело в «Объёме».
+
+/** Предлагается ли метке отметка «Квадратное»: у её изображения есть квадратный вариант тела. */
+export function markSquareCan(project, mark) {
+  if (!mark || mark.kind !== "point" || markIsComment(mark)) return false;
+  const name = typeViewName(project, mark.typeId);
+  return name !== null && objectModelSquareKeys().includes(name);
+}
+
+/** Квадратное ли зеркало этой метки: отметка стоит и вариант у изображения есть. */
+export function markSquare(project, mark) {
+  if (!mark || mark.square !== true) return false;
+  return markSquareCan(project, mark);
+}
+
+/** Поставить или снять отметку «Квадратное». Снятая **убирает** ключ, а не пишет `false`. */
+export function setMarkSquare(project, markId, on) {
+  return updateMark(project, markId, { square: on === true ? true : null });
 }
 
 // ——— метка в откосе (правка без автопилота, 2026-11-20) ————————————————————

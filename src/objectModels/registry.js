@@ -26,7 +26,7 @@
 import { objectCatalogEntry, objectCatalogKeyByName } from "../objectCatalog.js";
 import { MODELS_CLIMATE } from "./climate.js";
 import { MODELS_LINES } from "./lines.js";
-import { MODELS_LIGHT, MODELS_LIGHT_HANGING } from "./light.js";
+import { MODELS_LIGHT, MODELS_LIGHT_HANGING, MODELS_LIGHT_SQUARE } from "./light.js";
 import { MODELS_NET } from "./net.js";
 import { MODELS_OBJECTS } from "./objects.js";
 import { MODELS_KEYED, MODELS_POWER } from "./power.js";
@@ -174,6 +174,7 @@ export function objectModelFaceCount(model) {
   let faces = 0;
   for (const part of (model && model.parts) || []) {
     if (part.kind === "plate") faces += part.points.length + 2;
+    else if (part.kind === "tube" && part.sides) faces += part.sides + 2;
     else faces += part.kind === "cyl" || part.kind === "tube" ? MODEL_CYL_SIDES + 2 : part.kind === "cone" ? MODEL_CYL_SIDES + 1 : 6;
   }
   return faces;
@@ -238,6 +239,34 @@ export function objectModelHangingKeys() {
  */
 export function objectModelHanging(model, hanging) {
   const key = model && hanging === true ? MODELS_HANGING[model.key] : null;
+  const other = key ? objectModelByKey(key) : null;
+  return other || model;
+}
+
+// ——— квадратный вариант тела (правка без автопилота, 2026-11-21) ————————————
+//
+// Слова заказчика: «если какие-то есть на дизайн проекте объекты, но таких у
+// нас нет — пусть добавит… Например опция у зеркала — квадратное». Зеркало
+// подсветки с таска 177 круглое в любом габарите, а на развёртках дизайн-проекта
+// зеркала над раковиной сплошь прямоугольные.
+//
+// **Та же лестница, что у висячей люстры**: отметка у метки (`mark.square`,
+// правило — `markSquareCan` в `model.js`) подменяет **модель**, оставляя
+// изображение, габарит и знак на плане теми же. Пары «обычная → квадратная»
+// объявлены рядом с описаниями (`MODELS_LIGHT_SQUARE` в `light.js`).
+const MODELS_SQUARE = { ...MODELS_LIGHT_SQUARE };
+
+/** Имена изображений, у которых есть квадратный вариант: кому предлагать отметку. */
+export function objectModelSquareKeys() {
+  return Object.keys(MODELS_SQUARE);
+}
+
+/**
+ * **Квадратный вариант модели.** Без отметки и без варианта модель проходит
+ * насквозь той же ссылкой — кадр метки без отметки прежний грань в грань (G68).
+ */
+export function objectModelSquare(model, square) {
+  const key = model && square === true ? MODELS_SQUARE[model.key] : null;
   const other = key ? objectModelByKey(key) : null;
   return other || model;
 }

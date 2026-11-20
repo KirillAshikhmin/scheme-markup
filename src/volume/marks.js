@@ -16,6 +16,7 @@ import {
   hexToRgb,
   labelOf,
   markHanging,
+  markSquare,
   markRevealOpening,
   markIsComment,
   markObjectId,
@@ -32,7 +33,7 @@ import {
   wallVectors,
 } from "../model.js";
 import { MODEL_CYL_SIDES } from "../objectModels/kit.js";
-import { objectLineModel, objectModelByKey, objectModelChannels, objectModelHanging } from "../objectModels/registry.js";
+import { objectLineModel, objectModelByKey, objectModelChannels, objectModelHanging, objectModelSquare } from "../objectModels/registry.js";
 import { objectViewByName, objectViewForShape } from "../objectViews/registry.js";
 import { VOLUME_LAYER_MARK } from "./measures.js";
 import { volumeClockwise, volumeFace, volumeFaceNormal, volumeLine } from "./faces.js";
@@ -1187,10 +1188,15 @@ export function volumeMarkPlacement(project, mark, where = [], seat = null, poin
     // подменяет описание, оставляя изображение, габарит и знак на плане теми
     // же. Метка без отметки получает ту же модель той же ссылкой, и кадр у
     // неё грань в грань прежний (G68).
+    // **Квадратное зеркало — тем же приёмом** (правка 2026-11-21): отметка
+    // `mark.square` подменяет описание зеркала подсветки.
     model: view
-      ? objectModelHanging(
-          objectModelChannels(objectModelByKey(view.name), typeChannels(project, mark.typeId)),
-          markHanging(project, mark),
+      ? objectModelSquare(
+          objectModelHanging(
+            objectModelChannels(objectModelByKey(view.name), typeChannels(project, mark.typeId)),
+            markHanging(project, mark),
+          ),
+          markSquare(project, mark),
         )
       : null,
   };
@@ -1829,10 +1835,16 @@ export function volumeTubeFaces(frame, part, rgb, out = [], options = {}) {
     acrossShare = acrossMm > 0 ? radiusMm / acrossMm : acrossShare;
     upShare = frame.heightMm > 0 ? radiusMm / frame.heightMm : upShare;
   }
+  // Квадратное тело (`sides: 4`, правка 2026-11-21) — тот же обвод в четыре
+  // грани, описанный вокруг круга: вершины отодвинуты на 1 / cos(π / 4), и
+  // сторона квадрата равна диаметру. Число граней у него своё и от сборки
+  // «круглых тел» видеокарты не зависит: углы у квадрата настоящие.
+  const sides = part.sides || volumeSidesNow;
+  const reach = part.sides ? 1 / Math.cos(Math.PI / sides) : 1;
   const ring = [];
-  for (let index = 0; index < volumeSidesNow; index += 1) {
-    const angle = ((index + 0.5) * Math.PI * 2) / volumeSidesNow;
-    ring.push({ across: across + Math.cos(angle) * acrossShare, z: middleZ + Math.sin(angle) * upShare });
+  for (let index = 0; index < sides; index += 1) {
+    const angle = ((index + 0.5) * Math.PI * 2) / sides;
+    ring.push({ across: across + Math.cos(angle) * acrossShare * reach, z: middleZ + Math.sin(angle) * upShare * reach });
   }
   const node = (item, along) => (alongX ? at(along, item.across, item.z) : at(item.across, along, item.z));
   const axisAt = (along) => (alongX ? at(along, across, middleZ) : at(across, along, middleZ));
@@ -1891,7 +1903,8 @@ export function volumeModelFaces(frame, model, rgb, out = [], options = {}) {
     const before = out.length;
     if (part.kind === "tube") volumeTubeFaces(frame, part, paint(part.material), out, own(part));
     else if (part.kind === "cone") volumeConeFaces(frame, part, paint(part.material), out, own(part));
-    if (out.length > before) volumeSmoothTag(out, before);
+    // Квадратному телу бока не сглаживаются: у него рёбра, а не обвод круга.
+    if (out.length > before && !part.sides) volumeSmoothTag(out, before);
   }
   for (const prism of volumeModelPrisms(frame, parts)) {
     // Та самая одна строка (таск 09 сценариев): `prism.lit` доезжает до грани

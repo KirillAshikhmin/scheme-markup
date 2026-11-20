@@ -227,6 +227,17 @@ export const MODELS_LIGHT = {
     modelTube("glass", { axis: "y", round: true, x: -0.44, width: 0.88, y: -0.5, depth: 0.3, z: 0.06, height: 0.88, material: "glass" }),
     modelTube("glow", { axis: "y", round: true, y: -0.2, depth: 0.7, material: "light", lit: true }),
   ),
+  // **Квадратное зеркало** (правка без автопилота, 2026-11-21; слова
+  // заказчика: «опция у зеркала — квадратное»). Те же два тела с теми же
+  // долями, только обвод в четыре грани (`sides: 4`): квадрат описан вокруг
+  // прежнего круга, поэтому зеркало занимает на стене то же место и так же
+  // выходит из габарита подсветки (`round`). Это второе описание, а не второй
+  // ключ у метки: выбирает его отметка (`mark.square`), пара объявлена ниже —
+  // `MODELS_LIGHT_SQUARE`, — как у висячей люстры.
+  mirrorSquare: modelParts(
+    modelTube("glass", { axis: "y", round: true, sides: 4, x: -0.44, width: 0.88, y: -0.5, depth: 0.3, z: 0.06, height: 0.88, material: "glass" }),
+    modelTube("glow", { axis: "y", round: true, sides: 4, y: -0.2, depth: 0.7, material: "light", lit: true }),
+  ),
   // ——— люстра (таск 216, G323) ———
   //
   // Слова заказчика: «И люстру сделай более красивой всё-таки, а то просто
@@ -343,3 +354,10 @@ export const MODELS_LIGHT = {
  * этом не узнают: им хватит этой строки.
  */
 export const MODELS_LIGHT_HANGING = Object.freeze({ chandelier: "chandelierHanging" });
+
+/**
+ * **Квадратные варианты тел** (правка 2026-11-21): «обычный ключ → квадратный
+ * ключ». Устроено как пара висячей люстры и читается теми же дверями реестра
+ * (`objectModelSquare`, `objectModelSquareKeys`).
+ */
+export const MODELS_LIGHT_SQUARE = Object.freeze({ mirror: "mirrorSquare" });
