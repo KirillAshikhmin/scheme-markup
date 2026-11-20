@@ -1842,21 +1842,24 @@ export function volumeModelFaces(frame, model, rgb, out = [], options = {}) {
     // и открывает её то же, что открывает двери: щелчок, E и касание.
     doorId: part && part.leaf && options.leafId ? options.leafId : null,
   });
+  // Второй цвет вещи чертежа (правка 2026-11-20): светлые тела красятся им
+  // самим, а не осветлённым основным. Нет его — всё как было.
+  const paint = (material) => (material === "light" && options.lightRgb ? options.lightRgb : volumeModelRgb(material, rgb));
   for (const part of parts) {
-    if (part.kind === "tube") volumeTubeFaces(frame, part, volumeModelRgb(part.material, rgb), out, own(part));
-    else if (part.kind === "cone") volumeConeFaces(frame, part, volumeModelRgb(part.material, rgb), out, own(part));
+    if (part.kind === "tube") volumeTubeFaces(frame, part, paint(part.material), out, own(part));
+    else if (part.kind === "cone") volumeConeFaces(frame, part, paint(part.material), out, own(part));
   }
   for (const prism of volumeModelPrisms(frame, parts)) {
     // Та самая одна строка (таск 09 сценариев): `prism.lit` доезжает до грани
     // через `own(prism)`, а горит ли тело — решает кадр по состоянию дома.
-    const fill = volumeModelRgb(prism.material, rgb);
+    const fill = paint(prism.material);
     volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, fill, out, own(prism));
   }
   // Картинка на лице тела — последней (таск 255, G400): она ложится **поверх**
   // лица, и в кадре порядок граней одной плоскости решает порядок записи.
   for (const part of parts) {
     if (!part.art) continue;
-    volumeArtFaces(frame, part, volumeModelRgb(part.material, rgb), out, own(part));
+    volumeArtFaces(frame, part, paint(part.material), out, own(part));
   }
   return out;
 }

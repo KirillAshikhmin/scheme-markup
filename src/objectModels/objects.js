@@ -280,6 +280,27 @@ export const MODELS_OBJECTS = {
   ),
   washer: MODEL_LAUNDRY,
   dryerMachine: MODEL_LAUNDRY,
+  // Тумба с раковиной (правка 2026-11-20): подвесной корпус с двумя ящиками,
+  // толстая столешница, чаша в ней и смеситель. Корпус **висит** — под ним
+  // пусто на пятую часть габарита (210 мм из 1070), а вещь при этом стоит «на
+  // полу», как всё напольное в каталоге. Чаша — тёмная плашка поверх
+  // столешницы: выгрызать её в теле нечем, а сверху она так и читается.
+  vanity: modelParts(
+    modelBox("case", { y: -0.42, depth: 0.92, z: 0.2, height: 0.46 }),
+    modelBox("drawerHigh", { x: -0.47, width: 0.94, y: -0.5, depth: 0.1, z: 0.44, height: 0.2, material: "light" }),
+    modelBox("drawerLow", { x: -0.47, width: 0.94, y: -0.5, depth: 0.1, z: 0.22, height: 0.2, material: "light" }),
+    modelBox("top", { z: 0.66, height: 0.15, material: "light" }),
+    modelBox("basin", { x: -0.3, width: 0.6, y: -0.34, depth: 0.6, z: 0.81, height: 0.01, material: "dark" }),
+    modelBox("tap", { x: -0.03, width: 0.06, y: 0.3, depth: 0.12, z: 0.81, height: 0.19, material: "metal" }),
+  ),
+  // Подвесной унитаз с инсталляцией (правка 2026-11-20): чаша на стене,
+  // сиденье с крышкой одним телом и клавиша смыва над ней. Бачка нет — он в
+  // коробе. Три тела: кадр платит за каждую грань, а круглых здесь два.
+  toiletWall: modelParts(
+    modelCyl("bowl", { x: -0.45, width: 0.9, y: -0.5, depth: 1, z: 0.1, height: 0.26, material: "light" }),
+    modelCyl("seat", { x: -0.47, width: 0.94, y: -0.5, depth: 1, z: 0.36, height: 0.05, material: "dark" }),
+    modelBox("flush", { x: -0.34, width: 0.68, y: 0.46, depth: 0.04, z: 0.84, height: 0.14, material: "metal" }),
+  ),
   // Раковина: чаша, пьедестал и смеситель.
   sink: modelParts(
     modelCyl("bowl", { x: -0.4, width: 0.8, y: -0.44, depth: 0.74, z: 0.55, height: 0.45, material: "light" }),
@@ -641,6 +662,16 @@ export const MODELS_OBJECTS = {
   // Столешницы у него нет своим телом нарочно: «Столешница» — вещь каталога, и
   // кухонный фронт собирают из шкафов с полосой поверх них. Второй верх здесь
   // налез бы на неё.
+  // Кухонный шкаф с мойкой (правка 2026-11-20): тот же модуль с двумя
+  // дверцами, поверх — столешница на 0,78 высоты габарита, чаша и смеситель.
+  kitchenSink: modelParts(
+    modelBox("case", { y: -0.3, depth: 0.8, z: 0, height: 0.74 }),
+    modelBox("doorLeft", { x: -0.46, width: 0.45, y: -0.5, depth: 0.22, z: 0.05, height: 0.68, material: "light", leaf: true }),
+    modelBox("doorRight", { x: 0.01, width: 0.45, y: -0.5, depth: 0.22, z: 0.05, height: 0.68, material: "light", leaf: true }),
+    modelBox("top", { z: 0.74, height: 0.04, material: "light" }),
+    modelBox("basin", { x: -0.34, width: 0.68, y: -0.3, depth: 0.52, z: 0.78, height: 0.01, material: "dark" }),
+    modelBox("tap", { x: -0.03, width: 0.06, y: 0.26, depth: 0.12, z: 0.78, height: 0.22, material: "metal" }),
+  ),
   kitchenCabinet: modelParts(
     modelBox("case", { y: -0.3, depth: 0.8 }),
     modelBox("doorLeft", { x: -0.46, width: 0.45, y: -0.5, depth: 0.22, z: 0.06, height: 0.88, material: "light", leaf: true }),

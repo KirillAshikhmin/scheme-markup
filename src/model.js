@@ -8182,9 +8182,58 @@ export function updateSchemeObject(project, objectId, patch = {}) {
       shape,
       Object.prototype.hasOwnProperty.call(patch, "mirror") ? patch.mirror : current.mirror,
     ),
+    // Цвета вещи переживают любую её правку: запись собирается здесь заново, и
+    // без этой строки краска молча пропадала бы при первом же сдвиге ширины.
+    ...schemeObjectColorsField(schemeObjectColors(current)),
   };
   const schemeObjects = schemeObjectsOf(project).map((object) => (object.id === objectId ? next : object));
   return { project: withProject(project, { schemeObjects }), schemeObject: next };
+}
+
+// ——— цвета вещи чертежа (правка без автопилота, 2026-11-20) ————————————————
+//
+// Слова заказчика: «для объектов чертежа сделай выбор цвета. У шкафа отдельно
+// основной цвет и цвет дверей, и так же по всем. Как раз большинство
+// двуцветные сейчас. Хотя можно просто цвет 1 и цвет 2 сделать».
+//
+// Цветов два, и делит их **материал тела модели**, а не имя вещи: основной —
+// корпус (`body`, от него же считаются тёмные тела, металл и стекло), второй —
+// светлые тела (`light`): фасад шкафа, столешница, подушки, абажур. Так одно
+// правило красит все вещи каталога, и новой модели свой список «что у неё
+// второе» не нужен.
+//
+// Хранится, как краска стены: необязательный ключ `object.colors = {main,
+// second}`, сброс удаляет ключ (G68 — прежний объект не меняется, вещь без
+// ключа рисуется как рисовалась). Плана это не касается: на чертеже вещь
+// остаётся контуром, красится только «Объём».
+
+/** Какие цвета есть у вещи: основной и второй. */
+export const SCHEME_OBJECT_COLOR_PARTS = Object.freeze(["main", "second"]);
+
+/** Цвета вещи: `{main, second}`, `null` — не задан (рисуется цветом сборки). */
+export function schemeObjectColors(object) {
+  const colors = object && object.colors && typeof object.colors === "object" ? object.colors : null;
+  return { main: colors ? paintHex(colors.main) : null, second: colors ? paintHex(colors.second) : null };
+}
+
+function schemeObjectColorsField(colors) {
+  const next = {};
+  for (const part of SCHEME_OBJECT_COLOR_PARTS) if (colors[part]) next[part] = colors[part];
+  return Object.keys(next).length > 0 ? { colors: next } : {};
+}
+
+/** Задать цвет вещи или снять его (`null`, `""`): `{project, schemeObject, changed}`. */
+export function setSchemeObjectColor(project, objectId, part, value) {
+  const current = findSchemeObject(project, objectId);
+  if (!current) throw modelError("schemeObjectNotFound");
+  if (!SCHEME_OBJECT_COLOR_PARTS.includes(part)) throw modelError("paintPartInvalid");
+  const color = paintColorValue(value);
+  const colors = schemeObjectColors(current);
+  if (colors[part] === color) return { project, schemeObject: current, changed: false };
+  const { colors: dropped, ...rest } = current;
+  const next = { ...rest, ...schemeObjectColorsField({ ...colors, [part]: color }) };
+  const schemeObjects = schemeObjectsOf(project).map((object) => (object.id === objectId ? next : object));
+  return { project: withProject(project, { schemeObjects }), schemeObject: next, changed: true };
 }
 
 /**

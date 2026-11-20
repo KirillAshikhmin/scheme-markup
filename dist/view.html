@@ -7349,6 +7349,7 @@ objectRemove: "удаление объекта чертежа",
 objectResize: "габарит объекта чертежа",
 objectTurn: "поворот объекта чертежа",
 objectMirror: "отражение лестницы",
+objectColor: "цвет вещи",
 objectPoint: "вершина объекта чертежа",
 projectProps: "свойства объекта",
 scaleSet: "масштаб плана",
@@ -8098,6 +8099,10 @@ objectTurnLeftHint: "Повернуть на четверть оборота п�
 objectTurnRightHint: "Повернуть на четверть оборота по часовой (клавиша R, на 45° — E)",
 objectTurnHint:
 "Четыре двери к одному углу: R — четверть оборота (Shift+R — против часовой), Q и E — на 45°, ручка перед вещью — кратно 15° (клик по ней — четверть оборота, Alt — целый градус), это поле — любой градус. Без выделения угол и размеры достаются той вещи, которая встанет следующей: она нарисована призраком под рукой.",
+objectColor_main: "Цвет 1",
+objectColorHint_main: "Основной цвет вещи в «Объёме»: корпус и всё, что считается от него",
+objectColor_second: "Цвет 2",
+objectColorHint_second: "Второй цвет вещи в «Объёме»: светлые части — фасад шкафа, столешница, подушки, абажур",
 objectMirror: "Зеркально",
 objectMirrorHint: "Отразить марш слева направо: нижняя ступень Г-образной уйдёт на другую сторону, спиральная закрутится в другую сторону",
 objectToWall: "К стене",
@@ -8800,6 +8805,9 @@ table: "Стол",
 bed: "Кровать",
 dresser: "Тумба",
 sink: "Раковина",
+vanity: "Тумба с раковиной",
+toiletWall: "Унитаз подвесной",
+kitchenSink: "Кухонный шкаф с мойкой",
 shower: "Душ",
 towelDryer: "Полотенцесушитель",
 hood: "Вытяжка",
@@ -10809,6 +10817,17 @@ heightAboveFloorMm: 0,
 words: ["кухонный шкаф", "кухонные шкаф", "кухонный модул", "шкаф кухон", "кухня"],
 },
 {
+key: "kitchenSink",
+category: "furniture",
+mount: "floor",
+shape: "rect",
+widthMm: 800,
+depthMm: 600,
+heightMm: 1100,
+heightAboveFloorMm: 0,
+words: ["кухонный шкаф с мойкой", "кухонные шкафы с мойкой", "шкаф с мойкой", "кухонная мойка", "мойка кухон"],
+},
+{
 key: "shelving",
 category: "furniture",
 mount: "floor",
@@ -10840,6 +10859,17 @@ depthMm: 500,
 heightMm: 850,
 heightAboveFloorMm: 0,
 words: ["раковин", "мойк"],
+},
+{
+key: "vanity",
+category: "sanitary",
+mount: "floor",
+shape: "rect",
+widthMm: 800,
+depthMm: 480,
+heightMm: 1070,
+heightAboveFloorMm: 0,
+words: ["тумба с раковиной", "раковина с тумбой", "умывальник с тумбой"],
 },
 {
 key: "shower",
@@ -10884,6 +10914,17 @@ depthMm: 650,
 heightMm: 780,
 heightAboveFloorMm: 0,
 words: ["унитаз"],
+},
+{
+key: "toiletWall",
+category: "sanitary",
+mount: "floor",
+shape: "rect",
+widthMm: 360,
+depthMm: 560,
+heightMm: 1100,
+heightAboveFloorMm: 0,
+words: ["подвесной унитаз", "унитаз подвесной", "инсталляц"],
 },
 {
 key: "bathtub",
@@ -12070,6 +12111,15 @@ viewCircle(-0.08, 0.22, 0.045),
 viewCircle(0.08, 0.22, 0.045),
 ),
 },
+kitchenSink: {
+shapes: [],
+parts: viewParts(
+viewRect(-0.46, -0.3, 0.92, 0.6, 0.03),
+viewRect(-0.32, -0.2, 0.64, 0.36, 0.06),
+viewCircle(0, -0.02, 0.05),
+viewLine(0, -0.3, 0, -0.16),
+),
+},
 shelving: {
 shapes: [],
 parts: viewParts(
@@ -12105,6 +12155,23 @@ viewRect(-0.42, -0.34, 0.84, 0.68, 0.08),
 viewCircle(0, 0.04, 0.26),
 viewCircle(0, 0.04, 0.06),
 viewLine(0, -0.34, 0, -0.2),
+),
+},
+vanity: {
+shapes: [],
+parts: viewParts(
+viewRect(-0.46, -0.34, 0.92, 0.68, 0.03),
+viewCircle(0, 0.04, 0.24),
+viewCircle(0, 0.04, 0.05),
+viewLine(0, -0.34, 0, -0.2),
+),
+},
+toiletWall: {
+shapes: [],
+parts: viewParts(
+viewLine(-0.24, -0.46, 0.24, -0.46),
+viewCircle(0, 0.08, 0.34),
+viewCircle(0, 0.08, 0.22),
 ),
 },
 shower: {
@@ -13503,6 +13570,19 @@ modelBox("water", { x: -0.44, width: 0.88, y: -0.44, depth: 0.88, z: 0.78, heigh
 ),
 washer: MODEL_LAUNDRY,
 dryerMachine: MODEL_LAUNDRY,
+vanity: modelParts(
+modelBox("case", { y: -0.42, depth: 0.92, z: 0.2, height: 0.46 }),
+modelBox("drawerHigh", { x: -0.47, width: 0.94, y: -0.5, depth: 0.1, z: 0.44, height: 0.2, material: "light" }),
+modelBox("drawerLow", { x: -0.47, width: 0.94, y: -0.5, depth: 0.1, z: 0.22, height: 0.2, material: "light" }),
+modelBox("top", { z: 0.66, height: 0.15, material: "light" }),
+modelBox("basin", { x: -0.3, width: 0.6, y: -0.34, depth: 0.6, z: 0.81, height: 0.01, material: "dark" }),
+modelBox("tap", { x: -0.03, width: 0.06, y: 0.3, depth: 0.12, z: 0.81, height: 0.19, material: "metal" }),
+),
+toiletWall: modelParts(
+modelCyl("bowl", { x: -0.45, width: 0.9, y: -0.5, depth: 1, z: 0.1, height: 0.26, material: "light" }),
+modelCyl("seat", { x: -0.47, width: 0.94, y: -0.5, depth: 1, z: 0.36, height: 0.05, material: "dark" }),
+modelBox("flush", { x: -0.34, width: 0.68, y: 0.46, depth: 0.04, z: 0.84, height: 0.14, material: "metal" }),
+),
 sink: modelParts(
 modelCyl("bowl", { x: -0.4, width: 0.8, y: -0.44, depth: 0.74, z: 0.55, height: 0.45, material: "light" }),
 modelBox("pedestal", { x: -0.18, width: 0.36, y: -0.2, depth: 0.4, z: 0, height: 0.55 }),
@@ -13686,6 +13766,14 @@ modelBox("case", { y: -0.3, depth: 0.8 }),
 modelBox("drawerHigh", { x: -0.46, width: 0.92, y: -0.5, depth: 0.22, z: 0.7, height: 0.24, material: "light" }),
 modelBox("drawerMid", { x: -0.46, width: 0.92, y: -0.5, depth: 0.22, z: 0.38, height: 0.24, material: "light" }),
 modelBox("drawerLow", { x: -0.46, width: 0.92, y: -0.5, depth: 0.22, z: 0.06, height: 0.24, material: "light" }),
+),
+kitchenSink: modelParts(
+modelBox("case", { y: -0.3, depth: 0.8, z: 0, height: 0.74 }),
+modelBox("doorLeft", { x: -0.46, width: 0.45, y: -0.5, depth: 0.22, z: 0.05, height: 0.68, material: "light", leaf: true }),
+modelBox("doorRight", { x: 0.01, width: 0.45, y: -0.5, depth: 0.22, z: 0.05, height: 0.68, material: "light", leaf: true }),
+modelBox("top", { z: 0.74, height: 0.04, material: "light" }),
+modelBox("basin", { x: -0.34, width: 0.68, y: -0.3, depth: 0.52, z: 0.78, height: 0.01, material: "dark" }),
+modelBox("tap", { x: -0.03, width: 0.06, y: 0.26, depth: 0.12, z: 0.78, height: 0.22, material: "metal" }),
 ),
 kitchenCabinet: modelParts(
 modelBox("case", { y: -0.3, depth: 0.8 }),
@@ -18750,9 +18838,32 @@ heightAboveFloorMm: Object.prototype.hasOwnProperty.call(patch, "heightAboveFloo
 shape,
 Object.prototype.hasOwnProperty.call(patch, "mirror") ? patch.mirror : current.mirror,
 ),
+...schemeObjectColorsField(schemeObjectColors(current)),
 };
 const schemeObjects = schemeObjectsOf(project).map((object) => (object.id === objectId ? next : object));
 return { project: withProject(project, { schemeObjects }), schemeObject: next };
+}
+const SCHEME_OBJECT_COLOR_PARTS = Object.freeze(["main", "second"]);
+function schemeObjectColors(object) {
+const colors = object && object.colors && typeof object.colors === "object" ? object.colors : null;
+return { main: colors ? paintHex(colors.main) : null, second: colors ? paintHex(colors.second) : null };
+}
+function schemeObjectColorsField(colors) {
+const next = {};
+for (const part of SCHEME_OBJECT_COLOR_PARTS) if (colors[part]) next[part] = colors[part];
+return Object.keys(next).length > 0 ? { colors: next } : {};
+}
+function setSchemeObjectColor(project, objectId, part, value) {
+const current = findSchemeObject(project, objectId);
+if (!current) throw modelError("schemeObjectNotFound");
+if (!SCHEME_OBJECT_COLOR_PARTS.includes(part)) throw modelError("paintPartInvalid");
+const color = paintColorValue(value);
+const colors = schemeObjectColors(current);
+if (colors[part] === color) return { project, schemeObject: current, changed: false };
+const { colors: dropped, ...rest } = current;
+const next = { ...rest, ...schemeObjectColorsField({ ...colors, [part]: color }) };
+const schemeObjects = schemeObjectsOf(project).map((object) => (object.id === objectId ? next : object));
+return { project: withProject(project, { schemeObjects }), schemeObject: next, changed: true };
 }
 function schemeObjectMirrorField(shape, mirror) {
 return shape !== "polyline" && mirror === true ? { mirror: true } : {};
@@ -40297,17 +40408,18 @@ lit: Boolean(part && part.lit && !part.art),
 bulb: part && Number.isInteger(part.bulb) ? part.bulb : null,
 doorId: part && part.leaf && options.leafId ? options.leafId : null,
 });
+const paint = (material) => (material === "light" && options.lightRgb ? options.lightRgb : volumeModelRgb(material, rgb));
 for (const part of parts) {
-if (part.kind === "tube") volumeTubeFaces(frame, part, volumeModelRgb(part.material, rgb), out, own(part));
-else if (part.kind === "cone") volumeConeFaces(frame, part, volumeModelRgb(part.material, rgb), out, own(part));
+if (part.kind === "tube") volumeTubeFaces(frame, part, paint(part.material), out, own(part));
+else if (part.kind === "cone") volumeConeFaces(frame, part, paint(part.material), out, own(part));
 }
 for (const prism of volumeModelPrisms(frame, parts)) {
-const fill = volumeModelRgb(prism.material, rgb);
+const fill = paint(prism.material);
 volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, fill, out, own(prism));
 }
 for (const part of parts) {
 if (!part.art) continue;
-volumeArtFaces(frame, part, volumeModelRgb(part.material, rgb), out, own(part));
+volumeArtFaces(frame, part, paint(part.material), out, own(part));
 }
 return out;
 }
@@ -40709,9 +40821,12 @@ const stair = frame && objectStairKey(model.key)
 : null;
 const leafId = frame && !stair && volumeModelOpens(model) ? volumeCupboardId(object.id) : null;
 const shown = leafId && open ? { key: model.key, parts: volumeCupboardModel(model, frame) } : model;
-if (frame) return volumeModelFaces(frame, stair ? { key: model.key, parts: stair } : shown, VOLUME_OBJECT_RGB, out, { clear: own, markId, leafId });
+const colors = schemeObjectColors(object);
+const bodyRgb = colors.main ? volumePaintRgb(colors.main) : VOLUME_OBJECT_RGB;
+const lightRgb = colors.second ? volumePaintRgb(colors.second) : null;
+if (frame) return volumeModelFaces(frame, stair ? { key: model.key, parts: stair } : shown, bodyRgb, out, { clear: own, markId, leafId, lightRgb });
 for (const prism of volumeObjectPrisms(project, schemeId, object, fallbackHeightMm)) {
-volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, VOLUME_OBJECT_RGB, out, { clear: own, markId });
+volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, bodyRgb, out, { clear: own, markId });
 }
 return out;
 }
@@ -74544,6 +74659,18 @@ const deviceButton = uiButton("", {
 class: "ui-btn ui-btn--wide",
 on: { click: () => toggleDevice() },
 });
+const objectColorFallback = rgbToHex({ r: VOLUME_OBJECT_RGB[0], g: VOLUME_OBJECT_RGB[1], b: VOLUME_OBJECT_RGB[2] });
+const objectColors = SCHEME_OBJECT_COLOR_PARTS.map((part) => {
+const label = uiEl("span", { class: "workshop__paintLabel" });
+label.textContent = strings.workshop["objectColor_" + part];
+label.title = strings.workshop["objectColorHint_" + part];
+const field = colorPaintField({
+label: strings.workshop["objectColor_" + part],
+fallback: objectColorFallback,
+onPick: (color) => applyObjectColor(part, color),
+});
+return { part, field, row: uiEl("div", { class: "workshop__paintRow" }, [label, field.node]) };
+});
 const objectBad = uiBadLine();
 const objectDetail = uiEl("div", { class: "workshop__detail ui-fields" }, [
 thingButton,
@@ -74554,6 +74681,7 @@ turnChips,
 mirrorRow,
 uiField(strings.workshop.objectHeight, objectHeight, { title: strings.workshop.objectHeightHint }),
 uiField(strings.workshop.objectFloor, objectFloor),
+...objectColors.map((item) => item.row),
 deviceButton,
 objectBad,
 objectNote,
@@ -75371,6 +75499,18 @@ commit(updateSchemeObject(project(), object.id, { turnDeg }).project, strings.hi
 fail(error);
 sync();
 }
+}
+function applyObjectColor(part, color) {
+const object = selectedObject();
+if (!object) return;
+let result;
+try {
+result = setSchemeObjectColor(project(), object.id, part, color);
+} catch (error) {
+fail(error);
+return;
+}
+if (result.changed) commit(result.project, strings.history.objectColor);
 }
 function applyMirror(on) {
 const object = selectedObject();
@@ -76610,6 +76750,8 @@ turnField.hidden = band;
 turnChips.hidden = band;
 mirrorRow.hidden = band || !OBJECT_STAIR_MIRRORED.includes(key);
 mirrorBox.checked = object.mirror === true;
+const colors = schemeObjectColors(object);
+for (const item of objectColors) item.field.set(colors[item.part], { label: strings.workshop["objectColor_" + item.part] });
 const depthLabel = depthField.querySelector(".ui-field__label");
 if (depthLabel) depthLabel.textContent = band ? strings.workshop.objectBand : strings.workshop.objectDepth;
 fieldValue(objectWidth, object.widthMm);

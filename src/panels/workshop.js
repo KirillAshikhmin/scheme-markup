@@ -165,6 +165,9 @@ import {
   wallOwnHeightMm,
   wallGlassOf,
   wallPaintOf,
+  SCHEME_OBJECT_COLOR_PARTS,
+  schemeObjectColors,
+  setSchemeObjectColor,
   wallRoomId,
   wallSplitStops,
   wallVectors,
@@ -266,7 +269,7 @@ import { createElevationStrip, elevationPlace } from "./elevation.js";
 import { screenPlaceOf, screenPlaceSet } from "../screenPlace.js";
 import { createFieldPlate } from "./plate.js";
 import { colorPaintField } from "./colorPicker.js";
-import { VOLUME_WALL_RGB } from "../volume.js";
+import { VOLUME_OBJECT_RGB, VOLUME_WALL_RGB } from "../volume.js";
 
 // «Схема», у которой один пиксель плана — один миллиметр чертежа. Через неё
 // мастерская зовёт готовую геометрию `render.js`: `zoom` становится «пикселей
@@ -2592,6 +2595,21 @@ function createWorkshop({ api, hosts }) {
     class: "ui-btn ui-btn--wide",
     on: { click: () => toggleDevice() },
   });
+  // Цвета вещи (правка 2026-11-20): «цвет 1 и цвет 2» — основной красит
+  // корпус, второй — светлые тела модели (фасад, столешницу, подушки). Поле то
+  // же, что у краски стены: квадратик и «Снять».
+  const objectColorFallback = rgbToHex({ r: VOLUME_OBJECT_RGB[0], g: VOLUME_OBJECT_RGB[1], b: VOLUME_OBJECT_RGB[2] });
+  const objectColors = SCHEME_OBJECT_COLOR_PARTS.map((part) => {
+    const label = uiEl("span", { class: "workshop__paintLabel" });
+    label.textContent = strings.workshop["objectColor_" + part];
+    label.title = strings.workshop["objectColorHint_" + part];
+    const field = colorPaintField({
+      label: strings.workshop["objectColor_" + part],
+      fallback: objectColorFallback,
+      onPick: (color) => applyObjectColor(part, color),
+    });
+    return { part, field, row: uiEl("div", { class: "workshop__paintRow" }, [label, field.node]) };
+  });
   const objectBad = uiBadLine();
   const objectDetail = uiEl("div", { class: "workshop__detail ui-fields" }, [
     thingButton,
@@ -2602,6 +2620,7 @@ function createWorkshop({ api, hosts }) {
     mirrorRow,
     uiField(strings.workshop.objectHeight, objectHeight, { title: strings.workshop.objectHeightHint }),
     uiField(strings.workshop.objectFloor, objectFloor),
+    ...objectColors.map((item) => item.row),
     deviceButton,
     objectBad,
     objectNote,
@@ -3915,6 +3934,20 @@ function createWorkshop({ api, hosts }) {
       fail(error);
       sync();
     }
+  }
+
+  /** Покрасить выделенную вещь или снять цвет (`null`) — правкой через историю. */
+  function applyObjectColor(part, color) {
+    const object = selectedObject();
+    if (!object) return;
+    let result;
+    try {
+      result = setSchemeObjectColor(project(), object.id, part, color);
+    } catch (error) {
+      fail(error);
+      return;
+    }
+    if (result.changed) commit(result.project, strings.history.objectColor);
   }
 
   /** Отразить выделенную лестницу — правкой через историю. */
@@ -5861,6 +5894,8 @@ function createWorkshop({ api, hosts }) {
     turnChips.hidden = band;
     mirrorRow.hidden = band || !OBJECT_STAIR_MIRRORED.includes(key);
     mirrorBox.checked = object.mirror === true;
+    const colors = schemeObjectColors(object);
+    for (const item of objectColors) item.field.set(colors[item.part], { label: strings.workshop["objectColor_" + item.part] });
     const depthLabel = depthField.querySelector(".ui-field__label");
     if (depthLabel) depthLabel.textContent = band ? strings.workshop.objectBand : strings.workshop.objectDepth;
     fieldValue(objectWidth, object.widthMm);

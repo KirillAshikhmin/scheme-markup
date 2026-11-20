@@ -23,6 +23,7 @@ import {
   roomPaintOf,
   schemeAnchorOriginMm,
   schemeFloorOf,
+  schemeObjectColors,
   schemeObjectCorners,
   schemeObjectKeyOf,
   schemeObjectsOnScheme,
@@ -420,12 +421,17 @@ export function volumeObjectFaces(project, schemeId, object, fallbackHeightMm, o
   // открытого шкафа стоят распахнутыми (`volumeCupboardModel`).
   const leafId = frame && !stair && volumeModelOpens(model) ? volumeCupboardId(object.id) : null;
   const shown = leafId && open ? { key: model.key, parts: volumeCupboardModel(model, frame) } : model;
-  if (frame) return volumeModelFaces(frame, stair ? { key: model.key, parts: stair } : shown, VOLUME_OBJECT_RGB, out, { clear: own, markId, leafId });
+  // Цвета вещи (правка 2026-11-20): основной — вместо краски сборки, второй —
+  // светлым телам модели. Не заданы — вещь рисуется как рисовалась.
+  const colors = schemeObjectColors(object);
+  const bodyRgb = colors.main ? volumePaintRgb(colors.main) : VOLUME_OBJECT_RGB;
+  const lightRgb = colors.second ? volumePaintRgb(colors.second) : null;
+  if (frame) return volumeModelFaces(frame, stair ? { key: model.key, parts: stair } : shown, bodyRgb, out, { clear: own, markId, leafId, lightRgb });
   // У вещи без модели тело — её габарит, и хозяин у него тот же; **свечения
   // нет**: светится экран, а не шкаф, и коробка по габариту не знает, где у
   // неё лицо (у метки без модели правило своё — `volumeMarkFaces`).
   for (const prism of volumeObjectPrisms(project, schemeId, object, fallbackHeightMm)) {
-    volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, VOLUME_OBJECT_RGB, out, { clear: own, markId });
+    volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, bodyRgb, out, { clear: own, markId });
   }
   return out;
 }
