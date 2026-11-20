@@ -6705,7 +6705,7 @@ display: none;
     var label = document.getElementById("splash-step");
     var canvas = document.getElementById("splash-model");
     var STEPS = ["Расставляем розетки…","Проектируем щит…","Настраиваем сценарии…","Подбираем оборудование…","Чертим стены…","Развешиваем люстры…","Тянем кабель…","Маркируем линии…","Считаем длину ленты…","Калибруем масштаб…","Проверяем автоматы…","Вешаем шторы на карнизы…","Ищем, где спрятать кондиционер…","Учим выключатели проходить…","Уговариваем датчик движения не реагировать на кота…","Объясняем люстре, что она не главная…","Прячем провода за плинтус…","Ищем фазу. Нашли. Больше не ищем…","Считаем розетки. Опять не хватает…","Мирим тёплый пол с ковром…","Договариваемся с роботом-пылесосом о маршруте…","Убеждаем щит, что места в нём достаточно…","Учим шторы просыпаться вовремя…","Проверяем, что лампочка действительно горит…","Напоминаем термостату, что зима кончилась…","Вспоминаем, от чего этот автомат…"];
-    var PAGE_BYTES = 3149321;
+    var PAGE_BYTES = 3149427;
     var calm = false;
     try {
     calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -14016,10 +14016,11 @@ modelCyl("seat", { x: -0.47, width: 0.94, y: -0.5, depth: 1, z: 0.36, height: 0.
 modelBox("flush", { x: -0.34, width: 0.68, y: 0.46, depth: 0.04, z: 0.84, height: 0.14, material: "metal" }),
 ),
 sink: modelParts(
-modelCyl("bowl", { x: -0.4, width: 0.8, y: -0.44, depth: 0.74, z: 0.55, height: 0.45, material: "light" }),
-modelBox("pedestal", { x: -0.18, width: 0.36, y: -0.2, depth: 0.4, z: 0, height: 0.55 }),
-modelBox("tap", { x: -0.06, width: 0.12, y: 0.3, depth: 0.12, z: 0.8, height: 0.2, material: "metal" }),
-modelBox("spout", { x: -0.04, width: 0.08, y: 0.02, depth: 0.28, z: 0.95, height: 0.05, material: "metal" }),
+modelCyl("bowl", { x: -0.46, width: 0.92, y: -0.48, depth: 0.84, z: 0.72, height: 0.16, material: "light" }),
+modelCyl("basin", { x: -0.34, width: 0.68, y: -0.4, depth: 0.62, z: 0.88, height: 0.006, material: "dark" }),
+modelBox("pedestal", { x: -0.14, width: 0.28, y: -0.1, depth: 0.36, z: 0, height: 0.72 }),
+modelBox("tap", { x: -0.05, width: 0.1, y: 0.34, depth: 0.1, z: 0.88, height: 0.12, material: "metal" }),
+modelBox("spout", { x: -0.035, width: 0.07, y: 0.1, depth: 0.26, z: 0.97, height: 0.03, material: "metal" }),
 ),
 shower: modelParts(
 modelBox("riser", { x: -0.07, width: 0.14, y: 0.3, depth: 0.14, z: 0, height: 0.92, material: "metal" }),
@@ -14233,10 +14234,10 @@ modelCone("leavesLow", { x: -0.5, width: 1, y: -0.5, depth: 1, z: 0.2, height: 0
 modelCone("leavesHigh", { x: -0.36, width: 0.72, y: -0.36, depth: 0.72, z: 0.5, height: 0.5, material: "light" }),
 ),
 treePot: modelParts(
-modelBox("pot", { x: -0.32, width: 0.64, y: -0.32, depth: 0.64, z: 0, height: 0.22 }),
-modelBox("trunk", { x: -0.05, width: 0.1, y: -0.05, depth: 0.1, z: 0.22, height: 0.38, material: "dark" }),
-modelBox("crownLow", { x: -0.5, width: 1, y: -0.5, depth: 1, z: 0.52, height: 0.26, material: "light" }),
-modelBox("crownHigh", { x: -0.34, width: 0.68, y: -0.34, depth: 0.68, z: 0.74, height: 0.26, material: "light" }),
+modelCyl("pot", { x: -0.3, width: 0.6, y: -0.3, depth: 0.6, z: 0, height: 0.2 }),
+modelBox("trunk", { x: -0.04, width: 0.08, y: -0.04, depth: 0.08, z: 0.2, height: 0.36, material: "dark" }),
+modelCyl("crownLow", { x: -0.5, width: 1, y: -0.5, depth: 1, z: 0.5, height: 0.24, material: "light" }),
+modelCone("crownHigh", { x: -0.4, width: 0.8, y: -0.4, depth: 0.8, z: 0.74, height: 0.26, material: "light" }),
 ),
 floorLamp: modelParts(
 modelBox("base", { x: -0.33, width: 0.66, y: -0.33, depth: 0.66, z: 0, height: 0.04, material: "metal" }),

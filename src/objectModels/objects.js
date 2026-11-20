@@ -315,10 +315,12 @@ export const MODELS_OBJECTS = {
   ),
   // Раковина: чаша, пьедестал и смеситель.
   sink: modelParts(
-    modelCyl("bowl", { x: -0.4, width: 0.8, y: -0.44, depth: 0.74, z: 0.55, height: 0.45, material: "light" }),
-    modelBox("pedestal", { x: -0.18, width: 0.36, y: -0.2, depth: 0.4, z: 0, height: 0.55 }),
-    modelBox("tap", { x: -0.06, width: 0.12, y: 0.3, depth: 0.12, z: 0.8, height: 0.2, material: "metal" }),
-    modelBox("spout", { x: -0.04, width: 0.08, y: 0.02, depth: 0.28, z: 0.95, height: 0.05, material: "metal" }),
+    // Чаша невысокая (правка 2026-11-20): прежняя, почти в полгабарита, читалась бочкой.
+    modelCyl("bowl", { x: -0.46, width: 0.92, y: -0.48, depth: 0.84, z: 0.72, height: 0.16, material: "light" }),
+    modelCyl("basin", { x: -0.34, width: 0.68, y: -0.4, depth: 0.62, z: 0.88, height: 0.006, material: "dark" }),
+    modelBox("pedestal", { x: -0.14, width: 0.28, y: -0.1, depth: 0.36, z: 0, height: 0.72 }),
+    modelBox("tap", { x: -0.05, width: 0.1, y: 0.34, depth: 0.1, z: 0.88, height: 0.12, material: "metal" }),
+    modelBox("spout", { x: -0.035, width: 0.07, y: 0.1, depth: 0.26, z: 0.97, height: 0.03, material: "metal" }),
   ),
   // Полотенцесушитель уехал к меткам (таск 186, G279): тело то же, лежит оно
   // теперь в `objectModels/things.js`.
@@ -730,13 +732,13 @@ export const MODELS_OBJECTS = {
     modelCone("leavesHigh", { x: -0.36, width: 0.72, y: -0.36, depth: 0.72, z: 0.5, height: 0.5, material: "light" }),
   ),
   // Дерево: кадка, длинный ствол и крона **двумя ярусами** — этим оно и
-  // отличается от цветка. Ярусы коробками, а не цилиндрами: два цилиндра сверх
-  // кадки увели бы вещь за тридцать граней.
+  // отличается от цветка. С 2026-11-20 кадка и крона круглые: предел модели
+  // давно девяносто граней, а крона кубами читалась стопкой коробок.
   treePot: modelParts(
-    modelBox("pot", { x: -0.32, width: 0.64, y: -0.32, depth: 0.64, z: 0, height: 0.22 }),
-    modelBox("trunk", { x: -0.05, width: 0.1, y: -0.05, depth: 0.1, z: 0.22, height: 0.38, material: "dark" }),
-    modelBox("crownLow", { x: -0.5, width: 1, y: -0.5, depth: 1, z: 0.52, height: 0.26, material: "light" }),
-    modelBox("crownHigh", { x: -0.34, width: 0.68, y: -0.34, depth: 0.68, z: 0.74, height: 0.26, material: "light" }),
+    modelCyl("pot", { x: -0.3, width: 0.6, y: -0.3, depth: 0.6, z: 0, height: 0.2 }),
+    modelBox("trunk", { x: -0.04, width: 0.08, y: -0.04, depth: 0.08, z: 0.2, height: 0.36, material: "dark" }),
+    modelCyl("crownLow", { x: -0.5, width: 1, y: -0.5, depth: 1, z: 0.5, height: 0.24, material: "light" }),
+    modelCone("crownHigh", { x: -0.4, width: 0.8, y: -0.4, depth: 0.8, z: 0.74, height: 0.26, material: "light" }),
   ),
   // Торшер: блин основания, тонкая стойка и абажур. Абажур светлый и стоит под
   // самым верхом габарита — туда и смотрят, когда ищут, где у торшера свет.
