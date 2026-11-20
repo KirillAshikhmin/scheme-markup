@@ -129,6 +129,10 @@ export function volumeMeshColor(color, fallback = [60, 60, 60]) {
  * Буфер глубины не разводит грани, лежащие в одной плоскости (дерево порядка
  * разводило их очередью): столешницы двух вещей на одной высоте, фигуры
  * картинки на стекле экрана. Вынос на доли миллиметра решает, кто сверху.
+ * `options.sink(face)` — на сколько миллиметров утопить в пол нижние точки
+ * грани (те, что у самого пола): полотно двери кончается ровно на полу, и
+ * карта теней пропускала под ним полоску света из соседней комнаты (дефект
+ * заказчика: «дверные проёмы внизу тоже дают артефакты»).
  * `options.shift(face)` — сдвиг грани целиком `{x, y, z}` в мм: вещь едет вся
  * разом, и щелей на её рёбрах не открывается (вынос по нормали их открывал —
  * дефект заказчика «рябь на гранях»).
@@ -144,6 +148,7 @@ export function volumeMeshBuild(faces, options = {}) {
   const alphaOf = options.alpha || null;
   const liftOf = options.lift || null;
   const shiftOf = options.shift || null;
+  const sinkOf = options.sink || null;
   const solid = { pos: [], nor: [], col: [] };
   const clear = { pos: [], nor: [], col: [] };
   const lines = { pos: [], col: [] };
@@ -233,8 +238,9 @@ export function volumeMeshBuild(faces, options = {}) {
     const back = face.backRgb
       ? [volumeMeshLinear(face.backRgb[0] / 255), volumeMeshLinear(face.backRgb[1] / 255), volumeMeshLinear(face.backRgb[2] / 255)]
       : c;
+    const sink = sinkOf ? Number(sinkOf(face)) || 0 : 0;
     const emit = (p, sign) => {
-      into.pos.push((p.x + sx) * S, (p.z + sz) * S, (p.y + sy) * S);
+      into.pos.push((p.x + sx) * S, (p.z + sz - (sink > 0 && p.z < 5 && p.z > -5 ? sink : 0)) * S, (p.y + sy) * S);
       let vx = nx;
       let vy = ny;
       let vz = nz;

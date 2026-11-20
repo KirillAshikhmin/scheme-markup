@@ -112,7 +112,12 @@ export function volumeGlMake(THREE) {
   const camera = new THREE.PerspectiveCamera(60, 1, 0.08, 2500);
 
   const mats = {
-    solid: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 }),
+    // Тень бросает **лицо** грани (`shadowSide`), а не изнанка, как библиотека
+    // делает по умолчанию: у стены в десять сантиметров изнанка — это уже
+    // поверхность соседней комнаты, и свет сочился на неё по краям проёмов и
+    // у подножия стен (дефект заказчика: «свет через стены проходит… ещё и на
+    // соседние стены падает»).
+    solid: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0, shadowSide: THREE.FrontSide }),
     clear: new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide, transparent: true, depthWrite: false }),
     line: new THREE.LineBasicMaterial({ vertexColors: true }),
     // Светящееся (тело горящей лампы, диод, экран) и накладки кадра — без света
@@ -179,10 +184,10 @@ export function volumeGlMake(THREE) {
     const lamp = new THREE.SpotLight(0xffe6c4, 0, 0, VOLUME_GL_SPOT_ANGLE, 0.9, 2);
     lamp.castShadow = true;
     // Ближним — карта подробнее, остальным хватает половины.
-    lamp.shadow.mapSize.set(at < VOLUME_GL_SHADOWED ? 1024 : 512, at < VOLUME_GL_SHADOWED ? 1024 : 512);
+    lamp.shadow.mapSize.set(at < VOLUME_GL_SHADOWED ? 2048 : 1024, at < VOLUME_GL_SHADOWED ? 2048 : 1024);
     // Запас побольше: под скользящим светом стена шла рябью (дефект заказчика).
-    lamp.shadow.bias = -0.004;
-    lamp.shadow.normalBias = 0.06;
+    lamp.shadow.bias = -0.003;
+    lamp.shadow.normalBias = 0.03;
     lamp.shadow.camera.near = 0.05;
     lamp.shadow.camera.far = 12;
     world.add(lamp, lamp.target);
@@ -192,9 +197,9 @@ export function volumeGlMake(THREE) {
   for (let at = 0; at < VOLUME_GL_POINTS; at += 1) {
     const lamp = new THREE.PointLight(0xffe6c4, 0, 0, 2);
     lamp.castShadow = true;
-    lamp.shadow.mapSize.set(512, 512);
-    lamp.shadow.bias = -0.004;
-    lamp.shadow.normalBias = 0.06;
+    lamp.shadow.mapSize.set(1024, 1024);
+    lamp.shadow.bias = -0.003;
+    lamp.shadow.normalBias = 0.03;
     lamp.shadow.camera.near = 0.05;
     lamp.shadow.camera.far = 14;
     world.add(lamp);
@@ -203,9 +208,9 @@ export function volumeGlMake(THREE) {
   const fill = new THREE.PointLight(0xffe6c4, 0, 0, 2);
   // Отражённый свет тоже не ходит сквозь стены.
   fill.castShadow = true;
-  fill.shadow.mapSize.set(256, 256);
-  fill.shadow.bias = -0.006;
-  fill.shadow.normalBias = 0.08;
+  fill.shadow.mapSize.set(512, 512);
+  fill.shadow.bias = -0.003;
+  fill.shadow.normalBias = 0.03;
   fill.shadow.camera.near = 0.05;
   fill.shadow.camera.far = 14;
   let shadowKey = "";
@@ -242,6 +247,9 @@ export function volumeGlMake(THREE) {
       // объектов пересекаются фон земли и пола»).
       lift: (face) => (face.layer === VOLUME_LAYER_BASE ? -4 : face.art ? art(face) : 0),
       shift: volumeMeshThingShift,
+      // Стены, полотна дверей и ворот уходят в пол на 12 см: у их подножия
+      // карта теней пропускала полоску света из соседней комнаты.
+      sink: (face) => (!face.markId && !face.thing && face.n && Math.abs(face.n.z) < 0.5 && !String(face.doorId || "").startsWith("thing:") ? 120 : 0),
     });
     swap(solid, geometry(mesh.solid, 3));
     swap(glass, geometry(mesh.clear, 4));
