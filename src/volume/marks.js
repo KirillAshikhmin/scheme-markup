@@ -1906,7 +1906,38 @@ export function volumeModelFaces(frame, model, rgb, out = [], options = {}) {
     // Квадратному телу бока не сглаживаются: у него рёбра, а не обвод круга.
     if (out.length > before && !part.sides) volumeSmoothTag(out, before);
   }
+  // **Тела одной вещи с гранями в одной плоскости** (топка камина в лице
+  // портала): в кадре Canvas 2D верх решал порядок записи, а буфер глубины
+  // видеокарты их не разводит — рябь (дефект заказчика 2026-11-21: «у камина
+  // тоже косяк отрисовки»). В сборке для видеокарты каждое следующее тело
+  // раздаётся от своей середины на пятую долю миллиметра больше предыдущего:
+  // позже записанное оказывается чуть впереди, как и было задумано порядком.
+  // Тело раздаётся целиком, щелей на его рёбрах нет. Обычная сборка не тронута.
+  let grown = 0;
   for (const prism of volumeModelPrisms(frame, parts)) {
+    if (volumeSidesNow > MODEL_CYL_SIDES && prism.corners.length > 0) {
+      const by = grown * 0.2;
+      grown += 1;
+      if (by > 0) {
+        let cx = 0;
+        let cy = 0;
+        for (const corner of prism.corners) {
+          cx += corner.x;
+          cy += corner.y;
+        }
+        cx /= prism.corners.length;
+        cy /= prism.corners.length;
+        prism.corners = prism.corners.map((corner) => {
+          const dx = corner.x - cx;
+          const dy = corner.y - cy;
+          const length = Math.hypot(dx, dy) || 1;
+          // Угол уходит по диагонали: на `by` по каждой оси прямоугольника.
+          return { ...corner, x: corner.x + (dx / length) * by * Math.SQRT2, y: corner.y + (dy / length) * by * Math.SQRT2 };
+        });
+        prism.bottomMm -= by;
+        prism.topMm += by;
+      }
+    }
     // Та самая одна строка (таск 09 сценариев): `prism.lit` доезжает до грани
     // через `own(prism)`, а горит ли тело — решает кадр по состоянию дома.
     const fill = paint(prism.material);

@@ -6711,7 +6711,7 @@ display: none;
     var label = document.getElementById("splash-step");
     var canvas = document.getElementById("splash-model");
     var STEPS = ["Расставляем розетки…","Проектируем щит…","Настраиваем сценарии…","Подбираем оборудование…","Чертим стены…","Развешиваем люстры…","Тянем кабель…","Маркируем линии…","Считаем длину ленты…","Калибруем масштаб…","Проверяем автоматы…","Вешаем шторы на карнизы…","Ищем, где спрятать кондиционер…","Учим выключатели проходить…","Уговариваем датчик движения не реагировать на кота…","Объясняем люстре, что она не главная…","Прячем провода за плинтус…","Ищем фазу. Нашли. Больше не ищем…","Считаем розетки. Опять не хватает…","Мирим тёплый пол с ковром…","Договариваемся с роботом-пылесосом о маршруте…","Убеждаем щит, что места в нём достаточно…","Учим шторы просыпаться вовремя…","Проверяем, что лампочка действительно горит…","Напоминаем термостату, что зима кончилась…","Вспоминаем, от чего этот автомат…"];
-    var PAGE_BYTES = 3162767;
+    var PAGE_BYTES = 3163357;
     var calm = false;
     try {
     calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -41414,7 +41414,30 @@ if (part.kind === "tube") volumeTubeFaces(frame, part, paint(part.material), out
 else if (part.kind === "cone") volumeConeFaces(frame, part, paint(part.material), out, own(part));
 if (out.length > before && !part.sides) volumeSmoothTag(out, before);
 }
+let grown = 0;
 for (const prism of volumeModelPrisms(frame, parts)) {
+if (volumeSidesNow > MODEL_CYL_SIDES && prism.corners.length > 0) {
+const by = grown * 0.2;
+grown += 1;
+if (by > 0) {
+let cx = 0;
+let cy = 0;
+for (const corner of prism.corners) {
+cx += corner.x;
+cy += corner.y;
+}
+cx /= prism.corners.length;
+cy /= prism.corners.length;
+prism.corners = prism.corners.map((corner) => {
+const dx = corner.x - cx;
+const dy = corner.y - cy;
+const length = Math.hypot(dx, dy) || 1;
+return { ...corner, x: corner.x + (dx / length) * by * Math.SQRT2, y: corner.y + (dy / length) * by * Math.SQRT2 };
+});
+prism.bottomMm -= by;
+prism.topMm += by;
+}
+}
 const fill = paint(prism.material);
 const before = out.length;
 volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, fill, out, own(prism));
