@@ -3215,6 +3215,7 @@ export const strings = {
     dresser: "Тумба",
     sink: "Раковина",
     vanity: "Тумба с раковиной",
+    vanitySmall: "Рукомойник (малая раковина)",
     toiletWall: "Унитаз подвесной",
     kitchenSink: "Кухонный шкаф с мойкой",
     shower: "Душ",

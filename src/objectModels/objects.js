@@ -294,6 +294,17 @@ export const MODELS_OBJECTS = {
     modelBox("tap", { x: -0.03, width: 0.06, y: 0.3, depth: 0.12, z: 0.81, height: 0.19, material: "metal" }),
     modelBox("spout", { x: -0.03, width: 0.06, y: 0.02, depth: 0.28, z: 0.96, height: 0.04, material: "metal" }),
   ),
+  // Малая раковина для туалета (правка 2026-11-20): узкая тумба с дверцей,
+  // раковина плитой сверху, смеситель **слева** и излив от него к чаше.
+  vanitySmall: modelParts(
+    modelBox("plinth", { x: -0.44, width: 0.88, y: -0.3, depth: 0.76, z: 0, height: 0.04, material: "dark" }),
+    modelBox("case", { x: -0.48, width: 0.96, y: -0.4, depth: 0.9, z: 0.04, height: 0.68 }),
+    modelBox("door", { x: -0.48, width: 0.96, y: -0.5, depth: 0.1, z: 0.05, height: 0.6, material: "light" }),
+    modelBox("top", { z: 0.72, height: 0.113, material: "light" }),
+    modelBox("basin", { x: -0.16, width: 0.6, y: -0.38, depth: 0.7, z: 0.833, height: 0.005, material: "dark" }),
+    modelBox("tap", { x: -0.42, width: 0.12, y: 0.12, depth: 0.24, z: 0.833, height: 0.167, material: "metal" }),
+    modelBox("spout", { x: -0.32, width: 0.3, y: 0.18, depth: 0.12, z: 0.94, height: 0.035, material: "metal" }),
+  ),
   // Подвесной унитаз с инсталляцией (правка 2026-11-20): чаша на стене,
   // сиденье с крышкой одним телом и клавиша смыва над ней. Бачка нет — он в
   // коробе. Три тела: кадр платит за каждую грань, а круглых здесь два.

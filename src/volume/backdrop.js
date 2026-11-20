@@ -911,7 +911,13 @@ function volumeDrawGround(ctx, box, camera, hour, land, near, groundMm = 0) {
         volumeDrawStrip(ctx, aim, street.nodes, (run) =>
           street.river
             ? volumeStripFill(ctx, run, palette.riverNear, palette.riverFar)
-            : volumeStripFill(ctx, run, palette.asphalt, palette.asphaltFar),
+            : street.ring
+              ? // Кольцевая — ровным цветом (дефект заказчика: «мигает эта
+                // дорога-кольцо вокруг дома»): растяжка идёт от первого видимого
+                // узла к последнему, а у кольца они меняются с каждым поворотом
+                // головы, и заливка перескакивала.
+                palette.asphalt
+              : volumeStripFill(ctx, run, palette.asphalt, palette.asphaltFar),
         );
         if (street.marks) volumeDrawStrip(ctx, aim, street.marks, () => palette.mark);
       }
@@ -1760,7 +1766,7 @@ const VOLUME_MEGA_PLACES = {
   })),
   streets: VOLUME_MEGA_STREETS.map((street) => {
     const nodes = volumeBandNodes(street.points, street.widthM);
-    return { river: street.river === true, nodes, marks: street.river ? null : volumeStreetMarks(nodes) };
+    return { river: street.river === true, ring: street.ring === true, nodes, marks: street.river ? null : volumeStreetMarks(nodes) };
   }),
   cars: [
     ...VOLUME_MEGA_CARS.map(([az, away, height], index) => volumeCar(az, away, height, index)),

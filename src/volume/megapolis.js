@@ -121,7 +121,8 @@ export const VOLUME_MEGA_STREETS = Object.freeze([
   { widthM: 20, points: [[122, 52], [121, 130], [120, 300], [120, 620], [120, 1100]] },
   { widthM: 20, points: [[302, 52], [301, 130], [300, 300], [300, 620], [300, 1100]] },
   // Кольцевая в двухстах метрах.
-  { widthM: 18, points: Array.from({ length: 25 }, (unused, index) => [index * 15, 212]) },
+  // `ring` — замкнутая: заливается ровно (см. `volumeDrawBackdrop`).
+  { widthM: 18, ring: true, points: Array.from({ length: 25 }, (unused, index) => [index * 15, 212]) },
   // Река с набережной — дугой по одной стороне.
   { widthM: 70, river: true, points: [[150, 900], [165, 640], [182, 520], [200, 470], [220, 500], [240, 620], [256, 880]] },
 ]);
@@ -559,8 +560,24 @@ export function volumeDrawMegaSkyline(ctx, point, ridge, color) {
     }
     run.push({ foot, crest, edge, edgeFoot });
   }
-  ctx.fillStyle = color;
   for (const line of runs) {
+    // Гряда тает к подножию (дефект заказчика: «какая-то серость на фоне сзади
+    // у горизонта»): с высоты этажа сплошная заливка от гребня до земли читалась
+    // серой стеной. Гребень остаётся плотным, низ уходит в землю за ним.
+    let top = Infinity;
+    let bottom = -Infinity;
+    for (const step of line) {
+      top = Math.min(top, step.crest.y, step.edge.y);
+      bottom = Math.max(bottom, step.foot.y, step.edgeFoot.y);
+    }
+    const rgb = /^rgb\(([^)]+)\)$/.exec(color);
+    if (rgb && ctx.createLinearGradient && bottom > top) {
+      const fade = ctx.createLinearGradient(0, top, 0, bottom);
+      fade.addColorStop(0, color);
+      fade.addColorStop(0.35, "rgba(" + rgb[1] + ",0.85)");
+      fade.addColorStop(1, "rgba(" + rgb[1] + ",0)");
+      ctx.fillStyle = fade;
+    } else ctx.fillStyle = color;
     ctx.beginPath();
     ctx.moveTo(line[0].foot.x, line[0].foot.y);
     for (const step of line) {

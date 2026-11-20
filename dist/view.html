@@ -6705,7 +6705,7 @@ display: none;
     var label = document.getElementById("splash-step");
     var canvas = document.getElementById("splash-model");
     var STEPS = ["Расставляем розетки…","Проектируем щит…","Настраиваем сценарии…","Подбираем оборудование…","Чертим стены…","Развешиваем люстры…","Тянем кабель…","Маркируем линии…","Считаем длину ленты…","Калибруем масштаб…","Проверяем автоматы…","Вешаем шторы на карнизы…","Ищем, где спрятать кондиционер…","Учим выключатели проходить…","Уговариваем датчик движения не реагировать на кота…","Объясняем люстре, что она не главная…","Прячем провода за плинтус…","Ищем фазу. Нашли. Больше не ищем…","Считаем розетки. Опять не хватает…","Мирим тёплый пол с ковром…","Договариваемся с роботом-пылесосом о маршруте…","Убеждаем щит, что места в нём достаточно…","Учим шторы просыпаться вовремя…","Проверяем, что лампочка действительно горит…","Напоминаем термостату, что зима кончилась…","Вспоминаем, от чего этот автомат…"];
-    var PAGE_BYTES = 3145377;
+    var PAGE_BYTES = 3147478;
     var calm = false;
     try {
     calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -9207,6 +9207,7 @@ bed: "Кровать",
 dresser: "Тумба",
 sink: "Раковина",
 vanity: "Тумба с раковиной",
+vanitySmall: "Рукомойник (малая раковина)",
 toiletWall: "Унитаз подвесной",
 kitchenSink: "Кухонный шкаф с мойкой",
 shower: "Душ",
@@ -11273,6 +11274,17 @@ heightAboveFloorMm: 0,
 words: ["тумба с раковиной", "раковина с тумбой", "умывальник с тумбой"],
 },
 {
+key: "vanitySmall",
+category: "sanitary",
+mount: "floor",
+shape: "rect",
+widthMm: 400,
+depthMm: 210,
+heightMm: 900,
+heightAboveFloorMm: 0,
+words: ["рукомойник", "малая раковина"],
+},
+{
 key: "shower",
 category: "sanitary",
 mount: "floor",
@@ -12565,6 +12577,15 @@ viewRect(-0.46, -0.34, 0.92, 0.68, 0.03),
 viewCircle(0, 0.04, 0.24),
 viewCircle(0, 0.04, 0.05),
 viewLine(0, -0.34, 0, -0.2),
+),
+},
+vanitySmall: {
+shapes: [],
+parts: viewParts(
+viewRect(-0.2, -0.36, 0.62, 0.72, 0.06),
+viewCircle(0.1, 0.12, 0.06),
+viewCircle(-0.36, -0.24, 0.07),
+viewLine(-0.36, -0.24, -0.1, -0.24),
 ),
 },
 toiletWall: {
@@ -13979,6 +14000,15 @@ modelBox("top", { z: 0.66, height: 0.15, material: "light" }),
 modelBox("basin", { x: -0.3, width: 0.6, y: -0.34, depth: 0.6, z: 0.81, height: 0.01, material: "dark" }),
 modelBox("tap", { x: -0.03, width: 0.06, y: 0.3, depth: 0.12, z: 0.81, height: 0.19, material: "metal" }),
 modelBox("spout", { x: -0.03, width: 0.06, y: 0.02, depth: 0.28, z: 0.96, height: 0.04, material: "metal" }),
+),
+vanitySmall: modelParts(
+modelBox("plinth", { x: -0.44, width: 0.88, y: -0.3, depth: 0.76, z: 0, height: 0.04, material: "dark" }),
+modelBox("case", { x: -0.48, width: 0.96, y: -0.4, depth: 0.9, z: 0.04, height: 0.68 }),
+modelBox("door", { x: -0.48, width: 0.96, y: -0.5, depth: 0.1, z: 0.05, height: 0.6, material: "light" }),
+modelBox("top", { z: 0.72, height: 0.113, material: "light" }),
+modelBox("basin", { x: -0.16, width: 0.6, y: -0.38, depth: 0.7, z: 0.833, height: 0.005, material: "dark" }),
+modelBox("tap", { x: -0.42, width: 0.12, y: 0.12, depth: 0.24, z: 0.833, height: 0.167, material: "metal" }),
+modelBox("spout", { x: -0.32, width: 0.3, y: 0.18, depth: 0.12, z: 0.94, height: 0.035, material: "metal" }),
 ),
 toiletWall: modelParts(
 modelCyl("bowl", { x: -0.45, width: 0.9, y: -0.5, depth: 1, z: 0.1, height: 0.26, material: "light" }),
@@ -45372,7 +45402,7 @@ const VOLUME_MEGA_STREETS = Object.freeze([
 { widthM: 26, points: [[30, 46], [30, 120], [30, 260], [30, 520], [30, 1000], [30, 1700]] },
 { widthM: 20, points: [[122, 52], [121, 130], [120, 300], [120, 620], [120, 1100]] },
 { widthM: 20, points: [[302, 52], [301, 130], [300, 300], [300, 620], [300, 1100]] },
-{ widthM: 18, points: Array.from({ length: 25 }, (unused, index) => [index * 15, 212]) },
+{ widthM: 18, ring: true, points: Array.from({ length: 25 }, (unused, index) => [index * 15, 212]) },
 { widthM: 70, river: true, points: [[150, 900], [165, 640], [182, 520], [200, 470], [220, 500], [240, 620], [256, 880]] },
 ]);
 const MEGA_AVENUES_AZ = [30, 120, 300];
@@ -45699,8 +45729,21 @@ runs.push(run);
 }
 run.push({ foot, crest, edge, edgeFoot });
 }
-ctx.fillStyle = color;
 for (const line of runs) {
+let top = Infinity;
+let bottom = -Infinity;
+for (const step of line) {
+top = Math.min(top, step.crest.y, step.edge.y);
+bottom = Math.max(bottom, step.foot.y, step.edgeFoot.y);
+}
+const rgb = /^rgb\(([^)]+)\)$/.exec(color);
+if (rgb && ctx.createLinearGradient && bottom > top) {
+const fade = ctx.createLinearGradient(0, top, 0, bottom);
+fade.addColorStop(0, color);
+fade.addColorStop(0.35, "rgba(" + rgb[1] + ",0.85)");
+fade.addColorStop(1, "rgba(" + rgb[1] + ",0)");
+ctx.fillStyle = fade;
+} else ctx.fillStyle = color;
 ctx.beginPath();
 ctx.moveTo(line[0].foot.x, line[0].foot.y);
 for (const step of line) {
@@ -46223,6 +46266,9 @@ for (const street of mega.streets) {
 volumeDrawStrip(ctx, aim, street.nodes, (run) =>
 street.river
 ? volumeStripFill(ctx, run, palette.riverNear, palette.riverFar)
+: street.ring
+?
+palette.asphalt
 : volumeStripFill(ctx, run, palette.asphalt, palette.asphaltFar),
 );
 if (street.marks) volumeDrawStrip(ctx, aim, street.marks, () => palette.mark);
@@ -46826,7 +46872,7 @@ heightMm: rise * VOLUME_M,
 })),
 streets: VOLUME_MEGA_STREETS.map((street) => {
 const nodes = volumeBandNodes(street.points, street.widthM);
-return { river: street.river === true, nodes, marks: street.river ? null : volumeStreetMarks(nodes) };
+return { river: street.river === true, ring: street.ring === true, nodes, marks: street.river ? null : volumeStreetMarks(nodes) };
 }),
 cars: [
 ...VOLUME_MEGA_CARS.map(([az, away, height], index) => volumeCar(az, away, height, index)),
@@ -72264,6 +72310,7 @@ glow: new THREE.MeshBasicMaterial({ vertexColors: true, polygonOffset: true, pol
 over: new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3, toneMapped: false }),
 overClear: new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, transparent: true, depthWrite: false, toneMapped: false }),
 overLine: new THREE.LineBasicMaterial({ vertexColors: true, toneMapped: false }),
+land: new THREE.ShadowMaterial({ opacity: 0.32 }),
 };
 const empty = () => new THREE.BufferGeometry();
 const geometry = (data, size) => {
@@ -72283,6 +72330,8 @@ solid.castShadow = true;
 solid.receiveShadow = true;
 const glass = new THREE.Mesh(empty(), mats.clear);
 glass.renderOrder = 2;
+const land = new THREE.Mesh(empty(), mats.land);
+land.receiveShadow = true;
 const lines = new THREE.LineSegments(empty(), mats.line);
 const led = new THREE.Mesh(empty(), mats.glow);
 led.renderOrder = 1;
@@ -72294,7 +72343,7 @@ const overClear = new THREE.Mesh(empty(), mats.overClear);
 overClear.renderOrder = 4;
 const overLines = new THREE.LineSegments(empty(), mats.overLine);
 overLines.renderOrder = 5;
-world.add(solid, glass, lines, led, glow, overSolid, overClear, overLines);
+world.add(solid, land, glass, lines, led, glow, overSolid, overClear, overLines);
 const hemi = new THREE.HemisphereLight(0xdfe9f5, 0x8b8577, 1);
 const sun = new THREE.DirectionalLight(0xfff4d6, 0);
 sun.castShadow = true;
@@ -72331,16 +72380,18 @@ let sizeKey = "";
 const linearRgb = (color, rgb) => color.setRGB(volumeMeshLinear(rgb[0] / 255), volumeMeshLinear(rgb[1] / 255), volumeMeshLinear(rgb[2] / 255));
 function sceneMesh(scene) {
 const isScreen = (face) => face.art === "screen";
+const isLand = (face) => face.layer === VOLUME_LAYER_BASE && face.flat === true;
 const isLed = (face) => Boolean(face.led) && !face.line && !isScreen(face);
 const art = volumeMeshArtLift();
 const mesh = volumeMeshBuild(scene.faces, {
-keep: (face) => !isLed(face) && !isScreen(face),
-lift: (face) => volumeMeshThingLift(face) + (face.art ? art(face) : 0),
+keep: (face) => !isLed(face) && !isScreen(face) && !isLand(face),
+lift: (face) => (face.layer === VOLUME_LAYER_BASE ? -4 : volumeMeshThingLift(face) + (face.art ? art(face) : 0)),
 });
 swap(solid, geometry(mesh.solid, 3));
 swap(glass, geometry(mesh.clear, 4));
 swap(lines, geometry(mesh.lines, 3));
 swap(led, geometry(volumeMeshBuild(scene.faces, { keep: isLed, alpha: () => 1 }).solid, 3));
+swap(land, geometry(volumeMeshBuild(scene.faces, { keep: isLand, alpha: () => 1, lift: () => -4 }).solid, 3));
 litFaces = scene.faces.filter((face) => !face.line && (face.lit || isScreen(face)) && face.markId);
 triangles = mesh.triangles;
 glowKey = "";
@@ -72501,7 +72552,7 @@ renderer.render(world, camera);
 return canvas;
 }
 function drop() {
-for (const node of [solid, glass, lines, led, glow, overSolid, overClear, overLines]) node.geometry.dispose();
+for (const node of [solid, land, glass, lines, led, glow, overSolid, overClear, overLines]) node.geometry.dispose();
 for (const name of Object.keys(mats)) mats[name].dispose();
 renderer.dispose();
 sceneWas = null;

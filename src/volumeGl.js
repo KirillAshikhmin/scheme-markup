@@ -31,6 +31,7 @@
 
 import {
   VOLUME_FOV_DEG,
+  VOLUME_LAYER_BASE,
   VOLUME_MESH_SCALE,
   VOLUME_NIGHT_SHARE,
   volumeMeshArtLift,
@@ -111,6 +112,9 @@ export function volumeGlMake(THREE) {
     over: new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3, toneMapped: false }),
     overClear: new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, transparent: true, depthWrite: false, toneMapped: false }),
     overLine: new THREE.LineBasicMaterial({ vertexColors: true, toneMapped: false }),
+    // Земля плиты — только тень: сама земля нарисована фоном, и свой цвет у
+    // плиты дал бы светлый прямоугольник вокруг дома.
+    land: new THREE.ShadowMaterial({ opacity: 0.32 }),
   };
 
   const empty = () => new THREE.BufferGeometry();
@@ -132,6 +136,8 @@ export function volumeGlMake(THREE) {
   solid.receiveShadow = true;
   const glass = new THREE.Mesh(empty(), mats.clear);
   glass.renderOrder = 2;
+  const land = new THREE.Mesh(empty(), mats.land);
+  land.receiveShadow = true;
   const lines = new THREE.LineSegments(empty(), mats.line);
   const led = new THREE.Mesh(empty(), mats.glow);
   led.renderOrder = 1;
@@ -143,7 +149,7 @@ export function volumeGlMake(THREE) {
   overClear.renderOrder = 4;
   const overLines = new THREE.LineSegments(empty(), mats.overLine);
   overLines.renderOrder = 5;
-  world.add(solid, glass, lines, led, glow, overSolid, overClear, overLines);
+  world.add(solid, land, glass, lines, led, glow, overSolid, overClear, overLines);
 
   const hemi = new THREE.HemisphereLight(0xdfe9f5, 0x8b8577, 1);
   const sun = new THREE.DirectionalLight(0xfff4d6, 0);
@@ -189,19 +195,24 @@ export function volumeGlMake(THREE) {
     // Диоды и шкалы светятся всегда своим цветом; картинка экрана — только у
     // работающего прибора. Остальное — тело под светом.
     const isScreen = (face) => face.art === "screen";
+    const isLand = (face) => face.layer === VOLUME_LAYER_BASE && face.flat === true;
     const isLed = (face) => Boolean(face.led) && !face.line && !isScreen(face);
     // Грани в одной плоскости разводятся выносом: вещи — по своему номеру,
     // фигуры полотна — по порядку записи (дефект заказчика: «на телевизоре
     // картинка артефактами идёт… или там, где плоскости пересекаются»).
     const art = volumeMeshArtLift();
     const mesh = volumeMeshBuild(scene.faces, {
-      keep: (face) => !isLed(face) && !isScreen(face),
-      lift: (face) => volumeMeshThingLift(face) + (face.art ? art(face) : 0),
+      keep: (face) => !isLed(face) && !isScreen(face) && !isLand(face),
+      // Плита земли лежит в одной плоскости с полами (в кадре Canvas 2D их
+      // разводил ярус): опускается на 4 мм (дефект заказчика: «у одноэтажных
+      // объектов пересекаются фон земли и пола»).
+      lift: (face) => (face.layer === VOLUME_LAYER_BASE ? -4 : volumeMeshThingLift(face) + (face.art ? art(face) : 0)),
     });
     swap(solid, geometry(mesh.solid, 3));
     swap(glass, geometry(mesh.clear, 4));
     swap(lines, geometry(mesh.lines, 3));
     swap(led, geometry(volumeMeshBuild(scene.faces, { keep: isLed, alpha: () => 1 }).solid, 3));
+    swap(land, geometry(volumeMeshBuild(scene.faces, { keep: isLand, alpha: () => 1, lift: () => -4 }).solid, 3));
     litFaces = scene.faces.filter((face) => !face.line && (face.lit || isScreen(face)) && face.markId);
     triangles = mesh.triangles;
     glowKey = "";
@@ -383,7 +394,7 @@ export function volumeGlMake(THREE) {
   }
 
   function drop() {
-    for (const node of [solid, glass, lines, led, glow, overSolid, overClear, overLines]) node.geometry.dispose();
+    for (const node of [solid, land, glass, lines, led, glow, overSolid, overClear, overLines]) node.geometry.dispose();
     for (const name of Object.keys(mats)) mats[name].dispose();
     renderer.dispose();
     sceneWas = null;

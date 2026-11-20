@@ -438,6 +438,20 @@ const CATALOG = [
     heightAboveFloorMm: 0,
     words: ["тумба с раковиной", "раковина с тумбой", "умывальник с тумбой"],
   },
+  // Малая раковина для туалета (правка 2026-11-20, по образцу заказчика):
+  // узкая тумба 400 × 210 с раковиной на 750, смеситель слева. Высота габарита
+  // — со смесителем.
+  {
+    key: "vanitySmall",
+    category: "sanitary",
+    mount: "floor",
+    shape: "rect",
+    widthMm: 400,
+    depthMm: 210,
+    heightMm: 900,
+    heightAboveFloorMm: 0,
+    words: ["рукомойник", "малая раковина"],
+  },
   {
     key: "shower",
     category: "sanitary",
