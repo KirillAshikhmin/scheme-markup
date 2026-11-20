@@ -6748,7 +6748,7 @@ display: none;
     var label = document.getElementById("splash-step");
     var canvas = document.getElementById("splash-model");
     var STEPS = ["Расставляем розетки…","Проектируем щит…","Настраиваем сценарии…","Подбираем оборудование…","Чертим стены…","Развешиваем люстры…","Тянем кабель…","Маркируем линии…","Считаем длину ленты…","Калибруем масштаб…","Проверяем автоматы…","Вешаем шторы на карнизы…","Ищем, где спрятать кондиционер…","Учим выключатели проходить…","Уговариваем датчик движения не реагировать на кота…","Объясняем люстре, что она не главная…","Прячем провода за плинтус…","Ищем фазу. Нашли. Больше не ищем…","Считаем розетки. Опять не хватает…","Мирим тёплый пол с ковром…","Договариваемся с роботом-пылесосом о маршруте…","Убеждаем щит, что места в нём достаточно…","Учим шторы просыпаться вовремя…","Проверяем, что лампочка действительно горит…","Напоминаем термостату, что зима кончилась…","Вспоминаем, от чего этот автомат…"];
-    var PAGE_BYTES = 3220031;
+    var PAGE_BYTES = 3220314;
     var calm = false;
     try {
     calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -45775,6 +45775,7 @@ const paint = options.paint || null;
 const alphaOf = options.alpha || null;
 const liftOf = options.lift || null;
 const shiftOf = options.shift || null;
+const sinkOf = options.sink || null;
 const solid = { pos: [], nor: [], col: [] };
 const clear = { pos: [], nor: [], col: [] };
 const lines = { pos: [], col: [] };
@@ -45859,8 +45860,9 @@ const sz = nz * lift + (shift ? shift.z : 0);
 const back = face.backRgb
 ? [volumeMeshLinear(face.backRgb[0] / 255), volumeMeshLinear(face.backRgb[1] / 255), volumeMeshLinear(face.backRgb[2] / 255)]
 : c;
+const sink = sinkOf ? Number(sinkOf(face)) || 0 : 0;
 const emit = (p, sign) => {
-into.pos.push((p.x + sx) * S, (p.z + sz) * S, (p.y + sy) * S);
+into.pos.push((p.x + sx) * S, (p.z + sz - (sink > 0 && p.z < 5 && p.z > -5 ? sink : 0)) * S, (p.y + sy) * S);
 let vx = nx;
 let vy = ny;
 let vz = nz;
@@ -74078,8 +74080,8 @@ for (let at = 0; at < VOLUME_GL_SPOTS; at += 1) {
 const lamp = new THREE.SpotLight(0xffe6c4, 0, 0, 1.25, 0.9, 2);
 lamp.castShadow = true;
 lamp.shadow.mapSize.set(at < VOLUME_GL_SHADOWED ? 1024 : 512, at < VOLUME_GL_SHADOWED ? 1024 : 512);
-lamp.shadow.bias = -0.004;
-lamp.shadow.normalBias = 0.06;
+lamp.shadow.bias = -0.003;
+lamp.shadow.normalBias = 0.03;
 lamp.shadow.camera.near = 0.05;
 lamp.shadow.camera.far = 12;
 world.add(lamp, lamp.target);
@@ -74090,8 +74092,8 @@ for (let at = 0; at < VOLUME_GL_POINTS; at += 1) {
 const lamp = new THREE.PointLight(0xffe6c4, 0, 0, 2);
 lamp.castShadow = true;
 lamp.shadow.mapSize.set(512, 512);
-lamp.shadow.bias = -0.004;
-lamp.shadow.normalBias = 0.06;
+lamp.shadow.bias = -0.003;
+lamp.shadow.normalBias = 0.03;
 lamp.shadow.camera.near = 0.05;
 lamp.shadow.camera.far = 14;
 world.add(lamp);
@@ -74099,9 +74101,9 @@ points.push(lamp);
 }
 const fill = new THREE.PointLight(0xffe6c4, 0, 0, 2);
 fill.castShadow = true;
-fill.shadow.mapSize.set(256, 256);
-fill.shadow.bias = -0.006;
-fill.shadow.normalBias = 0.08;
+fill.shadow.mapSize.set(512, 512);
+fill.shadow.bias = -0.003;
+fill.shadow.normalBias = 0.03;
 fill.shadow.camera.near = 0.05;
 fill.shadow.camera.far = 14;
 let shadowKey = "";
@@ -74126,6 +74128,7 @@ const mesh = volumeMeshBuild(scene.faces, {
 keep: (face) => !isLed(face) && !isScreen(face) && !isLand(face) && !isFixture(face),
 lift: (face) => (face.layer === VOLUME_LAYER_BASE ? -4 : face.art ? art(face) : 0),
 shift: volumeMeshThingShift,
+sink: (face) => (!face.markId && !face.thing && face.n && Math.abs(face.n.z) < 0.5 && !String(face.doorId || "").startsWith("thing:") ? 120 : 0),
 });
 swap(solid, geometry(mesh.solid, 3));
 swap(glass, geometry(mesh.clear, 4));

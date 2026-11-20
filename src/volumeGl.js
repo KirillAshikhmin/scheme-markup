@@ -177,8 +177,8 @@ export function volumeGlMake(THREE) {
     // Ближним — карта подробнее, остальным хватает половины.
     lamp.shadow.mapSize.set(at < VOLUME_GL_SHADOWED ? 1024 : 512, at < VOLUME_GL_SHADOWED ? 1024 : 512);
     // Запас побольше: под скользящим светом стена шла рябью (дефект заказчика).
-    lamp.shadow.bias = -0.004;
-    lamp.shadow.normalBias = 0.06;
+    lamp.shadow.bias = -0.003;
+    lamp.shadow.normalBias = 0.03;
     lamp.shadow.camera.near = 0.05;
     lamp.shadow.camera.far = 12;
     world.add(lamp, lamp.target);
@@ -189,8 +189,8 @@ export function volumeGlMake(THREE) {
     const lamp = new THREE.PointLight(0xffe6c4, 0, 0, 2);
     lamp.castShadow = true;
     lamp.shadow.mapSize.set(512, 512);
-    lamp.shadow.bias = -0.004;
-    lamp.shadow.normalBias = 0.06;
+    lamp.shadow.bias = -0.003;
+    lamp.shadow.normalBias = 0.03;
     lamp.shadow.camera.near = 0.05;
     lamp.shadow.camera.far = 14;
     world.add(lamp);
@@ -199,9 +199,9 @@ export function volumeGlMake(THREE) {
   const fill = new THREE.PointLight(0xffe6c4, 0, 0, 2);
   // Отражённый свет тоже не ходит сквозь стены.
   fill.castShadow = true;
-  fill.shadow.mapSize.set(256, 256);
-  fill.shadow.bias = -0.006;
-  fill.shadow.normalBias = 0.08;
+  fill.shadow.mapSize.set(512, 512);
+  fill.shadow.bias = -0.003;
+  fill.shadow.normalBias = 0.03;
   fill.shadow.camera.near = 0.05;
   fill.shadow.camera.far = 14;
   let shadowKey = "";
@@ -238,6 +238,9 @@ export function volumeGlMake(THREE) {
       // объектов пересекаются фон земли и пола»).
       lift: (face) => (face.layer === VOLUME_LAYER_BASE ? -4 : face.art ? art(face) : 0),
       shift: volumeMeshThingShift,
+      // Стены, полотна дверей и ворот уходят в пол на 12 см: у их подножия
+      // карта теней пропускала полоску света из соседней комнаты.
+      sink: (face) => (!face.markId && !face.thing && face.n && Math.abs(face.n.z) < 0.5 && !String(face.doorId || "").startsWith("thing:") ? 120 : 0),
     });
     swap(solid, geometry(mesh.solid, 3));
     swap(glass, geometry(mesh.clear, 4));
