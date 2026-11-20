@@ -46,7 +46,7 @@ export const VOLUME_GL_MODULE = "./vendor/three/three.module.min.js";
 
 /** Источников у видеокарты: число постоянно, погашенные стоят с нулевой силой. */
 export const VOLUME_GL_SPOTS = 8;
-export const VOLUME_GL_POINTS = 3;
+export const VOLUME_GL_POINTS = 5;
 export const VOLUME_GL_SHADOWED = 2;
 /** Сила источника на единицу мощности лампы сцены (подобрано на прототипе). */
 export const VOLUME_GL_LAMP_GAIN = 3.6;
@@ -350,8 +350,10 @@ export function volumeGlMake(THREE) {
         node.intensity = 0;
         continue;
       }
-      node.position.set(item.x * S, (item.z - 60) * S, item.y * S);
-      node.target.position.set(item.x * S, -10, item.y * S);
+      node.position.set(item.x * S, (item.aim ? item.z : item.z - 60) * S, item.y * S);
+      // Подсветка картины целит в стену под собой, остальные — отвесно вниз.
+      if (item.aim) node.target.position.set(item.aim.x * S, item.aim.z * S, item.aim.y * S);
+      else node.target.position.set(item.x * S, -10, item.y * S);
       node.intensity = VOLUME_GL_LAMP_GAIN * item.power;
       linearRgb(node.color, item.rgb);
     }

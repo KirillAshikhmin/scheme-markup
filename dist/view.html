@@ -6742,7 +6742,7 @@ display: none;
     var label = document.getElementById("splash-step");
     var canvas = document.getElementById("splash-model");
     var STEPS = ["Расставляем розетки…","Проектируем щит…","Настраиваем сценарии…","Подбираем оборудование…","Чертим стены…","Развешиваем люстры…","Тянем кабель…","Маркируем линии…","Считаем длину ленты…","Калибруем масштаб…","Проверяем автоматы…","Вешаем шторы на карнизы…","Ищем, где спрятать кондиционер…","Учим выключатели проходить…","Уговариваем датчик движения не реагировать на кота…","Объясняем люстре, что она не главная…","Прячем провода за плинтус…","Ищем фазу. Нашли. Больше не ищем…","Считаем розетки. Опять не хватает…","Мирим тёплый пол с ковром…","Договариваемся с роботом-пылесосом о маршруте…","Убеждаем щит, что места в нём достаточно…","Учим шторы просыпаться вовремя…","Проверяем, что лампочка действительно горит…","Напоминаем термостату, что зима кончилась…","Вспоминаем, от чего этот автомат…"];
-    var PAGE_BYTES = 3219346;
+    var PAGE_BYTES = 3220031;
     var calm = false;
     try {
     calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -45545,6 +45545,9 @@ return out;
 // src/volume/mesh.js
 const VOLUME_MESH_SCALE = 0.001;
 const VOLUME_MESH_LAMP_JOIN_MM = 1500;
+const VOLUME_MESH_WALL_OUT_MM = 180;
+const VOLUME_MESH_WASH_OUT_MM = 260;
+const VOLUME_MESH_WASH_DROP_MM = 900;
 const VOLUME_MESH_HANG_MM = 250;
 function volumeMeshLinear(value) {
 return value <= 0.04045 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4);
@@ -45767,12 +45770,17 @@ const place = volumeMarkPlace(scene, markId);
 const chandelier = Boolean(place && place.view && place.view.name === "chandelier");
 for (const source of volumeLampSourcesOf(scene, markId, item ? item.roomId : undefined)) {
 if (!source || !source.at || !(source.power > 0)) continue;
+const wall = source.wall || null;
+const wash = Boolean(wall) && Number(source.beam) < 1;
+const off = wall ? (wash ? VOLUME_MESH_WASH_OUT_MM : VOLUME_MESH_WALL_OUT_MM) : 0;
 out.push({
-x: source.at.x,
-y: source.at.y,
+x: source.at.x + (wall ? wall.x * off : 0),
+y: source.at.y + (wall ? wall.y * off : 0),
 z: source.at.z,
+...(wall ? { wall: true } : {}),
+...(wash ? { aim: { x: source.at.x - wall.x * 20, y: source.at.y - wall.y * 20, z: source.at.z - VOLUME_MESH_WASH_DROP_MM } } : {}),
 power: source.power * strength,
-down: Boolean(source.dir && source.dir.z < 0) && !chandelier && !(ceilingMm > 0 && source.at.z < ceilingMm - VOLUME_MESH_HANG_MM),
+down: wash || Boolean(source.dir && source.dir.z < 0) && !chandelier && !(ceilingMm > 0 && source.at.z < ceilingMm - VOLUME_MESH_HANG_MM),
 hang: Boolean(source.dir && source.dir.z < 0) && (chandelier || (ceilingMm > 0 && source.at.z < ceilingMm - VOLUME_MESH_HANG_MM)),
 room: source.room || null,
 rgb,
@@ -45784,8 +45792,9 @@ return out;
 function volumeMeshLampJoin(lamps) {
 const out = [];
 for (const lamp of lamps) {
-const near = out.find(
+const near = lamp.wall ? null : out.find(
 (item) =>
+!item.wall &&
 item.room === lamp.room &&
 item.down === lamp.down &&
 Math.hypot(item.x - lamp.x, item.y - lamp.y) < VOLUME_MESH_LAMP_JOIN_MM,
@@ -45820,6 +45829,7 @@ let power = 0;
 const lead = spots[0] && points[0] ? ((spots[0].x - eye.x) ** 2 + (spots[0].y - eye.y) ** 2 <= (points[0].x - eye.x) ** 2 + (points[0].y - eye.y) ** 2 ? spots[0] : points[0]) : spots[0] || points[0] || null;
 for (const item of [...spots, ...points]) {
 if (lead && item.room !== lead.room) continue;
+if (item.wall) continue;
 fx += item.x * item.power;
 fy += item.y * item.power;
 power += item.power;
@@ -73826,7 +73836,7 @@ sync();
 // src/volumeGl.js
 const VOLUME_GL_MODULE = "./vendor/three/three.module.min.js";
 const VOLUME_GL_SPOTS = 8;
-const VOLUME_GL_POINTS = 3;
+const VOLUME_GL_POINTS = 5;
 const VOLUME_GL_SHADOWED = 2;
 const VOLUME_GL_LAMP_GAIN = 3.6;
 let volumeGlPromise = null;
@@ -74074,8 +74084,9 @@ if (!item) {
 node.intensity = 0;
 continue;
 }
-node.position.set(item.x * S, (item.z - 60) * S, item.y * S);
-node.target.position.set(item.x * S, -10, item.y * S);
+node.position.set(item.x * S, (item.aim ? item.z : item.z - 60) * S, item.y * S);
+if (item.aim) node.target.position.set(item.aim.x * S, item.aim.z * S, item.aim.y * S);
+else node.target.position.set(item.x * S, -10, item.y * S);
 node.intensity = VOLUME_GL_LAMP_GAIN * item.power;
 linearRgb(node.color, item.rgb);
 }

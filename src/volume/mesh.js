@@ -21,6 +21,11 @@ import { volumeMarkPlace } from "./scene.js";
 export const VOLUME_MESH_SCALE = 0.001;
 /** Соседние источники ближе этого сливаются в один: у видеокарты их считаные. */
 export const VOLUME_MESH_LAMP_JOIN_MM = 1500;
+/** На сколько настенный светильник отодвинут от стены для видеокарты. */
+export const VOLUME_MESH_WALL_OUT_MM = 180;
+/** Подсветка картины: вынос от стены и на сколько ниже себя она целит. */
+export const VOLUME_MESH_WASH_OUT_MM = 260;
+export const VOLUME_MESH_WASH_DROP_MM = 900;
 /** Источник ниже потолка на столько — светильник висячий. */
 export const VOLUME_MESH_HANG_MM = 250;
 
@@ -296,12 +301,23 @@ export function volumeMeshLamps(scene, light, live = null) {
     const chandelier = Boolean(place && place.view && place.view.name === "chandelier");
     for (const source of volumeLampSourcesOf(scene, markId, item ? item.roomId : undefined)) {
       if (!source || !source.at || !(source.power > 0)) continue;
+      // Настенный светильник (правка 2026-11-21, дефект заказчика: «странно бра
+      // светят»): источник сцены стоит в трёх сантиметрах от стены — точечный
+      // свет оттуда даёт яркую кляксу на стене и больше ничего. Видеокарте он
+      // отодвигается от стены. Маленький настенный (подсветка картины, `beam`
+      // меньше единицы) светит не во все стороны, а конусом вниз вдоль стены —
+      // на картину под ним (`aim`).
+      const wall = source.wall || null;
+      const wash = Boolean(wall) && Number(source.beam) < 1;
+      const off = wall ? (wash ? VOLUME_MESH_WASH_OUT_MM : VOLUME_MESH_WALL_OUT_MM) : 0;
       out.push({
-        x: source.at.x,
-        y: source.at.y,
+        x: source.at.x + (wall ? wall.x * off : 0),
+        y: source.at.y + (wall ? wall.y * off : 0),
         z: source.at.z,
+        ...(wall ? { wall: true } : {}),
+        ...(wash ? { aim: { x: source.at.x - wall.x * 20, y: source.at.y - wall.y * 20, z: source.at.z - VOLUME_MESH_WASH_DROP_MM } } : {}),
         power: source.power * strength,
-        down: Boolean(source.dir && source.dir.z < 0) && !chandelier && !(ceilingMm > 0 && source.at.z < ceilingMm - VOLUME_MESH_HANG_MM),
+        down: wash || Boolean(source.dir && source.dir.z < 0) && !chandelier && !(ceilingMm > 0 && source.at.z < ceilingMm - VOLUME_MESH_HANG_MM),
         hang: Boolean(source.dir && source.dir.z < 0) && (chandelier || (ceilingMm > 0 && source.at.z < ceilingMm - VOLUME_MESH_HANG_MM)),
         room: source.room || null,
         rgb,
@@ -315,8 +331,10 @@ export function volumeMeshLamps(scene, light, live = null) {
 export function volumeMeshLampJoin(lamps) {
   const out = [];
   for (const lamp of lamps) {
-    const near = out.find(
+    // Настенные не сливаются: у каждого бра своё пятно на своей стене.
+    const near = lamp.wall ? null : out.find(
       (item) =>
+        !item.wall &&
         item.room === lamp.room &&
         item.down === lamp.down &&
         Math.hypot(item.x - lamp.x, item.y - lamp.y) < VOLUME_MESH_LAMP_JOIN_MM,
@@ -361,6 +379,8 @@ export function volumeMeshLampPick(lamps, eye, limits = { spots: 8, points: 3 })
   const lead = spots[0] && points[0] ? ((spots[0].x - eye.x) ** 2 + (spots[0].y - eye.y) ** 2 <= (points[0].x - eye.x) ** 2 + (points[0].y - eye.y) ** 2 ? spots[0] : points[0]) : spots[0] || points[0] || null;
   for (const item of [...spots, ...points]) {
     if (lead && item.room !== lead.room) continue;
+    // Настенные в отражённый свет не идут: его середина легла бы на стену.
+    if (item.wall) continue;
     fx += item.x * item.power;
     fy += item.y * item.power;
     power += item.power;
