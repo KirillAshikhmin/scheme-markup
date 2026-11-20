@@ -6748,7 +6748,7 @@ display: none;
     var label = document.getElementById("splash-step");
     var canvas = document.getElementById("splash-model");
     var STEPS = ["Расставляем розетки…","Проектируем щит…","Настраиваем сценарии…","Подбираем оборудование…","Чертим стены…","Развешиваем люстры…","Тянем кабель…","Маркируем линии…","Считаем длину ленты…","Калибруем масштаб…","Проверяем автоматы…","Вешаем шторы на карнизы…","Ищем, где спрятать кондиционер…","Учим выключатели проходить…","Уговариваем датчик движения не реагировать на кота…","Объясняем люстре, что она не главная…","Прячем провода за плинтус…","Ищем фазу. Нашли. Больше не ищем…","Считаем розетки. Опять не хватает…","Мирим тёплый пол с ковром…","Договариваемся с роботом-пылесосом о маршруте…","Убеждаем щит, что места в нём достаточно…","Учим шторы просыпаться вовремя…","Проверяем, что лампочка действительно горит…","Напоминаем термостату, что зима кончилась…","Вспоминаем, от чего этот автомат…"];
-    var PAGE_BYTES = 3220314;
+    var PAGE_BYTES = 3220347;
     var calm = false;
     try {
     calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -74025,7 +74025,7 @@ lost = true;
 const world = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(60, 1, 0.08, 2500);
 const mats = {
-solid: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 }),
+solid: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0, shadowSide: THREE.FrontSide }),
 clear: new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide, transparent: true, depthWrite: false }),
 line: new THREE.LineBasicMaterial({ vertexColors: true }),
 glow: new THREE.MeshBasicMaterial({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, toneMapped: false }),
@@ -74079,7 +74079,7 @@ const spots = [];
 for (let at = 0; at < VOLUME_GL_SPOTS; at += 1) {
 const lamp = new THREE.SpotLight(0xffe6c4, 0, 0, 1.25, 0.9, 2);
 lamp.castShadow = true;
-lamp.shadow.mapSize.set(at < VOLUME_GL_SHADOWED ? 1024 : 512, at < VOLUME_GL_SHADOWED ? 1024 : 512);
+lamp.shadow.mapSize.set(at < VOLUME_GL_SHADOWED ? 2048 : 1024, at < VOLUME_GL_SHADOWED ? 2048 : 1024);
 lamp.shadow.bias = -0.003;
 lamp.shadow.normalBias = 0.03;
 lamp.shadow.camera.near = 0.05;
@@ -74091,7 +74091,7 @@ const points = [];
 for (let at = 0; at < VOLUME_GL_POINTS; at += 1) {
 const lamp = new THREE.PointLight(0xffe6c4, 0, 0, 2);
 lamp.castShadow = true;
-lamp.shadow.mapSize.set(512, 512);
+lamp.shadow.mapSize.set(1024, 1024);
 lamp.shadow.bias = -0.003;
 lamp.shadow.normalBias = 0.03;
 lamp.shadow.camera.near = 0.05;
