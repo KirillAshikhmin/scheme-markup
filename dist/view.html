@@ -6705,7 +6705,7 @@ display: none;
     var label = document.getElementById("splash-step");
     var canvas = document.getElementById("splash-model");
     var STEPS = ["Расставляем розетки…","Проектируем щит…","Настраиваем сценарии…","Подбираем оборудование…","Чертим стены…","Развешиваем люстры…","Тянем кабель…","Маркируем линии…","Считаем длину ленты…","Калибруем масштаб…","Проверяем автоматы…","Вешаем шторы на карнизы…","Ищем, где спрятать кондиционер…","Учим выключатели проходить…","Уговариваем датчик движения не реагировать на кота…","Объясняем люстре, что она не главная…","Прячем провода за плинтус…","Ищем фазу. Нашли. Больше не ищем…","Считаем розетки. Опять не хватает…","Мирим тёплый пол с ковром…","Договариваемся с роботом-пылесосом о маршруте…","Убеждаем щит, что места в нём достаточно…","Учим шторы просыпаться вовремя…","Проверяем, что лампочка действительно горит…","Напоминаем термостату, что зима кончилась…","Вспоминаем, от чего этот автомат…"];
-    var PAGE_BYTES = 3121351;
+    var PAGE_BYTES = 3144659;
     var calm = false;
     try {
     calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -8885,6 +8885,11 @@ simulationHint:
 "Что работает, видно и у остальных: под клавишей выключателя горит диод её канала, у розетки — диод справа сверху, " +
 "вентиляция и кондиционер выдувают струи, колонка звучит дугами, сработавший датчик горит красным. " +
 "E и щелчок управляют устройствами, как щелчок в «Схеме». Снимите галку — «Объём» станет таким, каким был до имитации.",
+glRender: "Свет и тени (новая отрисовка)",
+glRenderHint:
+"Сцену рисует видеокарта: лампы и солнце светят по-настоящему, вещи бросают тени, круглые тела круглые, " +
+"а кадр считается быстрее. Вещи чертежа в этом виде непрозрачны, а отметка «Физический свет» ни на что не влияет. " +
+"Снимите галку — вернётся прежняя отрисовка; она же включается сама, если видеокарта недоступна.",
 physicalLight: "Физический свет",
 physicalLightHint:
 "Лампа светит пятном вокруг себя — на пол, стены и потолок, — через открытые проёмы ложится в соседнюю комнату " +
@@ -40793,6 +40798,27 @@ if (material === "metal") return volumeMix(bodyRgb, VOLUME_MODEL_METAL, VOLUME_M
 if (material === "glass") return volumeMix(bodyRgb, VOLUME_MODEL_GLASS, VOLUME_MODEL_NEUTRAL);
 return bodyRgb;
 }
+const VOLUME_ROUND_SIDES = 24;
+let volumeSidesNow = MODEL_CYL_SIDES;
+let volumeSmoothNext = 0;
+function volumeRoundWith(sides, build) {
+const want = Number.isInteger(sides) && sides > MODEL_CYL_SIDES ? Math.min(sides, 48) : MODEL_CYL_SIDES;
+const was = volumeSidesNow;
+const next = volumeSmoothNext;
+volumeSidesNow = want;
+volumeSmoothNext = 0;
+try {
+return build();
+} finally {
+volumeSidesNow = was;
+volumeSmoothNext = next;
+}
+}
+function volumeSmoothTag(out, from) {
+if (volumeSidesNow <= MODEL_CYL_SIDES) return;
+volumeSmoothNext += 1;
+for (let index = from; index < out.length; index += 1) out[index].smooth = volumeSmoothNext;
+}
 function volumeModelPrisms(frame, parts) {
 const out = [];
 if (!frame || !(frame.heightMm > 0)) return out;
@@ -40808,8 +40834,8 @@ const corners = [];
 if (part.kind === "cyl") {
 const cx = part.x + part.width / 2;
 const cy = part.y + part.depth / 2;
-for (let index = 0; index < MODEL_CYL_SIDES; index += 1) {
-const angle = ((index + 0.5) * Math.PI * 2) / MODEL_CYL_SIDES;
+for (let index = 0; index < volumeSidesNow; index += 1) {
+const angle = ((index + 0.5) * Math.PI * 2) / volumeSidesNow;
 corners.push(at(cx + (Math.cos(angle) * part.width) / 2, cy + (Math.sin(angle) * part.depth) / 2));
 }
 } else if (part.kind === "plate") {
@@ -40826,6 +40852,7 @@ bottomMm,
 topMm,
 material: part.material,
 name: part.name,
+round: part.kind === "cyl",
 lit: part.lit,
 art: part.art || null,
 bulb: Number.isInteger(part.bulb) ? part.bulb : null,
@@ -40853,8 +40880,8 @@ z: frame.bottomMm + fz * frame.heightMm,
 const cx = part.x + part.width / 2;
 const cy = part.y + part.depth / 2;
 const ring = [];
-for (let index = 0; index < MODEL_CYL_SIDES; index += 1) {
-const angle = ((index + 0.5) * Math.PI * 2) / MODEL_CYL_SIDES;
+for (let index = 0; index < volumeSidesNow; index += 1) {
+const angle = ((index + 0.5) * Math.PI * 2) / volumeSidesNow;
 ring.push(at(cx + (Math.cos(angle) * part.width) / 2, cy + (Math.sin(angle) * part.depth) / 2, part.z));
 }
 const apex = at(cx, cy, part.z + part.height);
@@ -40886,8 +40913,8 @@ acrossShare = acrossMm > 0 ? radiusMm / acrossMm : acrossShare;
 upShare = frame.heightMm > 0 ? radiusMm / frame.heightMm : upShare;
 }
 const ring = [];
-for (let index = 0; index < MODEL_CYL_SIDES; index += 1) {
-const angle = ((index + 0.5) * Math.PI * 2) / MODEL_CYL_SIDES;
+for (let index = 0; index < volumeSidesNow; index += 1) {
+const angle = ((index + 0.5) * Math.PI * 2) / volumeSidesNow;
 ring.push({ across: across + Math.cos(angle) * acrossShare, z: middleZ + Math.sin(angle) * upShare });
 }
 const node = (item, along) => (alongX ? at(along, item.across, item.z) : at(item.across, along, item.z));
@@ -40914,12 +40941,16 @@ doorId: part && part.leaf && options.leafId ? options.leafId : null,
 });
 const paint = (material) => (material === "light" && options.lightRgb ? options.lightRgb : volumeModelRgb(material, rgb));
 for (const part of parts) {
+const before = out.length;
 if (part.kind === "tube") volumeTubeFaces(frame, part, paint(part.material), out, own(part));
 else if (part.kind === "cone") volumeConeFaces(frame, part, paint(part.material), out, own(part));
+if (out.length > before) volumeSmoothTag(out, before);
 }
 for (const prism of volumeModelPrisms(frame, parts)) {
 const fill = paint(prism.material);
+const before = out.length;
 volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, fill, out, own(prism));
+if (prism.round) volumeSmoothTag(out, before);
 }
 for (const part of parts) {
 if (!part.art) continue;
@@ -41719,6 +41750,7 @@ marks: options.marks || null,
 roofOff: options.roofOff === true,
 markImages: options.markImages !== false,
 objectsClear: options.objectsClear !== false,
+roundSides: options.roundSides || 0,
 upper: upper === true,
 capMm: cover && cover.capMm !== undefined ? cover.capMm : null,
 coverX: (cover && cover.dx) || 0,
@@ -41743,6 +41775,7 @@ was.schemeId !== now.schemeId ||
 was.roofOff !== now.roofOff ||
 was.markImages !== now.markImages ||
 was.objectsClear !== now.objectsClear ||
+was.roundSides !== now.roundSides ||
 was.upper !== now.upper ||
 was.capMm !== now.capMm ||
 was.coverX !== now.coverX ||
@@ -42410,6 +42443,9 @@ face.sides = sides;
 }
 }
 function volumeScene(project, schemeId, options = {}) {
+return volumeRoundWith(options.roundSides, () => volumeSceneBuild(project, schemeId, options));
+}
+function volumeSceneBuild(project, schemeId, options = {}) {
 const scheme = findScheme(project, schemeId);
 if (!scheme) return null;
 const walls = wallsOnScheme(project, schemeId);
@@ -43955,6 +43991,272 @@ function volumeColorOf(rgb) {
 if (!Array.isArray(rgb) || rgb.length < 3) return null;
 const out = rgb.slice(0, 3).map((value) => Math.max(0, Math.min(255, Number(value) || 0)));
 return out;
+}
+
+// src/volume/mesh.js
+const VOLUME_MESH_SCALE = 0.001;
+const VOLUME_MESH_LAMP_JOIN_MM = 1500;
+function volumeMeshLinear(value) {
+return value <= 0.04045 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4);
+}
+function volumeMeshEarcut(xy) {
+const n = xy.length >> 1;
+if (n < 3) return [];
+if (n === 3) return [0, 1, 2];
+let area = 0;
+for (let i = 0; i < n; i += 1) {
+const j = (i + 1) % n;
+area += xy[2 * i] * xy[2 * j + 1] - xy[2 * j] * xy[2 * i + 1];
+}
+const idx = [];
+for (let i = 0; i < n; i += 1) idx.push(area >= 0 ? i : n - 1 - i);
+const out = [];
+const eps = Math.abs(area) * 1e-9;
+let guard = n * n + 8;
+while (idx.length > 3 && guard-- > 0) {
+let cut = false;
+const m = idx.length;
+for (let i = 0; i < m; i += 1) {
+const a = idx[(i + m - 1) % m];
+const b = idx[i];
+const c = idx[(i + 1) % m];
+const ax = xy[2 * a];
+const ay = xy[2 * a + 1];
+const bx = xy[2 * b];
+const by = xy[2 * b + 1];
+const cx = xy[2 * c];
+const cy = xy[2 * c + 1];
+const cross = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+if (Math.abs(cross) <= eps) {
+idx.splice(i, 1);
+cut = true;
+break;
+}
+if (cross < 0) continue;
+let free = true;
+for (let k = 0; k < m && free; k += 1) {
+const p = idx[k];
+if (p === a || p === b || p === c) continue;
+const px = xy[2 * p];
+const py = xy[2 * p + 1];
+const d1 = (bx - ax) * (py - ay) - (by - ay) * (px - ax);
+const d2 = (cx - bx) * (py - by) - (cy - by) * (px - bx);
+const d3 = (ax - cx) * (py - cy) - (ay - cy) * (px - cx);
+if (d1 > eps && d2 > eps && d3 > eps) free = false;
+}
+if (!free) continue;
+out.push(a, b, c);
+idx.splice(i, 1);
+cut = true;
+break;
+}
+if (!cut) break;
+}
+for (let i = 1; i + 1 < idx.length; i += 1) out.push(idx[0], idx[i], idx[i + 1]);
+return out;
+}
+function volumeMeshColor(color, fallback = [60, 60, 60]) {
+if (Array.isArray(color)) return color;
+if (typeof color !== "string") return fallback;
+const hex = /^#([0-9a-f]{6})$/i.exec(color.trim());
+if (hex) return [1, 3, 5].map((at) => parseInt(color.trim().slice(at, at + 2), 16));
+const short = /^#([0-9a-f]{3})$/i.exec(color.trim());
+if (short) return [0, 1, 2].map((at) => parseInt(short[1][at] + short[1][at], 16));
+const list = /^rgba?\(([^)]+)\)$/i.exec(color.trim());
+if (list) {
+const parts = list[1].split(",").map((part) => Number(part));
+if (parts.length >= 3 && parts.slice(0, 3).every(Number.isFinite)) return parts.slice(0, 3);
+}
+return fallback;
+}
+function volumeMeshBuild(faces, options = {}) {
+const S = VOLUME_MESH_SCALE;
+const keep = options.keep || null;
+const paint = options.paint || null;
+const alphaOf = options.alpha || null;
+const solid = { pos: [], nor: [], col: [] };
+const clear = { pos: [], nor: [], col: [] };
+const lines = { pos: [], col: [] };
+const smoothOf = new Map();
+const keyOf = (id, x, y, z) => id + ":" + Math.round(x) + ":" + Math.round(y) + ":" + Math.round(z);
+for (const face of faces) {
+if (!face || !face.smooth || !face.n || face.line || !face.p || face.p.length > 4) continue;
+if (keep && !keep(face)) continue;
+for (const p of face.p) {
+const key = keyOf(face.smooth, p.x, p.y, p.z);
+const sum = smoothOf.get(key) || [0, 0, 0, 0];
+sum[0] += face.n.x;
+sum[1] += face.n.y;
+sum[2] += face.n.z;
+sum[3] += 1;
+smoothOf.set(key, sum);
+}
+}
+for (const face of faces) {
+if (!face || !face.p || face.p.length < 2) continue;
+if (keep && !keep(face)) continue;
+const P = face.p;
+if (face.line || P.length < 3) {
+const rgb = (paint && paint(face)) || volumeMeshColor(face.color || face.rgb);
+const c = [volumeMeshLinear(rgb[0] / 255), volumeMeshLinear(rgb[1] / 255), volumeMeshLinear(rgb[2] / 255)];
+const last = face.closed ? P.length : P.length - 1;
+for (let i = 0; i < last; i += 1) {
+const a = P[i];
+const b = P[(i + 1) % P.length];
+lines.pos.push(a.x * S, a.z * S, a.y * S, b.x * S, b.z * S, b.y * S);
+lines.col.push(c[0], c[1], c[2], c[0], c[1], c[2]);
+}
+continue;
+}
+let nx = 0;
+let ny = 0;
+let nz = 0;
+if (face.n) {
+nx = face.n.x;
+ny = face.n.y;
+nz = face.n.z;
+} else {
+for (let i = 0; i < P.length; i += 1) {
+const p = P[i];
+const q = P[(i + 1) % P.length];
+nx += (p.y - q.y) * (p.z + q.z);
+ny += (p.z - q.z) * (p.x + q.x);
+nz += (p.x - q.x) * (p.y + q.y);
+}
+}
+const nl = Math.hypot(nx, ny, nz);
+if (!(nl > 0)) continue;
+nx /= nl;
+ny /= nl;
+nz /= nl;
+let tri;
+if (P.length === 3) tri = [0, 1, 2];
+else if (P.length === 4) tri = [0, 1, 2, 0, 2, 3];
+else {
+const ax = Math.abs(nx);
+const ay = Math.abs(ny);
+const az = Math.abs(nz);
+const xy = [];
+for (const p of P) {
+if (az >= ax && az >= ay) xy.push(p.x, p.y);
+else if (ax >= ay) xy.push(p.y, p.z);
+else xy.push(p.x, p.z);
+}
+tri = volumeMeshEarcut(xy);
+}
+const rgb = (paint && paint(face)) || face.rgb || [60, 60, 60];
+const c = [volumeMeshLinear(rgb[0] / 255), volumeMeshLinear(rgb[1] / 255), volumeMeshLinear(rgb[2] / 255)];
+const own = alphaOf ? alphaOf(face) : null;
+const alpha = own !== null && own !== undefined ? own : face.clear ? (typeof face.alpha === "number" ? face.alpha : 0.4) : typeof face.alpha === "number" ? face.alpha : 1;
+const into = alpha < 1 ? clear : solid;
+const smooth = Boolean(face.smooth && face.n && P.length <= 4);
+const emit = (p, sign) => {
+into.pos.push(p.x * S, p.z * S, p.y * S);
+let vx = nx;
+let vy = ny;
+let vz = nz;
+if (smooth) {
+const sum = smoothOf.get(keyOf(face.smooth, p.x, p.y, p.z));
+if (sum && sum[3] >= 2 && sum[3] <= 4) {
+const len = Math.hypot(sum[0], sum[1], sum[2]);
+if (len > 0.2) {
+vx = sum[0] / len;
+vy = sum[1] / len;
+vz = sum[2] / len;
+}
+}
+}
+into.nor.push(vx * sign, vz * sign, vy * sign);
+if (into === clear) into.col.push(c[0], c[1], c[2], alpha);
+else into.col.push(c[0], c[1], c[2]);
+};
+for (let i = 0; i < tri.length; i += 3) {
+const a = P[tri[i]];
+const b = P[tri[i + 1]];
+const d = P[tri[i + 2]];
+const ux = b.x - a.x;
+const uy = b.y - a.y;
+const uz = b.z - a.z;
+const wx = d.x - a.x;
+const wy = d.y - a.y;
+const wz = d.z - a.z;
+const dot = (uy * wz - uz * wy) * nx + (uz * wx - ux * wz) * ny + (ux * wy - uy * wx) * nz;
+if (Math.abs(dot) < 1e-9) continue;
+const front = dot > 0 ? [a, d, b] : [a, b, d];
+for (const p of front) emit(p, 1);
+if (face.both && into === solid) for (const p of [front[0], front[2], front[1]]) emit(p, -1);
+}
+}
+return {
+solid: { pos: new Float32Array(solid.pos), nor: new Float32Array(solid.nor), col: new Float32Array(solid.col) },
+clear: { pos: new Float32Array(clear.pos), nor: new Float32Array(clear.nor), col: new Float32Array(clear.col) },
+lines: { pos: new Float32Array(lines.pos), col: new Float32Array(lines.col) },
+triangles: (solid.pos.length + clear.pos.length) / 9,
+};
+}
+function volumeMeshLamps(scene, light, live = null) {
+const out = [];
+if (!scene || !light || !light.lamps) return out;
+for (const [markId, strength] of light.lamps) {
+if (!(strength > 0)) continue;
+const item = live ? live.get(markId) : null;
+const rgb = (light.colors && light.colors.get(markId)) || VOLUME_LAMP_LIGHT_RGB;
+for (const source of volumeLampSourcesOf(scene, markId, item ? item.roomId : undefined)) {
+if (!source || !source.at || !(source.power > 0)) continue;
+out.push({
+x: source.at.x,
+y: source.at.y,
+z: source.at.z,
+power: source.power * strength,
+down: Boolean(source.dir && source.dir.z < 0),
+room: source.room || null,
+rgb,
+});
+}
+}
+return out;
+}
+function volumeMeshLampJoin(lamps) {
+const out = [];
+for (const lamp of lamps) {
+const near = out.find(
+(item) =>
+item.room === lamp.room &&
+item.down === lamp.down &&
+Math.hypot(item.x - lamp.x, item.y - lamp.y) < VOLUME_MESH_LAMP_JOIN_MM,
+);
+if (!near) {
+out.push({ ...lamp, rgb: [...lamp.rgb] });
+continue;
+}
+const sum = near.power + lamp.power;
+near.x = (near.x * near.power + lamp.x * lamp.power) / sum;
+near.y = (near.y * near.power + lamp.y * lamp.power) / sum;
+near.z = (near.z * near.power + lamp.z * lamp.power) / sum;
+near.rgb = [0, 1, 2].map((at) => (near.rgb[at] * near.power + lamp.rgb[at] * lamp.power) / sum);
+near.power = sum;
+}
+return out;
+}
+function volumeMeshLampPick(lamps, eye, limits = { spots: 8, points: 3 }) {
+const joined = volumeMeshLampJoin(lamps);
+const near = (down) =>
+joined
+.filter((item) => item.down === down)
+.map((item) => ({ item, d: (item.x - eye.x) ** 2 + (item.y - eye.y) ** 2 }))
+.sort((one, two) => one.d - two.d)
+.map((entry) => entry.item);
+const spots = near(true).slice(0, limits.spots);
+const points = near(false).slice(0, limits.points);
+let fx = 0;
+let fy = 0;
+let power = 0;
+for (const item of [...spots, ...points]) {
+fx += item.x * item.power;
+fy += item.y * item.power;
+power += item.power;
+}
+return { spots, points, fill: power > 0 ? { x: fx / power, y: fy / power, power } : null, total: joined.length };
 }
 
 // src/volume/signs.js
@@ -67914,6 +68216,7 @@ const VOLUME_GHOST_SETTING = "volumeThroughWalls";
 const VOLUME_SIMULATION_SETTING = "volumeSimulation";
 const VOLUME_HIDE_CARD_SETTING = "volumeHideCard";
 const VOLUME_PHYSICAL_SETTING = "volumePhysicalLight";
+const VOLUME_GL_SETTING = "volumeGl";
 const VOLUME_LOOK_SPEED_SETTING = "volumeTouchLookSpeed";
 const VOLUME_LOOK_INVERT_SETTING = "volumeTouchLookInvert";
 const VOLUME_OBJECTS_CLEAR_SETTING = "volumeObjectsClear";
@@ -67950,6 +68253,7 @@ ghost: false,
 simulation: true,
 hideCard: false,
 physical: true,
+gl: true,
 lookSpeed: 1,
 lookInvert: false,
 objectsClear: true,
@@ -67983,6 +68287,7 @@ for (const [key, name] of [
 [VOLUME_ROOF_SETTING, "roofOff"],
 [VOLUME_SIMULATION_SETTING, "simulation"],
 [VOLUME_PHYSICAL_SETTING, "physical"],
+[VOLUME_GL_SETTING, "gl"],
 [VOLUME_OBJECTS_CLEAR_SETTING, "objectsClear"],
 [VOLUME_LINK_ARROWS_SETTING, "linkArrows"],
 ]) {
@@ -68057,6 +68362,7 @@ ghost: params.ghost,
 simulation: params.simulation,
 hideCard: params.hideCard,
 physical: params.physical,
+gl: params.gl,
 lookSpeed: params.lookSpeed,
 lookInvert: params.lookInvert,
 objectsClear: params.objectsClear,
@@ -68092,6 +68398,7 @@ ghost: VOLUME_GHOST_SETTING,
 simulation: VOLUME_SIMULATION_SETTING,
 hideCard: VOLUME_HIDE_CARD_SETTING,
 physical: VOLUME_PHYSICAL_SETTING,
+gl: VOLUME_GL_SETTING,
 lookInvert: VOLUME_LOOK_INVERT_SETTING,
 objectsClear: VOLUME_OBJECTS_CLEAR_SETTING,
 linkArrows: VOLUME_LINK_ARROWS_SETTING,
@@ -68279,6 +68586,7 @@ on: { click: () => volumeParamsKind(kind) },
 ...weatherRows(),
 ]),
 group("frame", "", [
+checkRow(strings.volume.glRender, chosen.gl, strings.volume.glRenderHint, (on) => volumeParamsFlag("gl", on)),
 checkRow(strings.volume.objectsClear, chosen.objectsClear, strings.volume.objectsClearHint, (on) =>
 volumeParamsFlag("objectsClear", on),
 ),
@@ -71892,6 +72200,295 @@ sync();
 };
 }
 
+// src/volumeGl.js
+const VOLUME_GL_MODULE = "./vendor/three/three.module.min.js";
+const VOLUME_GL_SPOTS = 8;
+const VOLUME_GL_POINTS = 3;
+const VOLUME_GL_SHADOWED = 2;
+const VOLUME_GL_LAMP_GAIN = 3.6;
+let volumeGlPromise = null;
+function volumeGlLoad() {
+if (!volumeGlPromise) {
+const path = VOLUME_GL_MODULE;
+volumeGlPromise = import(path).then(
+(module) => (module && module.WebGLRenderer ? module : null),
+() => null,
+);
+}
+return volumeGlPromise;
+}
+const volumeGlMix = (a, b, share) => a.map((value, at) => value + (b[at] - value) * share);
+const VOLUME_GL_SKY = { day: [223, 233, 245], evening: [242, 201, 168], night: [143, 160, 216] };
+const VOLUME_GL_LAND = { day: [139, 133, 119], evening: [107, 90, 80], night: [42, 47, 69] };
+const VOLUME_GL_SUN = { high: [255, 244, 214], low: [255, 154, 90] };
+function volumeGlDayRgb(table, day) {
+return day > 0.5 ? volumeGlMix(table.evening, table.day, (day - 0.5) * 2) : volumeGlMix(table.night, table.evening, day * 2);
+}
+function volumeGlMake(THREE) {
+const S = VOLUME_MESH_SCALE;
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.setClearColor(0x000000, 0);
+renderer.setPixelRatio(1);
+const canvas = renderer.domElement;
+let lost = false;
+canvas.addEventListener("webglcontextlost", (event) => {
+event.preventDefault();
+lost = true;
+});
+const world = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(60, 1, 0.08, 2500);
+const mats = {
+solid: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 }),
+clear: new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide, transparent: true, depthWrite: false }),
+line: new THREE.LineBasicMaterial({ vertexColors: true }),
+glow: new THREE.MeshBasicMaterial({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, toneMapped: false }),
+over: new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3, toneMapped: false }),
+overClear: new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, transparent: true, depthWrite: false, toneMapped: false }),
+overLine: new THREE.LineBasicMaterial({ vertexColors: true, toneMapped: false }),
+};
+const empty = () => new THREE.BufferGeometry();
+const geometry = (data, size) => {
+const out = new THREE.BufferGeometry();
+out.setAttribute("position", new THREE.BufferAttribute(data.pos, 3));
+if (data.nor) out.setAttribute("normal", new THREE.BufferAttribute(data.nor, 3));
+out.setAttribute("color", new THREE.BufferAttribute(data.col, size));
+return out;
+};
+const swap = (node, next) => {
+node.geometry.dispose();
+node.geometry = next;
+node.visible = next.getAttribute("position") !== undefined && next.getAttribute("position").count > 0;
+};
+const solid = new THREE.Mesh(empty(), mats.solid);
+solid.castShadow = true;
+solid.receiveShadow = true;
+const glass = new THREE.Mesh(empty(), mats.clear);
+glass.renderOrder = 2;
+const lines = new THREE.LineSegments(empty(), mats.line);
+const led = new THREE.Mesh(empty(), mats.glow);
+led.renderOrder = 1;
+const glow = new THREE.Mesh(empty(), mats.glow);
+glow.renderOrder = 1;
+const overSolid = new THREE.Mesh(empty(), mats.over);
+overSolid.renderOrder = 3;
+const overClear = new THREE.Mesh(empty(), mats.overClear);
+overClear.renderOrder = 4;
+const overLines = new THREE.LineSegments(empty(), mats.overLine);
+overLines.renderOrder = 5;
+world.add(solid, glass, lines, led, glow, overSolid, overClear, overLines);
+const hemi = new THREE.HemisphereLight(0xdfe9f5, 0x8b8577, 1);
+const sun = new THREE.DirectionalLight(0xfff4d6, 0);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.bias = -0.0004;
+sun.shadow.normalBias = 0.03;
+world.add(hemi, sun, sun.target);
+const spots = [];
+for (let at = 0; at < VOLUME_GL_SPOTS; at += 1) {
+const lamp = new THREE.SpotLight(0xffe6c4, 0, 0, 1.25, 0.9, 2);
+lamp.castShadow = at < VOLUME_GL_SHADOWED;
+lamp.shadow.mapSize.set(1024, 1024);
+lamp.shadow.bias = -0.0015;
+lamp.shadow.normalBias = 0.02;
+lamp.shadow.camera.near = 0.05;
+lamp.shadow.camera.far = 12;
+world.add(lamp, lamp.target);
+spots.push(lamp);
+}
+const points = [];
+for (let at = 0; at < VOLUME_GL_POINTS; at += 1) {
+const lamp = new THREE.PointLight(0xffe6c4, 0, 0, 2);
+world.add(lamp);
+points.push(lamp);
+}
+const fill = new THREE.PointLight(0xffe6c4, 0, 0, 2);
+world.add(fill);
+let sceneWas = null;
+let litFaces = [];
+let glowKey = "";
+let overWas = null;
+let triangles = 0;
+let sizeKey = "";
+const linearRgb = (color, rgb) => color.setRGB(volumeMeshLinear(rgb[0] / 255), volumeMeshLinear(rgb[1] / 255), volumeMeshLinear(rgb[2] / 255));
+function sceneMesh(scene) {
+const isScreen = (face) => face.art === "screen";
+const isLed = (face) => Boolean(face.led) && !face.line && !isScreen(face);
+const mesh = volumeMeshBuild(scene.faces, { keep: (face) => !isLed(face) && !isScreen(face) });
+swap(solid, geometry(mesh.solid, 3));
+swap(glass, geometry(mesh.clear, 4));
+swap(lines, geometry(mesh.lines, 3));
+swap(led, geometry(volumeMeshBuild(scene.faces, { keep: isLed, alpha: () => 1 }).solid, 3));
+litFaces = scene.faces.filter((face) => !face.line && (face.lit || isScreen(face)) && face.markId);
+triangles = mesh.triangles;
+glowKey = "";
+const b = scene.boundsMm;
+if (b) {
+const reach = Math.max(8, (Math.hypot(b.maxX - b.minX, b.maxY - b.minY) * S) / 2 + 4);
+Object.assign(sun.shadow.camera, { left: -reach, right: reach, top: reach, bottom: -reach, near: 1, far: 140 });
+sun.shadow.camera.updateProjectionMatrix();
+}
+}
+function glowMesh(glowMap) {
+let key = "";
+if (glowMap && glowMap.size > 0 && litFaces.length > 0) {
+for (const [markId, item] of glowMap) {
+key += markId + ":" + Math.round((item.level || 0) * (item.fade === undefined ? 1 : item.fade) * 50) + ":" + (item.rgb || []).join(".") + (item.lamps ? JSON.stringify(item.lamps) : "") + ";";
+}
+}
+if (key === glowKey) return;
+glowKey = key;
+if (!key) {
+swap(glow, empty());
+return;
+}
+const shine = (face) => {
+const item = glowMap.get(face.markId);
+if (!item) return 0;
+if (item.lamps && Number.isInteger(face.bulb) && !item.lamps[face.bulb]) return 0;
+const fade = item.fade === undefined ? 1 : item.fade;
+return Math.max(0, Math.min(1, (item.level === undefined ? 1 : item.level) * fade));
+};
+const mesh = volumeMeshBuild(litFaces, {
+keep: (face) => shine(face) > 0.01,
+alpha: () => 1,
+paint: (face) => {
+if (face.art === "screen") return face.rgb;
+const item = glowMap.get(face.markId);
+const share = 0.35 + 0.65 * shine(face);
+const rgb = item.rgb || [255, 240, 196];
+return [0, 1, 2].map((at) => Math.min(255, (face.rgb[at] * 0.25 + rgb[at] * 0.78) * share + face.rgb[at] * (1 - share)));
+},
+});
+swap(glow, geometry(mesh.solid, 3));
+}
+function overMesh(extra) {
+const list = extra && extra.length > 0 ? extra : null;
+const same = list && overWas && list.length === overWas.length && list.every((face, at) => face === overWas[at]);
+if (same || (!list && !overWas)) return;
+overWas = list ? [...list] : null;
+if (!list) {
+swap(overSolid, empty());
+swap(overClear, empty());
+swap(overLines, empty());
+return;
+}
+const mesh = volumeMeshBuild(list);
+swap(overSolid, geometry(mesh.solid, 3));
+swap(overClear, geometry(mesh.clear, 4));
+swap(overLines, geometry(mesh.lines, 3));
+}
+function look(mood, scene) {
+const tint = mood && mood.tint;
+const night = Math.max(0, Math.min(1, (Number(tint && tint.share) || 0) / VOLUME_NIGHT_SHARE));
+const day = 1 - night;
+hemi.intensity = 0.45 + (2.1 - 0.45) * day * day;
+linearRgb(hemi.color, volumeGlDayRgb(VOLUME_GL_SKY, day));
+linearRgb(hemi.groundColor, volumeGlDayRgb(VOLUME_GL_LAND, day));
+const shadow = mood && mood.shadow;
+const fade = shadow ? Math.max(0, Math.min(1, Number(shadow.fade) || 0)) : 0;
+const rise = shadow ? Number(shadow.rise) || 0 : 0;
+if (fade > 0 && rise > 0) {
+const high = Math.max(0, Math.min(1, (rise - 4) / 16));
+sun.intensity = (1.6 + (3.6 - 1.6) * high) * fade;
+linearRgb(sun.color, volumeGlMix(VOLUME_GL_SUN.low, VOLUME_GL_SUN.high, high));
+const b = scene.boundsMm || { minX: 0, maxX: 0, minY: 0, maxY: 0 };
+const cx = ((b.minX + b.maxX) / 2) * S;
+const cz = ((b.minY + b.maxY) / 2) * S;
+const az = ((Number(shadow.az) || 0) * Math.PI) / 180;
+const up = (Math.max(rise, 3) * Math.PI) / 180;
+const far = 60;
+sun.target.position.set(cx, 0, cz);
+sun.position.set(cx + Math.cos(az) * Math.cos(up) * far, Math.sin(up) * far, cz + Math.sin(az) * Math.cos(up) * far);
+} else {
+sun.intensity = 0;
+}
+}
+function lampsPlace(list, eye) {
+const pick = volumeMeshLampPick(list || [], eye, { spots: VOLUME_GL_SPOTS, points: VOLUME_GL_POINTS });
+for (let at = 0; at < VOLUME_GL_SPOTS; at += 1) {
+const node = spots[at];
+const item = pick.spots[at];
+if (!item) {
+node.intensity = 0;
+continue;
+}
+node.position.set(item.x * S, (item.z - 60) * S, item.y * S);
+node.target.position.set(item.x * S, -10, item.y * S);
+node.intensity = VOLUME_GL_LAMP_GAIN * item.power;
+linearRgb(node.color, item.rgb);
+}
+for (let at = 0; at < VOLUME_GL_POINTS; at += 1) {
+const node = points[at];
+const item = pick.points[at];
+if (!item) {
+node.intensity = 0;
+continue;
+}
+node.position.set(item.x * S, item.z * S, item.y * S);
+node.intensity = VOLUME_GL_LAMP_GAIN * 0.35 * item.power;
+linearRgb(node.color, item.rgb);
+}
+if (pick.fill) {
+fill.position.set(pick.fill.x * S, 1.3, pick.fill.y * S);
+fill.intensity = VOLUME_GL_LAMP_GAIN * 0.07 * pick.fill.power;
+} else fill.intensity = 0;
+return pick;
+}
+function draw(frame) {
+if (lost) return null;
+const scene = frame.scene;
+if (!scene || scene.empty) return null;
+const width = Math.max(1, Math.round(frame.box.width * frame.ratio));
+const height = Math.max(1, Math.round(frame.box.height * frame.ratio));
+const key = width + "x" + height;
+if (key !== sizeKey) {
+sizeKey = key;
+renderer.setSize(width, height, false);
+camera.aspect = width / height;
+const focal = Math.max(width, height) / 2 / Math.tan(((VOLUME_FOV_DEG / 2) * Math.PI) / 180);
+camera.fov = (2 * Math.atan(height / 2 / focal) * 180) / Math.PI;
+camera.updateProjectionMatrix();
+}
+if (scene !== sceneWas) {
+sceneWas = scene;
+sceneMesh(scene);
+}
+glowMesh(frame.glow || null);
+overMesh(frame.extra || null);
+look(frame.mood, scene);
+const eye = frame.eye;
+lampsPlace(frame.lamps, eye.at);
+const near = frame.inside ? 0.08 : 0.5;
+if (camera.near !== near) {
+camera.near = near;
+camera.updateProjectionMatrix();
+}
+const yaw = eye.yaw || 0;
+const pitch = eye.pitch || 0;
+const cp = Math.cos(pitch);
+const px = eye.at.x * S;
+const py = eye.at.z * S;
+const pz = eye.at.y * S;
+camera.position.set(px, py, pz);
+camera.up.set(-Math.sin(pitch) * Math.cos(yaw), cp, -Math.sin(pitch) * Math.sin(yaw));
+camera.lookAt(px + Math.cos(yaw) * cp, py + Math.sin(pitch), pz + Math.sin(yaw) * cp);
+renderer.render(world, camera);
+return canvas;
+}
+function drop() {
+for (const node of [solid, glass, lines, led, glow, overSolid, overClear, overLines]) node.geometry.dispose();
+for (const name of Object.keys(mats)) mats[name].dispose();
+renderer.dispose();
+sceneWas = null;
+}
+return { canvas, draw, drop, lost: () => lost, triangles: () => triangles };
+}
+
 // src/panels/volume.js
 const VOLUME_HINT_SETTING = "volumeHintCollapsed";
 const VOLUME_SUMMARY_SETTING = "volumeSummaryCollapsed";
@@ -72343,6 +72940,12 @@ let stopHome = null;
 const homeOn = () => volumeParamsRead().simulation === true && simRunning();
 const sceneObjectIds = (state, id) =>
 schemeObjectsOnScheme(state.project, id).map((object) => object.id);
+let gl = null;
+let glScene = false;
+let glAsked = false;
+const glOn = () => Boolean(gl) && !gl.lost() && volumeParamsRead().gl !== false;
+let shownStale = false;
+let shownExtra = [];
 const sceneOptions = (state, id) => ({
 marks: sceneMarks(state, id),
 openDoorIds: openDoors,
@@ -72351,7 +72954,8 @@ openCurtainIds: openCurtains,
 roofOff: volumeParamsRead().roofOff === true,
 hiddenObjectIds: state.objectsShown === false ? sceneObjectIds(state, id) : state.hiddenObjectIds,
 markImages: state.marksHighlight === true,
-objectsClear: volumeParamsRead().objectsClear !== false,
+objectsClear: !glOn() && volumeParamsRead().objectsClear !== false,
+...(glOn() ? { roundSides: VOLUME_ROUND_SIDES } : {}),
 });
 const floorPlan = (state) => volumeFloorPlan(state.project, schemeId);
 let fallShown = false;
@@ -72558,6 +73162,7 @@ hints: () => appAllows("editHints", getState()),
 const paramsFields = createVolumeParamsFields(paramsDoors);
 const paramsButton = createVolumeParams(paramsDoors);
 const stopParams = volumeParamsWatch(() => paramsChanged());
+if (volumeParamsRead().gl !== false) glStart();
 const stopWeather = appWeatherWatch(() => {
 if (closed) return;
 refreshHour();
@@ -72831,6 +73436,7 @@ return { top, bottom: box.height - VOLUME_STICK_EDGE_PX - VOLUME_STICK_RADIUS * 
 }
 function setScene(state) {
 const was = scene;
+glScene = glOn();
 scene = sceneOf(state) || scene;
 if (scene !== was) fallWarmKeep(was);
 fallSnap = null;
@@ -72943,8 +73549,9 @@ const state = getState();
 const roofOff = volumeParamsRead().roofOff === true;
 const roofed = (scene.faces || []).some((face) => volumeIsCeiling(face) && face.both === true);
 const ceilings = (scene.faces || []).some((face) => volumeIsCeiling(face) && face.n.z < 0);
-const clearChanged = !scene.empty && scene.objectsClear !== undefined && scene.objectsClear !== (volumeParamsRead().objectsClear !== false);
-if (stacking(state) !== Boolean(scene.stackMm) || (ceilings && roofOff === roofed) || clearChanged) {
+const clearChanged = !scene.empty && scene.objectsClear !== undefined && scene.objectsClear !== (!glOn() && volumeParamsRead().objectsClear !== false);
+if (chosen.gl !== false && !gl) glStart();
+if (stacking(state) !== Boolean(scene.stackMm) || (ceilings && roofOff === roofed) || clearChanged || glOn() !== glScene) {
 setScene(state);
 rebuildOverlay();
 stanceRecheck();
@@ -72973,7 +73580,7 @@ function paint() {
 if (!ctx || closed) return;
 const paintFrom = fpsMeter ? performance.now() : 0;
 paintScene();
-if (fpsMeter) fpsMeter.frame(paintFrom, performance.now(), shown.length);
+if (fpsMeter) fpsMeter.frame(paintFrom, performance.now(), shownStale && gl ? gl.triangles() : shown.length);
 }
 function paintRatio() {
 const full = volumeRatio(typeof window !== "undefined" ? window.devicePixelRatio : 1);
@@ -73014,14 +73621,39 @@ const at = hourNow();
 volumeDrawBackdrop(ctx, box, spot, at, scene.landMm, scene.groundMm || 0);
 if (scene.empty) {
 shown = [];
+shownStale = false;
 return;
 }
 const marker = view === "around" ? volumeMarkerFaces({ x: person.x, y: person.y }, person.yaw) : [];
-const lights = homeLights(at);
-shown = volumeFrame(scene, spot, box, [...shadow, ...spots, ...moonSpots, ...overlay, ...marker, ...lights.signs], at.tint, lights.light);
+if (gl && gl.lost()) glStop();
+const byGl = glOn() && glScene;
+const lights = homeLights(at, byGl);
 const roofGone = volumeParamsRead().roofOff === true;
+let picture = null;
+if (byGl) {
+shownExtra = [...overlay, ...marker, ...lights.signs];
+picture = gl.draw({
+scene,
+eye: spot,
+box,
+ratio,
+mood: at,
+lamps: lights.light ? volumeMeshLamps(scene, lights.light, lights.live) : [],
+glow: lights.light ? lights.light.glow : null,
+extra: shownExtra,
+inside: view === "person" && Boolean(volumeRoomAt(scene, person)),
+});
+}
+if (picture) {
+shownStale = true;
+volumeDrawHouse(ctx, box, spot, at, scene, "before", roofGone);
+ctx.drawImage(picture, 0, 0, box.width, box.height);
+} else {
+shownStale = false;
+shown = volumeFrame(scene, spot, box, [...shadow, ...spots, ...moonSpots, ...overlay, ...marker, ...lights.signs], at.tint, lights.light);
 volumeDrawHouse(ctx, box, spot, at, scene, "before", roofGone);
 volumeDraw(ctx, shown);
+}
 volumeDrawHouse(ctx, box, spot, at, scene, "after", roofGone);
 syncRain(at);
 syncAir();
@@ -73040,11 +73672,40 @@ rain.set(kind, strength, Math.min(1, (Number(at && at.tint && at.tint.share) || 
 const on = Boolean(kind) && !scene.empty;
 const here = on && view === "person" ? volumeRoomAt(scene, person) : null;
 const indoors = Boolean(here) && here.hasCeiling !== false;
-rain.mask(indoors ? shown : null);
+rain.mask(indoors ? frameShown() : null);
 rain.show(on);
 }
-function homeLights(at) {
-const physical = volumeParamsRead().physical !== false;
+function frameShown() {
+if (!shownStale) return shown;
+shownStale = false;
+shown = scene && !scene.empty ? volumeFrame(scene, camera(), viewport(), shownExtra, hourNow().tint, null) : [];
+return shown;
+}
+function glStart() {
+if (glAsked || gl || closed) return;
+glAsked = true;
+volumeGlLoad().then((library) => {
+if (!library || closed || gl) return;
+try {
+gl = volumeGlMake(library);
+} catch (error) {
+gl = null;
+return;
+}
+if (glOn()) rebuildScene();
+});
+}
+function glStop() {
+if (!gl) return;
+try {
+gl.drop();
+} catch (error) {
+}
+gl = null;
+if (glScene && !closed) setTimeout(() => !closed && rebuildScene(), 0);
+}
+function homeLights(at, byGl = false) {
+const physical = !byGl && volumeParamsRead().physical !== false;
 const sky = physical ? { tint: at.tint } : {};
 if (!homeTarget) {
 setpoints.clear();
@@ -73054,6 +73715,7 @@ const faded = lightFadeLive(homeTarget, homeFade, now());
 const shown = volumeSetpointShow(homeTarget, setpoints, now());
 return {
 light: volumeLiveLight(scene, faded.live, { physical, ...sky }),
+live: faded.live,
 busy: faded.busy,
 signs: volumeLiveSigns(scene, homeTarget, [], shown.marks),
 until: shown.until,
@@ -73133,7 +73795,7 @@ setState({ selectedMarkIds: next });
 let channelPick = null;
 function channelAt(at) {
 if (!at || scene.empty) return null;
-return volumeChannelAt(shown, at.x, at.y);
+return volumeChannelAt(frameShown(), at.x, at.y);
 }
 function keysOf(markId) {
 const place = markId ? volumeMarkPlace(scene, markId) : null;
@@ -73216,7 +73878,7 @@ return { x: event.clientX - rect.left, y: event.clientY - rect.top };
 }
 function pickAt(event) {
 const at = atEvent(event);
-return volumePickAt(shown, at.x, at.y);
+return volumePickAt(frameShown(), at.x, at.y);
 }
 function fieldMiddle() {
 const box = viewport();
@@ -73324,7 +73986,7 @@ drawMeasure(ctx, from, to, measureVolumeLines(ends.from, ends.to), { color: MEAS
 }
 function doorUnder(at) {
 if (!at || scene.empty) return null;
-return volumeDoorAt(shown, at.x, at.y) || volumeDoorwayAt(shown, at.x, at.y);
+return volumeDoorAt(frameShown(), at.x, at.y) || volumeDoorwayAt(frameShown(), at.x, at.y);
 }
 function syncAim() {
 syncAimNode();
@@ -73332,7 +73994,7 @@ if (measuring() && !touching) measureFollow();
 const at = aimPoint();
 const found = doorUnder(at);
 const sheer =
-at && !scene.empty && (scene.sheers || []).length > 0 ? volumeSightAt(shown, at.x, at.y) : null;
+at && !scene.empty && (scene.sheers || []).length > 0 ? volumeSightAt(frameShown(), at.x, at.y) : null;
 if (found === aimedDoor && sheer === aimedMark) return;
 aimedDoor = found;
 aimedMark = sheer;
@@ -73348,9 +74010,9 @@ redraw();
 function aimChoiceAt(at, door) {
 if (!at || scene.empty) return { kind: "none", id: null };
 return volumeAimChoice({
-markExact: volumeSightAt(shown, at.x, at.y),
+markExact: volumeSightAt(frameShown(), at.x, at.y),
 door,
-markNear: volumePickAt(shown, at.x, at.y),
+markNear: volumePickAt(frameShown(), at.x, at.y),
 });
 }
 function actOnChoice(choice, at, how = "click") {
@@ -73378,7 +74040,7 @@ if (!actOnChoice(choice, at, how)) notify(strings.volume.aimless, "info");
 function openCardAt(at) {
 const choice =
 at && !scene.empty
-? volumeAimChoice({ markExact: volumeSightAt(shown, at.x, at.y), door: null, markNear: volumePickAt(shown, at.x, at.y) })
+? volumeAimChoice({ markExact: volumeSightAt(frameShown(), at.x, at.y), door: null, markNear: volumePickAt(frameShown(), at.x, at.y) })
 : { kind: "none", id: null };
 const selected = selectedIds();
 const markId = choice.kind === "mark" ? choice.id : selected.length === 1 ? selected[0] : null;
@@ -73462,7 +74124,7 @@ const found = channelAt(at);
 if (found && found.markId === markId) return found;
 if (!at || scene.empty) return null;
 if (deviceClickPlan(markAccessory(getState().project, markId)).kind !== "keys") return null;
-return volumeChannelNear(shown, markId, at.x, at.y);
+return volumeChannelNear(frameShown(), markId, at.x, at.y);
 }
 function homeActs(markId, at) {
 const mine = homeKeyAt(markId, at);
@@ -73479,7 +74141,7 @@ function homeGestureStart(event) {
 homeGesture = null;
 if (!homeOn() || scene.empty) return;
 const at = atEvent(event);
-const choice = aimChoiceAt(at, volumeDoorAt(shown, at.x, at.y));
+const choice = aimChoiceAt(at, volumeDoorAt(frameShown(), at.x, at.y));
 if (choice.kind !== "mark") return;
 const mine = homeKeyAt(choice.id, at);
 const action = volumeSimAction(markAccessory(getState().project, choice.id), mine ? mine.channel : null);
@@ -74653,6 +75315,10 @@ homeCard = null;
 if (stopHome) stopHome();
 stopHome = null;
 closed = true;
+if (gl) {
+gl.drop();
+gl = null;
+}
 if (fpsTimer !== null) clearInterval(fpsTimer);
 if (settleTimer !== null) clearTimeout(settleTimer);
 if (fallWarmTimer !== null) clearTimeout(fallWarmTimer);

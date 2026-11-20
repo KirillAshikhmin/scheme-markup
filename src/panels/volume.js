@@ -121,7 +121,9 @@ import {
   volumeFloorAt,
   volumeFloorPlan,
   volumeFloors,
+  VOLUME_ROUND_SIDES,
   volumeFrame,
+  volumeMeshLamps,
   volumeIsCeiling,
   volumeLinkLines,
   volumeLiveLight,
@@ -166,6 +168,7 @@ import {
   volumeStep,
 } from "../volume.js";
 import { createFpsMeter, fpsMeterOn } from "../fpsMeter.js";
+import { volumeGlLoad, volumeGlMake } from "../volumeGl.js";
 import { markCardModel, markCardParts } from "./markCard.js";
 import { deviceCardView, deviceClickPlan, deviceLiveKinds, devicePresserOf } from "./deviceCard.js";
 import { openSimCommands, simBarControls } from "./simBar.js";
@@ -1520,6 +1523,24 @@ function createVolume({ api, hosts }) {
   // Доводы сборки — **одни на все этажи стопки** (таск 202): фильтр меток,
   // открытые двери и спрятанные вещи обязаны значить на чужом этаже то же, что
   // на своём, иначе у вопроса «что сейчас показано» стало бы два ответа.
+  // ——— отрисовка видеокартой (правка 2026-11-20, ADR 042) ———
+  //
+  // `gl` — рисовальщик (`volumeGlMake`) или `null`: библиотека ещё грузится,
+  // не загрузилась, у браузера нет WebGL или контекст потерян. Тогда кадр
+  // рисует прежний рисовальщик — он запасной путь и он же выбор человека
+  // (отметка «Свет и тени» снята). Сцена у видеокарты своя сборка: круглые
+  // тела и непрозрачные вещи (`sceneOptions`), поэтому смена отрисовки — это
+  // пересборка сцены; для какой отрисовки собрана показанная, помнит `glScene`.
+  //
+  // Объявлено **здесь**, до первой сборки сцены: её доводы спрашивают `glOn`.
+  let gl = null;
+  let glScene = false;
+  let glAsked = false;
+  const glOn = () => Boolean(gl) && !gl.lost() && volumeParamsRead().gl !== false;
+  // Кадр для щелчка и прицела: видеокарта многоугольников не отдаёт, и они
+  // считаются по требованию — тем же `volumeFrame`, без света (`frameShown`).
+  let shownStale = false;
+  let shownExtra = [];
   const sceneOptions = (state, id) => ({
     marks: sceneMarks(state, id),
     openDoorIds: openDoors,
@@ -1538,7 +1559,9 @@ function createVolume({ api, hosts }) {
     // модели метки. Отметка раздела «Интерфейс», умолчание — снята.
     markImages: state.marksHighlight === true,
     // «Прозрачные объекты» (правка после сборки сценариев): умолчание — да.
-    objectsClear: volumeParamsRead().objectsClear !== false,
+    // У видеокарты вещи непрозрачны: тени и свет на них — то, ради чего она.
+    objectsClear: !glOn() && volumeParamsRead().objectsClear !== false,
+    ...(glOn() ? { roundSides: VOLUME_ROUND_SIDES } : {}),
   });
   /**
    * Какие этажи показывает окно (таск 202): стопка или одна открытая схема.
@@ -2103,6 +2126,7 @@ function createVolume({ api, hosts }) {
   // этой же подпиской приезжают настройки из хранилища (читаются они
   // асинхронно, как у плашек и слоёв, и первый кадр рисуется умолчаниями).
   const stopParams = volumeParamsWatch(() => paramsChanged());
+  if (volumeParamsRead().gl !== false) glStart();
   // Погода (правка после сборки сценариев): выбрали в опциях — снимок часа
   // пересчитывается сразу, а не через секунду.
   const stopWeather = appWeatherWatch(() => {
@@ -2618,6 +2642,7 @@ function createVolume({ api, hosts }) {
   /** Сцена, тень и свет меняются вместе: все трое держатся за геометрию. */
   function setScene(state) {
     const was = scene;
+    glScene = glOn();
     scene = sceneOf(state) || scene;
     // Память пачки переезжает из сцены в запас и обратно **здесь** — там, где
     // сцена меняется (таск 285): это единственное место, которое знает и
@@ -2807,8 +2832,10 @@ function createVolume({ api, hosts }) {
     const ceilings = (scene.faces || []).some((face) => volumeIsCeiling(face) && face.n.z < 0);
     // «Прозрачные объекты» (правка после сборки сценариев) — тоже сама сцена:
     // прозрачность у граней, и пересобрать их можно только заново.
-    const clearChanged = !scene.empty && scene.objectsClear !== undefined && scene.objectsClear !== (volumeParamsRead().objectsClear !== false);
-    if (stacking(state) !== Boolean(scene.stackMm) || (ceilings && roofOff === roofed) || clearChanged) {
+    const clearChanged = !scene.empty && scene.objectsClear !== undefined && scene.objectsClear !== (!glOn() && volumeParamsRead().objectsClear !== false);
+    // Отметку «Свет и тени» взвели, а библиотеки ещё нет — грузим (`glStart`).
+    if (chosen.gl !== false && !gl) glStart();
+    if (stacking(state) !== Boolean(scene.stackMm) || (ceilings && roofOff === roofed) || clearChanged || glOn() !== glScene) {
       setScene(state);
       rebuildOverlay();
       stanceRecheck();
@@ -2852,7 +2879,7 @@ function createVolume({ api, hosts }) {
     if (!ctx || closed) return;
     const paintFrom = fpsMeter ? performance.now() : 0;
     paintScene();
-    if (fpsMeter) fpsMeter.frame(paintFrom, performance.now(), shown.length);
+    if (fpsMeter) fpsMeter.frame(paintFrom, performance.now(), shownStale && gl ? gl.triangles() : shown.length);
   }
 
   // Плотность этого кадра (`volumeMotionRatio`): на ходу пальцем — пониже, и
@@ -2906,6 +2933,7 @@ function createVolume({ api, hosts }) {
     volumeDrawBackdrop(ctx, box, spot, at, scene.landMm, scene.groundMm || 0);
     if (scene.empty) {
       shown = [];
+      shownStale = false;
       return;
     }
     // Кружок «вы здесь» рисуется только в обзоре: от первого лица человек и
@@ -2918,13 +2946,41 @@ function createVolume({ api, hosts }) {
     // у них `VOLUME_LAYER_SUN` — выше полов, ниже тел.
     // Свет дома (таск 09 сценариев): свечение тел и свет комнаты — доводом
     // кадра, без пересборки сцены. Дом не идёт — довода нет, и кадр тот же.
-    const lights = homeLights(at);
-    shown = volumeFrame(scene, spot, box, [...shadow, ...spots, ...moonSpots, ...overlay, ...marker, ...lights.signs], at.tint, lights.light);
-    // Дом вокруг квартиры (правка 2026-11-20): часть до сцены и часть после —
-    // правило порядка у `volumeHouseParts`. «Снять крышу» снимает и его верх.
+    // Контекст видеокарты потерян — рисовальщик снимается, сцена пересобирается
+    // под прежнюю отрисовку следующим кадром, а этот рисуется ею же.
+    if (gl && gl.lost()) glStop();
+    const byGl = glOn() && glScene;
+    const lights = homeLights(at, byGl);
     const roofGone = volumeParamsRead().roofOff === true;
-    volumeDrawHouse(ctx, box, spot, at, scene, "before", roofGone);
-    volumeDraw(ctx, shown);
+    let picture = null;
+    if (byGl) {
+      shownExtra = [...overlay, ...marker, ...lights.signs];
+      picture = gl.draw({
+        scene,
+        eye: spot,
+        box,
+        ratio,
+        mood: at,
+        lamps: lights.light ? volumeMeshLamps(scene, lights.light, lights.live) : [],
+        glow: lights.light ? lights.light.glow : null,
+        extra: shownExtra,
+        inside: view === "person" && Boolean(volumeRoomAt(scene, person)),
+      });
+    }
+    if (picture) {
+      // Сцена видеокарты ложится в тот же кадр между фоном и накладками:
+      // порядок слоёв и снимок вида остаются одним холстом.
+      shownStale = true;
+      volumeDrawHouse(ctx, box, spot, at, scene, "before", roofGone);
+      ctx.drawImage(picture, 0, 0, box.width, box.height);
+    } else {
+      shownStale = false;
+      shown = volumeFrame(scene, spot, box, [...shadow, ...spots, ...moonSpots, ...overlay, ...marker, ...lights.signs], at.tint, lights.light);
+      // Дом вокруг квартиры (правка 2026-11-20): часть до сцены и часть после —
+      // правило порядка у `volumeHouseParts`. «Снять крышу» снимает и его верх.
+      volumeDrawHouse(ctx, box, spot, at, scene, "before", roofGone);
+      volumeDraw(ctx, shown);
+    }
     volumeDrawHouse(ctx, box, spot, at, scene, "after", roofGone);
     syncRain(at);
     syncAir();
@@ -2970,12 +3026,53 @@ function createVolume({ api, hosts }) {
     // На балконе без потолка — под небом: снег идёт по всему полю.
     const here = on && view === "person" ? volumeRoomAt(scene, person) : null;
     const indoors = Boolean(here) && here.hasCeiling !== false;
-    rain.mask(indoors ? shown : null);
+    rain.mask(indoors ? frameShown() : null);
     rain.show(on);
   }
 
-  function homeLights(at) {
-    const physical = volumeParamsRead().physical !== false;
+  /**
+   * Многоугольники кадра для щелчка, прицела и маски дождя. У прежней
+   * отрисовки это сам кадр; у видеокарты их нет, и они считаются здесь — по
+   * требованию и раз на кадр, без света (свет на попадание не влияет).
+   */
+  function frameShown() {
+    if (!shownStale) return shown;
+    shownStale = false;
+    shown = scene && !scene.empty ? volumeFrame(scene, camera(), viewport(), shownExtra, hourNow().tint, null) : [];
+    return shown;
+  }
+
+  /** Поднять рисовальщик видеокарты: раз на поверхность, не вышло — молча прежняя отрисовка. */
+  function glStart() {
+    if (glAsked || gl || closed) return;
+    glAsked = true;
+    volumeGlLoad().then((library) => {
+      if (!library || closed || gl) return;
+      try {
+        gl = volumeGlMake(library);
+      } catch (error) {
+        gl = null;
+        return;
+      }
+      if (glOn()) rebuildScene();
+    });
+  }
+
+  function glStop() {
+    if (!gl) return;
+    try {
+      gl.drop();
+    } catch (error) {
+      // Потерянный контекст освобождать нечем.
+    }
+    gl = null;
+    if (glScene && !closed) setTimeout(() => !closed && rebuildScene(), 0);
+  }
+
+  function homeLights(at, byGl = false) {
+    // Видеокарта светит сама: пятна и тени многоугольниками ей не нужны, а
+    // «что горит и с какой силой» она берёт из того же ответа (`lamps`, `glow`).
+    const physical = !byGl && volumeParamsRead().physical !== false;
     const sky = physical ? { tint: at.tint } : {};
     if (!homeTarget) {
       setpoints.clear();
@@ -2988,6 +3085,7 @@ function createVolume({ api, hosts }) {
     const shown = volumeSetpointShow(homeTarget, setpoints, now());
     return {
       light: volumeLiveLight(scene, faded.live, { physical, ...sky }),
+      live: faded.live,
       busy: faded.busy,
       signs: volumeLiveSigns(scene, homeTarget, [], shown.marks),
       until: shown.until,
@@ -3119,7 +3217,7 @@ function createVolume({ api, hosts }) {
   /** Канал под точкой кадра — или `null`: клавиша должна быть видна. */
   function channelAt(at) {
     if (!at || scene.empty) return null;
-    return volumeChannelAt(shown, at.x, at.y);
+    return volumeChannelAt(frameShown(), at.x, at.y);
   }
 
   /**
@@ -3254,7 +3352,7 @@ function createVolume({ api, hosts }) {
 
   function pickAt(event) {
     const at = atEvent(event);
-    return volumePickAt(shown, at.x, at.y);
+    return volumePickAt(frameShown(), at.x, at.y);
   }
 
   // ——— двери (G207, G210) ———
@@ -3495,7 +3593,7 @@ function createVolume({ api, hosts }) {
   /** Дверь в точке кадра: её полотно, а мимо полотна — её проём. */
   function doorUnder(at) {
     if (!at || scene.empty) return null;
-    return volumeDoorAt(shown, at.x, at.y) || volumeDoorwayAt(shown, at.x, at.y);
+    return volumeDoorAt(frameShown(), at.x, at.y) || volumeDoorwayAt(frameShown(), at.x, at.y);
   }
 
   /** Дверь под рукой — по последнему нарисованному кадру. */
@@ -3510,7 +3608,7 @@ function createVolume({ api, hosts }) {
     // схеме без них это был бы лишний проход по кадру на каждое движение
     // взгляда, а сказать о ней всё равно нечего.
     const sheer =
-      at && !scene.empty && (scene.sheers || []).length > 0 ? volumeSightAt(shown, at.x, at.y) : null;
+      at && !scene.empty && (scene.sheers || []).length > 0 ? volumeSightAt(frameShown(), at.x, at.y) : null;
     if (found === aimedDoor && sheer === aimedMark) return;
     aimedDoor = found;
     aimedMark = sheer;
@@ -3542,9 +3640,9 @@ function createVolume({ api, hosts }) {
   function aimChoiceAt(at, door) {
     if (!at || scene.empty) return { kind: "none", id: null };
     return volumeAimChoice({
-      markExact: volumeSightAt(shown, at.x, at.y),
+      markExact: volumeSightAt(frameShown(), at.x, at.y),
       door,
-      markNear: volumePickAt(shown, at.x, at.y),
+      markNear: volumePickAt(frameShown(), at.x, at.y),
     });
   }
 
@@ -3613,7 +3711,7 @@ function createVolume({ api, hosts }) {
   function openCardAt(at) {
     const choice =
       at && !scene.empty
-        ? volumeAimChoice({ markExact: volumeSightAt(shown, at.x, at.y), door: null, markNear: volumePickAt(shown, at.x, at.y) })
+        ? volumeAimChoice({ markExact: volumeSightAt(frameShown(), at.x, at.y), door: null, markNear: volumePickAt(frameShown(), at.x, at.y) })
         : { kind: "none", id: null };
     const selected = selectedIds();
     const markId = choice.kind === "mark" ? choice.id : selected.length === 1 ? selected[0] : null;
@@ -3729,7 +3827,7 @@ function createVolume({ api, hosts }) {
     if (found && found.markId === markId) return found;
     if (!at || scene.empty) return null;
     if (deviceClickPlan(markAccessory(getState().project, markId)).kind !== "keys") return null;
-    return volumeChannelNear(shown, markId, at.x, at.y);
+    return volumeChannelNear(frameShown(), markId, at.x, at.y);
   }
 
   /** Есть ли у метки дело для руки в этой точке — то же правило, что у `homeAct`. */
@@ -3756,7 +3854,7 @@ function createVolume({ api, hosts }) {
     homeGesture = null;
     if (!homeOn() || scene.empty) return;
     const at = atEvent(event);
-    const choice = aimChoiceAt(at, volumeDoorAt(shown, at.x, at.y));
+    const choice = aimChoiceAt(at, volumeDoorAt(frameShown(), at.x, at.y));
     if (choice.kind !== "mark") return;
     const mine = homeKeyAt(choice.id, at);
     const action = volumeSimAction(markAccessory(getState().project, choice.id), mine ? mine.channel : null);
@@ -5866,6 +5964,10 @@ function createVolume({ api, hosts }) {
     if (stopHome) stopHome();
     stopHome = null;
     closed = true;
+    if (gl) {
+      gl.drop();
+      gl = null;
+    }
     if (fpsTimer !== null) clearInterval(fpsTimer);
     if (settleTimer !== null) clearTimeout(settleTimer);
     // Подготовка пачки (таск 285) живёт ровно столько, сколько поверхность:

@@ -141,6 +141,8 @@ export function jobOf(command, project, keys) {
     roofOff: keys.has("no-roof"),
     // Шкафы со створками — распахнутыми (правка 2026-11-20): кадр для проверки.
     openCupboards: keys.has("open-cupboards"),
+    // `--gl`: кадр рисует видеокарта (`src/volumeGl.js`), как в окне объёма.
+    gl: keys.has("gl"),
     openDoors: keys.has("open-doors"),
     format: typeof keys.get("sheet") === "string" ? keys.get("sheet") : null,
     orientation: typeof keys.get("orientation") === "string" ? keys.get("orientation") : null,
@@ -179,7 +181,8 @@ export function jobOf(command, project, keys) {
 /** Отдать файл сборки. За пределы `scheme_image/src` не выходим никогда. */
 function sendSource(response, urlPath) {
   const path = resolve(ROOT, "." + urlPath);
-  if (!path.startsWith(join(ROOT, "src")) || !existsSync(path)) {
+  // Кроме исходников — копии библиотек рядом со страницей (`--gl` берёт three.js).
+  if (!(path.startsWith(join(ROOT, "src")) || path.startsWith(join(ROOT, "web", "vendor"))) || !existsSync(path)) {
     response.writeHead(404).end("нет такого файла");
     return;
   }
@@ -258,7 +261,7 @@ export async function renderSheets(command, opened, keys, say = () => {}) {
         response.end(objectBytes);
         return;
       }
-      if (url.pathname.startsWith("/src/")) {
+      if (url.pathname.startsWith("/src/") || url.pathname.startsWith("/web/vendor/")) {
         sendSource(response, url.pathname);
         return;
       }
@@ -309,7 +312,8 @@ export async function renderSheets(command, opened, keys, say = () => {}) {
     "--hide-crash-restore-bubble",
     "--window-size=1600,1000",
   ];
-  if (!keys.has("window")) args.push("--headless=new", "--disable-gpu");
+  // `--gl`: кадру нужна видеокарта, и её не выключаем.
+  if (!keys.has("window")) args.push("--headless=new", ...(keys.has("gl") ? [] : ["--disable-gpu"]));
   // Охрана по адресу: страница сверяет свой адрес с тем, что ей сказано здесь,
   // и ничего не делает, если адрес чужой.
   args.push(home + "/?home=" + encodeURIComponent(home));

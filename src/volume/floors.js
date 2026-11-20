@@ -1283,6 +1283,8 @@ export function volumeFloorKey(project, schemeId, options, cover, upper, known) 
     // «Прозрачные объекты» (правка после сборки сценариев): переключили — этаж
     // собирается заново, как у контура меток.
     objectsClear: options.objectsClear !== false,
+    // Круглые тела (правка 2026-11-20): другая отрисовка — другие грани.
+    roundSides: options.roundSides || 0,
     upper: upper === true,
     capMm: cover && cover.capMm !== undefined ? cover.capMm : null,
     coverX: (cover && cover.dx) || 0,
@@ -1323,6 +1325,7 @@ export function volumeFloorKeySame(was, now) {
     was.roofOff !== now.roofOff ||
     was.markImages !== now.markImages ||
     was.objectsClear !== now.objectsClear ||
+    was.roundSides !== now.roundSides ||
     was.upper !== now.upper ||
     was.capMm !== now.capMm ||
     was.coverX !== now.coverX ||

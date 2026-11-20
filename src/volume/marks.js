@@ -1639,6 +1639,46 @@ export function volumeModelRgb(material, bodyRgb) {
  * размера. Доли переводятся им, и только им: ни одно описание не знает ни
  * миллиметров, ни того, на стене вещь или на полу.
  */
+// ——— круглые тела для отрисовки видеокартой (правка 2026-11-20) ———————————
+//
+// Цилиндр, труба и конус собираются из `MODEL_CYL_SIDES` = 8 граней: у
+// рисовальщика по Canvas 2D каждая грань — заливка и резы в дереве порядка.
+// Видеокарте грани дёшевы, и для неё сцена собирается круглой — 24 грани
+// (слова заказчика: «круглые объекты и рисовались кругами»). Число граней —
+// довод **сборки сцены** (`options.roundSides` у `volumeScene`), а не глобальная
+// настройка: на время сборки его ставит `volumeRoundWith` и за собой снимает.
+// Сборка сцены синхронна, так что наружу это состояние не вытекает.
+//
+// У круглой сборки грани тела помечены его номером (`face.smooth`): по нему
+// сетка сглаживает нормали боков (`volume/mesh.js`). Номера идут по порядку
+// сборки и начинаются заново с каждой сценой — две сборки одного и того же
+// дают одинаковые грани, и готовое дерево порядка узнаёт их (`volumeValueSame`).
+// Обычная сборка пометок не несёт вовсе и остаётся прежней грань в грань.
+export const VOLUME_ROUND_SIDES = 24;
+let volumeSidesNow = MODEL_CYL_SIDES;
+let volumeSmoothNext = 0;
+
+/** Собрать `build()` с круглыми телами в `sides` граней; без числа — как было. */
+export function volumeRoundWith(sides, build) {
+  const want = Number.isInteger(sides) && sides > MODEL_CYL_SIDES ? Math.min(sides, 48) : MODEL_CYL_SIDES;
+  const was = volumeSidesNow;
+  const next = volumeSmoothNext;
+  volumeSidesNow = want;
+  volumeSmoothNext = 0;
+  try {
+    return build();
+  } finally {
+    volumeSidesNow = was;
+    volumeSmoothNext = next;
+  }
+}
+
+function volumeSmoothTag(out, from) {
+  if (volumeSidesNow <= MODEL_CYL_SIDES) return;
+  volumeSmoothNext += 1;
+  for (let index = from; index < out.length; index += 1) out[index].smooth = volumeSmoothNext;
+}
+
 export function volumeModelPrisms(frame, parts) {
   const out = [];
   if (!frame || !(frame.heightMm > 0)) return out;
@@ -1664,8 +1704,8 @@ export function volumeModelPrisms(frame, parts) {
       // бокам, а не рёбра — цилиндр у стены стоит к ней стороной.
       const cx = part.x + part.width / 2;
       const cy = part.y + part.depth / 2;
-      for (let index = 0; index < MODEL_CYL_SIDES; index += 1) {
-        const angle = ((index + 0.5) * Math.PI * 2) / MODEL_CYL_SIDES;
+      for (let index = 0; index < volumeSidesNow; index += 1) {
+        const angle = ((index + 0.5) * Math.PI * 2) / volumeSidesNow;
         corners.push(at(cx + (Math.cos(angle) * part.width) / 2, cy + (Math.sin(angle) * part.depth) / 2));
       }
     } else if (part.kind === "plate") {
@@ -1683,6 +1723,8 @@ export function volumeModelPrisms(frame, parts) {
       topMm,
       material: part.material,
       name: part.name,
+      // Цилиндр: в круглой сборке его бока сглаживаются (`volumeSmoothTag`).
+      round: part.kind === "cyl",
       // «Может светиться» (таск 09 сценариев): доезжает до грани
       // (`volumeModelFaces`), а горит ли — решает кадр по состоянию дома.
       lit: part.lit,
@@ -1747,8 +1789,8 @@ export function volumeConeFaces(frame, part, rgb, out = [], options = {}) {
   const cx = part.x + part.width / 2;
   const cy = part.y + part.depth / 2;
   const ring = [];
-  for (let index = 0; index < MODEL_CYL_SIDES; index += 1) {
-    const angle = ((index + 0.5) * Math.PI * 2) / MODEL_CYL_SIDES;
+  for (let index = 0; index < volumeSidesNow; index += 1) {
+    const angle = ((index + 0.5) * Math.PI * 2) / volumeSidesNow;
     ring.push(at(cx + (Math.cos(angle) * part.width) / 2, cy + (Math.sin(angle) * part.depth) / 2, part.z));
   }
   const apex = at(cx, cy, part.z + part.height);
@@ -1788,8 +1830,8 @@ export function volumeTubeFaces(frame, part, rgb, out = [], options = {}) {
     upShare = frame.heightMm > 0 ? radiusMm / frame.heightMm : upShare;
   }
   const ring = [];
-  for (let index = 0; index < MODEL_CYL_SIDES; index += 1) {
-    const angle = ((index + 0.5) * Math.PI * 2) / MODEL_CYL_SIDES;
+  for (let index = 0; index < volumeSidesNow; index += 1) {
+    const angle = ((index + 0.5) * Math.PI * 2) / volumeSidesNow;
     ring.push({ across: across + Math.cos(angle) * acrossShare, z: middleZ + Math.sin(angle) * upShare });
   }
   const node = (item, along) => (alongX ? at(along, item.across, item.z) : at(item.across, along, item.z));
@@ -1846,14 +1888,18 @@ export function volumeModelFaces(frame, model, rgb, out = [], options = {}) {
   // самим, а не осветлённым основным. Нет его — всё как было.
   const paint = (material) => (material === "light" && options.lightRgb ? options.lightRgb : volumeModelRgb(material, rgb));
   for (const part of parts) {
+    const before = out.length;
     if (part.kind === "tube") volumeTubeFaces(frame, part, paint(part.material), out, own(part));
     else if (part.kind === "cone") volumeConeFaces(frame, part, paint(part.material), out, own(part));
+    if (out.length > before) volumeSmoothTag(out, before);
   }
   for (const prism of volumeModelPrisms(frame, parts)) {
     // Та самая одна строка (таск 09 сценариев): `prism.lit` доезжает до грани
     // через `own(prism)`, а горит ли тело — решает кадр по состоянию дома.
     const fill = paint(prism.material);
+    const before = out.length;
     volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, fill, out, own(prism));
+    if (prism.round) volumeSmoothTag(out, before);
   }
   // Картинка на лице тела — последней (таск 255, G400): она ложится **поверх**
   // лица, и в кадре порядок граней одной плоскости решает порядок записи.

@@ -149,6 +149,11 @@ export const VOLUME_HIDE_CARD_SETTING = "volumeHideCard";
 // **положительная**, умолчание взведённое — то же правило, что у имитации:
 // `saved !== false` значит «не трогали». Снята — свет комнатой, как до правки.
 export const VOLUME_PHYSICAL_SETTING = "volumePhysicalLight";
+// Отрисовка видеокартой (правка 2026-11-20, ADR 042). Слова заказчика:
+// «включаемым и включённым по умолчанию… ну и с возможностью откатиться на
+// старую отрисовку». Отметка положительная, умолчание взведённое: снята —
+// кадр рисует прежний рисовальщик по Canvas 2D.
+export const VOLUME_GL_SETTING = "volumeGl";
 
 // Взгляд пальцем (правка после сборки сценариев, «как стандарт в отрасли»):
 // чувствительность свайпа и «Инвертировать вертикаль». Прежняя отметка
@@ -234,6 +239,8 @@ const params = {
   hideCard: false,
   // Физический свет ламп (правка после сборки сценариев): умолчание — включён.
   physical: true,
+  // Отрисовка видеокартой (ADR 042): умолчание — включена.
+  gl: true,
   // Взгляд пальцем: множитель чувствительности (`VOLUME_LOOK_SENSITIVITIES`)
   // и инверсия вертикали — умолчания «средняя» и «нет».
   lookSpeed: 1,
@@ -284,6 +291,7 @@ export function volumeParamsLoad() {
     [VOLUME_ROOF_SETTING, "roofOff"],
     [VOLUME_SIMULATION_SETTING, "simulation"],
     [VOLUME_PHYSICAL_SETTING, "physical"],
+    [VOLUME_GL_SETTING, "gl"],
     [VOLUME_OBJECTS_CLEAR_SETTING, "objectsClear"],
     [VOLUME_LINK_ARROWS_SETTING, "linkArrows"],
   ]) {
@@ -372,6 +380,7 @@ export function volumeParamsRead() {
     simulation: params.simulation,
     hideCard: params.hideCard,
     physical: params.physical,
+    gl: params.gl,
     lookSpeed: params.lookSpeed,
     lookInvert: params.lookInvert,
     objectsClear: params.objectsClear,
@@ -436,6 +445,7 @@ export function volumeParamsFlag(name, on) {
     simulation: VOLUME_SIMULATION_SETTING,
     hideCard: VOLUME_HIDE_CARD_SETTING,
     physical: VOLUME_PHYSICAL_SETTING,
+    gl: VOLUME_GL_SETTING,
     lookInvert: VOLUME_LOOK_INVERT_SETTING,
     objectsClear: VOLUME_OBJECTS_CLEAR_SETTING,
     linkArrows: VOLUME_LINK_ARROWS_SETTING,
@@ -782,6 +792,9 @@ export function createVolumeParamsFields(options) {
       group("frame", "", [
         // Прозрачные объекты (правка после сборки сценариев): вещи чертежа
         // сквозные или плотные.
+        // Отрисовка видеокартой (ADR 042): свет, тени и круглые тела. Снята —
+        // прежняя отрисовка, она же запасной путь.
+        checkRow(strings.volume.glRender, chosen.gl, strings.volume.glRenderHint, (on) => volumeParamsFlag("gl", on)),
         checkRow(strings.volume.objectsClear, chosen.objectsClear, strings.volume.objectsClearHint, (on) =>
           volumeParamsFlag("objectsClear", on),
         ),

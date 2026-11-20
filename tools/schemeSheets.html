@@ -206,13 +206,15 @@
             // Кадр собирается теми же руками, что в окне объёма: сцена,
             // снимок часа, тень дома и солнечные пятна приходят готовыми, а
             // кадр их только выкладывает. Своего рисования здесь нет.
-            let scene = volume.volumeScene(project, schemeId, { roofOff: job.roofOff === true });
+            // `--gl`: сцена видеокарты — круглые тела и непрозрачные вещи, как в окне.
+            const glOptions = job.gl ? { roundSides: volume.VOLUME_ROUND_SIDES, objectsClear: false } : {};
+            let scene = volume.volumeScene(project, schemeId, { roofOff: job.roofOff === true, ...glOptions });
             // `--open-cupboards`: какие шкафы открываются, знает сама сцена.
             const opened = scene
               ? [...(job.openCupboards ? scene.cupboards || [] : []), ...(job.openDoors ? scene.doors || [] : [])]
               : [];
             if (opened.length > 0) {
-              scene = volume.volumeScene(project, schemeId, { roofOff: job.roofOff === true, openDoorIds: new Set(opened) });
+              scene = volume.volumeScene(project, schemeId, { roofOff: job.roofOff === true, openDoorIds: new Set(opened), ...glOptions });
             }
             if (!scene || scene.empty) throw new Error("у схемы нет чертежа — объём рисовать нечем");
             const site = volume.volumeSiteOf(project);
@@ -255,8 +257,32 @@
             // термостатов кадра — снимок приёмки с нею иначе не снять, памяти
             // «меняли только что» в оснастке нет.
             const signs = live ? volume.volumeLiveSigns(scene, live, [], job.setpoint ? new Set(live.keys()) : null) : [];
-            const polygons = volume.volumeFrame(scene, camera, box, [...shadow, ...spots, ...signs], mood.tint, light);
-            volume.volumeDraw(ctx, polygons);
+            if (job.gl) {
+              // Тот же путь, что в окне объёма: картинка видеокарты ложится в
+              // кадр между фоном и накладками.
+              const three = await import("/web/vendor/three/three.module.min.js");
+              const { volumeGlMake } = await import("/src/volumeGl.js");
+              const painter = volumeGlMake(three);
+              const glLight = live ? volume.volumeLiveLight(scene, live, { physical: false }) : null;
+              const picture = painter.draw({
+                scene,
+                eye: camera,
+                box,
+                ratio: 1,
+                mood,
+                lamps: glLight ? volume.volumeMeshLamps(scene, glLight, live) : [],
+                glow: glLight ? glLight.glow : null,
+                extra: signs,
+                inside: Boolean(volume.volumeRoomAt(scene, camera.at)),
+              });
+              if (!picture) throw new Error("видеокарта кадр не отдала");
+              ctx.drawImage(picture, 0, 0, box.width, box.height);
+              await say("видеокарта: треугольников " + painter.triangles() + "; ночь " + Math.round((mood.tint.share || 0) * 100) / 100 + ", солнце " + Math.round(mood.shadow.rise) + "° × " + Math.round(mood.shadow.fade * 100) / 100);
+              painter.drop();
+            } else {
+              const polygons = volume.volumeFrame(scene, camera, box, [...shadow, ...spots, ...signs], mood.tint, light);
+              volume.volumeDraw(ctx, polygons);
+            }
             volume.volumeDrawHouse(ctx, box, camera, mood, scene, "after", job.roofOff === true);
             volume.volumeDrawBackdropNear(ctx, box, camera, mood, scene.landMm, scene.groundMm || 0);
             const png = await exporter.viewPng(canvas, exporter.EXPORT_SCREEN_DPI);

@@ -54,7 +54,7 @@ import {
   volumeDoorOpen,
 } from "./walls.js";
 import { volumeCurtainShare, volumeSheerPlaces, volumeShiftRoomLight, volumeSunOpenings } from "./sun.js";
-import { volumeMarkFaces, volumeMarkProbe, volumeMarkViewLines, volumeMarks } from "./marks.js";
+import { volumeMarkFaces, volumeMarkProbe, volumeMarkViewLines, volumeMarks, volumeRoundWith } from "./marks.js";
 import {
   VOLUME_SLAB_MM,
   volumeCeilingUnderVoid,
@@ -569,6 +569,11 @@ function volumeStackRoomsJoin(faces, alias, under = null) {
  * заказчик просил картинку поверх модели.
  */
 export function volumeScene(project, schemeId, options = {}) {
+  // Круглые тела — довод сборки (`options.roundSides`, `volumeRoundWith`).
+  return volumeRoundWith(options.roundSides, () => volumeSceneBuild(project, schemeId, options));
+}
+
+function volumeSceneBuild(project, schemeId, options = {}) {
   const scheme = findScheme(project, schemeId);
   if (!scheme) return null;
   const walls = wallsOnScheme(project, schemeId);

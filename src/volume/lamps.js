@@ -390,7 +390,7 @@ export function volumeLampSources(place, scene = null, roomId = null) {
  * Тело одно — ответ тот же вызов в вызов, что у прежнего `volumeLampSources` с
  * первым телом (G68).
  */
-function volumeLampSourcesOf(scene, markId, roomId) {
+export function volumeLampSourcesOf(scene, markId, roomId) {
   const places = volumeMarkPlaces(scene, markId);
   if (places.length < 2) return places.length === 1 ? volumeLampSources(places[0], scene, roomId) : [];
   const out = [];
