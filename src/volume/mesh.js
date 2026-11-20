@@ -144,6 +144,8 @@ export function volumeMeshBuild(faces, options = {}) {
   const liftOf = options.lift || null;
   const shiftOf = options.shift || null;
   const sinkOf = options.sink || null;
+  const tagOf = options.tag || null;
+  const tags = [];
   const solid = { pos: [], nor: [], col: [] };
   const clear = { pos: [], nor: [], col: [] };
   const lines = { pos: [], col: [] };
@@ -234,6 +236,7 @@ export function volumeMeshBuild(faces, options = {}) {
       ? [volumeMeshLinear(face.backRgb[0] / 255), volumeMeshLinear(face.backRgb[1] / 255), volumeMeshLinear(face.backRgb[2] / 255)]
       : c;
     const sink = sinkOf ? Number(sinkOf(face)) || 0 : 0;
+    const tag = tagOf ? Number(tagOf(face)) || 0 : 0;
     const emit = (p, sign) => {
       into.pos.push((p.x + sx) * S, (p.z + sz - (sink > 0 && p.z < 5 && p.z > -5 ? sink : 0)) * S, (p.y + sy) * S);
       let vx = nx;
@@ -251,6 +254,7 @@ export function volumeMeshBuild(faces, options = {}) {
         }
       }
       into.nor.push(vx * sign, vz * sign, vy * sign);
+      if (tagOf && into === solid) tags.push(tag);
       const tone = sign < 0 ? back : c;
       if (into === clear) into.col.push(tone[0], tone[1], tone[2], alpha);
       else into.col.push(tone[0], tone[1], tone[2]);
@@ -279,7 +283,8 @@ export function volumeMeshBuild(faces, options = {}) {
     }
   }
   return {
-    solid: { pos: new Float32Array(solid.pos), nor: new Float32Array(solid.nor), col: new Float32Array(solid.col) },
+    // `tag` — число на вершину (`options.tag(face)`): номер помещения грани для света лент.
+    solid: { pos: new Float32Array(solid.pos), nor: new Float32Array(solid.nor), col: new Float32Array(solid.col), ...(tagOf ? { tag: new Float32Array(tags) } : {}) },
     clear: { pos: new Float32Array(clear.pos), nor: new Float32Array(clear.nor), col: new Float32Array(clear.col) },
     lines: { pos: new Float32Array(lines.pos), col: new Float32Array(lines.col) },
     triangles: (solid.pos.length + clear.pos.length) / 9,
@@ -392,7 +397,7 @@ export function volumeMeshLampPick(lamps, eye, limits = { spots: 8, points: 3 })
   // разных комнат пришлась бы в стену или к соседям, а сквозь стены он теперь
   // не ходит (у источника тень).
   const lead = spots[0] && points[0] ? ((spots[0].x - eye.x) ** 2 + (spots[0].y - eye.y) ** 2 <= (points[0].x - eye.x) ** 2 + (points[0].y - eye.y) ** 2 ? spots[0] : points[0]) : spots[0] || points[0] || ribbons.slice().sort((one, two) => (one.x - eye.x) ** 2 + (one.y - eye.y) ** 2 - ((two.x - eye.x) ** 2 + (two.y - eye.y) ** 2))[0] || null;
-  for (const item of [...spots, ...points, ...ribbons]) {
+  for (const item of [...spots, ...points]) {
     if (lead && item.room !== lead.room) continue;
     // Настенные в отражённый свет не идут: его середина легла бы на стену.
     if (item.wall) continue;
@@ -491,4 +496,45 @@ export function volumeMeshGlowStrips(lamps) {
     }
   }
   return { pos: new Float32Array(pos), col: new Float32Array(col) };
+}
+
+/**
+ * Ленты и треки отрезками — настоящими источниками света (слово заказчика:
+ * «это полноценные источники света могут быть»). Соседние куски одной метки,
+ * лежащие на одной прямой, сливаются в один отрезок: `{a, b, rgb, power, room}`,
+ * `power` — сила на метр. Светит отрезок своим помещением (`room`), поэтому
+ * сквозь стены свет не идёт и без карты теней.
+ */
+export function volumeMeshRibbonSegments(lamps) {
+  const out = [];
+  const byLine = new Map();
+  for (const item of lamps || []) {
+    if (!item.line) continue;
+    const key = item.line + "|" + (item.room || "");
+    if (!byLine.has(key)) byLine.set(key, []);
+    byLine.get(key).push(item);
+  }
+  for (const list of byLine.values()) {
+    let run = null;
+    for (let at = 0; at + 1 < list.length; at += 1) {
+      const a = list[at];
+      const b = list[at + 1];
+      const d = [b.x - a.x, b.y - a.y, b.z - a.z];
+      const length = Math.hypot(d[0], d[1], d[2]);
+      if (!(length > 50) || length > 1700) {
+        run = null;
+        continue;
+      }
+      const dir = d.map((value) => value / length);
+      if (run && run.dir[0] * dir[0] + run.dir[1] * dir[1] + run.dir[2] * dir[2] > 0.995 && run.length < 6000) {
+        run.seg.b = { x: b.x, y: b.y, z: b.z };
+        run.length += length;
+        continue;
+      }
+      const seg = { a: { x: a.x, y: a.y, z: a.z }, b: { x: b.x, y: b.y, z: b.z }, rgb: a.rgb, power: (a.power + b.power) / 2, room: a.room || null };
+      out.push(seg);
+      run = { seg, dir, length };
+    }
+  }
+  return out;
 }

@@ -39,6 +39,7 @@ import {
   volumeMeshGlowStrips,
   volumeMeshLampPick,
   volumeMeshLinear,
+  volumeMeshRibbonSegments,
   volumeMeshThingShift,
 } from "./volume.js";
 
@@ -51,6 +52,10 @@ export const VOLUME_GL_POINTS = 5;
 export const VOLUME_GL_SHADOWED = 2;
 /** Сила источника на единицу мощности лампы сцены (подобрано на прототипе). */
 export const VOLUME_GL_LAMP_GAIN = 3.6;
+/** Отрезков лент в шейдере: ближайшие к глазу. */
+export const VOLUME_GL_RIBBONS = 16;
+/** Сила света ленты на единицу мощности её куска. */
+export const VOLUME_GL_RIBBON_GAIN = 2.2;
 
 let volumeGlPromise = null;
 
@@ -130,11 +135,63 @@ export function volumeGlMake(THREE) {
     land: new THREE.ShadowMaterial({ opacity: 0.32 }),
   };
 
+  // ——— свет лент: отрезки в шейдере тела ———
+  //
+  // У библиотеки нет линейного источника с тенью, а конусов считаные. Лента —
+  // отрезок: шейдер тела для каждой точки берёт ближайшую точку отрезка и
+  // светит от неё. Сквозь стены свет не идёт: у вершины есть номер помещения
+  // (`aRoom`), у отрезка — тоже, и чужое помещение отрезок не светит. Ноль у
+  // вершины — «любое» (откос проёма, тело светильника), минус один — «никакое»
+  // (наружная стена). Теней от вещей у этого света нет.
+  const ribbonUniforms = {
+    ribA: { value: Array.from({ length: VOLUME_GL_RIBBONS }, () => new THREE.Vector3()) },
+    ribB: { value: Array.from({ length: VOLUME_GL_RIBBONS }, () => new THREE.Vector3()) },
+    ribC: { value: Array.from({ length: VOLUME_GL_RIBBONS }, () => new THREE.Vector3()) },
+    ribR: { value: new Array(VOLUME_GL_RIBBONS).fill(0) },
+    ribN: { value: 0 },
+  };
+  mats.solid.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, ribbonUniforms);
+    shader.vertexShader = shader.vertexShader
+      .replace("#include <common>", "#include <common>\nattribute float aRoom;\nvarying float vRoom;")
+      .replace("#include <begin_vertex>", "#include <begin_vertex>\nvRoom = aRoom;");
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        "#include <common>",
+        "#include <common>\nuniform vec3 ribA[" + VOLUME_GL_RIBBONS + "];\nuniform vec3 ribB[" + VOLUME_GL_RIBBONS + "];\nuniform vec3 ribC[" + VOLUME_GL_RIBBONS + "];\nuniform float ribR[" + VOLUME_GL_RIBBONS + "];\nuniform int ribN;\nvarying float vRoom;",
+      )
+      .replace(
+        "#include <lights_fragment_end>",
+        [
+          "#include <lights_fragment_end>",
+          "{",
+          "  vec3 ribP = -vViewPosition;",
+          "  vec3 ribNn = normalize(normal);",
+          "  for (int i = 0; i < " + VOLUME_GL_RIBBONS + "; i++) {",
+          "    if (i >= ribN) break;",
+          "    if (vRoom < -0.5) continue;",
+          "    if (vRoom > 0.5 && abs(vRoom - ribR[i]) > 0.5) continue;",
+          "    vec3 ribAB = ribB[i] - ribA[i];",
+          "    float ribT = clamp(dot(ribP - ribA[i], ribAB) / max(dot(ribAB, ribAB), 0.000001), 0.0, 1.0);",
+          "    vec3 ribL = ribA[i] + ribAB * ribT - ribP;",
+          "    float ribD = length(ribL);",
+          "    float ribNL = max(dot(ribNn, ribL / max(ribD, 0.0001)), 0.0);",
+          "    float ribAtt = 1.0 / (0.3 + ribD + 0.3 * ribD * ribD);",
+          "    reflectedLight.directDiffuse += ribC[i] * (ribAtt * ribNL) * BRDF_Lambert(material.diffuseColor);",
+          "  }",
+          "}",
+        ].join("\n"),
+      );
+  };
+  let ribbonSegs = [];
+  let roomIndex = new Map();
+
   const empty = () => new THREE.BufferGeometry();
   const geometry = (data, size) => {
     const out = new THREE.BufferGeometry();
     out.setAttribute("position", new THREE.BufferAttribute(data.pos, 3));
     if (data.nor) out.setAttribute("normal", new THREE.BufferAttribute(data.nor, 3));
+    if (data.tag) out.setAttribute("aRoom", new THREE.BufferAttribute(data.tag, 1));
     out.setAttribute("color", new THREE.BufferAttribute(data.col, size));
     return out;
   };
@@ -242,7 +299,16 @@ export function volumeGlMake(THREE) {
     const shining = new Set();
     for (const face of scene.faces) if (face.lit && face.markId && !face.art) shining.add(face.markId);
     const isFixture = (face) => Boolean(face.markId) && shining.has(face.markId) && !face.line && !(face.clear || face.alpha < 1);
+    // Номера помещений для света лент: ключ помещения → 1, 2, 3…
+    roomIndex = new Map();
+    const roomOf = (face) => {
+      if (face.sides) return 0;
+      if (!face.room) return face.markId || face.thing ? 0 : -1;
+      if (!roomIndex.has(face.room)) roomIndex.set(face.room, roomIndex.size + 1);
+      return roomIndex.get(face.room);
+    };
     const mesh = volumeMeshBuild(scene.faces, {
+      tag: roomOf,
       keep: (face) => !isLed(face) && !isScreen(face) && !isLand(face) && !isFixture(face),
       // Плита земли лежит в одной плоскости с полами (в кадре Canvas 2D их
       // разводил ярус): опускается на 4 мм (дефект заказчика: «у одноэтажных
@@ -362,6 +428,7 @@ export function volumeGlMake(THREE) {
     for (const item of list || []) if (item.line) ribbons += item.line + ":" + Math.round(item.x) + "," + Math.round(item.y) + "," + Math.round(item.z) + "," + Math.round(item.power * 20) + ";";
     if (ribbons !== stripKey) {
       stripKey = ribbons;
+      ribbonSegs = ribbons ? volumeMeshRibbonSegments(list) : [];
       const built = ribbons ? volumeMeshGlowStrips(list) : null;
       if (built && built.pos.length > 0) {
         const next = new THREE.BufferGeometry();
@@ -455,6 +522,21 @@ export function volumeGlMake(THREE) {
     // «Вверх» — как у `volumeBasis`: при взгляде отвесно вниз кадр не переворачивается.
     camera.up.set(-Math.sin(pitch) * Math.cos(yaw), cp, -Math.sin(pitch) * Math.sin(yaw));
     camera.lookAt(px + Math.cos(yaw) * cp, py + Math.sin(pitch), pz + Math.sin(yaw) * cp);
+    // Отрезки лент — в координатах камеры, ближайшие к глазу.
+    camera.updateMatrixWorld();
+    const view = camera.matrixWorldInverse;
+    const middle = (seg) => ((seg.a.x + seg.b.x) / 2 - eye.at.x) ** 2 + ((seg.a.y + seg.b.y) / 2 - eye.at.y) ** 2;
+    const nearest = ribbonSegs.length > VOLUME_GL_RIBBONS ? [...ribbonSegs].sort((one, two) => middle(one) - middle(two)).slice(0, VOLUME_GL_RIBBONS) : ribbonSegs;
+    ribbonUniforms.ribN.value = nearest.length;
+    for (let at = 0; at < nearest.length; at += 1) {
+      const seg = nearest[at];
+      // Лента светит из-под себя: на восемь сантиметров ниже поверхности.
+      ribbonUniforms.ribA.value[at].set(seg.a.x * S, (seg.a.z - 80) * S, seg.a.y * S).applyMatrix4(view);
+      ribbonUniforms.ribB.value[at].set(seg.b.x * S, (seg.b.z - 80) * S, seg.b.y * S).applyMatrix4(view);
+      const gain = VOLUME_GL_RIBBON_GAIN * seg.power;
+      ribbonUniforms.ribC.value[at].set(volumeMeshLinear(seg.rgb[0] / 255) * gain, volumeMeshLinear(seg.rgb[1] / 255) * gain, volumeMeshLinear(seg.rgb[2] / 255) * gain);
+      ribbonUniforms.ribR.value[at] = roomIndex.get(seg.room) || 0;
+    }
     // Что определяет тени: сцена, где стоят и горят ли источники, где солнце.
     let lit = String(sceneStamp);
     for (const node of [...spots, ...points, fill, sun]) {

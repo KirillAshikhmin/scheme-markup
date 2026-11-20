@@ -6748,7 +6748,7 @@ display: none;
     var label = document.getElementById("splash-step");
     var canvas = document.getElementById("splash-model");
     var STEPS = ["Расставляем розетки…","Проектируем щит…","Настраиваем сценарии…","Подбираем оборудование…","Чертим стены…","Развешиваем люстры…","Тянем кабель…","Маркируем линии…","Считаем длину ленты…","Калибруем масштаб…","Проверяем автоматы…","Вешаем шторы на карнизы…","Ищем, где спрятать кондиционер…","Учим выключатели проходить…","Уговариваем датчик движения не реагировать на кота…","Объясняем люстре, что она не главная…","Прячем провода за плинтус…","Ищем фазу. Нашли. Больше не ищем…","Считаем розетки. Опять не хватает…","Мирим тёплый пол с ковром…","Договариваемся с роботом-пылесосом о маршруте…","Убеждаем щит, что места в нём достаточно…","Учим шторы просыпаться вовремя…","Проверяем, что лампочка действительно горит…","Напоминаем термостату, что зима кончилась…","Вспоминаем, от чего этот автомат…"];
-    var PAGE_BYTES = 3222948;
+    var PAGE_BYTES = 3227419;
     var calm = false;
     try {
     calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -45776,6 +45776,8 @@ const alphaOf = options.alpha || null;
 const liftOf = options.lift || null;
 const shiftOf = options.shift || null;
 const sinkOf = options.sink || null;
+const tagOf = options.tag || null;
+const tags = [];
 const solid = { pos: [], nor: [], col: [] };
 const clear = { pos: [], nor: [], col: [] };
 const lines = { pos: [], col: [] };
@@ -45861,6 +45863,7 @@ const back = face.backRgb
 ? [volumeMeshLinear(face.backRgb[0] / 255), volumeMeshLinear(face.backRgb[1] / 255), volumeMeshLinear(face.backRgb[2] / 255)]
 : c;
 const sink = sinkOf ? Number(sinkOf(face)) || 0 : 0;
+const tag = tagOf ? Number(tagOf(face)) || 0 : 0;
 const emit = (p, sign) => {
 into.pos.push((p.x + sx) * S, (p.z + sz - (sink > 0 && p.z < 5 && p.z > -5 ? sink : 0)) * S, (p.y + sy) * S);
 let vx = nx;
@@ -45878,6 +45881,7 @@ vz = sum[2] / len;
 }
 }
 into.nor.push(vx * sign, vz * sign, vy * sign);
+if (tagOf && into === solid) tags.push(tag);
 const tone = sign < 0 ? back : c;
 if (into === clear) into.col.push(tone[0], tone[1], tone[2], alpha);
 else into.col.push(tone[0], tone[1], tone[2]);
@@ -45900,7 +45904,7 @@ if (face.both && into === solid) for (const p of [front[0], front[2], front[1]])
 }
 }
 return {
-solid: { pos: new Float32Array(solid.pos), nor: new Float32Array(solid.nor), col: new Float32Array(solid.col) },
+solid: { pos: new Float32Array(solid.pos), nor: new Float32Array(solid.nor), col: new Float32Array(solid.col), ...(tagOf ? { tag: new Float32Array(tags) } : {}) },
 clear: { pos: new Float32Array(clear.pos), nor: new Float32Array(clear.nor), col: new Float32Array(clear.col) },
 lines: { pos: new Float32Array(lines.pos), col: new Float32Array(lines.col) },
 triangles: (solid.pos.length + clear.pos.length) / 9,
@@ -45979,7 +45983,7 @@ let fx = 0;
 let fy = 0;
 let power = 0;
 const lead = spots[0] && points[0] ? ((spots[0].x - eye.x) ** 2 + (spots[0].y - eye.y) ** 2 <= (points[0].x - eye.x) ** 2 + (points[0].y - eye.y) ** 2 ? spots[0] : points[0]) : spots[0] || points[0] || ribbons.slice().sort((one, two) => (one.x - eye.x) ** 2 + (one.y - eye.y) ** 2 - ((two.x - eye.x) ** 2 + (two.y - eye.y) ** 2))[0] || null;
-for (const item of [...spots, ...points, ...ribbons]) {
+for (const item of [...spots, ...points]) {
 if (lead && item.room !== lead.room) continue;
 if (item.wall) continue;
 fx += item.x * item.power;
@@ -46049,6 +46053,39 @@ col.push(c[0], c[1], c[2], q[3]);
 }
 }
 return { pos: new Float32Array(pos), col: new Float32Array(col) };
+}
+function volumeMeshRibbonSegments(lamps) {
+const out = [];
+const byLine = new Map();
+for (const item of lamps || []) {
+if (!item.line) continue;
+const key = item.line + "|" + (item.room || "");
+if (!byLine.has(key)) byLine.set(key, []);
+byLine.get(key).push(item);
+}
+for (const list of byLine.values()) {
+let run = null;
+for (let at = 0; at + 1 < list.length; at += 1) {
+const a = list[at];
+const b = list[at + 1];
+const d = [b.x - a.x, b.y - a.y, b.z - a.z];
+const length = Math.hypot(d[0], d[1], d[2]);
+if (!(length > 50) || length > 1700) {
+run = null;
+continue;
+}
+const dir = d.map((value) => value / length);
+if (run && run.dir[0] * dir[0] + run.dir[1] * dir[1] + run.dir[2] * dir[2] > 0.995 && run.length < 6000) {
+run.seg.b = { x: b.x, y: b.y, z: b.z };
+run.length += length;
+continue;
+}
+const seg = { a: { x: a.x, y: a.y, z: a.z }, b: { x: b.x, y: b.y, z: b.z }, rgb: a.rgb, power: (a.power + b.power) / 2, room: a.room || null };
+out.push(seg);
+run = { seg, dir, length };
+}
+}
+return out;
 }
 
 // src/volume/signs.js
@@ -74034,6 +74071,8 @@ const VOLUME_GL_SPOTS = 8;
 const VOLUME_GL_POINTS = 5;
 const VOLUME_GL_SHADOWED = 2;
 const VOLUME_GL_LAMP_GAIN = 3.6;
+const VOLUME_GL_RIBBONS = 16;
+const VOLUME_GL_RIBBON_GAIN = 2.2;
 let volumeGlPromise = null;
 function volumeGlLoad() {
 if (!volumeGlPromise) {
@@ -74082,11 +74121,54 @@ overLine: new THREE.LineBasicMaterial({ vertexColors: true, toneMapped: false })
 strip: new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }),
 land: new THREE.ShadowMaterial({ opacity: 0.32 }),
 };
+const ribbonUniforms = {
+ribA: { value: Array.from({ length: VOLUME_GL_RIBBONS }, () => new THREE.Vector3()) },
+ribB: { value: Array.from({ length: VOLUME_GL_RIBBONS }, () => new THREE.Vector3()) },
+ribC: { value: Array.from({ length: VOLUME_GL_RIBBONS }, () => new THREE.Vector3()) },
+ribR: { value: new Array(VOLUME_GL_RIBBONS).fill(0) },
+ribN: { value: 0 },
+};
+mats.solid.onBeforeCompile = (shader) => {
+Object.assign(shader.uniforms, ribbonUniforms);
+shader.vertexShader = shader.vertexShader
+.replace("#include <common>", "#include <common>\nattribute float aRoom;\nvarying float vRoom;")
+.replace("#include <begin_vertex>", "#include <begin_vertex>\nvRoom = aRoom;");
+shader.fragmentShader = shader.fragmentShader
+.replace(
+"#include <common>",
+"#include <common>\nuniform vec3 ribA[" + VOLUME_GL_RIBBONS + "];\nuniform vec3 ribB[" + VOLUME_GL_RIBBONS + "];\nuniform vec3 ribC[" + VOLUME_GL_RIBBONS + "];\nuniform float ribR[" + VOLUME_GL_RIBBONS + "];\nuniform int ribN;\nvarying float vRoom;",
+)
+.replace(
+"#include <lights_fragment_end>",
+[
+"#include <lights_fragment_end>",
+"{",
+"  vec3 ribP = -vViewPosition;",
+"  vec3 ribNn = normalize(normal);",
+"  for (int i = 0; i < " + VOLUME_GL_RIBBONS + "; i++) {",
+"    if (i >= ribN) break;",
+"    if (vRoom < -0.5) continue;",
+"    if (vRoom > 0.5 && abs(vRoom - ribR[i]) > 0.5) continue;",
+"    vec3 ribAB = ribB[i] - ribA[i];",
+"    float ribT = clamp(dot(ribP - ribA[i], ribAB) / max(dot(ribAB, ribAB), 0.000001), 0.0, 1.0);",
+"    vec3 ribL = ribA[i] + ribAB * ribT - ribP;",
+"    float ribD = length(ribL);",
+"    float ribNL = max(dot(ribNn, ribL / max(ribD, 0.0001)), 0.0);",
+"    float ribAtt = 1.0 / (0.3 + ribD + 0.3 * ribD * ribD);",
+"    reflectedLight.directDiffuse += ribC[i] * (ribAtt * ribNL) * BRDF_Lambert(material.diffuseColor);",
+"  }",
+"}",
+].join("\n"),
+);
+};
+let ribbonSegs = [];
+let roomIndex = new Map();
 const empty = () => new THREE.BufferGeometry();
 const geometry = (data, size) => {
 const out = new THREE.BufferGeometry();
 out.setAttribute("position", new THREE.BufferAttribute(data.pos, 3));
 if (data.nor) out.setAttribute("normal", new THREE.BufferAttribute(data.nor, 3));
+if (data.tag) out.setAttribute("aRoom", new THREE.BufferAttribute(data.tag, 1));
 out.setAttribute("color", new THREE.BufferAttribute(data.col, size));
 return out;
 };
@@ -74175,7 +74257,15 @@ const art = volumeMeshArtLift();
 const shining = new Set();
 for (const face of scene.faces) if (face.lit && face.markId && !face.art) shining.add(face.markId);
 const isFixture = (face) => Boolean(face.markId) && shining.has(face.markId) && !face.line && !(face.clear || face.alpha < 1);
+roomIndex = new Map();
+const roomOf = (face) => {
+if (face.sides) return 0;
+if (!face.room) return face.markId || face.thing ? 0 : -1;
+if (!roomIndex.has(face.room)) roomIndex.set(face.room, roomIndex.size + 1);
+return roomIndex.get(face.room);
+};
 const mesh = volumeMeshBuild(scene.faces, {
+tag: roomOf,
 keep: (face) => !isLed(face) && !isScreen(face) && !isLand(face) && !isFixture(face),
 lift: (face) => (face.layer === VOLUME_LAYER_BASE ? -4 : face.art ? art(face) : 0),
 shift: volumeMeshThingShift,
@@ -74281,6 +74371,7 @@ let ribbons = "";
 for (const item of list || []) if (item.line) ribbons += item.line + ":" + Math.round(item.x) + "," + Math.round(item.y) + "," + Math.round(item.z) + "," + Math.round(item.power * 20) + ";";
 if (ribbons !== stripKey) {
 stripKey = ribbons;
+ribbonSegs = ribbons ? volumeMeshRibbonSegments(list) : [];
 const built = ribbons ? volumeMeshGlowStrips(list) : null;
 if (built && built.pos.length > 0) {
 const next = new THREE.BufferGeometry();
@@ -74358,6 +74449,19 @@ const pz = eye.at.y * S;
 camera.position.set(px, py, pz);
 camera.up.set(-Math.sin(pitch) * Math.cos(yaw), cp, -Math.sin(pitch) * Math.sin(yaw));
 camera.lookAt(px + Math.cos(yaw) * cp, py + Math.sin(pitch), pz + Math.sin(yaw) * cp);
+camera.updateMatrixWorld();
+const view = camera.matrixWorldInverse;
+const middle = (seg) => ((seg.a.x + seg.b.x) / 2 - eye.at.x) ** 2 + ((seg.a.y + seg.b.y) / 2 - eye.at.y) ** 2;
+const nearest = ribbonSegs.length > VOLUME_GL_RIBBONS ? [...ribbonSegs].sort((one, two) => middle(one) - middle(two)).slice(0, VOLUME_GL_RIBBONS) : ribbonSegs;
+ribbonUniforms.ribN.value = nearest.length;
+for (let at = 0; at < nearest.length; at += 1) {
+const seg = nearest[at];
+ribbonUniforms.ribA.value[at].set(seg.a.x * S, (seg.a.z - 80) * S, seg.a.y * S).applyMatrix4(view);
+ribbonUniforms.ribB.value[at].set(seg.b.x * S, (seg.b.z - 80) * S, seg.b.y * S).applyMatrix4(view);
+const gain = VOLUME_GL_RIBBON_GAIN * seg.power;
+ribbonUniforms.ribC.value[at].set(volumeMeshLinear(seg.rgb[0] / 255) * gain, volumeMeshLinear(seg.rgb[1] / 255) * gain, volumeMeshLinear(seg.rgb[2] / 255) * gain);
+ribbonUniforms.ribR.value[at] = roomIndex.get(seg.room) || 0;
+}
 let lit = String(sceneStamp);
 for (const node of [...spots, ...points, fill, sun]) {
 lit += "|" + (node.intensity > 0 ? Math.round(node.position.x * 50) + "," + Math.round(node.position.y * 50) + "," + Math.round(node.position.z * 50) : "-");

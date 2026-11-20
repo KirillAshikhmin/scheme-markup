@@ -414,6 +414,7 @@ import {
   volumeMeshLampPick,
   volumeMeshLamps,
   volumeMeshLinear,
+  volumeMeshRibbonSegments,
   volumeMeshThingLift,
   volumeMeshThingShift,
 } from "./volume/mesh.js";
@@ -767,6 +768,7 @@ export {
   volumeMeshLampPick,
   volumeMeshLamps,
   volumeMeshLinear,
+  volumeMeshRibbonSegments,
   volumeMeshThingLift,
   volumeMeshThingShift,
   volumeLine,
