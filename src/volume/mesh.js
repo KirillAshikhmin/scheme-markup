@@ -111,7 +111,11 @@ export function volumeMeshColor(color, fallback = [60, 60, 60]) {
  *
  * `options.keep(face)` — какие грани брать (умолчание — все);
  * `options.paint(face)` — свой цвет грани `[r, g, b]` 0…255 вместо её краски;
- * `options.alpha(face)` — своя непрозрачность.
+ * `options.alpha(face)` — своя непрозрачность;
+ * `options.lift(face)` — на сколько миллиметров вынести грань по её нормали.
+ * Буфер глубины не разводит грани, лежащие в одной плоскости (дерево порядка
+ * разводило их очередью): столешницы двух вещей на одной высоте, фигуры
+ * картинки на стекле экрана. Вынос на доли миллиметра решает, кто сверху.
  *
  * Сглаживание: у грани круглого тела (`face.smooth`, `volumeRoundWith`)
  * нормаль вершины — среднее нормалей боков, сходящихся в ней. Днище (точек
@@ -122,6 +126,7 @@ export function volumeMeshBuild(faces, options = {}) {
   const keep = options.keep || null;
   const paint = options.paint || null;
   const alphaOf = options.alpha || null;
+  const liftOf = options.lift || null;
   const solid = { pos: [], nor: [], col: [] };
   const clear = { pos: [], nor: [], col: [] };
   const lines = { pos: [], col: [] };
@@ -201,8 +206,9 @@ export function volumeMeshBuild(faces, options = {}) {
     const alpha = own !== null && own !== undefined ? own : face.clear ? (typeof face.alpha === "number" ? face.alpha : 0.4) : typeof face.alpha === "number" ? face.alpha : 1;
     const into = alpha < 1 ? clear : solid;
     const smooth = Boolean(face.smooth && face.n && P.length <= 4);
+    const lift = liftOf ? Number(liftOf(face)) || 0 : 0;
     const emit = (p, sign) => {
-      into.pos.push(p.x * S, p.z * S, p.y * S);
+      into.pos.push((p.x + nx * lift) * S, (p.z + nz * lift) * S, (p.y + ny * lift) * S);
       let vx = nx;
       let vy = ny;
       let vz = nz;
@@ -329,4 +335,29 @@ export function volumeMeshLampPick(lamps, eye, limits = { spots: 8, points: 3 })
     power += item.power;
   }
   return { spots, points, fill: power > 0 ? { x: fx / power, y: fy / power, power } : null, total: joined.length };
+}
+
+/**
+ * Вынос грани вещи по нормали, мм: у каждой вещи свой, по её номеру, — две
+ * вещи с гранями в одной плоскости расходятся на доли миллиметра, и спора в
+ * буфере глубины нет. Одна и та же вещь выносится целиком и одинаково.
+ */
+export function volumeMeshThingLift(face) {
+  const id = face && face.thing !== undefined && face.thing !== null ? Number(face.thing) : NaN;
+  // Доли миллиметра: больший вынос раскрывает щели на рёбрах самой вещи.
+  return Number.isFinite(id) ? 0.1 + (Math.abs(id) % 7) * 0.12 : 0;
+}
+
+/**
+ * Вынос фигур картинки (экран, полотно): они лежат в одной плоскости друг на
+ * друге, и порядок записи — порядок слоёв. `volumeMeshArtLift()` отдаёт
+ * счётчик на одну сборку сетки: каждая следующая фигура — на 0,3 мм выше.
+ */
+export function volumeMeshArtLift(baseMm = 1) {
+  let count = 0;
+  return (face) => {
+    if (!face || !face.art) return 0;
+    count += 1;
+    return baseMm + count * 0.3;
+  };
 }

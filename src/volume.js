@@ -405,6 +405,7 @@ import {
 import {
   VOLUME_MESH_LAMP_JOIN_MM,
   VOLUME_MESH_SCALE,
+  volumeMeshArtLift,
   volumeMeshBuild,
   volumeMeshColor,
   volumeMeshEarcut,
@@ -412,6 +413,7 @@ import {
   volumeMeshLampPick,
   volumeMeshLamps,
   volumeMeshLinear,
+  volumeMeshThingLift,
 } from "./volume/mesh.js";
 import {
   VOLUME_LED_ALERT_RGB,
@@ -754,6 +756,7 @@ export {
   volumeLampSourcesOf,
   VOLUME_MESH_LAMP_JOIN_MM,
   VOLUME_MESH_SCALE,
+  volumeMeshArtLift,
   volumeMeshBuild,
   volumeMeshColor,
   volumeMeshEarcut,
@@ -761,6 +764,7 @@ export {
   volumeMeshLampPick,
   volumeMeshLamps,
   volumeMeshLinear,
+  volumeMeshThingLift,
   volumeLine,
   volumeLineSpots,
   volumeLinkLines,

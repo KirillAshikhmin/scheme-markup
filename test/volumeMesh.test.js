@@ -100,3 +100,19 @@ test("источники света: соседние сливаются, вид
   assert.ok(pick.fill.power > 0);
   assert.equal(volumeMeshLampPick([], { x: 0, y: 0 }).fill, null);
 });
+
+test("грани в одной плоскости разводятся выносом: вещи — по номеру, фигуры картинки — по порядку", async () => {
+  const { volumeMeshArtLift, volumeMeshThingLift } = await import("../src/volume.js");
+  assert.equal(volumeMeshThingLift({}), 0);
+  assert.ok(volumeMeshThingLift({ thing: "12" }) > 0);
+  assert.notEqual(volumeMeshThingLift({ thing: "12" }), volumeMeshThingLift({ thing: "13" }));
+  assert.equal(volumeMeshThingLift({ thing: "12" }), volumeMeshThingLift({ thing: "12" }));
+  const art = volumeMeshArtLift();
+  assert.equal(art({}), 0);
+  const first = art({ art: "screen" });
+  assert.ok(art({ art: "screen" }) > first);
+  // Вынос идёт по нормали грани.
+  const top = { p: [{ x: 0, y: 0, z: 900 }, { x: 600, y: 0, z: 900 }, { x: 600, y: 600, z: 900 }, { x: 0, y: 600, z: 900 }], n: { x: 0, y: 0, z: 1 }, rgb: [1, 1, 1] };
+  const mesh = volumeMeshBuild([top], { lift: () => 2 });
+  assert.ok(Math.abs(mesh.solid.pos[1] - 0.902) < 1e-6);
+});

@@ -33,9 +33,11 @@ import {
   VOLUME_FOV_DEG,
   VOLUME_MESH_SCALE,
   VOLUME_NIGHT_SHARE,
+  volumeMeshArtLift,
   volumeMeshBuild,
   volumeMeshLampPick,
   volumeMeshLinear,
+  volumeMeshThingLift,
 } from "./volume.js";
 
 /** Копия three.js рядом со страницей (`web/vendor/three/`, версия — в README там же). */
@@ -147,8 +149,8 @@ export function volumeGlMake(THREE) {
   const sun = new THREE.DirectionalLight(0xfff4d6, 0);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
-  sun.shadow.bias = -0.0004;
-  sun.shadow.normalBias = 0.03;
+  sun.shadow.bias = -0.0008;
+  sun.shadow.normalBias = 0.05;
   world.add(hemi, sun, sun.target);
   // Потолочные светят вниз конусом (иначе на потолке у каждого — пересвеченное
   // пятно), настенные и напольные — во все стороны.
@@ -157,8 +159,9 @@ export function volumeGlMake(THREE) {
     const lamp = new THREE.SpotLight(0xffe6c4, 0, 0, 1.25, 0.9, 2);
     lamp.castShadow = at < VOLUME_GL_SHADOWED;
     lamp.shadow.mapSize.set(1024, 1024);
-    lamp.shadow.bias = -0.0015;
-    lamp.shadow.normalBias = 0.02;
+    // Запас побольше: под скользящим светом стена шла рябью (дефект заказчика).
+    lamp.shadow.bias = -0.004;
+    lamp.shadow.normalBias = 0.06;
     lamp.shadow.camera.near = 0.05;
     lamp.shadow.camera.far = 12;
     world.add(lamp, lamp.target);
@@ -187,7 +190,14 @@ export function volumeGlMake(THREE) {
     // работающего прибора. Остальное — тело под светом.
     const isScreen = (face) => face.art === "screen";
     const isLed = (face) => Boolean(face.led) && !face.line && !isScreen(face);
-    const mesh = volumeMeshBuild(scene.faces, { keep: (face) => !isLed(face) && !isScreen(face) });
+    // Грани в одной плоскости разводятся выносом: вещи — по своему номеру,
+    // фигуры полотна — по порядку записи (дефект заказчика: «на телевизоре
+    // картинка артефактами идёт… или там, где плоскости пересекаются»).
+    const art = volumeMeshArtLift();
+    const mesh = volumeMeshBuild(scene.faces, {
+      keep: (face) => !isLed(face) && !isScreen(face),
+      lift: (face) => volumeMeshThingLift(face) + (face.art ? art(face) : 0),
+    });
     swap(solid, geometry(mesh.solid, 3));
     swap(glass, geometry(mesh.clear, 4));
     swap(lines, geometry(mesh.lines, 3));
@@ -225,7 +235,10 @@ export function volumeGlMake(THREE) {
       const fade = item.fade === undefined ? 1 : item.fade;
       return Math.max(0, Math.min(1, (item.level === undefined ? 1 : item.level) * fade));
     };
+    const screen = volumeMeshArtLift();
     const mesh = volumeMeshBuild(litFaces, {
+      // Стекло экрана — над телом, фигуры картинки — над стеклом и друг над другом.
+      lift: (face) => volumeMeshThingLift(face) + (face.art === "screen" ? screen(face) : 0.5),
       keep: (face) => shine(face) > 0.01,
       alpha: () => 1,
       paint: (face) => {
