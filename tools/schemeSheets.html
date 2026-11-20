@@ -237,7 +237,8 @@
                 " мм; граней в сцене " +
                 scene.faces.length,
             );
-            volume.volumeDrawBackdrop(ctx, box, camera, mood, scene.landMm);
+            volume.volumeDrawBackdrop(ctx, box, camera, mood, scene.landMm, scene.groundMm || 0);
+            volume.volumeDrawHouse(ctx, box, camera, mood, scene, "before", job.roofOff === true);
             const shadow = volume.volumeShadowFaces(scene.shadowBoxes, mood.shadow);
             const spots = volume.volumeSunSpotFaces(scene.sunSpots, mood.shadow);
             // Горящие лампы (`--lamps`): дом тут не запускается — светом
@@ -253,7 +254,8 @@
             const signs = live ? volume.volumeLiveSigns(scene, live, [], job.setpoint ? new Set(live.keys()) : null) : [];
             const polygons = volume.volumeFrame(scene, camera, box, [...shadow, ...spots, ...signs], mood.tint, light);
             volume.volumeDraw(ctx, polygons);
-            volume.volumeDrawBackdropNear(ctx, box, camera, mood, scene.landMm);
+            volume.volumeDrawHouse(ctx, box, camera, mood, scene, "after", job.roofOff === true);
+            volume.volumeDrawBackdropNear(ctx, box, camera, mood, scene.landMm, scene.groundMm || 0);
             const png = await exporter.viewPng(canvas, exporter.EXPORT_SCREEN_DPI);
             await put(exporter.exportFileName(project, "объём — " + scheme.name, "png"), png);
             continue;

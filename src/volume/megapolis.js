@@ -232,7 +232,6 @@ export function volumeMegaPaint(palette, tone) {
  * этажности — см. шапку.
  */
 export function volumeDrawMegaBlock(ctx, point, at, block, index, hour, lit) {
-  const paint = volumeMegaPaint(hour.palette, block.tone);
   const len = Math.hypot(block.x, block.y) || 1;
   const fx = block.x / len;
   const fy = block.y / len;
@@ -243,88 +242,113 @@ export function volumeDrawMegaBlock(ctx, point, at, block, index, hour, lit) {
     x: block.x + ux * block.halfMm * alongSign + fx * deep * deepSign,
     y: block.y + uy * block.halfMm * alongSign + fy * deep * deepSign,
   });
-  const plan = [corner(1, -1), corner(-1, -1), corner(-1, 1), corner(1, 1)];
-  const wides = [block.halfMm * 2, block.deepMm, block.halfMm * 2, block.deepMm];
+  volumeDrawMegaBox(ctx, point, at, {
+    plan: [corner(1, -1), corner(-1, -1), corner(-1, 1), corner(1, 1)],
+    wides: [block.halfMm * 2, block.deepMm, block.halfMm * 2, block.deepMm],
+    bottomMm: 0,
+    topMm: block.heightMm,
+    floors: block.floors,
+    paint: volumeMegaPaint(hour.palette, block.tone),
+    seed: index,
+  }, hour, lit);
+}
+
+/**
+ * Коробка с окнами между двумя высотами — общая кисть дома мегаполиса и дома,
+ * в котором стоит квартира (`volume/house.js`).
+ *
+ * `box.plan` — четыре угла по кругу так, чтобы наружу смотрел **правый**
+ * перпендикуляр ребра; `box.wides` — длины рёбер в миллиметрах; `bottomMm` и
+ * `topMm` — низ и верх; `floors` — сколько этажей в этой высоте.
+ */
+export function volumeDrawMegaBox(ctx, point, at, box, hour, lit) {
+  const { plan, wides, bottomMm, topMm, floors, paint } = box;
   const shown = [];
   for (let side = 0; side < 4; side += 1) {
     const from = plan[side];
     const to = plan[(side + 1) % 4];
-    // Обход коробки по кругу: наружу смотрит правый перпендикуляр ребра.
     const mx = (from.x + to.x) / 2;
     const my = (from.y + to.y) / 2;
     if ((to.y - from.y) * (at.x - mx) - (to.x - from.x) * (at.y - my) <= 0) continue;
-    const left = point(from.x, from.y, block.heightMm);
-    const right = point(to.x, to.y, block.heightMm);
-    const footLeft = point(from.x, from.y, 0);
-    const footRight = point(to.x, to.y, 0);
+    const left = point(from.x, from.y, topMm);
+    const right = point(to.x, to.y, topMm);
+    const footLeft = point(from.x, from.y, bottomMm);
+    const footRight = point(to.x, to.y, bottomMm);
     if (!left || !right || !footLeft || !footRight) continue;
     shown.push({ side, wide: wides[side], left, right, footLeft, footRight, depth: Math.hypot(mx - at.x, my - at.y) });
   }
-  if (shown.length === 0) return;
-  shown.sort((one, two) => two.depth - one.depth);
-  const share = hour.cityLit;
-  for (const wall of shown) {
-    const { left, right, footLeft, footRight } = wall;
-    // Ближняя из двух стен — лицо, дальняя — бок: бок темнее.
-    ctx.fillStyle = wall === shown[shown.length - 1] ? paint.wall : paint.side;
-    ctx.beginPath();
-    megaQuad(ctx, left, right, footRight, footLeft);
-    ctx.fill();
-    const tall = Math.max(Math.abs(footLeft.y - left.y), Math.abs(footRight.y - right.y));
-    const floorPx = tall / block.floors;
-    if (floorPx < VOLUME_MEGA_BAND_PX) continue;
-    const pad = 0.04;
-    const cellY = (1 - pad * 2) / block.floors;
-    // Остекление — полоса на этаж, все полосы стены одним путём.
-    ctx.fillStyle = paint.band;
-    ctx.beginPath();
-    for (let floor = 0; floor < block.floors; floor += 1) {
-      const top = pad + cellY * (floor + 0.2);
-      const low = top + cellY * 0.56;
-      megaQuad(
-        ctx,
-        megaSpot(left, right, footLeft, footRight, pad, top),
-        megaSpot(left, right, footLeft, footRight, 1 - pad, top),
-        megaSpot(left, right, footLeft, footRight, 1 - pad, low),
-        megaSpot(left, right, footLeft, footRight, pad, low),
-      );
-    }
-    ctx.fill();
-    if (!(share > 0)) continue;
-    const bays = Math.max(2, Math.round(wall.wide / VOLUME_MEGA_BAY_MM));
-    const across = Math.hypot(right.x - left.x, right.y - left.y) / bays;
-    if (across < VOLUME_MEGA_WINDOW_PX) continue;
-    const cellX = (1 - pad * 2) / bays;
-    // Светящиеся окна — вторым путём. На очень большой стене проверяется
-    // каждый второй этаж: зажжённых от этого вдвое меньше, а заливка та же.
-    const step = block.floors * bays > VOLUME_MEGA_LIT_MAX ? 2 : 1;
-    const seed = index * 4 + wall.side;
-    let any = false;
-    ctx.beginPath();
-    for (let floor = 0; floor < block.floors; floor += step) {
-      const top = pad + cellY * (floor + 0.2);
-      const low = top + cellY * 0.56;
-      for (let bay = 0; bay < bays; bay += 1) {
-        if (!lit(seed, floor, bay, share)) continue;
-        const from = pad + cellX * (bay + 0.14);
-        const to = from + cellX * 0.72;
+  if (shown.length > 0) {
+    shown.sort((one, two) => two.depth - one.depth);
+    const share = hour.cityLit;
+    for (const wall of shown) {
+      const { left, right, footLeft, footRight } = wall;
+      // Ближняя из двух стен — лицо, дальняя — бок: бок темнее.
+      ctx.fillStyle = wall === shown[shown.length - 1] ? paint.wall : paint.side;
+      ctx.beginPath();
+      megaQuad(ctx, left, right, footRight, footLeft);
+      ctx.fill();
+      const tall = Math.max(Math.abs(footLeft.y - left.y), Math.abs(footRight.y - right.y));
+      const floorPx = tall / floors;
+      if (floorPx < VOLUME_MEGA_BAND_PX) continue;
+      const pad = 0.04;
+      const cellY = (1 - pad * 2) / floors;
+      // Остекление — полоса на этаж, все полосы стены одним путём.
+      ctx.fillStyle = paint.band;
+      ctx.beginPath();
+      for (let floor = 0; floor < floors; floor += 1) {
+        const top = pad + cellY * (floor + 0.2);
+        const low = top + cellY * 0.56;
         megaQuad(
           ctx,
-          megaSpot(left, right, footLeft, footRight, from, top),
-          megaSpot(left, right, footLeft, footRight, to, top),
-          megaSpot(left, right, footLeft, footRight, to, low),
-          megaSpot(left, right, footLeft, footRight, from, low),
+          megaSpot(left, right, footLeft, footRight, pad, top),
+          megaSpot(left, right, footLeft, footRight, 1 - pad, top),
+          megaSpot(left, right, footLeft, footRight, 1 - pad, low),
+          megaSpot(left, right, footLeft, footRight, pad, low),
         );
-        any = true;
+      }
+      ctx.fill();
+      if (!(share > 0)) continue;
+      const bays = Math.max(2, Math.round(wall.wide / VOLUME_MEGA_BAY_MM));
+      const across = Math.hypot(right.x - left.x, right.y - left.y) / bays;
+      if (across < VOLUME_MEGA_WINDOW_PX) continue;
+      const cellX = (1 - pad * 2) / bays;
+      // Светящиеся окна — вторым путём. На очень большой стене проверяется
+      // каждый второй этаж: зажжённых от этого вдвое меньше, а заливка та же.
+      const step = floors * bays > VOLUME_MEGA_LIT_MAX ? 2 : 1;
+      const seed = box.seed * 4 + wall.side;
+      let any = false;
+      ctx.beginPath();
+      for (let floor = 0; floor < floors; floor += step) {
+        const top = pad + cellY * (floor + 0.2);
+        const low = top + cellY * 0.56;
+        for (let bay = 0; bay < bays; bay += 1) {
+          if (!lit(seed, floor, bay, share)) continue;
+          const from = pad + cellX * (bay + 0.14);
+          const to = from + cellX * 0.72;
+          megaQuad(
+            ctx,
+            megaSpot(left, right, footLeft, footRight, from, top),
+            megaSpot(left, right, footLeft, footRight, to, top),
+            megaSpot(left, right, footLeft, footRight, to, low),
+            megaSpot(left, right, footLeft, footRight, from, low),
+          );
+          any = true;
+        }
+      }
+      if (any) {
+        ctx.fillStyle = hour.palette.mega.light;
+        ctx.fill();
       }
     }
-    if (any) {
-      ctx.fillStyle = hour.palette.mega.light;
-      ctx.fill();
-    }
   }
-  // Крыша видна сверху — с высокого этажа город и состоит из крыш.
-  const top = plan.map((spot) => point(spot.x, spot.y, block.heightMm));
+  // Крыша видна сверху — с высокого этажа город и состоит из крыш. Снизу она
+  // не рисуется: под крышей дома, над которым стоит глаз, смотреть не на что.
+  if (box.roof === false) return;
+  // Глаз ниже крыши — её не видно: рисовать её значило бы положить тёмную
+  // заплату поверх стен. Высота глаза приходит с местом камеры (`at.z`), в тех
+  // же миллиметрах, что высоты коробки.
+  if (Number.isFinite(at.z) && at.z <= topMm) return;
+  const top = plan.map((spot) => point(spot.x, spot.y, topMm));
   if (top.every(Boolean)) {
     ctx.fillStyle = paint.roof;
     ctx.beginPath();
@@ -417,7 +441,10 @@ export function volumeDrawMegaSkyline(ctx, point, ridge, color) {
     const crest = point(node.x, node.y, node.heightMm);
     const edge = point(next.x, next.y, node.heightMm);
     const edgeFoot = point(next.x, next.y, 0);
-    if (!foot || !crest || !edge || !edgeFoot) {
+    // Узел почти сбоку от глаза (взгляд круто вниз с высоты) проекция
+    // растягивает на весь кадр: такой узел не рисуется, как и узел за спиной.
+    const close = ridge.nearMm || 0;
+    if (!foot || !crest || !edge || !edgeFoot || foot.depth < close || edgeFoot.depth < close) {
       run = null;
       continue;
     }

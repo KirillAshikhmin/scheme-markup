@@ -308,6 +308,9 @@ import {
   VOLUME_CUPBOARD_PREFIX,
   VOLUME_CUPBOARD_LEAF_MM,
   VOLUME_CUPBOARD_BOARD_MM,
+  VOLUME_HOUSE_WING_MM,
+  volumeHouseLift,
+  volumeHouseOutline,
   volumeFaceMine,
   volumeFloorFaces,
   volumeFloorKey,
@@ -475,6 +478,7 @@ import {
   volumeAroundTarget,
   volumeMarkerFaces,
 } from "./volume/around.js";
+import { volumeDrawHouse, volumeHouseParts } from "./volume/house.js";
 
 export {
   VOLUME_ARCH_SEGMENTS,
@@ -674,6 +678,11 @@ export {
   VOLUME_CUPBOARD_LEAF_MM,
   VOLUME_CUPBOARD_BOARD_MM,
   volumeModelOpens,
+  VOLUME_HOUSE_WING_MM,
+  volumeHouseLift,
+  volumeHouseOutline,
+  volumeDrawHouse,
+  volumeHouseParts,
   volumeCurtainGather,
   volumeCurtainOpen,
   volumeCurtainShare,

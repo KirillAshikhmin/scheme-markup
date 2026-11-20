@@ -11583,6 +11583,85 @@ export function setProjectSite(project, patch = {}) {
   return { project: withProject(project, { site }), site: next, changed: true };
 }
 
+// ——— дом, в котором стоит объект (правка без автопилота, 2026-11-20) ————————
+//
+// Слова заказчика: «что бы указанный этаж у чертежа поднимал сам объект на
+// нужную высоту — если объект квартира, то как раз мы не на земле же, а где-то
+// наверху в доме. Ну и, естественно, дом тоже отрисовать» — и на вопрос, как
+// отличить квартиру от коттеджа: «В чертеже уже указывается этаж. Можно в
+// свойствах объекта добавить поле — количество этажей в здании».
+//
+// Отсюда правило: **объект становится «квартирой в доме» только тогда, когда
+// человек заполнил «Этажей в доме»**. Этаж квартиры — прежнее поле «Этаж»
+// схемы. Ключа `project.building` нет — всё как было, байт в байт: коттедж с
+// этажами 1 и 2 не взлетает, миграции нет, версия формата не поднимается (тот
+// же приём, что у `project.site`). Догадку «нижняя схема на 17 этаже — значит
+// квартира» сборка **не применяет**: объект, где начерчен один второй этаж
+// коттеджа, взлетел бы молча (G68).
+//
+// `storeyMm` — высота типового этажа дома «пол–пол». Необязательная: не задана
+// — «Объём» выводит её из высоты стен схемы и плиты.
+
+/** Сколько этажей бывает в доме: тот же потолок, что у номера этажа схемы. */
+export const BUILDING_FLOORS_MAX = SCHEME_FLOOR_MAX;
+export const BUILDING_STOREY_MIN_MM = 2200;
+export const BUILDING_STOREY_MAX_MM = 6000;
+
+/** Дом объекта: `{floors, storeyMm}`; `null` — не задано. Мусор читается как «не задано». */
+export function projectBuilding(project) {
+  const own = project && project.building && typeof project.building === "object" ? project.building : null;
+  const floors = own && Number.isInteger(own.floors) && own.floors >= 1 && own.floors <= BUILDING_FLOORS_MAX ? own.floors : null;
+  const storey =
+    own && Number.isFinite(own.storeyMm) && own.storeyMm >= BUILDING_STOREY_MIN_MM && own.storeyMm <= BUILDING_STOREY_MAX_MM
+      ? Math.round(own.storeyMm)
+      : null;
+  return { floors, storeyMm: floors === null ? null : storey };
+}
+
+// Число из поля: `{value}` или `{bad: "invalid" | "range"}`. Ошибку бросает
+// вызывающий — своим кодом, названным строкой: по этим строкам словарь ошибок
+// сверяется с кодом (`test/strings.test.js`).
+function buildingNumber(value, min, max) {
+  if (value === null || value === undefined) return { value: null };
+  const text = typeof value === "string" ? value.trim().replace(",", ".") : value;
+  if (text === "") return { value: null };
+  const number = Number(text);
+  if (!Number.isFinite(number) || !Number.isInteger(number)) return { bad: "invalid" };
+  if (number < min || number > max) return { bad: "range" };
+  return { value: number };
+}
+
+/**
+ * Задать дом объекта: `{project, building, changed}`. `floors` — число или
+ * строка из поля; пустое **убирает** ключ целиком, вместе с высотой этажа.
+ */
+export function setProjectBuilding(project, patch = {}) {
+  const before = projectBuilding(project);
+  const next = { ...before };
+  const given = (field) => Object.prototype.hasOwnProperty.call(patch, field);
+  if (given("floors")) {
+    const read = buildingNumber(patch.floors, 1, BUILDING_FLOORS_MAX);
+    if (read.bad === "invalid") throw modelError("buildingFloorsInvalid");
+    if (read.bad === "range") throw modelError("buildingFloorsRange", { min: 1, max: BUILDING_FLOORS_MAX });
+    next.floors = read.value;
+  }
+  if (given("storeyMm")) {
+    const read = buildingNumber(patch.storeyMm, BUILDING_STOREY_MIN_MM, BUILDING_STOREY_MAX_MM);
+    if (read.bad === "invalid") throw modelError("buildingStoreyInvalid");
+    if (read.bad === "range") throw modelError("buildingStoreyRange", { min: BUILDING_STOREY_MIN_MM, max: BUILDING_STOREY_MAX_MM });
+    next.storeyMm = read.value;
+  }
+  if (next.floors === null) next.storeyMm = null;
+  if (next.floors === before.floors && next.storeyMm === before.storeyMm) return { project, building: next, changed: false };
+  if (next.floors === null) {
+    const { building: dropped, ...rest } = project;
+    return { project: withProject(rest, {}), building: next, changed: true };
+  }
+  const building = { floors: next.floors };
+  if (next.storeyMm !== null) building.storeyMm = next.storeyMm;
+  return { project: withProject(project, { building }), building: next, changed: true };
+}
+
 // ——— правка вершин ломаной ————————————————————————————————————————————
 //
 // Та же рука, что правит контур помещения: вершину двигают, добавляют между

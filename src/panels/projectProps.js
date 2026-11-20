@@ -27,6 +27,8 @@ import {
   projectCoords,
   projectSite,
   projectStamp,
+  projectBuilding,
+  setProjectBuilding,
   setProjectSite,
   setProjectStamp,
   updateProject,
@@ -131,6 +133,13 @@ export function projectPropsDialog(api, options = {}) {
     return { field, input, node: propsField(strings.gost[row.label] || field, input) };
   });
 
+  // Дом объекта (правка 2026-11-20): «Этажей в доме». Заполнено — объект в
+  // «Объёме» поднимается на свой этаж и вокруг него встаёт дом.
+  const building = projectBuilding(project);
+  const floorsInput = propsInput(building.floors === null ? "" : String(building.floors), strings.projectProps.buildingFloorsPlaceholder, {
+    attrs: { inputmode: "numeric" },
+  });
+  const floorsError = uiEl("p", { class: "modal__error" });
   const coordsError = uiEl("p", { class: "modal__error" });
   const topError = uiEl("p", { class: "modal__error" });
   const stampHead = propsHead(strings.projectProps.stamp);
@@ -146,6 +155,10 @@ export function projectPropsDialog(api, options = {}) {
     ]),
     facing,
     uiEl("p", { class: "modal__hint", text: strings.projectProps.topOnlyVolume }),
+    propsHead(strings.projectProps.building),
+    uiEl("div", { class: "modal__fields" }, [
+      propsField(strings.projectProps.buildingFloors, floorsInput, strings.projectProps.buildingFloorsHint, floorsError),
+    ]),
     stampHead,
     uiEl("p", { class: "modal__hint", text: strings.gost.stampHint }),
     uiEl("div", { class: "modal__fields" }, stampRows.map((row) => row.node)),
@@ -164,6 +177,7 @@ export function projectPropsDialog(api, options = {}) {
     // строкой: закрыть окно и потерять набранное человек не должен.
     coordsError.textContent = "";
     topError.textContent = "";
+    floorsError.textContent = "";
     let located;
     try {
       located = setProjectSite(base, {
@@ -179,15 +193,24 @@ export function projectPropsDialog(api, options = {}) {
       if (typeof input.scrollIntoView === "function") input.scrollIntoView({ block: "center" });
       return;
     }
+    let housed;
+    try {
+      housed = setProjectBuilding(located.project, { floors: floorsInput.value });
+    } catch (failure) {
+      floorsError.textContent = failure.message;
+      floorsInput.focus();
+      if (typeof floorsInput.scrollIntoView === "function") floorsInput.scrollIntoView({ block: "center" });
+      return;
+    }
     const patch = {};
     for (const row of stampRows) patch[row.field] = row.input.value;
-    const stamped = setProjectStamp(located.project, patch);
+    const stamped = setProjectStamp(housed.project, patch);
     // Пустое имя — не ответ: окно про имя спрашивают реже всего, а объект без
     // имени не найти в списке.
     const name = nameInput.value.trim();
     const renamed = name !== "" && name !== base.name;
     const next = renamed ? updateProject(stamped.project, { name }).project : stamped.project;
-    if (located.changed || stamped.changed || renamed) {
+    if (located.changed || housed.changed || stamped.changed || renamed) {
       canvasCommit(base, next, strings.history.projectProps);
     }
     modal.close();
@@ -195,7 +218,7 @@ export function projectPropsDialog(api, options = {}) {
     if (typeof options.onSaved === "function") options.onSaved();
   }
 
-  for (const input of [nameInput, addressInput, coordsInput, topInput, ...stampRows.map((row) => row.input)]) {
+  for (const input of [nameInput, addressInput, coordsInput, topInput, floorsInput, ...stampRows.map((row) => row.input)]) {
     input.addEventListener("keydown", (event) => {
       if (event.key !== "Enter") return;
       event.preventDefault();

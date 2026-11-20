@@ -116,6 +116,7 @@ import {
   volumeDraw,
   volumeDrawBackdrop,
   volumeDrawBackdropNear,
+  volumeDrawHouse,
   volumeMood,
   volumeFloorAt,
   volumeFloorPlan,
@@ -2902,7 +2903,7 @@ function createVolume({ api, hosts }) {
     // он не считает ничего — час приходит готовым снимком.
     // Земля сцены приходит фону одним прямоугольником (D52): по ней он знает,
     // где кончается плита, и не рисует на земле ничего ближе её кромки.
-    volumeDrawBackdrop(ctx, box, spot, at, scene.landMm);
+    volumeDrawBackdrop(ctx, box, spot, at, scene.landMm, scene.groundMm || 0);
     if (scene.empty) {
       shown = [];
       return;
@@ -2919,13 +2920,18 @@ function createVolume({ api, hosts }) {
     // кадра, без пересборки сцены. Дом не идёт — довода нет, и кадр тот же.
     const lights = homeLights(at);
     shown = volumeFrame(scene, spot, box, [...shadow, ...spots, ...moonSpots, ...overlay, ...marker, ...lights.signs], at.tint, lights.light);
+    // Дом вокруг квартиры (правка 2026-11-20): часть до сцены и часть после —
+    // правило порядка у `volumeHouseParts`. «Снять крышу» снимает и его верх.
+    const roofGone = volumeParamsRead().roofOff === true;
+    volumeDrawHouse(ctx, box, spot, at, scene, "before", roofGone);
     volumeDraw(ctx, shown);
+    volumeDrawHouse(ctx, box, spot, at, scene, "after", roofGone);
     syncRain(at);
     syncAir();
     // Второй проход фона: вещи, которые ближе кромки плиты, дом закрыть не
     // может — они перед ним (таск 199, разбор у `volumeDrawBackdrop`). Внутри
     // плиты проход пуст, то есть у ходящего по дому его нет вовсе.
-    volumeDrawBackdropNear(ctx, box, spot, at, scene.landMm);
+    volumeDrawBackdropNear(ctx, box, spot, at, scene.landMm, scene.groundMm || 0);
     // Миникарта — поверх кадра и после него: это накладка, а не часть сцены.
     if (view === "person") paintMinimap(box);
     // Отрезок линейки — тоже накладка, и поверх миникарты: мерку читают
@@ -4033,7 +4039,7 @@ function createVolume({ api, hosts }) {
         // Пол держит камеру (таск 200) — но в стопке этажей (таск 202) земля
         // лежит ниже пола открытой схемы, и держать надо по ней: иначе с
         // третьего этажа дом не обойти снаружи, камера упирается в свой пол.
-        z: volumeGroundMm(around.eye.z + dz, scene.stackMm ? scene.stackMm.bottomMm : 0),
+        z: volumeGroundMm(around.eye.z + dz, scene.stackMm ? scene.stackMm.bottomMm : scene.groundMm || 0),
       },
       around.yaw,
       around.pitch,

@@ -10,6 +10,7 @@ import {
   findScheme,
   openingOpens,
   openingVents,
+  openingFamilyOf,
   openingsInWall,
   outlinesInOrder,
   schemeObjectsOnScheme,
@@ -55,7 +56,10 @@ import {
 import { volumeCurtainShare, volumeSheerPlaces, volumeShiftRoomLight, volumeSunOpenings } from "./sun.js";
 import { volumeMarkFaces, volumeMarkProbe, volumeMarkViewLines, volumeMarks } from "./marks.js";
 import {
+  VOLUME_SLAB_MM,
   volumeCeilingUnderVoid,
+  volumeHouseLift,
+  volumeHouseOutline,
   volumeCupboardId,
   volumeFloorFaces,
   volumeFloorKey,
@@ -614,6 +618,13 @@ export function volumeScene(project, schemeId, options = {}) {
   if (!schemeHeight.known && !rooms.some((room) => room.heightKnown)) notes.push("noHeight");
   const faces = [];
   const bounds = drawingBoundsMm(project, schemeId);
+  // **Объект в многоэтажном доме** (правка 2026-11-20): у названного дома
+  // («Этажей в доме») схема стоит на своём этаже. Сама сцена не двигается —
+  // опускается земля (`groundMm`), а вокруг встаёт дом (`house`). Этаж стопки
+  // (`order: false`) не поднимается: стопку этажей дом пока не знает, и её
+  // сцена остаётся прежней.
+  const lift = bounds && options.upper !== true && options.order !== false ? volumeHouseLift(project, schemeId, schemeHeight.mm) : null;
+  const lifted = Boolean(lift && lift.raiseMm > 0);
   // Плита под чертежом — нулевой ярус. Она есть всегда: с обведёнными
   // помещениями закрывает пороги и щели у стен, без них остаётся единственным
   // полом. Потолка в этом случае нет вовсе — накрыть всё одной крышкой значило
@@ -650,8 +661,10 @@ export function volumeScene(project, schemeId, options = {}) {
   // словах — «пол есть во всех замкнутых помещениях», — и другого способа
   // узнать, есть ли там пол, у сборки нет.
   let landMm = null;
-  if (bounds && options.upper !== true) {
-    const land = rooms.length > 0;
+  // У поднятой квартиры земли под полом нет — там дом: плита-земля не кладётся.
+  // Помещения не обведены — плита остаётся единственным полом, как всегда.
+  if (bounds && options.upper !== true && !(lifted && rooms.length > 0)) {
+    const land = rooms.length > 0 && !lifted;
     const shadow = volumeShadowShift(tallest);
     const out = land ? Math.hypot(shadow.x, shadow.y) + VOLUME_LAND_OUT_MM : 0;
     const plate = {
@@ -731,6 +744,39 @@ export function volumeScene(project, schemeId, options = {}) {
         heightMm: height,
       });
     }
+  }
+  // Тень поднятой квартиры на землю не кладётся: её бросает дом, а не стены
+  // этажа, и лежала бы она в десятках метров внизу поверх фона.
+  if (lifted) shadowBoxes.length = 0;
+  // Дом вокруг квартиры: контур по габариту, фасад — стороны с окнами.
+  let house = null;
+  if (lift) {
+    const windows = { north: false, east: false, south: false, west: false };
+    const near = 700;
+    for (const wall of walls) {
+      if (!openingsInWall(project, wall.id).some((opening) => openingFamilyOf(opening.kind) === "window")) continue;
+      const ax = Number(wall.aMm.x);
+      const ay = Number(wall.aMm.y);
+      const bx = Number(wall.bMm.x);
+      const by = Number(wall.bMm.y);
+      if (Math.abs(ay - by) <= Math.abs(ax - bx)) {
+        if (Math.abs((ay + by) / 2 - bounds.minY) < near) windows.north = true;
+        if (Math.abs((ay + by) / 2 - bounds.maxY) < near) windows.south = true;
+      } else {
+        if (Math.abs((ax + bx) / 2 - bounds.minX) < near) windows.west = true;
+        if (Math.abs((ax + bx) / 2 - bounds.maxX) < near) windows.east = true;
+      }
+    }
+    const outline = volumeHouseOutline(bounds, windows);
+    house = {
+      ...lift,
+      rect: outline.rect,
+      wings: outline.wings,
+      // Низ и верх самой квартиры: под ней дом до земли, над ней — до крыши.
+      floorMm: -VOLUME_SLAB_MM,
+      ceilingMm: schemeHeight.mm,
+    };
+    if (lifted) landMm = outline.rect;
   }
   for (const room of rooms) {
     // **Пол помещения — он же перекрытие** (таск 209, G317): одно правило, а не
@@ -1173,6 +1219,10 @@ export function volumeScene(project, schemeId, options = {}) {
     doors,
     windows,
     cupboards,
+    // Где лежит земля в миллиметрах сцены и дом вокруг квартиры (правка
+    // 2026-11-20). У объекта на земле — ноль и `null`.
+    groundMm: lift ? lift.groundMm : 0,
+    house,
     // Лестницы схемы (таск 149): по ним окно спрашивает про этаж. Лежат в
     // сцене, а не ищутся на каждом шаге, — спрашивается это на каждом шаге, а
     // меняется только вместе с чертежом, то есть вместе со всей сценой.

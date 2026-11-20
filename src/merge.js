@@ -28,6 +28,7 @@ import {
   markWithoutObject,
   markWithoutWall,
   nextIds,
+  projectBuilding,
   projectSite,
   renumberAcceptedRepeats,
 } from "./model.js";
@@ -199,6 +200,19 @@ function mergeStamp(merged, ours, theirs, winner) {
  * Поля нет ни у кого — оно и не заводится: объект прежней разметки остаётся
  * прежним, и два одинаковых файла сходятся в «ничего не изменилось» (G68).
  */
+/**
+ * Дом объекта (`project.building`, правка 2026-11-20) — один слот: есть у
+ * одного — берут оба, есть у обоих и разный — победитель спора. Нет ни у кого
+ * — не заводится (G68).
+ */
+function mergeBuilding(merged, ours, theirs, winner) {
+  const mine = projectBuilding(ours);
+  const other = projectBuilding(theirs);
+  if (mine.floors === null && other.floors === null) return;
+  const kept = mine.floors === null ? other : other.floors === null ? mine : winner === "theirs" ? other : mine;
+  merged.building = kept.storeyMm === null ? { floors: kept.floors } : { floors: kept.floors, storeyMm: kept.storeyMm };
+}
+
 function mergeSite(merged, ours, theirs, winner) {
   const has = (project) => Boolean(project && project.site && typeof project.site === "object");
   if (!has(ours) && !has(theirs)) return;
@@ -1068,6 +1082,7 @@ export function mergeProjects(ours, theirs, base, options = {}) {
   if (!mergeSame(ours.view, theirs.view)) merged.view = winner === "theirs" ? theirs.view : ours.view;
   mergeStamp(merged, ours, theirs, winner);
   mergeSite(merged, ours, theirs, winner);
+  mergeBuilding(merged, ours, theirs, winner);
   // Ключ проекта сходится. Есть у одного — берут оба: это факт, а не мнение, и
   // после первой же встречи родство перестаёт быть догадкой. Есть у обоих и
   // разные (копии разошлись до появления ключей) — берётся меньший по строке:

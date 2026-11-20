@@ -18,6 +18,7 @@ import {
   outlinesInOrder,
   planFractionToMm,
   planMmToFraction,
+  projectBuilding,
   roomAtPlace,
   roomHasFloor,
   roomPaintOf,
@@ -550,6 +551,69 @@ export function volumeCupboardMarks(project, schemeId, object, fallbackHeightMm)
     if (probes.some(inside)) out.push(mark.id);
   }
   return out;
+}
+
+// ——— объект в многоэтажном доме (правка без автопилота, 2026-11-20) —————————
+//
+// Слова заказчика: «что бы указанный этаж у чертежа поднимал сам объект на
+// нужную высоту — если объект квартира, то как раз мы не на земле же, а где-то
+// наверху в доме». Поднимает только **названный дом**: поле «Этажей в доме»
+// (`projectBuilding`). Без него номер этажа по-прежнему значит одно — порядок
+// в стопке, и коттедж с этажами 1 и 2 стоит на земле (G68).
+//
+// **Сцена не сдвигается ни на миллиметр — опускается земля.** Ноль высоты
+// остаётся полом открытой схемы: ходьба, камера, выделение и лестницы считают
+// как считали, а земля, фон и дом под квартирой уходят вниз на `raiseMm`.
+
+/** Сколько дом выступает за глухую сторону квартиры: соседние квартиры и лестничная клетка. */
+export const VOLUME_HOUSE_WING_MM = 12000;
+
+/**
+ * Подъём схемы в доме: `{floor, floors, storeyMm, raiseMm, groundMm, roofMm}` или
+ * `null` — дом не назван, у схемы нет этажа, или это подвал (этаж ниже первого
+ * в первой версии не поднимается и не заглубляется).
+ *
+ * `heightMm` — высота стен схемы; этаж дома — она же плюс плита, если своей
+ * высоты этажа у дома нет. `groundMm` — где земля в миллиметрах сцены (ноль
+ * или ниже), `roofMm` — где крыша дома.
+ */
+export function volumeHouseLift(project, schemeId, heightMm) {
+  const building = projectBuilding(project);
+  if (building.floors === null) return null;
+  const floor = schemeFloorOf(project, schemeId);
+  if (floor === null || floor < 1) return null;
+  const wall = Number(heightMm) > 0 ? Number(heightMm) : WALL_HEIGHT_FALLBACK_MM;
+  const storeyMm = building.storeyMm || wall + VOLUME_SLAB_MM;
+  const floors = Math.max(building.floors, floor);
+  const raiseMm = (floor - 1) * storeyMm;
+  return { floor, floors, storeyMm, raiseMm, groundMm: raiseMm === 0 ? 0 : -raiseMm, roofMm: wall + (floors - floor) * storeyMm };
+}
+
+/**
+ * Контур дома по габариту квартиры: `{rect, wings}`.
+ *
+ * `windows` — на каких сторонах габарита стоят окна (`{north, east, south,
+ * west}`). Сторона с окном — фасад, дом на ней кончается; глухая наращивается
+ * на `VOLUME_HOUSE_WING_MM`. Окна со всех сторон или ни с одной — дом ровно по
+ * габариту: гадать, где у него соседи, нечем. `wings` — куски дома на уровне
+ * самой квартиры, за её глухими сторонами.
+ */
+export function volumeHouseOutline(bounds, windows) {
+  const sides = ["north", "east", "south", "west"];
+  const open = sides.filter((side) => windows && windows[side]);
+  const grow = open.length === 0 || open.length === 4 ? () => 0 : (side) => (windows[side] ? 0 : VOLUME_HOUSE_WING_MM);
+  const rect = {
+    minX: bounds.minX - grow("west"),
+    maxX: bounds.maxX + grow("east"),
+    minY: bounds.minY - grow("north"),
+    maxY: bounds.maxY + grow("south"),
+  };
+  const wings = [];
+  if (rect.minX < bounds.minX) wings.push({ side: "west", minX: rect.minX, maxX: bounds.minX, minY: rect.minY, maxY: rect.maxY });
+  if (rect.maxX > bounds.maxX) wings.push({ side: "east", minX: bounds.maxX, maxX: rect.maxX, minY: rect.minY, maxY: rect.maxY });
+  if (rect.minY < bounds.minY) wings.push({ side: "north", minX: bounds.minX, maxX: bounds.maxX, minY: rect.minY, maxY: bounds.minY });
+  if (rect.maxY > bounds.maxY) wings.push({ side: "south", minX: bounds.minX, maxX: bounds.maxX, minY: bounds.maxY, maxY: rect.maxY });
+  return { rect, wings };
 }
 
 /**

@@ -6711,7 +6711,7 @@ display: none;
     var label = document.getElementById("splash-step");
     var canvas = document.getElementById("splash-model");
     var STEPS = ["Расставляем розетки…","Проектируем щит…","Настраиваем сценарии…","Подбираем оборудование…","Чертим стены…","Развешиваем люстры…","Тянем кабель…","Маркируем линии…","Считаем длину ленты…","Калибруем масштаб…","Проверяем автоматы…","Вешаем шторы на карнизы…","Ищем, где спрятать кондиционер…","Учим выключатели проходить…","Уговариваем датчик движения не реагировать на кота…","Объясняем люстре, что она не главная…","Прячем провода за плинтус…","Ищем фазу. Нашли. Больше не ищем…","Считаем розетки. Опять не хватает…","Мирим тёплый пол с ковром…","Договариваемся с роботом-пылесосом о маршруте…","Убеждаем щит, что места в нём достаточно…","Учим шторы просыпаться вовремя…","Проверяем, что лампочка действительно горит…","Напоминаем термостату, что зима кончилась…","Вспоминаем, от чего этот автомат…"];
-    var PAGE_BYTES = 3102841;
+    var PAGE_BYTES = 3112788;
     var calm = false;
     try {
     calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -8017,6 +8017,10 @@ imageRequired: "Нужна картинка плана",
 planSizeInvalid: "Размер плана должен быть больше нуля",
 schemeFloorInvalid: "Этаж — целое число: «1», «2», «0» или «-1» для подвала",
 schemeFloorRange: "Этаж — число от {min} до {max}",
+buildingFloorsInvalid: "Этажей в доме — целое число: «9», «17», «25»",
+buildingFloorsRange: "Этажей в доме — число от {min} до {max}",
+buildingStoreyInvalid: "Высота этажа дома — целое число миллиметров",
+buildingStoreyRange: "Высота этажа дома — от {min} до {max} мм",
 schemeAnchorInvalid: "Точка привязки — две координаты в миллиметрах чертежа: X и Y",
 schemeAnchorHalf: "Точка привязки — обе координаты: заполните X и Y или оставьте оба поля пустыми",
 coordsInvalid:
@@ -8386,6 +8390,11 @@ addressPlaceholder: "Москва, ул. Ленина, 14, кв. 56",
 addressHint:
 "Адрес встаёт в графу штампа «Наименование здания» — там, где лист не сужен помещением: лист по комнате называет комнату.",
 place: "Место",
+building: "Дом",
+buildingFloors: "Этажей в доме",
+buildingFloorsPlaceholder: "пусто — объект стоит на земле",
+buildingFloorsHint:
+"Заполните, если объект — квартира в многоэтажном доме: в «Объёме» он поднимется на этаж, указанный у схемы, а вокруг встанет дом. Пусто — объект стоит на земле, как коттедж",
 coords: "Координаты: широта, долгота",
 coordsPlaceholder: "55.7558, 37.6173",
 coordsHint:
@@ -21057,6 +21066,53 @@ return { project: withProject(rest, {}), site: next, changed: true };
 }
 return { project: withProject(project, { site }), site: next, changed: true };
 }
+const BUILDING_FLOORS_MAX = SCHEME_FLOOR_MAX;
+const BUILDING_STOREY_MIN_MM = 2200;
+const BUILDING_STOREY_MAX_MM = 6000;
+function projectBuilding(project) {
+const own = project && project.building && typeof project.building === "object" ? project.building : null;
+const floors = own && Number.isInteger(own.floors) && own.floors >= 1 && own.floors <= BUILDING_FLOORS_MAX ? own.floors : null;
+const storey =
+own && Number.isFinite(own.storeyMm) && own.storeyMm >= BUILDING_STOREY_MIN_MM && own.storeyMm <= BUILDING_STOREY_MAX_MM
+? Math.round(own.storeyMm)
+: null;
+return { floors, storeyMm: floors === null ? null : storey };
+}
+function buildingNumber(value, min, max) {
+if (value === null || value === undefined) return { value: null };
+const text = typeof value === "string" ? value.trim().replace(",", ".") : value;
+if (text === "") return { value: null };
+const number = Number(text);
+if (!Number.isFinite(number) || !Number.isInteger(number)) return { bad: "invalid" };
+if (number < min || number > max) return { bad: "range" };
+return { value: number };
+}
+function setProjectBuilding(project, patch = {}) {
+const before = projectBuilding(project);
+const next = { ...before };
+const given = (field) => Object.prototype.hasOwnProperty.call(patch, field);
+if (given("floors")) {
+const read = buildingNumber(patch.floors, 1, BUILDING_FLOORS_MAX);
+if (read.bad === "invalid") throw modelError("buildingFloorsInvalid");
+if (read.bad === "range") throw modelError("buildingFloorsRange", { min: 1, max: BUILDING_FLOORS_MAX });
+next.floors = read.value;
+}
+if (given("storeyMm")) {
+const read = buildingNumber(patch.storeyMm, BUILDING_STOREY_MIN_MM, BUILDING_STOREY_MAX_MM);
+if (read.bad === "invalid") throw modelError("buildingStoreyInvalid");
+if (read.bad === "range") throw modelError("buildingStoreyRange", { min: BUILDING_STOREY_MIN_MM, max: BUILDING_STOREY_MAX_MM });
+next.storeyMm = read.value;
+}
+if (next.floors === null) next.storeyMm = null;
+if (next.floors === before.floors && next.storeyMm === before.storeyMm) return { project, building: next, changed: false };
+if (next.floors === null) {
+const { building: dropped, ...rest } = project;
+return { project: withProject(rest, {}), building: next, changed: true };
+}
+const building = { floors: next.floors };
+if (next.storeyMm !== null) building.storeyMm = next.storeyMm;
+return { project: withProject(project, { building }), building: next, changed: true };
+}
 function markPointsAt(project, markId) {
 return [...requireMark(project, markId).points];
 }
@@ -24648,6 +24704,13 @@ if (value) stamp[field] = value;
 if (Object.keys(stamp).length > 0) merged.stamp = stamp;
 else delete merged.stamp;
 }
+function mergeBuilding(merged, ours, theirs, winner) {
+const mine = projectBuilding(ours);
+const other = projectBuilding(theirs);
+if (mine.floors === null && other.floors === null) return;
+const kept = mine.floors === null ? other : other.floors === null ? mine : winner === "theirs" ? other : mine;
+merged.building = kept.storeyMm === null ? { floors: kept.floors } : { floors: kept.floors, storeyMm: kept.storeyMm };
+}
 function mergeSite(merged, ours, theirs, winner) {
 const has = (project) => Boolean(project && project.site && typeof project.site === "object");
 if (!has(ours) && !has(theirs)) return;
@@ -25152,6 +25215,7 @@ report.conflicts.push({ code: "bothChanged", entity: "name", id: ours.id, kept: 
 if (!mergeSame(ours.view, theirs.view)) merged.view = winner === "theirs" ? theirs.view : ours.view;
 mergeStamp(merged, ours, theirs, winner);
 mergeSite(merged, ours, theirs, winner);
+mergeBuilding(merged, ours, theirs, winner);
 const mergedKey = mergeMergeKeys(mergeKeyOf(ours), mergeKeyOf(theirs));
 if (mergedKey) merged.key = mergedKey;
 if (theirs.createdAt && (!merged.createdAt || theirs.createdAt < merged.createdAt)) merged.createdAt = theirs.createdAt;
@@ -41482,6 +41546,35 @@ if (probes.some(inside)) out.push(mark.id);
 }
 return out;
 }
+const VOLUME_HOUSE_WING_MM = 12000;
+function volumeHouseLift(project, schemeId, heightMm) {
+const building = projectBuilding(project);
+if (building.floors === null) return null;
+const floor = schemeFloorOf(project, schemeId);
+if (floor === null || floor < 1) return null;
+const wall = Number(heightMm) > 0 ? Number(heightMm) : WALL_HEIGHT_FALLBACK_MM;
+const storeyMm = building.storeyMm || wall + VOLUME_SLAB_MM;
+const floors = Math.max(building.floors, floor);
+const raiseMm = (floor - 1) * storeyMm;
+return { floor, floors, storeyMm, raiseMm, groundMm: raiseMm === 0 ? 0 : -raiseMm, roofMm: wall + (floors - floor) * storeyMm };
+}
+function volumeHouseOutline(bounds, windows) {
+const sides = ["north", "east", "south", "west"];
+const open = sides.filter((side) => windows && windows[side]);
+const grow = open.length === 0 || open.length === 4 ? () => 0 : (side) => (windows[side] ? 0 : VOLUME_HOUSE_WING_MM);
+const rect = {
+minX: bounds.minX - grow("west"),
+maxX: bounds.maxX + grow("east"),
+minY: bounds.minY - grow("north"),
+maxY: bounds.maxY + grow("south"),
+};
+const wings = [];
+if (rect.minX < bounds.minX) wings.push({ side: "west", minX: rect.minX, maxX: bounds.minX, minY: rect.minY, maxY: rect.maxY });
+if (rect.maxX > bounds.maxX) wings.push({ side: "east", minX: bounds.maxX, maxX: rect.maxX, minY: rect.minY, maxY: rect.maxY });
+if (rect.minY < bounds.minY) wings.push({ side: "north", minX: bounds.minX, maxX: bounds.maxX, minY: rect.minY, maxY: bounds.minY });
+if (rect.maxY > bounds.maxY) wings.push({ side: "south", minX: bounds.minX, maxX: bounds.maxX, minY: bounds.maxY, maxY: rect.maxY });
+return { rect, wings };
+}
 function volumePrismBlocks(prism) {
 return prism.bottomMm < VOLUME_HEAD_MM && prism.topMm > VOLUME_STEP_MM;
 }
@@ -42504,11 +42597,13 @@ const schemeHeight = volumeHeightMm(project, schemeId, null);
 if (!schemeHeight.known && !rooms.some((room) => room.heightKnown)) notes.push("noHeight");
 const faces = [];
 const bounds = drawingBoundsMm(project, schemeId);
+const lift = bounds && options.upper !== true && options.order !== false ? volumeHouseLift(project, schemeId, schemeHeight.mm) : null;
+const lifted = Boolean(lift && lift.raiseMm > 0);
 const wallHeights = volumeWallHeights(project, schemeId, schemeHeight.mm);
 const tallest = volumeWallsTopMm(project, schemeId, wallHeights);
 let landMm = null;
-if (bounds && options.upper !== true) {
-const land = rooms.length > 0;
+if (bounds && options.upper !== true && !(lifted && rooms.length > 0)) {
+const land = rooms.length > 0 && !lifted;
 const shadow = volumeShadowShift(tallest);
 const out = land ? Math.hypot(shadow.x, shadow.y) + VOLUME_LAND_OUT_MM : 0;
 const plate = {
@@ -42552,6 +42647,35 @@ Number(wall.thicknessMm),
 heightMm: height,
 });
 }
+}
+if (lifted) shadowBoxes.length = 0;
+let house = null;
+if (lift) {
+const windows = { north: false, east: false, south: false, west: false };
+const near = 700;
+for (const wall of walls) {
+if (!openingsInWall(project, wall.id).some((opening) => openingFamilyOf(opening.kind) === "window")) continue;
+const ax = Number(wall.aMm.x);
+const ay = Number(wall.aMm.y);
+const bx = Number(wall.bMm.x);
+const by = Number(wall.bMm.y);
+if (Math.abs(ay - by) <= Math.abs(ax - bx)) {
+if (Math.abs((ay + by) / 2 - bounds.minY) < near) windows.north = true;
+if (Math.abs((ay + by) / 2 - bounds.maxY) < near) windows.south = true;
+} else {
+if (Math.abs((ax + bx) / 2 - bounds.minX) < near) windows.west = true;
+if (Math.abs((ax + bx) / 2 - bounds.maxX) < near) windows.east = true;
+}
+}
+const outline = volumeHouseOutline(bounds, windows);
+house = {
+...lift,
+rect: outline.rect,
+wings: outline.wings,
+floorMm: -VOLUME_SLAB_MM,
+ceilingMm: schemeHeight.mm,
+};
+if (lifted) landMm = outline.rect;
 }
 for (const room of rooms) {
 if (room.hasFloor) {
@@ -42785,6 +42909,8 @@ openingCount: walls.reduce((sum, wall) => sum + openingsInWall(project, wall.id)
 doors,
 windows,
 cupboards,
+groundMm: lift ? lift.groundMm : 0,
+house,
 stairs: volumeStairs(project, schemeId).filter((stair) => !hidden.has(stair.objectId)),
 marks: marks.placed,
 unplaced: marks.unplaced,
@@ -45096,7 +45222,6 @@ if (tone === 3) return { wall: mega.brick, side: mega.brickSide, band: palette.g
 return { wall: palette.wall, side: palette.wallSide, band: palette.glass, roof: palette.roof };
 }
 function volumeDrawMegaBlock(ctx, point, at, block, index, hour, lit) {
-const paint = volumeMegaPaint(hour.palette, block.tone);
 const len = Math.hypot(block.x, block.y) || 1;
 const fx = block.x / len;
 const fy = block.y / len;
@@ -45107,8 +45232,18 @@ const corner = (alongSign, deepSign) => ({
 x: block.x + ux * block.halfMm * alongSign + fx * deep * deepSign,
 y: block.y + uy * block.halfMm * alongSign + fy * deep * deepSign,
 });
-const plan = [corner(1, -1), corner(-1, -1), corner(-1, 1), corner(1, 1)];
-const wides = [block.halfMm * 2, block.deepMm, block.halfMm * 2, block.deepMm];
+volumeDrawMegaBox(ctx, point, at, {
+plan: [corner(1, -1), corner(-1, -1), corner(-1, 1), corner(1, 1)],
+wides: [block.halfMm * 2, block.deepMm, block.halfMm * 2, block.deepMm],
+bottomMm: 0,
+topMm: block.heightMm,
+floors: block.floors,
+paint: volumeMegaPaint(hour.palette, block.tone),
+seed: index,
+}, hour, lit);
+}
+function volumeDrawMegaBox(ctx, point, at, box, hour, lit) {
+const { plan, wides, bottomMm, topMm, floors, paint } = box;
 const shown = [];
 for (let side = 0; side < 4; side += 1) {
 const from = plan[side];
@@ -45116,14 +45251,14 @@ const to = plan[(side + 1) % 4];
 const mx = (from.x + to.x) / 2;
 const my = (from.y + to.y) / 2;
 if ((to.y - from.y) * (at.x - mx) - (to.x - from.x) * (at.y - my) <= 0) continue;
-const left = point(from.x, from.y, block.heightMm);
-const right = point(to.x, to.y, block.heightMm);
-const footLeft = point(from.x, from.y, 0);
-const footRight = point(to.x, to.y, 0);
+const left = point(from.x, from.y, topMm);
+const right = point(to.x, to.y, topMm);
+const footLeft = point(from.x, from.y, bottomMm);
+const footRight = point(to.x, to.y, bottomMm);
 if (!left || !right || !footLeft || !footRight) continue;
 shown.push({ side, wide: wides[side], left, right, footLeft, footRight, depth: Math.hypot(mx - at.x, my - at.y) });
 }
-if (shown.length === 0) return;
+if (shown.length > 0) {
 shown.sort((one, two) => two.depth - one.depth);
 const share = hour.cityLit;
 for (const wall of shown) {
@@ -45133,13 +45268,13 @@ ctx.beginPath();
 megaQuad(ctx, left, right, footRight, footLeft);
 ctx.fill();
 const tall = Math.max(Math.abs(footLeft.y - left.y), Math.abs(footRight.y - right.y));
-const floorPx = tall / block.floors;
+const floorPx = tall / floors;
 if (floorPx < VOLUME_MEGA_BAND_PX) continue;
 const pad = 0.04;
-const cellY = (1 - pad * 2) / block.floors;
+const cellY = (1 - pad * 2) / floors;
 ctx.fillStyle = paint.band;
 ctx.beginPath();
-for (let floor = 0; floor < block.floors; floor += 1) {
+for (let floor = 0; floor < floors; floor += 1) {
 const top = pad + cellY * (floor + 0.2);
 const low = top + cellY * 0.56;
 megaQuad(
@@ -45156,11 +45291,11 @@ const bays = Math.max(2, Math.round(wall.wide / VOLUME_MEGA_BAY_MM));
 const across = Math.hypot(right.x - left.x, right.y - left.y) / bays;
 if (across < VOLUME_MEGA_WINDOW_PX) continue;
 const cellX = (1 - pad * 2) / bays;
-const step = block.floors * bays > VOLUME_MEGA_LIT_MAX ? 2 : 1;
-const seed = index * 4 + wall.side;
+const step = floors * bays > VOLUME_MEGA_LIT_MAX ? 2 : 1;
+const seed = box.seed * 4 + wall.side;
 let any = false;
 ctx.beginPath();
-for (let floor = 0; floor < block.floors; floor += step) {
+for (let floor = 0; floor < floors; floor += step) {
 const top = pad + cellY * (floor + 0.2);
 const low = top + cellY * 0.56;
 for (let bay = 0; bay < bays; bay += 1) {
@@ -45182,7 +45317,10 @@ ctx.fillStyle = hour.palette.mega.light;
 ctx.fill();
 }
 }
-const top = plan.map((spot) => point(spot.x, spot.y, block.heightMm));
+}
+if (box.roof === false) return;
+if (Number.isFinite(at.z) && at.z <= topMm) return;
+const top = plan.map((spot) => point(spot.x, spot.y, topMm));
 if (top.every(Boolean)) {
 ctx.fillStyle = paint.roof;
 ctx.beginPath();
@@ -45262,7 +45400,8 @@ const foot = point(node.x, node.y, 0);
 const crest = point(node.x, node.y, node.heightMm);
 const edge = point(next.x, next.y, node.heightMm);
 const edgeFoot = point(next.x, next.y, 0);
-if (!foot || !crest || !edge || !edgeFoot) {
+const close = ridge.nearMm || 0;
+if (!foot || !crest || !edge || !edgeFoot || foot.depth < close || edgeFoot.depth < close) {
 run = null;
 continue;
 }
@@ -45483,13 +45622,14 @@ bank(node.right, 1.1, 0.5, "bush");
 return greens;
 }
 const VOLUME_RIVER_GREENS = volumeRiverGreens(VOLUME_RIVER);
-function volumeGroundAim(camera, box) {
+function volumeGroundAim(camera, box, groundMm = 0) {
+const ground = Number(groundMm) || 0;
 return {
 basis: volumeBasis(camera),
 focal: volumeFocal(box),
 halfWidth: box.width / 2,
 halfHeight: box.height / 2,
-at: camera.at,
+at: ground === 0 ? camera.at : { x: camera.at.x, y: camera.at.y, z: camera.at.z - ground },
 };
 }
 function volumeGroundPoint(aim, xMm, yMm, zMm = 0) {
@@ -45681,7 +45821,7 @@ ctx.fillStyle = ridge.far ? palette.hillFar : palette.hillNear;
 ctx.fill();
 }
 }
-function volumeDrawBackdrop(ctx, box, camera, mood = null, land = null) {
+function volumeDrawBackdrop(ctx, box, camera, mood = null, land = null, groundMm = 0) {
 const hour = mood || VOLUME_MOOD_NOON;
 const palette = hour.palette;
 const horizonY = volumeHorizon(camera, box);
@@ -45700,7 +45840,7 @@ if (line < box.height) {
 ctx.fillStyle = palette.land;
 ctx.fillRect(0, Math.max(0, line), box.width, box.height - Math.max(0, line));
 }
-if (hour.kind !== "plain") volumeDrawGround(ctx, box, camera, hour, land, false);
+if (hour.kind !== "plain") volumeDrawGround(ctx, box, camera, hour, land, false, groundMm);
 volumeDrawFogBand(ctx, box, line, hour);
 return line;
 }
@@ -45741,15 +45881,15 @@ gradient.addColorStop(1, "rgba(" + rgb + "," + Math.round(strength * VOLUME_FOG_
 ctx.fillStyle = gradient;
 ctx.fillRect(0, Math.max(0, top), box.width, box.height - Math.max(0, top));
 }
-function volumeDrawBackdropNear(ctx, box, camera, mood = null, land = null) {
+function volumeDrawBackdropNear(ctx, box, camera, mood = null, land = null, groundMm = 0) {
 const hour = mood || VOLUME_MOOD_NOON;
 if (hour.kind === "plain") return;
 if (!(volumePlateGap(land, camera.at) > 0)) return;
-volumeDrawGround(ctx, box, camera, hour, land, true);
+volumeDrawGround(ctx, box, camera, hour, land, true, groundMm);
 }
-function volumeDrawGround(ctx, box, camera, hour, land, near) {
+function volumeDrawGround(ctx, box, camera, hour, land, near, groundMm = 0) {
 const palette = hour.palette;
-const aim = volumeGroundAim(camera, box);
+const aim = volumeGroundAim(camera, box, groundMm);
 const places = volumeBackdropPlaces(land);
 const gap = volumePlateGap(land, camera.at);
 const at = camera.at;
@@ -45799,7 +45939,7 @@ street.river
 if (street.marks) volumeDrawStrip(ctx, aim, street.marks, () => palette.mark);
 }
 }
-take(mega.blocks, (spot, index) => volumeDrawMegaBlock(ctx, point, at, spot, index, hour, volumeCityWindowLit));
+take(mega.blocks, (spot, index) => volumeDrawMegaBlock(ctx, point, aim.at, spot, index, hour, volumeCityWindowLit));
 take(mega.cars, (spot) => volumeDrawCar(ctx, aim, spot, palette));
 take(mega.greens, (spot) => volumeDrawTree(ctx, aim, spot, palette));
 } else {
@@ -46388,6 +46528,7 @@ tone,
 })),
 skyline: VOLUME_MEGA_SKYLINE.map((ridge) => ({
 far: ridge.far,
+nearMm: ridge.awayM * VOLUME_M * 0.25,
 nodes: ridge.rises.map((rise, index) => ({
 ...volumeAway((index * 360) / ridge.rises.length, ridge.awayM),
 awayMm: ridge.awayM * VOLUME_M,
@@ -46505,6 +46646,71 @@ normal: { x: 0, y: 0, z: 1 },
 layer: VOLUME_LAYER_MARK,
 }));
 return out;
+}
+
+// src/volume/house.js
+function housePlan(rect) {
+return {
+plan: [
+{ x: rect.minX, y: rect.minY },
+{ x: rect.maxX, y: rect.minY },
+{ x: rect.maxX, y: rect.maxY },
+{ x: rect.minX, y: rect.maxY },
+],
+wides: [rect.maxX - rect.minX, rect.maxY - rect.minY, rect.maxX - rect.minX, rect.maxY - rect.minY],
+};
+}
+function volumeHouseParts(house, eye, roofOff = false) {
+if (!house) return [];
+const parts = [];
+const below = house.floor - 1;
+if (below > 0) {
+parts.push({ name: "low", rect: house.rect, bottomMm: house.groundMm, topMm: house.floorMm, floors: below, pass: "before", roof: true });
+}
+if (roofOff) return parts;
+for (const wing of house.wings) {
+const outside =
+wing.side === "west"
+? eye.x < wing.maxX
+: wing.side === "east"
+? eye.x > wing.minX
+: wing.side === "north"
+? eye.y < wing.maxY
+: eye.y > wing.minY;
+parts.push({ name: "wing", rect: wing, bottomMm: house.floorMm, topMm: house.ceilingMm, floors: 1, pass: outside ? "after" : "before", roof: false });
+}
+const above = house.floors - house.floor;
+parts.push({
+name: "high",
+rect: house.rect,
+bottomMm: house.ceilingMm,
+topMm: Math.max(house.roofMm, house.ceilingMm + 300),
+floors: Math.max(1, above),
+pass: eye.z > house.ceilingMm ? "after" : "before",
+roof: true,
+});
+return parts;
+}
+function volumeDrawHouse(ctx, box, camera, mood, scene, pass, roofOff = false) {
+const house = scene && scene.house;
+if (!house || !mood || !mood.palette || !mood.palette.mega) return 0;
+const aim = volumeGroundAim(camera, box, 0);
+const point = (x, y, z) => volumeGroundPoint(aim, x, y, z);
+const paint = volumeMegaPaint(mood.palette, 0);
+let drawn = 0;
+for (const part of volumeHouseParts(house, camera.at, roofOff)) {
+if (part.pass !== pass) continue;
+volumeDrawMegaBox(
+ctx,
+point,
+camera.at,
+{ ...housePlan(part.rect), bottomMm: part.bottomMm, topMm: part.topMm, floors: part.floors, paint, seed: 900 + drawn, roof: part.roof },
+mood,
+volumeCityWindowLit,
+);
+drawn += 1;
+}
+return drawn;
 }
 
 // src/volume.js
@@ -61149,6 +61355,11 @@ const row = STAMP_LABELS[field] || { label: field };
 const input = propsInput(stamp[field], row.hint ? strings.gost[row.hint] : "");
 return { field, input, node: propsField(strings.gost[row.label] || field, input) };
 });
+const building = projectBuilding(project);
+const floorsInput = propsInput(building.floors === null ? "" : String(building.floors), strings.projectProps.buildingFloorsPlaceholder, {
+attrs: { inputmode: "numeric" },
+});
+const floorsError = uiEl("p", { class: "modal__error" });
 const coordsError = uiEl("p", { class: "modal__error" });
 const topError = uiEl("p", { class: "modal__error" });
 const stampHead = propsHead(strings.projectProps.stamp);
@@ -61164,6 +61375,10 @@ propsField(strings.projectProps.top, topInput, strings.projectProps.topHint, top
 ]),
 facing,
 uiEl("p", { class: "modal__hint", text: strings.projectProps.topOnlyVolume }),
+propsHead(strings.projectProps.building),
+uiEl("div", { class: "modal__fields" }, [
+propsField(strings.projectProps.buildingFloors, floorsInput, strings.projectProps.buildingFloorsHint, floorsError),
+]),
 stampHead,
 uiEl("p", { class: "modal__hint", text: strings.gost.stampHint }),
 uiEl("div", { class: "modal__fields" }, stampRows.map((row) => row.node)),
@@ -61177,6 +61392,7 @@ return;
 }
 coordsError.textContent = "";
 topError.textContent = "";
+floorsError.textContent = "";
 let located;
 try {
 located = setProjectSite(base, {
@@ -61192,20 +61408,29 @@ input.focus();
 if (typeof input.scrollIntoView === "function") input.scrollIntoView({ block: "center" });
 return;
 }
+let housed;
+try {
+housed = setProjectBuilding(located.project, { floors: floorsInput.value });
+} catch (failure) {
+floorsError.textContent = failure.message;
+floorsInput.focus();
+if (typeof floorsInput.scrollIntoView === "function") floorsInput.scrollIntoView({ block: "center" });
+return;
+}
 const patch = {};
 for (const row of stampRows) patch[row.field] = row.input.value;
-const stamped = setProjectStamp(located.project, patch);
+const stamped = setProjectStamp(housed.project, patch);
 const name = nameInput.value.trim();
 const renamed = name !== "" && name !== base.name;
 const next = renamed ? updateProject(stamped.project, { name }).project : stamped.project;
-if (located.changed || stamped.changed || renamed) {
+if (located.changed || housed.changed || stamped.changed || renamed) {
 canvasCommit(base, next, strings.history.projectProps);
 }
 modal.close();
 notify(strings.projectProps.saved, "success");
 if (typeof options.onSaved === "function") options.onSaved();
 }
-for (const input of [nameInput, addressInput, coordsInput, topInput, ...stampRows.map((row) => row.input)]) {
+for (const input of [nameInput, addressInput, coordsInput, topInput, floorsInput, ...stampRows.map((row) => row.input)]) {
 input.addEventListener("keydown", (event) => {
 if (event.key !== "Enter") return;
 event.preventDefault();
@@ -72717,7 +72942,7 @@ ctx.clearRect(0, 0, node.width, node.height);
 ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
 const spot = camera();
 const at = hourNow();
-volumeDrawBackdrop(ctx, box, spot, at, scene.landMm);
+volumeDrawBackdrop(ctx, box, spot, at, scene.landMm, scene.groundMm || 0);
 if (scene.empty) {
 shown = [];
 return;
@@ -72725,10 +72950,13 @@ return;
 const marker = view === "around" ? volumeMarkerFaces({ x: person.x, y: person.y }, person.yaw) : [];
 const lights = homeLights(at);
 shown = volumeFrame(scene, spot, box, [...shadow, ...spots, ...moonSpots, ...overlay, ...marker, ...lights.signs], at.tint, lights.light);
+const roofGone = volumeParamsRead().roofOff === true;
+volumeDrawHouse(ctx, box, spot, at, scene, "before", roofGone);
 volumeDraw(ctx, shown);
+volumeDrawHouse(ctx, box, spot, at, scene, "after", roofGone);
 syncRain(at);
 syncAir();
-volumeDrawBackdropNear(ctx, box, spot, at, scene.landMm);
+volumeDrawBackdropNear(ctx, box, spot, at, scene.landMm, scene.groundMm || 0);
 if (view === "person") paintMinimap(box);
 if (measuring()) paintMeasure(box);
 syncAim();
@@ -73345,7 +73573,7 @@ aroundSet(
 {
 x: around.eye.x + dx,
 y: around.eye.y + dy,
-z: volumeGroundMm(around.eye.z + dz, scene.stackMm ? scene.stackMm.bottomMm : 0),
+z: volumeGroundMm(around.eye.z + dz, scene.stackMm ? scene.stackMm.bottomMm : scene.groundMm || 0),
 },
 around.yaw,
 around.pitch,

@@ -411,13 +411,18 @@ export const VOLUME_RIVER_GREENS = volumeRiverGreens(VOLUME_RIVER);
  * Считается один раз на кадр, как и небесный. Место здесь обязательно: у вещи
  * фона есть свои координаты, и без места камеры их не во что переводить.
  */
-export function volumeGroundAim(camera, box) {
+export function volumeGroundAim(camera, box, groundMm = 0) {
+  // `groundMm` — где лежит земля в миллиметрах сцены (правка 2026-11-20). У
+  // объекта на земле это ноль, и прицел прежний до бита; у квартиры, поднятой
+  // на этаж (`scene.groundMm` отрицательный), вещи фона стоят на земле внизу,
+  // а не на уровне её пола: место камеры поднимается над землёй на эту меру.
+  const ground = Number(groundMm) || 0;
   return {
     basis: volumeBasis(camera),
     focal: volumeFocal(box),
     halfWidth: box.width / 2,
     halfHeight: box.height / 2,
-    at: camera.at,
+    at: ground === 0 ? camera.at : { x: camera.at.x, y: camera.at.y, z: camera.at.z - ground },
   };
 }
 
@@ -745,7 +750,7 @@ function volumeDrawRidge(ctx, aim, ridge, palette) {
  * дальней стены дома, рисуется под домом. Случается это только в обзоре с
  * отлёта, где дом и есть то, на что смотрят.
  */
-export function volumeDrawBackdrop(ctx, box, camera, mood = null, land = null) {
+export function volumeDrawBackdrop(ctx, box, camera, mood = null, land = null, groundMm = 0) {
   const hour = mood || VOLUME_MOOD_NOON;
   const palette = hour.palette;
   const horizonY = volumeHorizon(camera, box);
@@ -770,7 +775,7 @@ export function volumeDrawBackdrop(ctx, box, camera, mood = null, land = null) {
     ctx.fillStyle = palette.land;
     ctx.fillRect(0, Math.max(0, line), box.width, box.height - Math.max(0, line));
   }
-  if (hour.kind !== "plain") volumeDrawGround(ctx, box, camera, hour, land, false);
+  if (hour.kind !== "plain") volumeDrawGround(ctx, box, camera, hour, land, false, groundMm);
   volumeDrawFogBand(ctx, box, line, hour);
   return line;
 }
@@ -833,11 +838,11 @@ function volumeDrawFogBand(ctx, box, line, hour) {
  *
  * Внутри плиты проход пуст, и это обычный случай: человек ходит по дому.
  */
-export function volumeDrawBackdropNear(ctx, box, camera, mood = null, land = null) {
+export function volumeDrawBackdropNear(ctx, box, camera, mood = null, land = null, groundMm = 0) {
   const hour = mood || VOLUME_MOOD_NOON;
   if (hour.kind === "plain") return;
   if (!(volumePlateGap(land, camera.at) > 0)) return;
-  volumeDrawGround(ctx, box, camera, hour, land, true);
+  volumeDrawGround(ctx, box, camera, hour, land, true, groundMm);
 }
 
 /**
@@ -851,9 +856,9 @@ export function volumeDrawBackdropNear(ctx, box, camera, mood = null, land = nul
  * (дорога, река, улицы, разметка) рисуется до стоящего — оно лежит на земле и
  * закрыть собой дерево не может.
  */
-function volumeDrawGround(ctx, box, camera, hour, land, near) {
+function volumeDrawGround(ctx, box, camera, hour, land, near, groundMm = 0) {
   const palette = hour.palette;
-  const aim = volumeGroundAim(camera, box);
+  const aim = volumeGroundAim(camera, box, groundMm);
   const places = volumeBackdropPlaces(land);
   const gap = volumePlateGap(land, camera.at);
   const at = camera.at;
@@ -906,7 +911,8 @@ function volumeDrawGround(ctx, box, camera, hour, land, near) {
         if (street.marks) volumeDrawStrip(ctx, aim, street.marks, () => palette.mark);
       }
     }
-    take(mega.blocks, (spot, index) => volumeDrawMegaBlock(ctx, point, at, spot, index, hour, volumeCityWindowLit));
+    // Место глаза — у прицела: высота в нём отсчитана от земли, как и высоты домов.
+    take(mega.blocks, (spot, index) => volumeDrawMegaBlock(ctx, point, aim.at, spot, index, hour, volumeCityWindowLit));
     take(mega.cars, (spot) => volumeDrawCar(ctx, aim, spot, palette));
     take(mega.greens, (spot) => volumeDrawTree(ctx, aim, spot, palette));
   } else {
@@ -1738,6 +1744,8 @@ const VOLUME_MEGA_PLACES = {
   })),
   skyline: VOLUME_MEGA_SKYLINE.map((ridge) => ({
     far: ridge.far,
+    // Ближе четверти своей дальности гряда не рисуется (`volumeDrawMegaSkyline`).
+    nearMm: ridge.awayM * VOLUME_M * 0.25,
     nodes: ridge.rises.map((rise, index) => ({
       ...volumeAway((index * 360) / ridge.rises.length, ridge.awayM),
       awayMm: ridge.awayM * VOLUME_M,
