@@ -947,6 +947,38 @@ export async function workerScript(html, assets, view = "") {
  * assets, worker, modules}`. Проверки те же, что у `build()`, — она пишет
  * ровно это.
  */
+// ——— заставка загрузки (правка без автопилота, 2026-11-20) ————————————————
+const SPLASH_FILE = "splash.html";
+const SPLASH_SLOT = /[ \t]*<!--\s*splash:[\s\S]*?-->\s*/;
+
+/**
+ * Заставка для страницы: разметка `src/splash.html` без её шапки-комментария,
+ * с подписями из словаря и размером страницы. Подписи и заголовок идут в
+ * страницу **данными сборки**: скрипт заставки работает раньше словаря.
+ */
+export function splashFrom(template, bytes) {
+  const escapeHtml = (value) => String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const steps = JSON.stringify(strings.splash.steps).replace(/</g, "\\u003c");
+  // Комментарии заставки — для того, кто её правит; в страницу они не едут,
+  // как не едут комментарии бандла и стилей.
+  const body = template
+    .replace(/^\s*<!--[\s\S]*?-->\s*/, "")
+    .replace(/(<style>)([\s\S]*?)(<\/style>)/, (match, open, css, close) => open + stripCssComments(css) + close)
+    .replace(/(<script>)([\s\S]*?)(<\/script>)/, (match, open, code, close) => open + stripComments(code) + close);
+  for (const slot of ["{{title}}", "{{steps}}", "{{bytes}}"]) {
+    if (!body.includes(slot)) throw new Error("В заставке нет места подстановки " + slot);
+  }
+  return (
+    body
+      .replace("{{title}}", () => escapeHtml(strings.app.title))
+      .replace("{{steps}}", () => steps)
+      .replace("{{bytes}}", () => String(Math.max(0, Math.round(bytes))))
+      .split("\n")
+      .map((line) => (line ? "    " + line : line))
+      .join("\n") + "\n"
+  );
+}
+
 export async function buildPage() {
   const sources = await readSources();
 
@@ -975,8 +1007,15 @@ export async function buildPage() {
         "    <script>\n(function () {\n" + script + "\n})();\n    </script>\n",
       );
 
-  const html = pageFrom(await readFile(path.join(srcDir, "index.html"), "utf8"));
-  const view = pageFrom(await readFile(path.join(srcDir, VIEW_PAGE_FILE), "utf8"));
+  // Заставка загрузки встаёт первой в `<body>` обеих страниц: её стиль и скрипт
+  // работают, пока бандл ниже ещё едет. Размер страницы она узнаёт отсюда.
+  const splash = splashFrom(await readFile(path.join(srcDir, SPLASH_FILE), "utf8"), script.length + css.length);
+  const withSplash = (page) => {
+    if (!SPLASH_SLOT.test(page)) throw new Error("В шаблоне страницы нет отметки заставки (<!-- splash: … -->)");
+    return page.replace(SPLASH_SLOT, () => splash);
+  };
+  const html = withSplash(pageFrom(await readFile(path.join(srcDir, "index.html"), "utf8")));
+  const view = withSplash(pageFrom(await readFile(path.join(srcDir, VIEW_PAGE_FILE), "utf8")));
 
   // Ресурсы страницы (шрифт), копия кодека и файлы веб-версии. Проверка ссылок
   // идёт по этому же списку: страница вправе сослаться только на то, что

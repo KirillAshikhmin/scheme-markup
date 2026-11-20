@@ -6618,7 +6618,362 @@ display: none;
     </style>
 </head>
   <body>
-    <!-- ——— страница просмотра объекта (таск 01 просмотра) ————————————————
+    <div id="splash" role="status" aria-live="polite">
+      <div class="splash__box">
+        <div class="splash__title">Разметка схем</div>
+        <div class="splash__bar"><div class="splash__fill" id="splash-fill"></div></div>
+        <div class="splash__row">
+          <span class="splash__step" id="splash-step"></span>
+          <span class="splash__percent" id="splash-percent">0 %</span>
+        </div>
+      </div>
+      <canvas id="splash-model" class="splash__model" width="220" height="220" aria-hidden="true"></canvas>
+    </div>
+    <style>#splash {
+    position: fixed;
+    inset: 0;
+    z-index: 100000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #0d1117;
+    color: #e6edf3;
+    font: 15px/1.4 var(--font-ui);
+    transition: opacity 0.28s ease;
+    }
+    #splash.splash--gone {
+    opacity: 0;
+    pointer-events: none;
+    }
+    .splash__box {
+    width: min(440px, 78vw);
+    }
+    .splash__title {
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    margin-bottom: 18px;
+    }
+    .splash__bar {
+    height: 6px;
+    border-radius: 3px;
+    background: #21262d;
+    overflow: hidden;
+    }
+    .splash__fill {
+    height: 100%;
+    width: 0;
+    border-radius: 3px;
+    background: linear-gradient(90deg, #1f6feb, #58a6ff);
+    }
+    .splash__row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 10px;
+    color: #8b949e;
+    font-size: 13px;
+    }
+    .splash__step {
+    transition: opacity 0.2s ease;
+    }
+    .splash__percent {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    }
+    .splash__model {
+    position: absolute;
+    right: 28px;
+    bottom: 28px;
+    width: 220px;
+    height: 220px;
+    }
+    @media (max-width: 640px) {
+    .splash__model {
+    right: 8px;
+    bottom: 8px;
+    width: 140px;
+    height: 140px;
+    }
+    }
+    </style>
+    <script>(function () {
+    var root = document.getElementById("splash");
+    if (!root) return;
+    var fill = document.getElementById("splash-fill");
+    var percent = document.getElementById("splash-percent");
+    var label = document.getElementById("splash-step");
+    var canvas = document.getElementById("splash-model");
+    var STEPS = ["Расставляем розетки…","Проектируем щит…","Настраиваем сценарии…","Подбираем оборудование…","Чертим стены…","Развешиваем люстры…","Тянем кабель…","Маркируем линии…","Считаем длину ленты…","Калибруем масштаб…","Проверяем автоматы…","Вешаем шторы на карнизы…","Ищем, где спрятать кондиционер…","Учим выключатели проходить…"];
+    var PAGE_BYTES = 3085935;
+    var calm = false;
+    try {
+    calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    } catch (error) {
+    calm = false;
+    }
+    var now = function () {
+    return window.performance && performance.now ? performance.now() : Date.now();
+    };
+    var began = now();
+    var LOAD_SHARE = 0.72;
+    var MARKS = { parsed: 0.8, start: 0.86, panels: 0.96, done: 1 };
+    var link = navigator.connection || null;
+    var mbit = link && link.downlink > 0 ? link.downlink : 12;
+    var expected = Math.max(0.35, ((PAGE_BYTES / 4) * 8) / (mbit * 1e6) + 0.25);
+    var floor = 0;
+    var shown = 0;
+    var finished = false;
+    function target() {
+    var seconds = (now() - began) / 1000;
+    var loading = LOAD_SHARE * (1 - Math.exp((-2.3 * seconds) / expected));
+    return Math.max(floor, loading);
+    }
+    function paintBar() {
+    var goal = target();
+    shown += (goal - shown) * (finished ? 0.35 : 0.14);
+    if (goal - shown < 0.001) shown = goal;
+    fill.style.width = (shown * 100).toFixed(1) + "%";
+    percent.textContent = Math.round(shown * 100) + " %";
+    }
+    var order = STEPS.map(function (item, index) {
+    return index;
+    });
+    for (var i = order.length - 1; i > 0; i -= 1) {
+    var j = Math.floor(Math.random() * (i + 1));
+    var kept = order[i];
+    order[i] = order[j];
+    order[j] = kept;
+    }
+    var stepAt = 0;
+    function nextStep() {
+    if (order.length === 0) return;
+    label.style.opacity = "0";
+    setTimeout(function () {
+    label.textContent = STEPS[order[stepAt % order.length]];
+    label.style.opacity = "1";
+    stepAt += 1;
+    }, 180);
+    }
+    if (order.length > 0) {
+    label.textContent = STEPS[order[0]];
+    stepAt = 1;
+    }
+    var stepTimer = setInterval(nextStep, 1500);
+    function prism(sides, r1, r2, height, color, place) {
+    var faces = [];
+    var ring = function (radius, y) {
+    var points = [];
+    for (var n = 0; n < sides; n += 1) {
+    var angle = ((n + 0.5) * Math.PI * 2) / sides;
+    points.push([Math.cos(angle) * radius[0], y, Math.sin(angle) * radius[1]]);
+    }
+    return points;
+    };
+    var low = ring(r1, 0);
+    var high = ring(r2, height);
+    for (var n = 0; n < sides; n += 1) {
+    var next = (n + 1) % sides;
+    faces.push([low[next], low[n], high[n], high[next]]);
+    }
+    faces.push(high.slice().reverse());
+    faces.push(low);
+    return faces.map(function (points) {
+    return {
+    color: color,
+    glow: place.glow === true,
+    points: points.map(function (point) {
+    var x = point[0];
+    var y = point[1];
+    var z = point[2];
+    if (place.lie) {
+    var up = y;
+    y = z;
+    z = -up;
+    }
+    return [x + (place.x || 0), y + (place.y || 0), z + (place.z || 0)];
+    }),
+    };
+    });
+    }
+    var SQ = Math.SQRT1_2 * 2;
+    function box(w, h, d, color, place) {
+    return prism(4, [(w / 2) * SQ, (d / 2) * SQ], [(w / 2) * SQ, (d / 2) * SQ], h, color, place);
+    }
+    function cyl(r, h, color, place, r2) {
+    return prism(12, [r, r], [r2 === undefined ? r : r2, r2 === undefined ? r : r2], h, color, place);
+    }
+    function build(parts) {
+    return [].concat.apply([], parts);
+    }
+    var PLATE = [222, 226, 230];
+    var DARK = [48, 54, 61];
+    var BLUE = [88, 166, 255];
+    var MODELS = [
+    build([
+    box(1.5, 0.16, 1.5, PLATE, { lie: true, z: 0.08 }),
+    cyl(0.5, 0.06, [196, 202, 208], { lie: true, z: -0.08 }),
+    cyl(0.07, 0.04, DARK, { lie: true, x: -0.19, z: -0.14 }),
+    cyl(0.07, 0.04, DARK, { lie: true, x: 0.19, z: -0.14 }),
+    ]),
+    build([
+    box(1.5, 0.16, 1.5, PLATE, { lie: true, z: 0.08 }),
+    box(0.6, 0.1, 1.24, [240, 243, 246], { lie: true, x: -0.32, z: -0.08 }),
+    box(0.6, 0.06, 1.24, [205, 211, 217], { lie: true, x: 0.32, z: -0.08 }),
+    ]),
+    build([
+    cyl(0.22, 0.08, DARK, { y: 0.92 }),
+    box(0.04, 0.6, 0.04, DARK, { y: 0.32 }),
+    cyl(0.72, 0.5, [236, 196, 110], { y: -0.2 }, 0.26),
+    cyl(0.2, 0.22, [255, 236, 170], { y: -0.42, glow: true }),
+    ]),
+    build(
+    [box(1.3, 1.9, 0.4, [150, 158, 166], { y: -0.95 }), box(1.1, 1.7, 0.06, [200, 206, 212], { y: -0.85, z: -0.22 })].concat(
+    [0, 1, 2, 3, 4].map(function (n) {
+    return box(0.15, 0.34, 0.1, n === 0 ? [248, 81, 73] : BLUE, { x: -0.36 + n * 0.18, y: 0.1, z: -0.28 });
+    }),
+    [0, 1, 2, 3, 4].map(function (n) {
+    return box(0.15, 0.34, 0.1, [63, 185, 80], { x: -0.36 + n * 0.18, y: -0.5, z: -0.28 });
+    }),
+    ),
+    ),
+    build([
+    box(1.4, 0.2, 1.4, PLATE, { lie: true, z: 0.1 }),
+    box(1.0, 0.05, 0.62, [22, 60, 44], { lie: true, y: 0.18, z: -0.1 }),
+    box(0.56, 0.03, 0.26, [86, 211, 100], { lie: true, y: 0.18, z: -0.15, glow: true }),
+    cyl(0.11, 0.05, BLUE, { lie: true, x: -0.3, y: -0.4, z: -0.1 }),
+    cyl(0.11, 0.05, [248, 81, 73], { lie: true, x: 0.3, y: -0.4, z: -0.1 }),
+    ]),
+    build([
+    box(0.5, 0.1, 0.5, DARK, { y: 0.85 }),
+    box(0.1, 0.5, 0.1, DARK, { y: 0.38 }),
+    box(0.62, 0.52, 1.3, PLATE, { y: -0.14 }),
+    cyl(0.2, 0.12, DARK, { lie: true, y: 0.12, z: -0.65 }),
+    cyl(0.11, 0.04, BLUE, { lie: true, y: 0.12, z: -0.78, glow: true }),
+    ]),
+    ];
+    var ctx = canvas && canvas.getContext ? canvas.getContext("2d") : null;
+    var LIGHT = [0.35, 0.8, -0.48];
+    var MODEL_SECONDS = 3.2;
+    function paintModel() {
+    if (!ctx) return;
+    var seconds = (now() - began) / 1000;
+    var at = Math.floor(seconds / MODEL_SECONDS) % MODELS.length;
+    var inside = (seconds % MODEL_SECONDS) / MODEL_SECONDS;
+    var alpha = Math.min(1, inside / 0.12, (1 - inside) / 0.12);
+    var turn = calm ? 0.6 : seconds * 1.5;
+    var cos = Math.cos(turn);
+    var sin = Math.sin(turn);
+    var tilt = 0.36;
+    var tc = Math.cos(tilt);
+    var ts = Math.sin(tilt);
+    var size = canvas.width;
+    var drawn = [];
+    var faces = MODELS[at];
+    for (var n = 0; n < faces.length; n += 1) {
+    var face = faces[n];
+    var points = [];
+    var depth = 0;
+    for (var k = 0; k < face.points.length; k += 1) {
+    var p = face.points[k];
+    var x = p[0] * cos - p[2] * sin;
+    var z = p[0] * sin + p[2] * cos;
+    var y = p[1] * tc - z * ts;
+    z = p[1] * ts + z * tc;
+    points.push([x, y, z]);
+    depth += z;
+    }
+    var a = points[0];
+    var b = points[1];
+    var c = points[2];
+    var ux = b[0] - a[0];
+    var uy = b[1] - a[1];
+    var uz = b[2] - a[2];
+    var vx = c[0] - a[0];
+    var vy = c[1] - a[1];
+    var vz = c[2] - a[2];
+    var nx = uy * vz - uz * vy;
+    var ny = uz * vx - ux * vz;
+    var nz = ux * vy - uy * vx;
+    var length = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+    if (nz / length > 0) continue;
+    var lit = Math.max(0, (nx * LIGHT[0] + ny * LIGHT[1] + nz * LIGHT[2]) / length);
+    var shade = face.glow ? 1 : 0.5 + 0.5 * lit;
+    drawn.push({ points: points, depth: depth / points.length, color: face.color, shade: shade });
+    }
+    drawn.sort(function (first, second) {
+    return second.depth - first.depth;
+    });
+    ctx.clearRect(0, 0, size, size);
+    ctx.globalAlpha = Math.max(0, alpha);
+    var scale = size / 3.4;
+    for (var m = 0; m < drawn.length; m += 1) {
+    var item = drawn[m];
+    ctx.beginPath();
+    for (var q = 0; q < item.points.length; q += 1) {
+    var px = size / 2 + item.points[q][0] * scale;
+    var py = size / 2 - item.points[q][1] * scale;
+    if (q === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    var tone = "rgb(" + Math.round(item.color[0] * item.shade) + "," + Math.round(item.color[1] * item.shade) + "," + Math.round(item.color[2] * item.shade) + ")";
+    ctx.fillStyle = tone;
+    ctx.strokeStyle = tone;
+    ctx.lineWidth = 1;
+    ctx.fill();
+    ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    }
+    var raf = window.requestAnimationFrame || function (run) { return setTimeout(run, 33); };
+    var alive = true;
+    function frame() {
+    if (!alive) return;
+    paintBar();
+    paintModel();
+    raf(frame);
+    }
+    frame();
+    function leave() {
+    if (!alive && finished) return;
+    finished = true;
+    floor = 1;
+    clearInterval(stepTimer);
+    var quick = now() - began < 350;
+    setTimeout(
+    function () {
+    root.className = "splash--gone";
+    setTimeout(function () {
+    alive = false;
+    if (root.parentNode) root.parentNode.removeChild(root);
+    }, 320);
+    },
+    quick ? 0 : 260,
+    );
+    }
+    window.schemeSplash = {
+    mark: function (name) {
+    if (finished) return;
+    if (name === "done") {
+    leave();
+    return;
+    }
+    if (MARKS[name] !== undefined) floor = Math.max(floor, MARKS[name]);
+    },
+    };
+    window.addEventListener("error", function () {
+    if (!finished) leave();
+    });
+    window.addEventListener("load", function () {
+    setTimeout(function () {
+    if (!finished) leave();
+    }, 4000);
+    });
+    })();
+    </script>
+
+<!-- ——— страница просмотра объекта (таск 01 просмотра) ————————————————
          Та же сборка, что у «Разметки»: тот же код и те же стили, **другая
          разметка**. Панель монтируется только там, где для неё есть узел
          (`app.mountPanel` молча проходит мимо отсутствующего), поэтому список
@@ -6738,6 +7093,24 @@ display: none;
 (function () {
 // src/strings.js
 const strings = {
+splash: {
+steps: [
+"Расставляем розетки…",
+"Проектируем щит…",
+"Настраиваем сценарии…",
+"Подбираем оборудование…",
+"Чертим стены…",
+"Развешиваем люстры…",
+"Тянем кабель…",
+"Маркируем линии…",
+"Считаем длину ленты…",
+"Калибруем масштаб…",
+"Проверяем автоматы…",
+"Вешаем шторы на карнизы…",
+"Ищем, где спрятать кондиционер…",
+"Учим выключатели проходить…",
+],
+},
 app: {
 title: "Разметка схем",
 installShortName: "Разметка",
@@ -25275,6 +25648,20 @@ return module.decompress(bytes instanceof Uint8Array ? bytes : new Uint8Array(by
 function brotliReachable() {
 if (typeof location === "undefined" || !location.protocol) return true;
 return location.protocol !== "file:";
+}
+
+// src/splash.js
+const SPLASH_MARKS = Object.freeze(["parsed", "start", "panels", "done"]);
+function splashMark(name) {
+if (!SPLASH_MARKS.includes(name)) return false;
+const host = typeof window !== "undefined" ? window.schemeSplash : null;
+if (!host || typeof host.mark !== "function") return false;
+try {
+host.mark(name);
+} catch (error) {
+return false;
+}
+return true;
 }
 
 // src/markBox.js
@@ -47785,6 +48172,7 @@ screenPlaceWatch(() => saveViewMemory());
 function startApp() {
 if (appStarted) return;
 appStarted = true;
+splashMark("start");
 screenPlaceScreen(appState.screen);
 applyStrings(document);
 wireSections();
@@ -47799,9 +48187,12 @@ if (simRunning() !== appState.simRunning) setState({ simRunning: simRunning() })
 if (appState.project) simSync(appState.project);
 for (const id of appPanels.keys()) mountPanel(id);
 wirePanelRail();
+splashMark("panels");
 registerServiceWorker();
+splashMark("done");
 }
 if (typeof document !== "undefined") {
+splashMark("parsed");
 appUseKind(appKindFor(document.getElementById("app")));
 if (document.readyState === "loading") {
 document.addEventListener("DOMContentLoaded", startApp, { once: true });

@@ -112,7 +112,12 @@ test("словарь потока — выжимка: разделы WORKER_STRI
 
 test("собранная страница и поток: без комментариев, разбираются, поток без второй копии словаря", async () => {
   const { html, worker } = await buildPage();
-  const script = html.slice(html.indexOf("<script>") + 8, html.lastIndexOf("</script>"));
+  // Бандл — **последний** скрипт страницы: первым стоит маленький скрипт
+  // заставки загрузки (`src/splash.html`), он едет раньше.
+  const script = html.slice(html.lastIndexOf("<script>") + 8, html.lastIndexOf("</script>"));
+  const splash = html.slice(html.indexOf("<script>") + 8, html.indexOf("</script>"));
+  assert.doesNotThrow(() => new vm.Script(splash));
+  assert.ok(!/^\s*\/\/ /m.test(splash), "в скрипте заставки остался строчный комментарий");
   assert.doesNotThrow(() => new vm.Script(script));
   assert.ok(Buffer.byteLength(html) < 3.5 * 1024 * 1024, "страница снова тяжелее 3,5 МБ: " + Buffer.byteLength(html));
   assert.ok(!/^\s*\/\/ (?!src\/)/m.test(script), "в странице остался строчный комментарий");

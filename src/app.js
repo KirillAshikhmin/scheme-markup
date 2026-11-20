@@ -1,6 +1,7 @@
 // Каркас сеанса: состояние, реестр панелей, уведомления.
 // Панели других тасков монтируются по идентификатору контейнера из index.html
 // и не правят ни этот файл, ни разметку.
+import { splashMark } from "./splash.js";
 import { strings, text } from "./strings.js";
 import { getSetting, setSetting, storeUse } from "./store.js";
 // Расположение — одно на три режима, и считает его `screenPlace.js` (таск 178,
@@ -1489,6 +1490,7 @@ function wireSections() {
 export function startApp() {
   if (appStarted) return;
   appStarted = true;
+  splashMark("start");
   // Хозяин общего места — с первой минуты: поверхности собираются ниже, и их
   // первый же кадр обязан знать, на его режим смотрят или нет (D61).
   screenPlaceScreen(appState.screen);
@@ -1508,9 +1510,12 @@ export function startApp() {
   // Рейка завязывается после панелей: разделы в разметке стоят с самого начала,
   // а вот высоты у них появляются, когда панели в них что-то положили.
   wirePanelRail();
+  splashMark("panels");
   // Веб-версия заодно просит служебный скрипт: установленное приложение
   // обязано открываться и без сети. Со страницы на диске это ничего не делает.
   registerServiceWorker();
+  // Интерфейс собран — заставка загрузки уходит (`src/splash.html`).
+  splashMark("done");
 }
 
 // Старт откладывается за границу текущего скрипта: в собранном файле панели
@@ -1522,6 +1527,8 @@ export function startApp() {
 // панели файла. К этой минуте разметка уже разобрана: бандл стоит последним
 // скриптом в конце `<body>`.
 if (typeof document !== "undefined") {
+  // Бандл доехал и разобран: заставка переходит с ожидания на настоящие шаги.
+  splashMark("parsed");
   appUseKind(appKindFor(document.getElementById("app")));
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", startApp, { once: true });
