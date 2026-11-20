@@ -1675,6 +1675,8 @@ export function volumeModelPrisms(frame, parts) {
       // Чем тело просвечивает (таск 189): имя плотности или `null`. Доезжает
       // до грани и останавливается — в объект не пишется ничего (G68).
       clear: part.clear || null,
+      // Створка шкафа (правка 2026-11-20) — см. `volumeModelFaces`.
+      leaf: part.leaf === true,
     });
   }
   return out;
@@ -1814,6 +1816,9 @@ export function volumeModelFaces(frame, model, rgb, out = [], options = {}) {
     // стало бы видно вовсе: светилось бы всё лицо, как до этого таска.
     lit: Boolean(part && part.lit && !part.art),
     bulb: part && Number.isInteger(part.bulb) ? part.bulb : null,
+    // Створка шкафа (правка 2026-11-20): её грани — «дверь» со своим хозяином,
+    // и открывает её то же, что открывает двери: щелчок, E и касание.
+    doorId: part && part.leaf && options.leafId ? options.leafId : null,
   });
   for (const part of parts) {
     if (part.kind === "tube") volumeTubeFaces(frame, part, volumeModelRgb(part.material, rgb), out, own(part));

@@ -132,10 +132,31 @@ export const MODELS_OBJECTS = {
   // же вещь, попавшая в сборку с двух сторон. Две разные модели для неё
   // разошлись бы при первой же правке.
   panel: MODELS_POWER.panelBox,
-  // Радиатор: панель и решётка сверху — то, по чему его узнают под окном.
+  // Радиатор: **трубчатый** — ряд стоячих труб между двумя коллекторами (правка
+  // 2026-11-20, слова заказчика: «радиаторы должны быть не просто
+  // прямоугольником, а горизонтальные в виде труб» — и фото стального
+  // трубчатого радиатора). Прежняя панель с решёткой читалась ящиком под окном.
+  //
+  // Трубы — **коробки, а не цилиндры**: двенадцать труб с коллекторами — это
+  // четырнадцать тел и 84 грани при пределе вещи каталога 15 и 90
+  // (`objectModelLimits`), а цилиндрами вышло бы вчетверо больше граней на
+  // вещь, которую рассматривают с трёх метров. Шаг трубы — доля ширины, так
+  // что в ходовом габарите 1200 труба выходит 55 мм через 28 мм просвета;
+  // просветы видны насквозь, и этим радиатор отличается от панели.
   radiator: modelParts(
-    modelBox("panel", { y: -0.35, depth: 0.7, z: 0, height: 0.92 }),
-    modelBox("grid", { x: -0.46, width: 0.92, y: -0.4, depth: 0.8, z: 0.92, height: 0.08, material: "light" }),
+    modelBox("headerLow", { x: -0.5, width: 1, y: -0.3, depth: 0.6, z: 0, height: 0.07, material: "light" }),
+    modelBox("headerHigh", { x: -0.5, width: 1, y: -0.3, depth: 0.6, z: 0.93, height: 0.07, material: "light" }),
+    Array.from({ length: 12 }, (unused, index) =>
+      modelBox("tube" + (index + 1), {
+        x: -0.5 + 0.014 + index * (1 / 12),
+        width: 0.055,
+        y: -0.25,
+        depth: 0.5,
+        z: 0.07,
+        height: 0.86,
+        material: "light",
+      }),
+    ),
   ),
   // Столешница: светлая плита и фасады под ней. Та самая высота, от которой
   // отмеряют розетки над кухонным фронтом.
@@ -184,7 +205,7 @@ export const MODELS_OBJECTS = {
   // Шкаф: корпус и фасад. Он же «шкаф» из брифа — вид и вещь каталога здесь
   // одно и то же.
   cabinet: modelParts(
-    modelBox("door", { x: -0.46, width: 0.92, y: -0.5, depth: 0.15, z: 0.03, height: 0.94, material: "light" }),
+    modelBox("door", { x: -0.46, width: 0.92, y: -0.5, depth: 0.15, z: 0.03, height: 0.94, material: "light", leaf: true }),
     modelBox("case", { y: -0.35, depth: 0.85 }),
   ),
   // ——— гардеробная, обувница и вешалка (правка 2026-10-27) ———
@@ -622,8 +643,8 @@ export const MODELS_OBJECTS = {
   // налез бы на неё.
   kitchenCabinet: modelParts(
     modelBox("case", { y: -0.3, depth: 0.8 }),
-    modelBox("doorLeft", { x: -0.46, width: 0.45, y: -0.5, depth: 0.22, z: 0.06, height: 0.88, material: "light" }),
-    modelBox("doorRight", { x: 0.01, width: 0.45, y: -0.5, depth: 0.22, z: 0.06, height: 0.88, material: "light" }),
+    modelBox("doorLeft", { x: -0.46, width: 0.45, y: -0.5, depth: 0.22, z: 0.06, height: 0.88, material: "light", leaf: true }),
+    modelBox("doorRight", { x: 0.01, width: 0.45, y: -0.5, depth: 0.22, z: 0.06, height: 0.88, material: "light", leaf: true }),
   ),
   // Стеллаж: боковины и две полки между ними. Полки видны насквозь — у шкафа
   // на их месте сплошной фасад, и в кадре это две разные вещи.

@@ -8254,6 +8254,10 @@ windows: "Окна: открыто {open} из {count}.",
 windowKeys: "Клик или E по окну открывают его створку.",
 windowAimed: "Клик или E откроют и закроют створку этого окна.",
 windowTouch: "Касание по окну открывает и закрывает створку.",
+cupboards: "Шкафы: открыто {open} из {count}.",
+cupboardKeys: "Клик или E по шкафу открывают его дверцы.",
+cupboardAimed: "Клик или E откроют и закроют дверцы этого шкафа.",
+cupboardTouch: "Касание по шкафу открывает и закрывает дверцы.",
 doorsOpened: "Все двери открыты",
 doorsClosed: "Все двери закрыты",
 doorsNone: "На этой схеме нет ни одной двери",
@@ -12914,6 +12918,7 @@ name,
 lit: part.lit === true,
 bulb: Number.isInteger(part.bulb) ? part.bulb : null,
 material,
+leaf: part.leaf === true,
 toFloor: part.toFloor === true,
 clear: MODEL_CLEARS.includes(part.clear) ? part.clear : null,
 art: MODEL_ARTS.includes(part.art) ? part.art : null,
@@ -13420,8 +13425,19 @@ modelBox("shelf", { x: -0.46, width: 0.92, y: -0.5, depth: 0.95, z: 0.46, height
 stairs: modelStair("stairs", 1100, 2700),
 panel: MODELS_POWER.panelBox,
 radiator: modelParts(
-modelBox("panel", { y: -0.35, depth: 0.7, z: 0, height: 0.92 }),
-modelBox("grid", { x: -0.46, width: 0.92, y: -0.4, depth: 0.8, z: 0.92, height: 0.08, material: "light" }),
+modelBox("headerLow", { x: -0.5, width: 1, y: -0.3, depth: 0.6, z: 0, height: 0.07, material: "light" }),
+modelBox("headerHigh", { x: -0.5, width: 1, y: -0.3, depth: 0.6, z: 0.93, height: 0.07, material: "light" }),
+Array.from({ length: 12 }, (unused, index) =>
+modelBox("tube" + (index + 1), {
+x: -0.5 + 0.014 + index * (1 / 12),
+width: 0.055,
+y: -0.25,
+depth: 0.5,
+z: 0.07,
+height: 0.86,
+material: "light",
+}),
+),
 ),
 counter: modelParts(
 modelBox("top", { z: 0.88, height: 0.12, material: "light" }),
@@ -13439,7 +13455,7 @@ modelBox("water", { x: -0.45, width: 0.9, y: -0.41, depth: 0.82, z: 0.25, height
 modelBox("tap", { x: -0.46, width: 0.1, y: -0.07, depth: 0.14, z: 0.9, height: 0.1, material: "metal" }),
 ),
 cabinet: modelParts(
-modelBox("door", { x: -0.46, width: 0.92, y: -0.5, depth: 0.15, z: 0.03, height: 0.94, material: "light" }),
+modelBox("door", { x: -0.46, width: 0.92, y: -0.5, depth: 0.15, z: 0.03, height: 0.94, material: "light", leaf: true }),
 modelBox("case", { y: -0.35, depth: 0.85 }),
 ),
 wardrobeOpen: modelParts(
@@ -13668,8 +13684,8 @@ modelBox("drawerLow", { x: -0.46, width: 0.92, y: -0.5, depth: 0.22, z: 0.06, he
 ),
 kitchenCabinet: modelParts(
 modelBox("case", { y: -0.3, depth: 0.8 }),
-modelBox("doorLeft", { x: -0.46, width: 0.45, y: -0.5, depth: 0.22, z: 0.06, height: 0.88, material: "light" }),
-modelBox("doorRight", { x: 0.01, width: 0.45, y: -0.5, depth: 0.22, z: 0.06, height: 0.88, material: "light" }),
+modelBox("doorLeft", { x: -0.46, width: 0.45, y: -0.5, depth: 0.22, z: 0.06, height: 0.88, material: "light", leaf: true }),
+modelBox("doorRight", { x: 0.01, width: 0.45, y: -0.5, depth: 0.22, z: 0.06, height: 0.88, material: "light", leaf: true }),
 ),
 shelving: modelParts(
 modelBox("sideLeft", { x: -0.5, width: 0.06, z: 0, height: 1 }),
@@ -40129,6 +40145,7 @@ art: part.art || null,
 bulb: Number.isInteger(part.bulb) ? part.bulb : null,
 channel: part.channel === undefined ? null : part.channel,
 clear: part.clear || null,
+leaf: part.leaf === true,
 });
 }
 return out;
@@ -40207,6 +40224,7 @@ clear: (part && part.clear) || options.clear || false,
 channel: part && part.channel !== undefined ? part.channel : null,
 lit: Boolean(part && part.lit && !part.art),
 bulb: part && Number.isInteger(part.bulb) ? part.bulb : null,
+doorId: part && part.leaf && options.leafId ? options.leafId : null,
 });
 for (const part of parts) {
 if (part.kind === "tube") volumeTubeFaces(frame, part, volumeModelRgb(part.material, rgb), out, own(part));
@@ -40609,7 +40627,7 @@ depthMm: Number(object.depthMm),
 heightMm: prism.topMm - prism.bottomMm,
 };
 }
-function volumeObjectFaces(project, schemeId, object, fallbackHeightMm, out = [], clear = true) {
+function volumeObjectFaces(project, schemeId, object, fallbackHeightMm, out = [], clear = true, open = false) {
 const own = clear !== false;
 const device = object ? markOfObject(project, object.id) : null;
 const markId = device ? device.id : null;
@@ -40618,9 +40636,77 @@ const frame = model ? volumeObjectFrame(project, schemeId, object, fallbackHeigh
 const stair = frame && objectStairKey(model.key)
 ? objectStairModel(model.key, { widthMm: frame.widthMm, depthMm: frame.depthMm, heightMm: frame.heightMm, mirror: object.mirror === true })
 : null;
-if (frame) return volumeModelFaces(frame, stair ? { key: model.key, parts: stair } : model, VOLUME_OBJECT_RGB, out, { clear: own, markId });
+const leafId = frame && !stair && volumeModelOpens(model) ? volumeCupboardId(object.id) : null;
+const shown = leafId && open ? { key: model.key, parts: volumeCupboardModel(model, frame) } : model;
+if (frame) return volumeModelFaces(frame, stair ? { key: model.key, parts: stair } : shown, VOLUME_OBJECT_RGB, out, { clear: own, markId, leafId });
 for (const prism of volumeObjectPrisms(project, schemeId, object, fallbackHeightMm)) {
 volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, VOLUME_OBJECT_RGB, out, { clear: own, markId });
+}
+return out;
+}
+const VOLUME_CUPBOARD_PREFIX = "thing:";
+const VOLUME_CUPBOARD_LEAF_MM = 600;
+const VOLUME_CUPBOARD_BOARD_MM = 20;
+function volumeCupboardId(objectId) {
+return VOLUME_CUPBOARD_PREFIX + objectId;
+}
+function volumeCupboardObjectId(id) {
+return typeof id === "string" && id.startsWith(VOLUME_CUPBOARD_PREFIX) ? id.slice(VOLUME_CUPBOARD_PREFIX.length) : null;
+}
+function volumeModelOpens(model) {
+return Boolean(model && Array.isArray(model.parts) && model.parts.some((part) => part && part.leaf && part.kind === "box"));
+}
+function volumeObjectOpens(project, object) {
+if (!object || object.shape === "polyline" || !object.atMm) return false;
+return volumeModelOpens(volumeObjectModel(project, object));
+}
+function volumeCupboardModel(model, frame) {
+const parts = [];
+for (const part of (model && model.parts) || []) {
+if (!part.leaf || part.kind !== "box" || !(frame.widthMm > 0) || !(frame.depthMm > 0)) {
+parts.push(part);
+continue;
+}
+const count = Math.max(1, Math.round((part.width * frame.widthMm) / VOLUME_CUPBOARD_LEAF_MM));
+const width = part.width / count;
+const board = Math.min(width, VOLUME_CUPBOARD_BOARD_MM / frame.widthMm);
+const reach = (width * frame.widthMm) / frame.depthMm;
+for (let index = 0; index < count; index += 1) {
+const x = part.x + index * width;
+const left = count === 1 ? x + width / 2 <= 0 : index % 2 === 0;
+parts.push({
+...part,
+name: part.name + (count > 1 ? index + 1 : "") + "Open",
+x: left ? x : x + width - board,
+width: board,
+y: part.y - reach,
+depth: reach,
+});
+}
+}
+return parts;
+}
+function volumeCupboardMarks(project, schemeId, object, fallbackHeightMm) {
+const frame = volumeObjectFrame(project, schemeId, object, fallbackHeightMm);
+if (!frame) return [];
+const inside = (point) => {
+if (!point) return false;
+const dx = point.x - frame.at.x;
+const dy = point.y - frame.at.y;
+return Math.abs(dx * frame.u.x + dy * frame.u.y) <= frame.widthMm / 2 && Math.abs(dx * frame.f.x + dy * frame.f.y) <= frame.depthMm / 2;
+};
+const top = frame.bottomMm + frame.heightMm;
+const out = [];
+for (const mark of (project && project.marks) || []) {
+if (!mark || mark.schemeId !== schemeId || !Array.isArray(mark.points)) continue;
+const height = typeof mark.heightAboveFloor === "number" ? mark.heightAboveFloor : null;
+if (height === null ? top < VOLUME_HEAD_MM : height < frame.bottomMm || height > top) continue;
+const points = mark.points.map((point) => planFractionToMm(project, schemeId, point));
+const probes = [...points];
+for (let index = 0; index + 1 < points.length; index += 1) {
+if (points[index] && points[index + 1]) probes.push({ x: (points[index].x + points[index + 1].x) / 2, y: (points[index].y + points[index + 1].y) / 2 });
+}
+if (probes.some(inside)) out.push(mark.id);
 }
 return out;
 }
@@ -41403,7 +41489,7 @@ if (!sub) return null;
 if (sub.empty) return { schemeId: item.schemeId, sub };
 volumeFloorFaces(sub.faces, place);
 const known = {
-doors: [...(sub.doors || []), ...(sub.windows || [])],
+doors: [...(sub.doors || []), ...(sub.windows || []), ...(sub.cupboards || [])],
 sheers: sub.sheers || [],
 objects: schemeObjectsOnScheme(project, item.schemeId).map((object) => object.id),
 };
@@ -41628,6 +41714,7 @@ walls: [],
 boundsMm: null,
 doors: [],
 windows: [],
+cupboards: [],
 sheers: [],
 stairs: [],
 marks: [],
@@ -41855,10 +41942,21 @@ topMm: span.topMm,
 const objectBoxes = [];
 const occluders = [];
 const modelled = new Set();
+const cupboards = [];
 for (const object of objects) {
 const objectFrom = faces.length;
 if (volumeObjectModel(project, object)) modelled.add(object.id);
-volumeObjectFaces(project, schemeId, object, schemeHeight.mm, faces, options.objectsClear !== false);
+const opens = volumeObjectOpens(project, object);
+if (opens) cupboards.push(volumeCupboardId(object.id));
+volumeObjectFaces(
+project,
+schemeId,
+object,
+schemeHeight.mm,
+faces,
+options.objectsClear !== false,
+opens && volumeDoorOpen(options.openDoorIds || null, volumeCupboardId(object.id)),
+);
 if (rooms.length > 0 && faces.length > objectFrom) volumeTagRoom(faces, objectFrom, where, volumeMiddleOf(faces[objectFrom].p));
 volumeTagThing(faces, objectFrom, object.id);
 const room = faces.length > objectFrom ? faces[objectFrom].room : null;
@@ -41914,6 +42012,7 @@ wallCount: walls.length,
 openingCount: walls.reduce((sum, wall) => sum + openingsInWall(project, wall.id).length, 0),
 doors,
 windows,
+cupboards,
 stairs: volumeStairs(project, schemeId).filter((stair) => !hidden.has(stair.objectId)),
 marks: marks.placed,
 unplaced: marks.unplaced,
@@ -70351,7 +70450,7 @@ const open = saved || {};
 const doors = new Set();
 const sheers = new Set();
 const add = (sub) => {
-for (const id of [...((sub && sub.doors) || []), ...((sub && sub.windows) || [])]) doors.add(id);
+for (const id of [...((sub && sub.doors) || []), ...((sub && sub.windows) || []), ...((sub && sub.cupboards) || [])]) doors.add(id);
 for (const id of (sub && sub.sheers) || []) sheers.add(id);
 };
 add(scene);
@@ -70535,6 +70634,29 @@ const state = text("volume.windows", { open: count, count: list.length });
 if (touching) return state + " " + strings.volume.windowTouch;
 return aimed && list.includes(aimed) ? state + " " + strings.volume.windowAimed : state + " " + strings.volume.windowKeys;
 }
+function volumeCupboardLine(cupboards, open, aimed, touching) {
+const list = cupboards || [];
+if (list.length === 0) return "";
+const count = list.filter((id) => open.has(id)).length;
+const state = text("volume.cupboards", { open: count, count: list.length });
+if (touching) return state + " " + strings.volume.cupboardTouch;
+return aimed && list.includes(aimed) ? state + " " + strings.volume.cupboardAimed : state + " " + strings.volume.cupboardKeys;
+}
+function volumeCupboardLamps(project, schemeId, objectId, fallbackHeightMm) {
+const object = schemeObjectsOnScheme(project, schemeId).find((item) => item.id === objectId);
+if (!object) return [];
+const seen = new Set();
+const out = [];
+for (const markId of volumeCupboardMarks(project, schemeId, object, fallbackHeightMm)) {
+const accessory = markAccessory(project, markId);
+if (!accessory || seen.has(accessory.markId)) continue;
+const service = accessory.services.findIndex((item) => item.type === "Lightbulb");
+if (service < 0) continue;
+seen.add(accessory.markId);
+out.push({ markId: accessory.markId, service });
+}
+return out;
+}
 function volumeHintText(state) {
 if (state.empty) return strings.volume.emptyHint;
 const parts = [];
@@ -70555,6 +70677,7 @@ if (state.aim) parts.push(strings.volume.aimHint);
 if (state.home) parts.push(state.touching ? strings.volume.homeTouchHint : strings.volume.homeHint);
 parts.push(volumeDoorLine(state.doors, state.open, state.aimedDoor, state.touching));
 parts.push(volumeWindowLine(state.windows, state.open, state.aimedDoor, state.touching));
+parts.push(volumeCupboardLine(state.cupboards, state.open, state.aimedDoor, state.touching));
 parts.push(volumeSheerLine(state.sheers, state.openSheers || new Set(), state.aimedSheer, state.touching));
 parts.push(volumeFloorAction(state.stair, state.floors, state.back, { hints: state.hints }).hint);
 return parts.filter((part) => part !== "").join(" ");
@@ -71778,8 +71901,18 @@ if (openDoors.has(doorId)) openDoors.delete(doorId);
 else openDoors.add(doorId);
 openRev += 1;
 rebuildScene();
-if (homeOn()) simDoor(doorId, openDoors.has(doorId));
+if (homeOn()) {
+if (volumeCupboardObjectId(doorId)) cupboardLight(doorId);
+else simDoor(doorId, openDoors.has(doorId));
+}
 return true;
+}
+function cupboardLight(id) {
+const state = getState();
+const on = openDoors.has(id);
+for (const lamp of volumeCupboardLamps(state.project, schemeId, volumeCupboardObjectId(id), scene.heightMm)) {
+simAct({ kind: "set", markId: lamp.markId, service: lamp.service, char: "On", value: on });
+}
 }
 function toggleAllDoors() {
 const doors = scene.doors || [];
@@ -71898,6 +72031,7 @@ rebuildScene();
 function homeArrive() {
 homePlace = null;
 if (!scene.empty) for (const id of [...(scene.doors || []), ...(scene.windows || [])]) simDoor(id, openDoors.has(id));
+if (!scene.empty) for (const id of scene.cupboards || []) if (openDoors.has(id)) cupboardLight(id);
 if (!homeSeeded && !homeKnown) {
 homeSeeded = true;
 const state = getState();
@@ -72952,6 +73086,7 @@ locked,
 aim: !aimNode.hidden && !touching && !volumeTouchOnly(),
 doors: scene.doors,
 windows: scene.windows,
+cupboards: scene.cupboards,
 open: openDoors,
 aimedDoor,
 sheers: scene.sheers,

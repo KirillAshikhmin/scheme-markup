@@ -402,7 +402,7 @@ export function volumeObjectFrame(project, schemeId, object, fallbackHeightMm) {
  * Вещь без устройства остаётся как была: хозяина у её граней нет, и светиться
  * ей нечем.
  */
-export function volumeObjectFaces(project, schemeId, object, fallbackHeightMm, out = [], clear = true) {
+export function volumeObjectFaces(project, schemeId, object, fallbackHeightMm, out = [], clear = true, open = false) {
   // Отметка «Прозрачные объекты» (правка после сборки сценариев): «если
   // выключить, то становятся не прозрачными. По умолчанию вкл.» Снята — вещь
   // плотная, как стена; тюль шторы — тело метки, его отметка не трогает.
@@ -416,12 +416,132 @@ export function volumeObjectFaces(project, schemeId, object, fallbackHeightMm, o
   const stair = frame && objectStairKey(model.key)
     ? objectStairModel(model.key, { widthMm: frame.widthMm, depthMm: frame.depthMm, heightMm: frame.heightMm, mirror: object.mirror === true })
     : null;
-  if (frame) return volumeModelFaces(frame, stair ? { key: model.key, parts: stair } : model, VOLUME_OBJECT_RGB, out, { clear: own, markId });
+  // Шкаф со створками (правка 2026-11-20): створки несут хозяина-«дверь», а у
+  // открытого шкафа стоят распахнутыми (`volumeCupboardModel`).
+  const leafId = frame && !stair && volumeModelOpens(model) ? volumeCupboardId(object.id) : null;
+  const shown = leafId && open ? { key: model.key, parts: volumeCupboardModel(model, frame) } : model;
+  if (frame) return volumeModelFaces(frame, stair ? { key: model.key, parts: stair } : shown, VOLUME_OBJECT_RGB, out, { clear: own, markId, leafId });
   // У вещи без модели тело — её габарит, и хозяин у него тот же; **свечения
   // нет**: светится экран, а не шкаф, и коробка по габариту не знает, где у
   // неё лицо (у метки без модели правило своё — `volumeMarkFaces`).
   for (const prism of volumeObjectPrisms(project, schemeId, object, fallbackHeightMm)) {
     volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, VOLUME_OBJECT_RGB, out, { clear: own, markId });
+  }
+  return out;
+}
+
+// ——— шкафы открываются (правка без автопилота, 2026-11-20) ————————————————
+//
+// Слова заказчика: «сделай что бы шкафы открывались и подсветку в них
+// реализуй». Открывается вещь, у модели которой есть **створки** (`leaf` в
+// описании тела): шкаф и кухонный шкаф. Устроено это дорогой двери и створки
+// окна, а не своей: грани створок несут `doorId`, и тогда щелчок, E, касание,
+// прицел и память открытого работают сами — второго множества «что открыто»
+// в окне не заведено.
+//
+// **Имя в этом множестве — с приставкой.** Номера сущностей объекта свои у
+// каждого вида (ADR 038): проём 5 и вещь 5 живут одновременно, и голый номер
+// вещи открыл бы заодно чужую дверь.
+//
+// **Открытое — вид, а не свойство вещи**: в объект не пишется ничего (G68).
+
+/** Приставка имени шкафа в множестве открытого (`openDoorIds`). */
+export const VOLUME_CUPBOARD_PREFIX = "thing:";
+/** Створка шире этого делится на две и больше: двухметровой дверцы не бывает. */
+export const VOLUME_CUPBOARD_LEAF_MM = 600;
+/** Толщина распахнутой створки: фасад, а не то тело, которым он нарисован закрытым. */
+export const VOLUME_CUPBOARD_BOARD_MM = 20;
+
+/** Имя шкафа в множестве открытого по номеру вещи. */
+export function volumeCupboardId(objectId) {
+  return VOLUME_CUPBOARD_PREFIX + objectId;
+}
+
+/** Номер вещи по имени из множества открытого; `null` — это не шкаф (дверь, окно). */
+export function volumeCupboardObjectId(id) {
+  return typeof id === "string" && id.startsWith(VOLUME_CUPBOARD_PREFIX) ? id.slice(VOLUME_CUPBOARD_PREFIX.length) : null;
+}
+
+/** Есть ли у модели створки. */
+export function volumeModelOpens(model) {
+  return Boolean(model && Array.isArray(model.parts) && model.parts.some((part) => part && part.leaf && part.kind === "box"));
+}
+
+/** Открывается ли вещь чертежа: у неё модель со створками и обычный габарит. */
+export function volumeObjectOpens(project, object) {
+  if (!object || object.shape === "polyline" || !object.atMm) return false;
+  return volumeModelOpens(volumeObjectModel(project, object));
+}
+
+/**
+ * Тела открытого шкафа: каждая створка заменена распахнутыми на 90°.
+ *
+ * Створка шире `VOLUME_CUPBOARD_LEAF_MM` делится поровну, и петли чередуются —
+ * слева, справа, слева: соседние дверцы распахиваются друг от друга, как у
+ * шкафа с парными фасадами. Одиночная узкая створка висит на той стороне, к
+ * которой она ближе. Распахнутая створка — доска толщиной
+ * `VOLUME_CUPBOARD_BOARD_MM`, стоящая перед лицом шкафа: из габарита она
+ * выходит, как выходит из стены дверное полотно.
+ */
+export function volumeCupboardModel(model, frame) {
+  const parts = [];
+  for (const part of (model && model.parts) || []) {
+    if (!part.leaf || part.kind !== "box" || !(frame.widthMm > 0) || !(frame.depthMm > 0)) {
+      parts.push(part);
+      continue;
+    }
+    const count = Math.max(1, Math.round((part.width * frame.widthMm) / VOLUME_CUPBOARD_LEAF_MM));
+    const width = part.width / count;
+    const board = Math.min(width, VOLUME_CUPBOARD_BOARD_MM / frame.widthMm);
+    const reach = (width * frame.widthMm) / frame.depthMm;
+    for (let index = 0; index < count; index += 1) {
+      const x = part.x + index * width;
+      const left = count === 1 ? x + width / 2 <= 0 : index % 2 === 0;
+      parts.push({
+        ...part,
+        name: part.name + (count > 1 ? index + 1 : "") + "Open",
+        x: left ? x : x + width - board,
+        width: board,
+        y: part.y - reach,
+        depth: reach,
+      });
+    }
+  }
+  return parts;
+}
+
+/**
+ * Метки внутри шкафа: те, у кого вершина или середина звена лежит в его
+ * габарите на плане и кто по высоте в него попадает. По ним окно зажигает
+ * подсветку открытого шкафа («Подсветка на сенсоре (вкл. при открывании)»);
+ * лампа ли метка, решает оно же — по аксессуару.
+ *
+ * **Высота.** Метка со своей высотой обязана лежать между низом и верхом
+ * шкафа. Без высоты она потолочная или «как у типа», и считается своей только
+ * у шкафа в рост (`VOLUME_HEAD_MM`): точечный светильник над комодом — не
+ * подсветка комода.
+ */
+export function volumeCupboardMarks(project, schemeId, object, fallbackHeightMm) {
+  const frame = volumeObjectFrame(project, schemeId, object, fallbackHeightMm);
+  if (!frame) return [];
+  const inside = (point) => {
+    if (!point) return false;
+    const dx = point.x - frame.at.x;
+    const dy = point.y - frame.at.y;
+    return Math.abs(dx * frame.u.x + dy * frame.u.y) <= frame.widthMm / 2 && Math.abs(dx * frame.f.x + dy * frame.f.y) <= frame.depthMm / 2;
+  };
+  const top = frame.bottomMm + frame.heightMm;
+  const out = [];
+  for (const mark of (project && project.marks) || []) {
+    if (!mark || mark.schemeId !== schemeId || !Array.isArray(mark.points)) continue;
+    const height = typeof mark.heightAboveFloor === "number" ? mark.heightAboveFloor : null;
+    if (height === null ? top < VOLUME_HEAD_MM : height < frame.bottomMm || height > top) continue;
+    const points = mark.points.map((point) => planFractionToMm(project, schemeId, point));
+    const probes = [...points];
+    for (let index = 0; index + 1 < points.length; index += 1) {
+      if (points[index] && points[index + 1]) probes.push({ x: (points[index].x + points[index + 1].x) / 2, y: (points[index].y + points[index + 1].y) / 2 });
+    }
+    if (probes.some(inside)) out.push(mark.id);
   }
   return out;
 }

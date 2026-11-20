@@ -50,11 +50,13 @@ import {
   volumeWallLintels,
   volumeWallMiters,
   volumeWallSolids,
+  volumeDoorOpen,
 } from "./walls.js";
 import { volumeCurtainShare, volumeSheerPlaces, volumeShiftRoomLight, volumeSunOpenings } from "./sun.js";
 import { volumeMarkFaces, volumeMarkProbe, volumeMarkViewLines, volumeMarks } from "./marks.js";
 import {
   volumeCeilingUnderVoid,
+  volumeCupboardId,
   volumeFloorFaces,
   volumeFloorKey,
   volumeFloorKeySame,
@@ -62,6 +64,7 @@ import {
   volumeHeightMm,
   volumeObjectFaces,
   volumeObjectModel,
+  volumeObjectOpens,
   volumeObjectPrisms,
   volumePolysOverlap,
   volumePrismBlocks,
@@ -185,7 +188,7 @@ export function volumeStackScene(project, plan, optionsOf, was = null) {
     // отвечает на «моё ли это открыли» (см. `volumeFloorKey`).
     const known = {
       // Створка окна — тоже «открыли»: этаж с распахнутым окном собирается заново.
-      doors: [...(sub.doors || []), ...(sub.windows || [])],
+      doors: [...(sub.doors || []), ...(sub.windows || []), ...(sub.cupboards || [])],
       sheers: sub.sheers || [],
       objects: schemeObjectsOnScheme(project, item.schemeId).map((object) => object.id),
     };
@@ -588,6 +591,7 @@ export function volumeScene(project, schemeId, options = {}) {
       boundsMm: null,
       doors: [],
       windows: [],
+      cupboards: [],
       sheers: [],
       stairs: [],
       marks: [],
@@ -1007,6 +1011,9 @@ export function volumeScene(project, schemeId, options = {}) {
   // Вещи, которые нарисованы своей моделью (таск 255): их связанным приборам
   // тело не нужно — см. ниже, у меток.
   const modelled = new Set();
+  // Шкафы со створками (правка 2026-11-20): их открывают по одному, как окна, —
+  // E, щелчком и касанием; «все двери» их не трогает.
+  const cupboards = [];
   for (const object of objects) {
     // Рисуется модель или габарит — решает одно место (`volumeObjectFaces`).
     //
@@ -1035,7 +1042,17 @@ export function volumeScene(project, schemeId, options = {}) {
     // вернее: встать можно прямо на лестницу.
     const objectFrom = faces.length;
     if (volumeObjectModel(project, object)) modelled.add(object.id);
-    volumeObjectFaces(project, schemeId, object, schemeHeight.mm, faces, options.objectsClear !== false);
+    const opens = volumeObjectOpens(project, object);
+    if (opens) cupboards.push(volumeCupboardId(object.id));
+    volumeObjectFaces(
+      project,
+      schemeId,
+      object,
+      schemeHeight.mm,
+      faces,
+      options.objectsClear !== false,
+      opens && volumeDoorOpen(options.openDoorIds || null, volumeCupboardId(object.id)),
+    );
     // Вещь в комнате — её (таск 09 сценариев): включённый свет светлит и диван.
     if (rooms.length > 0 && faces.length > objectFrom) volumeTagRoom(faces, objectFrom, where, volumeMiddleOf(faces[objectFrom].p));
     volumeTagThing(faces, objectFrom, object.id);
@@ -1155,6 +1172,7 @@ export function volumeScene(project, schemeId, options = {}) {
     openingCount: walls.reduce((sum, wall) => sum + openingsInWall(project, wall.id).length, 0),
     doors,
     windows,
+    cupboards,
     // Лестницы схемы (таск 149): по ним окно спрашивает про этаж. Лежат в
     // сцене, а не ищутся на каждом шаге, — спрашивается это на каждом шаге, а
     // меняется только вместе с чертежом, то есть вместе со всей сценой.

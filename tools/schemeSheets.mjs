@@ -139,6 +139,8 @@ export function jobOf(command, project, keys) {
     // «Снять крышу» — та же отметка окна параметров объёма (таск 212): сверху
     // в дом без неё не заглянуть.
     roofOff: keys.has("no-roof"),
+    // Шкафы со створками — распахнутыми (правка 2026-11-20): кадр для проверки.
+    openCupboards: keys.has("open-cupboards"),
     format: typeof keys.get("sheet") === "string" ? keys.get("sheet") : null,
     orientation: typeof keys.get("orientation") === "string" ? keys.get("orientation") : null,
   };

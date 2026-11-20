@@ -206,7 +206,11 @@
             // Кадр собирается теми же руками, что в окне объёма: сцена,
             // снимок часа, тень дома и солнечные пятна приходят готовыми, а
             // кадр их только выкладывает. Своего рисования здесь нет.
-            const scene = volume.volumeScene(project, schemeId, { roofOff: job.roofOff === true });
+            let scene = volume.volumeScene(project, schemeId, { roofOff: job.roofOff === true });
+            // `--open-cupboards`: какие шкафы открываются, знает сама сцена.
+            if (job.openCupboards && scene && (scene.cupboards || []).length > 0) {
+              scene = volume.volumeScene(project, schemeId, { roofOff: job.roofOff === true, openDoorIds: new Set(scene.cupboards) });
+            }
             if (!scene || scene.empty) throw new Error("у схемы нет чертежа — объём рисовать нечем");
             const site = volume.volumeSiteOf(project);
             const day = clock.volumeDayNumberOf(job.date ? new Date(job.date) : new Date());

@@ -107,6 +107,8 @@ import {
   volumeCanStand,
   volumeChannelAt,
   volumeChannelNear,
+  volumeCupboardMarks,
+  volumeCupboardObjectId,
   volumeChannelLines,
   volumeChannelLinks,
   volumeDoorAt,
@@ -432,7 +434,8 @@ export function volumeOpenAlive(scene, saved) {
   const sheers = new Set();
   const add = (sub) => {
     // Окно со створкой открывают тем же множеством, что двери.
-    for (const id of [...((sub && sub.doors) || []), ...((sub && sub.windows) || [])]) doors.add(id);
+    // Шкаф со створками (правка 2026-11-20) — там же, под именем с приставкой.
+    for (const id of [...((sub && sub.doors) || []), ...((sub && sub.windows) || []), ...((sub && sub.cupboards) || [])]) doors.add(id);
     for (const id of (sub && sub.sheers) || []) sheers.add(id);
   };
   add(scene);
@@ -1006,6 +1009,42 @@ export function volumeWindowLine(windows, open, aimed, touching) {
 }
 
 /**
+ * Строка про шкафы со створками (правка без автопилота, 2026-11-20): сколько
+ * открыто и чем их открывают — как у окон.
+ */
+export function volumeCupboardLine(cupboards, open, aimed, touching) {
+  const list = cupboards || [];
+  if (list.length === 0) return "";
+  const count = list.filter((id) => open.has(id)).length;
+  const state = text("volume.cupboards", { open: count, count: list.length });
+  if (touching) return state + " " + strings.volume.cupboardTouch;
+  return aimed && list.includes(aimed) ? state + " " + strings.volume.cupboardAimed : state + " " + strings.volume.cupboardKeys;
+}
+
+/**
+ * Какие лампы зажигает открытый шкаф (правка 2026-11-20, «подсветку в них
+ * реализуй»): метки внутри его габарита (`volumeCupboardMarks`), у которых
+ * есть лампа. Ответ — `[{markId, service}]` по **ведущим** меткам: четыре
+ * точки одного обозначения — один аксессуар. Чистая: окно только шлёт дому
+ * «включи» и «выключи» по этому списку.
+ */
+export function volumeCupboardLamps(project, schemeId, objectId, fallbackHeightMm) {
+  const object = schemeObjectsOnScheme(project, schemeId).find((item) => item.id === objectId);
+  if (!object) return [];
+  const seen = new Set();
+  const out = [];
+  for (const markId of volumeCupboardMarks(project, schemeId, object, fallbackHeightMm)) {
+    const accessory = markAccessory(project, markId);
+    if (!accessory || seen.has(accessory.markId)) continue;
+    const service = accessory.services.findIndex((item) => item.type === "Lightbulb");
+    if (service < 0) continue;
+    seen.add(accessory.markId);
+    out.push({ markId: accessory.markId, service });
+  }
+  return out;
+}
+
+/**
  * Текст подсказки окна (G218) — весь, одной строкой.
  *
  * Собирается из того же, из чего собирался в строке под полем: вид говорит про
@@ -1060,6 +1099,7 @@ export function volumeHintText(state) {
   if (state.home) parts.push(state.touching ? strings.volume.homeTouchHint : strings.volume.homeHint);
   parts.push(volumeDoorLine(state.doors, state.open, state.aimedDoor, state.touching));
   parts.push(volumeWindowLine(state.windows, state.open, state.aimedDoor, state.touching));
+  parts.push(volumeCupboardLine(state.cupboards, state.open, state.aimedDoor, state.touching));
   parts.push(volumeSheerLine(state.sheers, state.openSheers || new Set(), state.aimedSheer, state.touching));
   // Про этажи — последней: лестница под рукой есть далеко не всегда, а когда
   // есть, это самое новое в строке. Там же и возврат (G216).
@@ -3599,8 +3639,25 @@ function createVolume({ api, hosts }) {
     rebuildScene();
     // Датчик открытия ходит вместе с дверью (история 2.9): связь дверь — датчик
     // считает дом (`markDoorOf`), «Объём» только говорит, что дверь сделала.
-    if (homeOn()) simDoor(doorId, openDoors.has(doorId));
+    if (homeOn()) {
+      if (volumeCupboardObjectId(doorId)) cupboardLight(doorId);
+      else simDoor(doorId, openDoors.has(doorId));
+    }
     return true;
+  }
+
+  /**
+   * Подсветка шкафа идёт за его дверцами (правка 2026-11-20): открыли —
+   * лампы внутри включились, закрыли — погасли. Это «подсветка на сенсоре
+   * (вкл. при открывании)» с чертежей: сенсор стоит в самом шкафу, и в доме
+   * его играет рука, открывшая дверцу. Без запущенного дома ламп нет вовсе.
+   */
+  function cupboardLight(id) {
+    const state = getState();
+    const on = openDoors.has(id);
+    for (const lamp of volumeCupboardLamps(state.project, schemeId, volumeCupboardObjectId(id), scene.heightMm)) {
+      simAct({ kind: "set", markId: lamp.markId, service: lamp.service, char: "On", value: on });
+    }
   }
 
   function toggleAllDoors() {
@@ -3763,6 +3820,9 @@ function createVolume({ api, hosts }) {
   function homeArrive() {
     homePlace = null;
     if (!scene.empty) for (const id of [...(scene.doors || []), ...(scene.windows || [])]) simDoor(id, openDoors.has(id));
+    // Открытый до запуска шкаф светит сразу; закрытые дом не трогает — их
+    // лампы могли включить сценарием.
+    if (!scene.empty) for (const id of scene.cupboards || []) if (openDoors.has(id)) cupboardLight(id);
     // Прежняя память открытых штор (история 2.14) — один раз и только дому,
     // который здесь ещё не запускали: его собственная память старше.
     if (!homeSeeded && !homeKnown) {
@@ -5683,6 +5743,7 @@ function createVolume({ api, hosts }) {
       aim: !aimNode.hidden && !touching && !volumeTouchOnly(),
       doors: scene.doors,
       windows: scene.windows,
+      cupboards: scene.cupboards,
       open: openDoors,
       aimedDoor,
       sheers: scene.sheers,
