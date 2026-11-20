@@ -768,10 +768,50 @@ export function volumeScene(project, schemeId, options = {}) {
       }
     }
     const outline = volumeHouseOutline(bounds, windows);
+    // Вход в квартиру: дверь в стене на глухой стороне габарита. За ней дом
+    // рисует коридор этажа (`volume/house.js`), иначе из двери видна улица.
+    let entry = null;
+    for (const wall of walls) {
+      if (entry) break;
+      const vectors = wallVectors(wall);
+      if (!vectors) continue;
+      const ax = Number(wall.aMm.x);
+      const ay = Number(wall.aMm.y);
+      const bx = Number(wall.bMm.x);
+      const by = Number(wall.bMm.y);
+      const flat = Math.abs(ay - by) <= Math.abs(ax - bx);
+      const side = flat
+        ? Math.abs((ay + by) / 2 - bounds.maxY) < near
+          ? "south"
+          : Math.abs((ay + by) / 2 - bounds.minY) < near
+            ? "north"
+            : null
+        : Math.abs((ax + bx) / 2 - bounds.maxX) < near
+          ? "east"
+          : Math.abs((ax + bx) / 2 - bounds.minX) < near
+            ? "west"
+            : null;
+      if (!side || windows[side]) continue;
+      for (const opening of openingsInWall(project, wall.id)) {
+        if (openingFamilyOf(opening.kind) !== "door") continue;
+        const middle = Number(opening.atMm) + Number(opening.widthMm) / 2;
+        const half = Number(wall.thicknessMm) / 2;
+        const out = side === "south" ? { x: 0, y: 1 } : side === "north" ? { x: 0, y: -1 } : side === "east" ? { x: 1, y: 0 } : { x: -1, y: 0 };
+        entry = {
+          side,
+          // Точка на наружной грани стены посередине двери.
+          x: ax + vectors.u.x * middle + out.x * half,
+          y: ay + vectors.u.y * middle + out.y * half,
+          out,
+        };
+        break;
+      }
+    }
     house = {
       ...lift,
       rect: outline.rect,
       wings: outline.wings,
+      entry,
       // Низ и верх самой квартиры: под ней дом до земли, над ней — до крыши.
       floorMm: -VOLUME_SLAB_MM,
       ceilingMm: schemeHeight.mm,

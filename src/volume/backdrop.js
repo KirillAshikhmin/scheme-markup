@@ -32,10 +32,13 @@ import {
   VOLUME_MEGA_CARS,
   VOLUME_MEGA_FLOOR_MM,
   VOLUME_MEGA_GREENS,
+  VOLUME_MEGA_PARKED,
   VOLUME_MEGA_SKYLINE,
   VOLUME_MEGA_STREETS,
   VOLUME_MEGA_TOWERS,
   volumeDrawMegaBlock,
+  volumeDrawMegaParking,
+  volumeMegaStall,
   volumeDrawMegaSkyline,
   volumeDrawMegaTower,
 } from "./megapolis.js";
@@ -902,6 +905,8 @@ function volumeDrawGround(ctx, box, camera, hour, land, near, groundMm = 0) {
       for (const ridge of mega.skyline) {
         volumeDrawMegaSkyline(ctx, point, ridge, ridge.far ? palette.mega.skylineFar : palette.mega.skylineNear);
       }
+      // Парковка вокруг дома — под улицами: проспекты начинаются на ней.
+      volumeDrawMegaParking(ctx, aim, places.push, palette);
       for (const street of mega.streets) {
         volumeDrawStrip(ctx, aim, street.nodes, (run) =>
           street.river
@@ -911,8 +916,9 @@ function volumeDrawGround(ctx, box, camera, hour, land, near, groundMm = 0) {
         if (street.marks) volumeDrawStrip(ctx, aim, street.marks, () => palette.mark);
       }
     }
-    // Место глаза — у прицела: высота в нём отсчитана от земли, как и высоты домов.
-    take(mega.blocks, (spot, index) => volumeDrawMegaBlock(ctx, point, aim.at, spot, index, hour, volumeCityWindowLit));
+    // Дому отдаётся сам прицел: стены он отсекает ближней плоскостью сам, а
+    // высота глаза в прицеле отсчитана от земли, как и высоты домов.
+    take(mega.blocks, (spot, index) => volumeDrawMegaBlock(ctx, aim, spot, index, hour, volumeCityWindowLit));
     take(mega.cars, (spot) => volumeDrawCar(ctx, aim, spot, palette));
     take(mega.greens, (spot) => volumeDrawTree(ctx, aim, spot, palette));
   } else {
@@ -1756,7 +1762,14 @@ const VOLUME_MEGA_PLACES = {
     const nodes = volumeBandNodes(street.points, street.widthM);
     return { river: street.river === true, nodes, marks: street.river ? null : volumeStreetMarks(nodes) };
   }),
-  cars: VOLUME_MEGA_CARS.map(([az, away, height], index) => volumeCar(az, away, height, index)),
+  cars: [
+    ...VOLUME_MEGA_CARS.map(([az, away, height], index) => volumeCar(az, away, height, index)),
+    // Машины на парковке у дома: место задано в метрах от середины чертежа.
+    ...VOLUME_MEGA_PARKED.map(([row, stall, height], index) => {
+      const at = volumeMegaStall(row, stall);
+      return { x: at.x * VOLUME_M, y: at.y * VOLUME_M, awayMm: Math.hypot(at.x, at.y) * VOLUME_M, heightMm: height * VOLUME_M, car: index + 2 };
+    }),
+  ],
   greens: VOLUME_MEGA_GREENS.map(([az, away, height]) => volumeStanding(az, away, height, "tree")),
 };
 

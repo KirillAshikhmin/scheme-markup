@@ -17,8 +17,63 @@
 //
 // «Снять крышу» снимает и верх дома, и соседей: остаётся постамент с открытой
 // планировкой, в которую можно заглянуть сверху.
-import { volumeCityWindowLit, volumeGroundAim, volumeGroundPoint } from "./backdrop.js";
-import { volumeDrawMegaBox, volumeMegaPaint } from "./megapolis.js";
+import { volumeCityWindowLit, volumeGroundAim } from "./backdrop.js";
+import { volumeDrawMegaBox, volumeMegaPaint, volumeMegaPath } from "./megapolis.js";
+
+// ——— коридор этажа за входной дверью (правка 2026-11-20) ————————————————————
+//
+// Слова заказчика: «Из входной двери мы то видим стену с окнами то улицу.
+// Сделай там просто коридор небольшой с дверьми в разные стороны, штук 5».
+//
+// Коридор — тот же рисунок, что и дом: пол, потолок и три стены с пятью
+// дверями, написанные до сцены, так что видно их только в проём входной двери.
+// Свет в нём свой и постоянный (светит — значит часом не красится): ночью из
+// тёмной прихожей дверь открывается в освещённый коридор, как и бывает.
+
+/** Коридор: сколько он тянется в каждую сторону от двери, его глубина и двери. */
+export const VOLUME_HALL_HALF_MM = 4600;
+export const VOLUME_HALL_DEEP_MM = 2200;
+export const VOLUME_HALL_DOOR_MM = { width: 900, height: 2050 };
+const HALL_WALL = "#d8d2c8";
+const HALL_SIDE = "#c9c2b7";
+const HALL_FLOOR = "#8d8880";
+const HALL_CEILING = "#efece6";
+const HALL_DOOR = "#8a6a4a";
+const HALL_HANDLE = "#d9d5cc";
+
+/**
+ * Грани коридора: `[{color, points}]` в миллиметрах сцены, в порядке рисования.
+ * Чистая — по ней идёт и кадр, и тест. `entry` — вход квартиры
+ * (`scene.house.entry`), `heightMm` — высота потолка.
+ */
+export function volumeHallFaces(entry, heightMm) {
+  if (!entry || !(heightMm > 0)) return [];
+  const out = entry.out;
+  const along = { x: -out.y, y: out.x };
+  const at = (side, deep, z) => ({ x: entry.x + along.x * side + out.x * deep, y: entry.y + along.y * side + out.y * deep, z });
+  const L = VOLUME_HALL_HALF_MM;
+  const D = VOLUME_HALL_DEEP_MM;
+  const H = heightMm;
+  const faces = [
+    { color: HALL_FLOOR, points: [at(-L, 0, 0), at(L, 0, 0), at(L, D, 0), at(-L, D, 0)] },
+    { color: HALL_CEILING, points: [at(-L, 0, H), at(L, 0, H), at(L, D, H), at(-L, D, H)] },
+    { color: HALL_WALL, points: [at(-L, D, 0), at(L, D, 0), at(L, D, H), at(-L, D, H)] },
+    { color: HALL_SIDE, points: [at(-L, 0, 0), at(-L, D, 0), at(-L, D, H), at(-L, 0, H)] },
+    { color: HALL_SIDE, points: [at(L, 0, 0), at(L, D, 0), at(L, D, H), at(L, 0, H)] },
+  ];
+  const half = VOLUME_HALL_DOOR_MM.width / 2;
+  const tall = Math.min(VOLUME_HALL_DOOR_MM.height, H - 100);
+  // Три двери напротив и по одной в торцах — пять квартир на площадке.
+  for (const middle of [-2900, 0, 2900]) {
+    faces.push({ color: HALL_DOOR, points: [at(middle - half, D - 8, 0), at(middle + half, D - 8, 0), at(middle + half, D - 8, tall), at(middle - half, D - 8, tall)] });
+    faces.push({ color: HALL_HANDLE, points: [at(middle + half - 150, D - 16, 980), at(middle + half - 60, D - 16, 980), at(middle + half - 60, D - 16, 1040), at(middle + half - 150, D - 16, 1040)] });
+  }
+  for (const side of [-1, 1]) {
+    const x = side * (L - 8);
+    faces.push({ color: HALL_DOOR, points: [at(x, D / 2 - half, 0), at(x, D / 2 + half, 0), at(x, D / 2 + half, tall), at(x, D / 2 - half, tall)] });
+  }
+  return faces;
+}
 
 function housePlan(rect) {
   // Обход по кругу, при котором наружу смотрит правый перпендикуляр ребра
@@ -82,20 +137,33 @@ export function volumeDrawHouse(ctx, box, camera, mood, scene, pass, roofOff = f
   if (!house || !mood || !mood.palette || !mood.palette.mega) return 0;
   // Проекция — в миллиметрах сцены: дом стоит там же, где квартира.
   const aim = volumeGroundAim(camera, box, 0);
-  const point = (x, y, z) => volumeGroundPoint(aim, x, y, z);
   const paint = volumeMegaPaint(mood.palette, 0);
   let drawn = 0;
   for (const part of volumeHouseParts(house, camera.at, roofOff)) {
     if (part.pass !== pass) continue;
     volumeDrawMegaBox(
       ctx,
-      point,
-      camera.at,
+      aim,
       { ...housePlan(part.rect), bottomMm: part.bottomMm, topMm: part.topMm, floors: part.floors, paint, seed: 900 + drawn, roof: part.roof },
       mood,
       volumeCityWindowLit,
     );
     drawn += 1;
+  }
+  // Коридор — последним в проходе «до сцены»: он ближе соседей, которых
+  // закрывает, и видно его только глазу, стоящему по квартирную сторону входа.
+  const entry = house.entry;
+  if (pass === "before" && entry) {
+    const inside = (camera.at.x - entry.x) * entry.out.x + (camera.at.y - entry.y) * entry.out.y < 0;
+    if (inside && camera.at.z < house.ceilingMm) {
+      for (const face of volumeHallFaces(entry, house.ceilingMm)) {
+        ctx.beginPath();
+        if (!volumeMegaPath(ctx, aim, face.points)) continue;
+        ctx.fillStyle = face.color;
+        ctx.fill();
+      }
+      drawn += 1;
+    }
   }
   return drawn;
 }

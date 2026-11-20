@@ -141,6 +141,7 @@ export function jobOf(command, project, keys) {
     roofOff: keys.has("no-roof"),
     // Шкафы со створками — распахнутыми (правка 2026-11-20): кадр для проверки.
     openCupboards: keys.has("open-cupboards"),
+    openDoors: keys.has("open-doors"),
     format: typeof keys.get("sheet") === "string" ? keys.get("sheet") : null,
     orientation: typeof keys.get("orientation") === "string" ? keys.get("orientation") : null,
   };

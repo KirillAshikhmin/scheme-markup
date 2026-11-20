@@ -171,6 +171,78 @@ export const VOLUME_MEGA_BLOCKS = Object.freeze([
   }).filter(Boolean),
 ]);
 
+/**
+ * Парковка вокруг дома (правка 2026-11-20). Слова заказчика: «дороги просто
+ * обрываются не доходя до дома — сделай вокруг дома парковку».
+ *
+ * Асфальтовая площадка квадратом `halfM` от середины чертежа: проспекты
+ * начинаются в 46–52 м и теперь упираются в неё, а не в газон. По четырём
+ * сторонам — ряды мест: `[xМ, yМ, вдоль "x" | "y", сколько мест]`, место 2,7 м
+ * шириной и 5 м глубиной. Машины стоят на части мест — `VOLUME_MEGA_PARKED`.
+ */
+export const VOLUME_MEGA_PARKING = Object.freeze({
+  halfM: 60,
+  stallM: 2.7,
+  deepM: 5,
+  rows: [
+    [-27, -44, "x", 20],
+    [-27, 49, "x", 20],
+    [-49, -24, "y", 18],
+    [44, -24, "y", 18],
+  ],
+});
+
+/** Машины на парковке: `[номер ряда, номер места, высота м]`. */
+export const VOLUME_MEGA_PARKED = Object.freeze([
+  [0, 1, 1.5], [0, 2, 1.6], [0, 5, 1.5], [0, 8, 1.7], [0, 9, 1.5], [0, 13, 1.6], [0, 17, 1.5],
+  [1, 0, 1.6], [1, 3, 1.5], [1, 4, 1.5], [1, 10, 1.7], [1, 15, 1.5], [1, 18, 1.6],
+  [2, 2, 1.5], [2, 6, 1.6], [2, 7, 1.5], [2, 12, 1.5], [2, 16, 1.7],
+  [3, 1, 1.6], [3, 4, 1.5], [3, 9, 1.5], [3, 11, 1.6], [3, 14, 1.5],
+]);
+
+/** Середина места парковки в метрах: `{x, y}`. */
+export function volumeMegaStall(row, index) {
+  const [x, y, along] = VOLUME_MEGA_PARKING.rows[row];
+  const step = VOLUME_MEGA_PARKING.stallM * (index + 0.5);
+  const deep = VOLUME_MEGA_PARKING.deepM / 2;
+  return along === "x" ? { x: x + step, y: y + deep } : { x: x + deep, y: y + step };
+}
+
+/**
+ * Площадка парковки и разметка мест: одна заливка асфальта и один путь линий.
+ * `push` — множитель расстановки фона (`volumeBackdropPush`).
+ */
+export function volumeDrawMegaParking(ctx, aim, push, palette) {
+  const M = 1000 * (push || 1);
+  const half = VOLUME_MEGA_PARKING.halfM * M;
+  ctx.beginPath();
+  if (!volumeMegaPath(ctx, aim, [{ x: -half, y: -half, z: 0 }, { x: half, y: -half, z: 0 }, { x: half, y: half, z: 0 }, { x: -half, y: half, z: 0 }])) return;
+  ctx.fillStyle = palette.asphalt;
+  ctx.fill();
+  // Линии мест видны с высоты и вблизи; издали это шум в одну точку.
+  if (megaScale(aim, 0, 0, 0) * VOLUME_MEGA_PARKING.stallM * 1000 < 1.5) return;
+  const line = 0.12 * M;
+  const stall = VOLUME_MEGA_PARKING.stallM * M;
+  const deep = VOLUME_MEGA_PARKING.deepM * M;
+  let any = false;
+  ctx.beginPath();
+  for (const [xM, yM, along, count] of VOLUME_MEGA_PARKING.rows) {
+    for (let index = 0; index <= count; index += 1) {
+      const x = xM * M + (along === "x" ? stall * index : 0);
+      const y = yM * M + (along === "y" ? stall * index : 0);
+      const points =
+        along === "x"
+          ? [{ x: x - line / 2, y, z: 0 }, { x: x + line / 2, y, z: 0 }, { x: x + line / 2, y: y + deep, z: 0 }, { x: x - line / 2, y: y + deep, z: 0 }]
+          : [{ x, y: y - line / 2, z: 0 }, { x: x + deep, y: y - line / 2, z: 0 }, { x: x + deep, y: y + line / 2, z: 0 }, { x, y: y + line / 2, z: 0 }];
+      if (volumeMegaPath(ctx, aim, points)) any = true;
+    }
+  }
+  if (any) {
+    ctx.fillStyle = palette.mark;
+    ctx.fill();
+  }
+}
+
 /** Машины у главного проспекта и деревья вдоль него: `[азимут°, дальность м, высота м]`. */
 export const VOLUME_MEGA_CARS = Object.freeze([
   [20, 60, 1.5],
@@ -198,21 +270,75 @@ export const VOLUME_MEGA_GREENS = Object.freeze([
   [344, 70, 9],
 ]);
 
-// Точка стены по долям: `fx` — вдоль верхней кромки, `fy` — сверху вниз.
-function megaSpot(left, right, footLeft, footRight, fx, fy) {
-  const topX = left.x + (right.x - left.x) * fx;
-  const topY = left.y + (right.y - left.y) * fx;
-  const lowX = footLeft.x + (footRight.x - footLeft.x) * fx;
-  const lowY = footLeft.y + (footRight.y - footLeft.y) * fx;
-  return { x: topX + (lowX - topX) * fy, y: topY + (lowY - topY) * fy };
+// ——— проекция с отсечением (правка 2026-11-20, дефект заказчика) ———————————
+//
+// Слова заказчика по первому показу: «Многоэтажки ближайшие при повороте
+// камеры сильно искажаются… Текущий дом тоже искажается и пропадать может».
+// Причин было две, и обе — в том, как стена попадала на экран:
+//
+//   — стена, у которой хоть один угол ушёл за спину, **не рисовалась вовсе**
+//     (точка за ближней плоскостью проекции не имеет) — отсюда «пропадает»;
+//   — полосы окон считались **долями между экранными углами**, а доля на
+//     экране — не доля на стене: у стены, уходящей вдаль, этажи обязаны
+//     сжиматься, а они шли ровным шагом — отсюда «искажается».
+//
+// Теперь каждый четырёхугольник — стена, полоса остекления, окно, крыша —
+// задан **точками на самой стене**, переводится в координаты камеры и
+// отсекается ближней плоскостью, как отсекаются грани сцены. Близкий дом и
+// дом, в котором стоит квартира, от этого рисуются верно под любым углом.
+
+/** Ближе этого к глазу фон не рисует: на самой ближней плоскости деление на нуль. */
+export const VOLUME_MEGA_NEAR_MM = 200;
+
+// Точка в координатах камеры: вправо, вверх и вглубь.
+function megaCam(aim, x, y, z) {
+  const dx = x - aim.at.x;
+  const dy = y - aim.at.y;
+  const dz = (z || 0) - aim.at.z;
+  const basis = aim.basis;
+  return {
+    r: dx * basis.right.x + dy * basis.right.y + dz * basis.right.z,
+    u: dx * basis.up.x + dy * basis.up.y + dz * basis.up.z,
+    d: dx * basis.fwd.x + dy * basis.fwd.y + dz * basis.fwd.z,
+  };
 }
 
-function megaQuad(ctx, a, b, c, d) {
-  ctx.moveTo(a.x, a.y);
-  ctx.lineTo(b.x, b.y);
-  ctx.lineTo(c.x, c.y);
-  ctx.lineTo(d.x, d.y);
+/**
+ * Многоугольник по точкам в миллиметрах — в путь холста, с отсечением ближней
+ * плоскостью. `false` — он целиком за спиной, в путь ничего не легло.
+ */
+export function volumeMegaPath(ctx, aim, points) {
+  const near = VOLUME_MEGA_NEAR_MM;
+  const cam = points.map((point) => megaCam(aim, point.x, point.y, point.z));
+  const kept = [];
+  for (let index = 0; index < cam.length; index += 1) {
+    const a = cam[index];
+    const b = cam[(index + 1) % cam.length];
+    const inA = a.d >= near;
+    const inB = b.d >= near;
+    if (inA) kept.push(a);
+    if (inA !== inB) {
+      const t = (near - a.d) / (b.d - a.d);
+      kept.push({ r: a.r + (b.r - a.r) * t, u: a.u + (b.u - a.u) * t, d: near });
+    }
+  }
+  if (kept.length < 3) return false;
+  for (let index = 0; index < kept.length; index += 1) {
+    const scale = aim.focal / kept[index].d;
+    const x = aim.halfWidth + kept[index].r * scale;
+    const y = aim.halfHeight - kept[index].u * scale;
+    if (index === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
   ctx.closePath();
+  return true;
+}
+
+// Сколько экранных точек даёт миллиметр на этой дальности; у самого глаза —
+// «очень много»: подробность тогда рисуется вся.
+function megaScale(aim, x, y, z) {
+  const depth = megaCam(aim, x, y, z).d;
+  return aim.focal / Math.max(VOLUME_MEGA_NEAR_MM, depth);
 }
 
 /** Краски дома по его тону: стена, бок, полосы остекления, крыша. */
@@ -231,7 +357,7 @@ export function volumeMegaPaint(palette, tone) {
  * floor, bay, share)` — светится ли окно. Число заливок не зависит от
  * этажности — см. шапку.
  */
-export function volumeDrawMegaBlock(ctx, point, at, block, index, hour, lit) {
+export function volumeDrawMegaBlock(ctx, aim, block, index, hour, lit) {
   const len = Math.hypot(block.x, block.y) || 1;
   const fx = block.x / len;
   const fy = block.y / len;
@@ -242,7 +368,7 @@ export function volumeDrawMegaBlock(ctx, point, at, block, index, hour, lit) {
     x: block.x + ux * block.halfMm * alongSign + fx * deep * deepSign,
     y: block.y + uy * block.halfMm * alongSign + fy * deep * deepSign,
   });
-  volumeDrawMegaBox(ctx, point, at, {
+  volumeDrawMegaBox(ctx, aim, {
     plan: [corner(1, -1), corner(-1, -1), corner(-1, 1), corner(1, 1)],
     wides: [block.halfMm * 2, block.deepMm, block.halfMm * 2, block.deepMm],
     bottomMm: 0,
@@ -257,12 +383,15 @@ export function volumeDrawMegaBlock(ctx, point, at, block, index, hour, lit) {
  * Коробка с окнами между двумя высотами — общая кисть дома мегаполиса и дома,
  * в котором стоит квартира (`volume/house.js`).
  *
- * `box.plan` — четыре угла по кругу так, чтобы наружу смотрел **правый**
- * перпендикуляр ребра; `box.wides` — длины рёбер в миллиметрах; `bottomMm` и
- * `topMm` — низ и верх; `floors` — сколько этажей в этой высоте.
+ * `aim` — прицел фона (`volumeGroundAim`): базис камеры, фокус, середина окна
+ * и место глаза в тех же миллиметрах, что высоты коробки. `box.plan` — четыре
+ * угла по кругу так, чтобы наружу смотрел **правый** перпендикуляр ребра;
+ * `box.wides` — длины рёбер; `bottomMm` и `topMm` — низ и верх; `floors` —
+ * сколько этажей в этой высоте.
  */
-export function volumeDrawMegaBox(ctx, point, at, box, hour, lit) {
+export function volumeDrawMegaBox(ctx, aim, box, hour, lit) {
   const { plan, wides, bottomMm, topMm, floors, paint } = box;
+  const at = aim.at;
   const shown = [];
   for (let side = 0; side < 4; side += 1) {
     const from = plan[side];
@@ -270,89 +399,65 @@ export function volumeDrawMegaBox(ctx, point, at, box, hour, lit) {
     const mx = (from.x + to.x) / 2;
     const my = (from.y + to.y) / 2;
     if ((to.y - from.y) * (at.x - mx) - (to.x - from.x) * (at.y - my) <= 0) continue;
-    const left = point(from.x, from.y, topMm);
-    const right = point(to.x, to.y, topMm);
-    const footLeft = point(from.x, from.y, bottomMm);
-    const footRight = point(to.x, to.y, bottomMm);
-    if (!left || !right || !footLeft || !footRight) continue;
-    shown.push({ side, wide: wides[side], left, right, footLeft, footRight, depth: Math.hypot(mx - at.x, my - at.y) });
+    shown.push({ side, wide: wides[side], from, to, mx, my, depth: Math.hypot(mx - at.x, my - at.y) });
   }
-  if (shown.length > 0) {
-    shown.sort((one, two) => two.depth - one.depth);
-    const share = hour.cityLit;
-    for (const wall of shown) {
-      const { left, right, footLeft, footRight } = wall;
-      // Ближняя из двух стен — лицо, дальняя — бок: бок темнее.
-      ctx.fillStyle = wall === shown[shown.length - 1] ? paint.wall : paint.side;
-      ctx.beginPath();
-      megaQuad(ctx, left, right, footRight, footLeft);
-      ctx.fill();
-      const tall = Math.max(Math.abs(footLeft.y - left.y), Math.abs(footRight.y - right.y));
-      const floorPx = tall / floors;
-      if (floorPx < VOLUME_MEGA_BAND_PX) continue;
-      const pad = 0.04;
-      const cellY = (1 - pad * 2) / floors;
-      // Остекление — полоса на этаж, все полосы стены одним путём.
-      ctx.fillStyle = paint.band;
-      ctx.beginPath();
-      for (let floor = 0; floor < floors; floor += 1) {
-        const top = pad + cellY * (floor + 0.2);
-        const low = top + cellY * 0.56;
-        megaQuad(
-          ctx,
-          megaSpot(left, right, footLeft, footRight, pad, top),
-          megaSpot(left, right, footLeft, footRight, 1 - pad, top),
-          megaSpot(left, right, footLeft, footRight, 1 - pad, low),
-          megaSpot(left, right, footLeft, footRight, pad, low),
-        );
-      }
-      ctx.fill();
-      if (!(share > 0)) continue;
-      const bays = Math.max(2, Math.round(wall.wide / VOLUME_MEGA_BAY_MM));
-      const across = Math.hypot(right.x - left.x, right.y - left.y) / bays;
-      if (across < VOLUME_MEGA_WINDOW_PX) continue;
-      const cellX = (1 - pad * 2) / bays;
-      // Светящиеся окна — вторым путём. На очень большой стене проверяется
-      // каждый второй этаж: зажжённых от этого вдвое меньше, а заливка та же.
-      const step = floors * bays > VOLUME_MEGA_LIT_MAX ? 2 : 1;
-      const seed = box.seed * 4 + wall.side;
-      let any = false;
-      ctx.beginPath();
-      for (let floor = 0; floor < floors; floor += step) {
-        const top = pad + cellY * (floor + 0.2);
-        const low = top + cellY * 0.56;
-        for (let bay = 0; bay < bays; bay += 1) {
-          if (!lit(seed, floor, bay, share)) continue;
-          const from = pad + cellX * (bay + 0.14);
-          const to = from + cellX * 0.72;
-          megaQuad(
-            ctx,
-            megaSpot(left, right, footLeft, footRight, from, top),
-            megaSpot(left, right, footLeft, footRight, to, top),
-            megaSpot(left, right, footLeft, footRight, to, low),
-            megaSpot(left, right, footLeft, footRight, from, low),
-          );
-          any = true;
-        }
-      }
-      if (any) {
-        ctx.fillStyle = hour.palette.mega.light;
-        ctx.fill();
+  shown.sort((one, two) => two.depth - one.depth);
+  const share = hour.cityLit;
+  const tall = topMm - bottomMm;
+  for (const wall of shown) {
+    const { from, to } = wall;
+    // Точка стены: `fx` — доля вдоль ребра, `fy` — доля сверху вниз.
+    const spot = (fx, fy) => ({ x: from.x + (to.x - from.x) * fx, y: from.y + (to.y - from.y) * fx, z: topMm - tall * fy });
+    const quad = (x0, x1, y0, y1) => volumeMegaPath(ctx, aim, [spot(x0, y0), spot(x1, y0), spot(x1, y1), spot(x0, y1)]);
+    // Ближняя из двух стен — лицо, дальняя — бок: бок темнее.
+    ctx.fillStyle = wall === shown[shown.length - 1] ? paint.wall : paint.side;
+    ctx.beginPath();
+    if (!quad(0, 1, 0, 1)) continue;
+    ctx.fill();
+    // Подробность — по тому, сколько точек занимает этаж у середины стены.
+    const scale = megaScale(aim, wall.mx, wall.my, (topMm + bottomMm) / 2);
+    const floorPx = (tall / floors) * scale;
+    if (floorPx < VOLUME_MEGA_BAND_PX) continue;
+    const pad = 0.04;
+    const cellY = (1 - pad * 2) / floors;
+    // Остекление — полоса на этаж, все полосы стены одним путём.
+    ctx.fillStyle = paint.band;
+    ctx.beginPath();
+    for (let floor = 0; floor < floors; floor += 1) {
+      const top = pad + cellY * (floor + 0.2);
+      quad(pad, 1 - pad, top, top + cellY * 0.56);
+    }
+    ctx.fill();
+    if (!(share > 0)) continue;
+    const bays = Math.max(2, Math.round(wall.wide / VOLUME_MEGA_BAY_MM));
+    if ((wall.wide / bays) * scale < VOLUME_MEGA_WINDOW_PX) continue;
+    const cellX = (1 - pad * 2) / bays;
+    // Светящиеся окна — вторым путём. На очень большой стене проверяется
+    // каждый второй этаж: зажжённых от этого вдвое меньше, а заливка та же.
+    const step = floors * bays > VOLUME_MEGA_LIT_MAX ? 2 : 1;
+    const seed = box.seed * 4 + wall.side;
+    let any = false;
+    ctx.beginPath();
+    for (let floor = 0; floor < floors; floor += step) {
+      const top = pad + cellY * (floor + 0.2);
+      for (let bay = 0; bay < bays; bay += 1) {
+        if (!lit(seed, floor, bay, share)) continue;
+        const left = pad + cellX * (bay + 0.14);
+        if (quad(left, left + cellX * 0.72, top, top + cellY * 0.56)) any = true;
       }
     }
+    if (any) {
+      ctx.fillStyle = hour.palette.mega.light;
+      ctx.fill();
+    }
   }
-  // Крыша видна сверху — с высокого этажа город и состоит из крыш. Снизу она
-  // не рисуется: под крышей дома, над которым стоит глаз, смотреть не на что.
-  if (box.roof === false) return;
-  // Глаз ниже крыши — её не видно: рисовать её значило бы положить тёмную
-  // заплату поверх стен. Высота глаза приходит с местом камеры (`at.z`), в тех
-  // же миллиметрах, что высоты коробки.
-  if (Number.isFinite(at.z) && at.z <= topMm) return;
-  const top = plan.map((spot) => point(spot.x, spot.y, topMm));
-  if (top.every(Boolean)) {
+  // Крыша видна сверху — с высокого этажа город и состоит из крыш. Глаз ниже
+  // крыши — её не видно: рисовать её значило бы положить тёмную заплату поверх
+  // стен.
+  if (box.roof === false || at.z <= topMm) return;
+  ctx.beginPath();
+  if (volumeMegaPath(ctx, aim, plan.map((spot) => ({ x: spot.x, y: spot.y, z: topMm })))) {
     ctx.fillStyle = paint.roof;
-    ctx.beginPath();
-    megaQuad(ctx, top[0], top[1], top[2], top[3]);
     ctx.fill();
   }
 }

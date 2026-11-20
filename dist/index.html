@@ -6711,7 +6711,7 @@ display: none;
     var label = document.getElementById("splash-step");
     var canvas = document.getElementById("splash-model");
     var STEPS = ["Расставляем розетки…","Проектируем щит…","Настраиваем сценарии…","Подбираем оборудование…","Чертим стены…","Развешиваем люстры…","Тянем кабель…","Маркируем линии…","Считаем длину ленты…","Калибруем масштаб…","Проверяем автоматы…","Вешаем шторы на карнизы…","Ищем, где спрятать кондиционер…","Учим выключатели проходить…","Уговариваем датчик движения не реагировать на кота…","Объясняем люстре, что она не главная…","Прячем провода за плинтус…","Ищем фазу. Нашли. Больше не ищем…","Считаем розетки. Опять не хватает…","Мирим тёплый пол с ковром…","Договариваемся с роботом-пылесосом о маршруте…","Убеждаем щит, что места в нём достаточно…","Учим шторы просыпаться вовремя…","Проверяем, что лампочка действительно горит…","Напоминаем термостату, что зима кончилась…","Вспоминаем, от чего этот автомат…"];
-    var PAGE_BYTES = 3112788;
+    var PAGE_BYTES = 3118565;
     var calm = false;
     try {
     calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -42668,10 +42668,47 @@ if (Math.abs((ax + bx) / 2 - bounds.maxX) < near) windows.east = true;
 }
 }
 const outline = volumeHouseOutline(bounds, windows);
+let entry = null;
+for (const wall of walls) {
+if (entry) break;
+const vectors = wallVectors(wall);
+if (!vectors) continue;
+const ax = Number(wall.aMm.x);
+const ay = Number(wall.aMm.y);
+const bx = Number(wall.bMm.x);
+const by = Number(wall.bMm.y);
+const flat = Math.abs(ay - by) <= Math.abs(ax - bx);
+const side = flat
+? Math.abs((ay + by) / 2 - bounds.maxY) < near
+? "south"
+: Math.abs((ay + by) / 2 - bounds.minY) < near
+? "north"
+: null
+: Math.abs((ax + bx) / 2 - bounds.maxX) < near
+? "east"
+: Math.abs((ax + bx) / 2 - bounds.minX) < near
+? "west"
+: null;
+if (!side || windows[side]) continue;
+for (const opening of openingsInWall(project, wall.id)) {
+if (openingFamilyOf(opening.kind) !== "door") continue;
+const middle = Number(opening.atMm) + Number(opening.widthMm) / 2;
+const half = Number(wall.thicknessMm) / 2;
+const out = side === "south" ? { x: 0, y: 1 } : side === "north" ? { x: 0, y: -1 } : side === "east" ? { x: 1, y: 0 } : { x: -1, y: 0 };
+entry = {
+side,
+x: ax + vectors.u.x * middle + out.x * half,
+y: ay + vectors.u.y * middle + out.y * half,
+out,
+};
+break;
+}
+}
 house = {
 ...lift,
 rect: outline.rect,
 wings: outline.wings,
+entry,
 floorMm: -VOLUME_SLAB_MM,
 ceilingMm: schemeHeight.mm,
 };
@@ -45176,6 +45213,58 @@ return megaOffStreet(az, away)
 : null;
 }).filter(Boolean),
 ]);
+const VOLUME_MEGA_PARKING = Object.freeze({
+halfM: 60,
+stallM: 2.7,
+deepM: 5,
+rows: [
+[-27, -44, "x", 20],
+[-27, 49, "x", 20],
+[-49, -24, "y", 18],
+[44, -24, "y", 18],
+],
+});
+const VOLUME_MEGA_PARKED = Object.freeze([
+[0, 1, 1.5], [0, 2, 1.6], [0, 5, 1.5], [0, 8, 1.7], [0, 9, 1.5], [0, 13, 1.6], [0, 17, 1.5],
+[1, 0, 1.6], [1, 3, 1.5], [1, 4, 1.5], [1, 10, 1.7], [1, 15, 1.5], [1, 18, 1.6],
+[2, 2, 1.5], [2, 6, 1.6], [2, 7, 1.5], [2, 12, 1.5], [2, 16, 1.7],
+[3, 1, 1.6], [3, 4, 1.5], [3, 9, 1.5], [3, 11, 1.6], [3, 14, 1.5],
+]);
+function volumeMegaStall(row, index) {
+const [x, y, along] = VOLUME_MEGA_PARKING.rows[row];
+const step = VOLUME_MEGA_PARKING.stallM * (index + 0.5);
+const deep = VOLUME_MEGA_PARKING.deepM / 2;
+return along === "x" ? { x: x + step, y: y + deep } : { x: x + deep, y: y + step };
+}
+function volumeDrawMegaParking(ctx, aim, push, palette) {
+const M = 1000 * (push || 1);
+const half = VOLUME_MEGA_PARKING.halfM * M;
+ctx.beginPath();
+if (!volumeMegaPath(ctx, aim, [{ x: -half, y: -half, z: 0 }, { x: half, y: -half, z: 0 }, { x: half, y: half, z: 0 }, { x: -half, y: half, z: 0 }])) return;
+ctx.fillStyle = palette.asphalt;
+ctx.fill();
+if (megaScale(aim, 0, 0, 0) * VOLUME_MEGA_PARKING.stallM * 1000 < 1.5) return;
+const line = 0.12 * M;
+const stall = VOLUME_MEGA_PARKING.stallM * M;
+const deep = VOLUME_MEGA_PARKING.deepM * M;
+let any = false;
+ctx.beginPath();
+for (const [xM, yM, along, count] of VOLUME_MEGA_PARKING.rows) {
+for (let index = 0; index <= count; index += 1) {
+const x = xM * M + (along === "x" ? stall * index : 0);
+const y = yM * M + (along === "y" ? stall * index : 0);
+const points =
+along === "x"
+? [{ x: x - line / 2, y, z: 0 }, { x: x + line / 2, y, z: 0 }, { x: x + line / 2, y: y + deep, z: 0 }, { x: x - line / 2, y: y + deep, z: 0 }]
+: [{ x, y: y - line / 2, z: 0 }, { x: x + deep, y: y - line / 2, z: 0 }, { x: x + deep, y: y + line / 2, z: 0 }, { x, y: y + line / 2, z: 0 }];
+if (volumeMegaPath(ctx, aim, points)) any = true;
+}
+}
+if (any) {
+ctx.fillStyle = palette.mark;
+ctx.fill();
+}
+}
 const VOLUME_MEGA_CARS = Object.freeze([
 [20, 60, 1.5],
 [22, 68, 1.6],
@@ -45200,19 +45289,47 @@ const VOLUME_MEGA_GREENS = Object.freeze([
 [318, 56, 7],
 [344, 70, 9],
 ]);
-function megaSpot(left, right, footLeft, footRight, fx, fy) {
-const topX = left.x + (right.x - left.x) * fx;
-const topY = left.y + (right.y - left.y) * fx;
-const lowX = footLeft.x + (footRight.x - footLeft.x) * fx;
-const lowY = footLeft.y + (footRight.y - footLeft.y) * fx;
-return { x: topX + (lowX - topX) * fy, y: topY + (lowY - topY) * fy };
+const VOLUME_MEGA_NEAR_MM = 200;
+function megaCam(aim, x, y, z) {
+const dx = x - aim.at.x;
+const dy = y - aim.at.y;
+const dz = (z || 0) - aim.at.z;
+const basis = aim.basis;
+return {
+r: dx * basis.right.x + dy * basis.right.y + dz * basis.right.z,
+u: dx * basis.up.x + dy * basis.up.y + dz * basis.up.z,
+d: dx * basis.fwd.x + dy * basis.fwd.y + dz * basis.fwd.z,
+};
 }
-function megaQuad(ctx, a, b, c, d) {
-ctx.moveTo(a.x, a.y);
-ctx.lineTo(b.x, b.y);
-ctx.lineTo(c.x, c.y);
-ctx.lineTo(d.x, d.y);
+function volumeMegaPath(ctx, aim, points) {
+const near = VOLUME_MEGA_NEAR_MM;
+const cam = points.map((point) => megaCam(aim, point.x, point.y, point.z));
+const kept = [];
+for (let index = 0; index < cam.length; index += 1) {
+const a = cam[index];
+const b = cam[(index + 1) % cam.length];
+const inA = a.d >= near;
+const inB = b.d >= near;
+if (inA) kept.push(a);
+if (inA !== inB) {
+const t = (near - a.d) / (b.d - a.d);
+kept.push({ r: a.r + (b.r - a.r) * t, u: a.u + (b.u - a.u) * t, d: near });
+}
+}
+if (kept.length < 3) return false;
+for (let index = 0; index < kept.length; index += 1) {
+const scale = aim.focal / kept[index].d;
+const x = aim.halfWidth + kept[index].r * scale;
+const y = aim.halfHeight - kept[index].u * scale;
+if (index === 0) ctx.moveTo(x, y);
+else ctx.lineTo(x, y);
+}
 ctx.closePath();
+return true;
+}
+function megaScale(aim, x, y, z) {
+const depth = megaCam(aim, x, y, z).d;
+return aim.focal / Math.max(VOLUME_MEGA_NEAR_MM, depth);
 }
 function volumeMegaPaint(palette, tone) {
 const mega = palette.mega;
@@ -45221,7 +45338,7 @@ if (tone === 2) return { wall: mega.panel, side: mega.panelSide, band: palette.g
 if (tone === 3) return { wall: mega.brick, side: mega.brickSide, band: palette.glass, roof: mega.roof };
 return { wall: palette.wall, side: palette.wallSide, band: palette.glass, roof: palette.roof };
 }
-function volumeDrawMegaBlock(ctx, point, at, block, index, hour, lit) {
+function volumeDrawMegaBlock(ctx, aim, block, index, hour, lit) {
 const len = Math.hypot(block.x, block.y) || 1;
 const fx = block.x / len;
 const fy = block.y / len;
@@ -45232,7 +45349,7 @@ const corner = (alongSign, deepSign) => ({
 x: block.x + ux * block.halfMm * alongSign + fx * deep * deepSign,
 y: block.y + uy * block.halfMm * alongSign + fy * deep * deepSign,
 });
-volumeDrawMegaBox(ctx, point, at, {
+volumeDrawMegaBox(ctx, aim, {
 plan: [corner(1, -1), corner(-1, -1), corner(-1, 1), corner(1, 1)],
 wides: [block.halfMm * 2, block.deepMm, block.halfMm * 2, block.deepMm],
 bottomMm: 0,
@@ -45242,8 +45359,9 @@ paint: volumeMegaPaint(hour.palette, block.tone),
 seed: index,
 }, hour, lit);
 }
-function volumeDrawMegaBox(ctx, point, at, box, hour, lit) {
+function volumeDrawMegaBox(ctx, aim, box, hour, lit) {
 const { plan, wides, bottomMm, topMm, floors, paint } = box;
+const at = aim.at;
 const shown = [];
 for (let side = 0; side < 4; side += 1) {
 const from = plan[side];
@@ -45251,24 +45369,21 @@ const to = plan[(side + 1) % 4];
 const mx = (from.x + to.x) / 2;
 const my = (from.y + to.y) / 2;
 if ((to.y - from.y) * (at.x - mx) - (to.x - from.x) * (at.y - my) <= 0) continue;
-const left = point(from.x, from.y, topMm);
-const right = point(to.x, to.y, topMm);
-const footLeft = point(from.x, from.y, bottomMm);
-const footRight = point(to.x, to.y, bottomMm);
-if (!left || !right || !footLeft || !footRight) continue;
-shown.push({ side, wide: wides[side], left, right, footLeft, footRight, depth: Math.hypot(mx - at.x, my - at.y) });
+shown.push({ side, wide: wides[side], from, to, mx, my, depth: Math.hypot(mx - at.x, my - at.y) });
 }
-if (shown.length > 0) {
 shown.sort((one, two) => two.depth - one.depth);
 const share = hour.cityLit;
+const tall = topMm - bottomMm;
 for (const wall of shown) {
-const { left, right, footLeft, footRight } = wall;
+const { from, to } = wall;
+const spot = (fx, fy) => ({ x: from.x + (to.x - from.x) * fx, y: from.y + (to.y - from.y) * fx, z: topMm - tall * fy });
+const quad = (x0, x1, y0, y1) => volumeMegaPath(ctx, aim, [spot(x0, y0), spot(x1, y0), spot(x1, y1), spot(x0, y1)]);
 ctx.fillStyle = wall === shown[shown.length - 1] ? paint.wall : paint.side;
 ctx.beginPath();
-megaQuad(ctx, left, right, footRight, footLeft);
+if (!quad(0, 1, 0, 1)) continue;
 ctx.fill();
-const tall = Math.max(Math.abs(footLeft.y - left.y), Math.abs(footRight.y - right.y));
-const floorPx = tall / floors;
+const scale = megaScale(aim, wall.mx, wall.my, (topMm + bottomMm) / 2);
+const floorPx = (tall / floors) * scale;
 if (floorPx < VOLUME_MEGA_BAND_PX) continue;
 const pad = 0.04;
 const cellY = (1 - pad * 2) / floors;
@@ -45276,20 +45391,12 @@ ctx.fillStyle = paint.band;
 ctx.beginPath();
 for (let floor = 0; floor < floors; floor += 1) {
 const top = pad + cellY * (floor + 0.2);
-const low = top + cellY * 0.56;
-megaQuad(
-ctx,
-megaSpot(left, right, footLeft, footRight, pad, top),
-megaSpot(left, right, footLeft, footRight, 1 - pad, top),
-megaSpot(left, right, footLeft, footRight, 1 - pad, low),
-megaSpot(left, right, footLeft, footRight, pad, low),
-);
+quad(pad, 1 - pad, top, top + cellY * 0.56);
 }
 ctx.fill();
 if (!(share > 0)) continue;
 const bays = Math.max(2, Math.round(wall.wide / VOLUME_MEGA_BAY_MM));
-const across = Math.hypot(right.x - left.x, right.y - left.y) / bays;
-if (across < VOLUME_MEGA_WINDOW_PX) continue;
+if ((wall.wide / bays) * scale < VOLUME_MEGA_WINDOW_PX) continue;
 const cellX = (1 - pad * 2) / bays;
 const step = floors * bays > VOLUME_MEGA_LIT_MAX ? 2 : 1;
 const seed = box.seed * 4 + wall.side;
@@ -45297,19 +45404,10 @@ let any = false;
 ctx.beginPath();
 for (let floor = 0; floor < floors; floor += step) {
 const top = pad + cellY * (floor + 0.2);
-const low = top + cellY * 0.56;
 for (let bay = 0; bay < bays; bay += 1) {
 if (!lit(seed, floor, bay, share)) continue;
-const from = pad + cellX * (bay + 0.14);
-const to = from + cellX * 0.72;
-megaQuad(
-ctx,
-megaSpot(left, right, footLeft, footRight, from, top),
-megaSpot(left, right, footLeft, footRight, to, top),
-megaSpot(left, right, footLeft, footRight, to, low),
-megaSpot(left, right, footLeft, footRight, from, low),
-);
-any = true;
+const left = pad + cellX * (bay + 0.14);
+if (quad(left, left + cellX * 0.72, top, top + cellY * 0.56)) any = true;
 }
 }
 if (any) {
@@ -45317,14 +45415,10 @@ ctx.fillStyle = hour.palette.mega.light;
 ctx.fill();
 }
 }
-}
-if (box.roof === false) return;
-if (Number.isFinite(at.z) && at.z <= topMm) return;
-const top = plan.map((spot) => point(spot.x, spot.y, topMm));
-if (top.every(Boolean)) {
-ctx.fillStyle = paint.roof;
+if (box.roof === false || at.z <= topMm) return;
 ctx.beginPath();
-megaQuad(ctx, top[0], top[1], top[2], top[3]);
+if (volumeMegaPath(ctx, aim, plan.map((spot) => ({ x: spot.x, y: spot.y, z: topMm })))) {
+ctx.fillStyle = paint.roof;
 ctx.fill();
 }
 }
@@ -45930,6 +46024,7 @@ for (const item of towers) volumeDrawMegaTower(ctx, point, item.tower, item.inde
 for (const ridge of mega.skyline) {
 volumeDrawMegaSkyline(ctx, point, ridge, ridge.far ? palette.mega.skylineFar : palette.mega.skylineNear);
 }
+volumeDrawMegaParking(ctx, aim, places.push, palette);
 for (const street of mega.streets) {
 volumeDrawStrip(ctx, aim, street.nodes, (run) =>
 street.river
@@ -45939,7 +46034,7 @@ street.river
 if (street.marks) volumeDrawStrip(ctx, aim, street.marks, () => palette.mark);
 }
 }
-take(mega.blocks, (spot, index) => volumeDrawMegaBlock(ctx, point, aim.at, spot, index, hour, volumeCityWindowLit));
+take(mega.blocks, (spot, index) => volumeDrawMegaBlock(ctx, aim, spot, index, hour, volumeCityWindowLit));
 take(mega.cars, (spot) => volumeDrawCar(ctx, aim, spot, palette));
 take(mega.greens, (spot) => volumeDrawTree(ctx, aim, spot, palette));
 } else {
@@ -46539,7 +46634,13 @@ streets: VOLUME_MEGA_STREETS.map((street) => {
 const nodes = volumeBandNodes(street.points, street.widthM);
 return { river: street.river === true, nodes, marks: street.river ? null : volumeStreetMarks(nodes) };
 }),
-cars: VOLUME_MEGA_CARS.map(([az, away, height], index) => volumeCar(az, away, height, index)),
+cars: [
+...VOLUME_MEGA_CARS.map(([az, away, height], index) => volumeCar(az, away, height, index)),
+...VOLUME_MEGA_PARKED.map(([row, stall, height], index) => {
+const at = volumeMegaStall(row, stall);
+return { x: at.x * VOLUME_M, y: at.y * VOLUME_M, awayMm: Math.hypot(at.x, at.y) * VOLUME_M, heightMm: height * VOLUME_M, car: index + 2 };
+}),
+],
 greens: VOLUME_MEGA_GREENS.map(([az, away, height]) => volumeStanding(az, away, height, "tree")),
 };
 function volumeMegaPlaces() {
@@ -46649,6 +46750,42 @@ return out;
 }
 
 // src/volume/house.js
+const VOLUME_HALL_HALF_MM = 4600;
+const VOLUME_HALL_DEEP_MM = 2200;
+const VOLUME_HALL_DOOR_MM = { width: 900, height: 2050 };
+const HALL_WALL = "#d8d2c8";
+const HALL_SIDE = "#c9c2b7";
+const HALL_FLOOR = "#8d8880";
+const HALL_CEILING = "#efece6";
+const HALL_DOOR = "#8a6a4a";
+const HALL_HANDLE = "#d9d5cc";
+function volumeHallFaces(entry, heightMm) {
+if (!entry || !(heightMm > 0)) return [];
+const out = entry.out;
+const along = { x: -out.y, y: out.x };
+const at = (side, deep, z) => ({ x: entry.x + along.x * side + out.x * deep, y: entry.y + along.y * side + out.y * deep, z });
+const L = VOLUME_HALL_HALF_MM;
+const D = VOLUME_HALL_DEEP_MM;
+const H = heightMm;
+const faces = [
+{ color: HALL_FLOOR, points: [at(-L, 0, 0), at(L, 0, 0), at(L, D, 0), at(-L, D, 0)] },
+{ color: HALL_CEILING, points: [at(-L, 0, H), at(L, 0, H), at(L, D, H), at(-L, D, H)] },
+{ color: HALL_WALL, points: [at(-L, D, 0), at(L, D, 0), at(L, D, H), at(-L, D, H)] },
+{ color: HALL_SIDE, points: [at(-L, 0, 0), at(-L, D, 0), at(-L, D, H), at(-L, 0, H)] },
+{ color: HALL_SIDE, points: [at(L, 0, 0), at(L, D, 0), at(L, D, H), at(L, 0, H)] },
+];
+const half = VOLUME_HALL_DOOR_MM.width / 2;
+const tall = Math.min(VOLUME_HALL_DOOR_MM.height, H - 100);
+for (const middle of [-2900, 0, 2900]) {
+faces.push({ color: HALL_DOOR, points: [at(middle - half, D - 8, 0), at(middle + half, D - 8, 0), at(middle + half, D - 8, tall), at(middle - half, D - 8, tall)] });
+faces.push({ color: HALL_HANDLE, points: [at(middle + half - 150, D - 16, 980), at(middle + half - 60, D - 16, 980), at(middle + half - 60, D - 16, 1040), at(middle + half - 150, D - 16, 1040)] });
+}
+for (const side of [-1, 1]) {
+const x = side * (L - 8);
+faces.push({ color: HALL_DOOR, points: [at(x, D / 2 - half, 0), at(x, D / 2 + half, 0), at(x, D / 2 + half, tall), at(x, D / 2 - half, tall)] });
+}
+return faces;
+}
 function housePlan(rect) {
 return {
 plan: [
@@ -46695,20 +46832,31 @@ function volumeDrawHouse(ctx, box, camera, mood, scene, pass, roofOff = false) {
 const house = scene && scene.house;
 if (!house || !mood || !mood.palette || !mood.palette.mega) return 0;
 const aim = volumeGroundAim(camera, box, 0);
-const point = (x, y, z) => volumeGroundPoint(aim, x, y, z);
 const paint = volumeMegaPaint(mood.palette, 0);
 let drawn = 0;
 for (const part of volumeHouseParts(house, camera.at, roofOff)) {
 if (part.pass !== pass) continue;
 volumeDrawMegaBox(
 ctx,
-point,
-camera.at,
+aim,
 { ...housePlan(part.rect), bottomMm: part.bottomMm, topMm: part.topMm, floors: part.floors, paint, seed: 900 + drawn, roof: part.roof },
 mood,
 volumeCityWindowLit,
 );
 drawn += 1;
+}
+const entry = house.entry;
+if (pass === "before" && entry) {
+const inside = (camera.at.x - entry.x) * entry.out.x + (camera.at.y - entry.y) * entry.out.y < 0;
+if (inside && camera.at.z < house.ceilingMm) {
+for (const face of volumeHallFaces(entry, house.ceilingMm)) {
+ctx.beginPath();
+if (!volumeMegaPath(ctx, aim, face.points)) continue;
+ctx.fillStyle = face.color;
+ctx.fill();
+}
+drawn += 1;
+}
 }
 return drawn;
 }

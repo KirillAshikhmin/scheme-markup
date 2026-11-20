@@ -21,6 +21,7 @@ import { mergeProjects } from "../src/merge.js";
 import {
   VOLUME_HOUSE_WING_MM,
   volumeGroundAim,
+  volumeHallFaces,
   volumeHouseLift,
   volumeHouseOutline,
   volumeHouseParts,
@@ -170,4 +171,27 @@ test("фон знает высоту земли: у объекта на земл
   assert.equal(volumeGroundAim(camera, box).at, camera.at);
   assert.equal(volumeGroundAim(camera, box, 0).at, camera.at);
   assert.deepEqual(volumeGroundAim(camera, box, -44000).at, { x: 1, y: 2, z: 45600 });
+});
+
+test("за входной дверью — коридор этажа: пол, потолок, три стены и пять дверей, весь снаружи квартиры", () => {
+  const entry = { side: "south", x: 3000, y: 5100, out: { x: 0, y: 1 } };
+  const faces = volumeHallFaces(entry, 2700);
+  assert.equal(faces.filter((face) => face.color === "#8a6a4a").length, 5, "дверей не пять");
+  for (const face of faces) {
+    assert.equal(face.points.length, 4);
+    for (const point of face.points) {
+      assert.ok(point.y >= entry.y - 1e-6, "коридор залез в квартиру");
+      assert.ok(point.z >= 0 && point.z <= 2700);
+    }
+  }
+  assert.deepEqual(volumeHallFaces(null, 2700), []);
+  // Вход находится сам: дверь в стене на глухой стороне габарита.
+  let { project, schemeId } = flat();
+  const south = project.walls.find((wall) => wall.aMm.y === 5000 && wall.bMm.y === 5000);
+  project = addOpening(project, { wallId: south.id, kind: "door", atMm: 2000, widthMm: 900, heightMm: 2050, heightAboveFloorMm: 0 }).project;
+  project = setProjectBuilding(setSchemeFloor(project, schemeId, 5).project, { floors: 9 }).project;
+  const found = volumeScene(project, schemeId, {}).house.entry;
+  assert.equal(found.side, "south");
+  assert.deepEqual(found.out, { x: 0, y: 1 });
+  assert.ok(Math.abs(found.y - 5100) < 1, "вход не на наружной грани стены: " + found.y);
 });

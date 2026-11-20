@@ -208,8 +208,11 @@
             // кадр их только выкладывает. Своего рисования здесь нет.
             let scene = volume.volumeScene(project, schemeId, { roofOff: job.roofOff === true });
             // `--open-cupboards`: какие шкафы открываются, знает сама сцена.
-            if (job.openCupboards && scene && (scene.cupboards || []).length > 0) {
-              scene = volume.volumeScene(project, schemeId, { roofOff: job.roofOff === true, openDoorIds: new Set(scene.cupboards) });
+            const opened = scene
+              ? [...(job.openCupboards ? scene.cupboards || [] : []), ...(job.openDoors ? scene.doors || [] : [])]
+              : [];
+            if (opened.length > 0) {
+              scene = volume.volumeScene(project, schemeId, { roofOff: job.roofOff === true, openDoorIds: new Set(opened) });
             }
             if (!scene || scene.empty) throw new Error("у схемы нет чертежа — объём рисовать нечем");
             const site = volume.volumeSiteOf(project);

@@ -8,6 +8,7 @@ import {
   volumeBackdropKindOf,
   volumeCityWindowLit,
   volumeDrawBackdrop,
+  volumeGroundAim,
   volumeMood,
 } from "../src/volume.js";
 import { volumeMegaPlaces } from "../src/volume/backdrop.js";
@@ -15,7 +16,9 @@ import {
   VOLUME_MEGA_BLOCKS,
   VOLUME_MEGA_TOWERS,
   volumeDrawMegaBlock,
+  volumeDrawMegaBox,
   volumeMegaLevels,
+  volumeMegaPath,
 } from "../src/volume/megapolis.js";
 
 const DAY_TIMES = { sunrise: 360, sunset: 1260 };
@@ -73,14 +76,14 @@ test("таблицы: дома не лезут к объекту, башни с�
 });
 
 test("дом стоит семь заливок при любой этажности — и днём, и ночью", () => {
-  const point = (x, y, z) => ({ x: x / 100, y: 400 - (z || 0) / 100 + y / 1000, scale: 0.01, depth: 1 });
+  const aim = volumeGroundAim({ at: { x: 0, y: 0, z: 1600 }, yaw: 0.36, pitch: 0 }, { width: 1600, height: 900 });
   for (const minutes of [900, 60]) {
     const hour = volumeMood({ minutes, times: DAY_TIMES, kind: "megapolis" });
     for (const floors of [5, 30, 70]) {
       const { ctx, ops } = counter();
       const block = { x: 80000, y: 30000, halfMm: 15000, deepMm: 16000, heightMm: floors * 3400, floors, tone: 1 };
-      volumeDrawMegaBlock(ctx, point, { x: 0, y: 0 }, block, 3, hour, volumeCityWindowLit);
-      assert.ok(ops.fill >= 3 && ops.fill <= 7, floors + " этажей: заливок " + ops.fill);
+      volumeDrawMegaBlock(ctx, aim, block, 3, hour, volumeCityWindowLit);
+      assert.ok(ops.fill >= 2 && ops.fill <= 7, floors + " этажей: заливок " + ops.fill);
       assert.equal(ops.rect, 0, "окна рисуются поимённо");
     }
   }
@@ -113,4 +116,37 @@ test("остальные фоны мегаполиса не заметили: и
   assert.ok(count("plain") < 20);
   assert.ok(count("megapolis") > count("plain") * 5);
   assert.ok(count("nature") > count("plain") * 3);
+});
+
+test("стена, ушедшая углом за спину, отсекается, а не пропадает; этажи сжимаются вдаль", () => {
+  const box = { width: 1600, height: 900 };
+  const hour = volumeMood({ minutes: 900, times: DAY_TIMES, kind: "megapolis" });
+  // Глаз у самой стены длинного дома и смотрит вдоль неё: ближний угол за спиной.
+  const aim = volumeGroundAim({ at: { x: 0, y: 2000, z: 20000 }, yaw: 0, pitch: 0 }, box);
+  const { ctx, ops } = counter();
+  const house = {
+    plan: [{ x: -30000, y: 3000 }, { x: 60000, y: 3000 }, { x: 60000, y: 20000 }, { x: -30000, y: 20000 }],
+    wides: [90000, 17000, 90000, 17000],
+    bottomMm: 0,
+    topMm: 60000,
+    floors: 18,
+    paint: { wall: "a", side: "b", band: "c", roof: "d" },
+    seed: 1,
+  };
+  volumeDrawMegaBox(ctx, aim, house, hour, volumeCityWindowLit);
+  assert.ok(ops.fill >= 2, "стена у глаза не нарисована: " + ops.fill);
+  // Отсечённый многоугольник лежит перед глазом: ни одной точки «из-за спины».
+  const seen = [];
+  const pen = { beginPath() {}, closePath() {}, moveTo: (x, y) => seen.push([x, y]), lineTo: (x, y) => seen.push([x, y]) };
+  assert.equal(volumeMegaPath(pen, aim, [{ x: -30000, y: 3000, z: 60000 }, { x: 60000, y: 3000, z: 60000 }, { x: 60000, y: 3000, z: 0 }, { x: -30000, y: 3000, z: 0 }]), true);
+  assert.ok(seen.length >= 4 && seen.every(([x, y]) => Number.isFinite(x) && Number.isFinite(y)));
+  assert.equal(volumeMegaPath(pen, aim, [{ x: -900, y: 0, z: 0 }, { x: -800, y: 0, z: 0 }, { x: -800, y: 100, z: 0 }]), false);
+  // Перспектива: одинаковые по высоте полосы на дальнем конце стены у́же, чем на ближнем.
+  const tall = (x) => {
+    const marks = [];
+    const probe = { beginPath() {}, closePath() {}, moveTo: (px, py) => marks.push(py), lineTo: (px, py) => marks.push(py) };
+    volumeMegaPath(probe, aim, [{ x, y: 3000, z: 23000 }, { x: x + 10, y: 3000, z: 23000 }, { x: x + 10, y: 3000, z: 20000 }, { x, y: 3000, z: 20000 }]);
+    return Math.max(...marks) - Math.min(...marks);
+  };
+  assert.ok(tall(5000) > tall(50000) * 3, "дальний этаж не сжался");
 });
