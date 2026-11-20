@@ -202,6 +202,35 @@ export const MODELS_OBJECTS = {
     modelBox("water", { x: -0.45, width: 0.9, y: -0.41, depth: 0.82, z: 0.25, height: 0.07, material: "glass" }),
     modelBox("tap", { x: -0.46, width: 0.1, y: -0.07, depth: 0.14, z: 0.9, height: 0.1, material: "metal" }),
   ),
+  // Шкаф-витрина (правка 2026-11-21): корпус досками, чтобы полки было видно,
+  // четыре полки и три стеклянные дверцы с тёмными стойками между ними.
+  glassCabinet: modelParts(
+    modelBox("back", { y: 0.42, depth: 0.08, material: "dark" }),
+    modelBox("sideLeft", { x: -0.5, width: 0.03, y: -0.44, depth: 0.86 }),
+    modelBox("sideRight", { x: 0.47, width: 0.03, y: -0.44, depth: 0.86 }),
+    modelBox("top", { y: -0.44, depth: 0.86, z: 0.96, height: 0.04 }),
+    modelBox("bottom", { y: -0.44, depth: 0.86, z: 0, height: 0.05 }),
+    modelBox("shelf1", { x: -0.47, width: 0.94, y: -0.36, depth: 0.78, z: 0.23, height: 0.015, material: "light" }),
+    modelBox("shelf2", { x: -0.47, width: 0.94, y: -0.36, depth: 0.78, z: 0.41, height: 0.015, material: "light" }),
+    modelBox("shelf3", { x: -0.47, width: 0.94, y: -0.36, depth: 0.78, z: 0.59, height: 0.015, material: "light" }),
+    modelBox("shelf4", { x: -0.47, width: 0.94, y: -0.36, depth: 0.78, z: 0.77, height: 0.015, material: "light" }),
+    modelBox("postLeft", { x: -0.175, width: 0.02, y: -0.5, depth: 0.06, z: 0.05, height: 0.91, material: "dark" }),
+    modelBox("postRight", { x: 0.155, width: 0.02, y: -0.5, depth: 0.06, z: 0.05, height: 0.91, material: "dark" }),
+    modelBox("glassLeft", { x: -0.47, width: 0.295, y: -0.49, depth: 0.03, z: 0.05, height: 0.91, material: "glass", clear: "glass" }),
+    modelBox("glassMiddle", { x: -0.155, width: 0.31, y: -0.49, depth: 0.03, z: 0.05, height: 0.91, material: "glass", clear: "glass" }),
+    modelBox("glassRight", { x: 0.175, width: 0.295, y: -0.49, depth: 0.03, z: 0.05, height: 0.91, material: "glass", clear: "glass" }),
+  ),
+  // Стол руководителя (правка 2026-11-21): столешница во весь габарит, слева
+  // опора-доска до пола, справа тёмная тумба с двумя ящиками и зазором под
+  // столешницей.
+  officeDesk: modelParts(
+    modelBox("top", { z: 0.93, height: 0.07 }),
+    modelBox("leg", { x: -0.5, width: 0.035, z: 0, height: 0.93 }),
+    modelBox("pedestal", { x: 0.2, width: 0.3, y: -0.46, depth: 0.92, z: 0, height: 0.86, material: "dark" }),
+    modelBox("drawerHigh", { x: 0.21, width: 0.28, y: -0.5, depth: 0.05, z: 0.45, height: 0.38, material: "dark" }),
+    modelBox("drawerLow", { x: 0.21, width: 0.28, y: -0.5, depth: 0.05, z: 0.04, height: 0.38, material: "dark" }),
+    modelBox("screen", { x: -0.46, width: 0.66, y: 0.42, depth: 0.03, z: 0.3, height: 0.63 }),
+  ),
   // Шкаф: корпус и фасад. Он же «шкаф» из брифа — вид и вещь каталога здесь
   // одно и то же.
   cabinet: modelParts(
@@ -375,6 +404,27 @@ export const MODELS_OBJECTS = {
   // полотна (`volume/art.js`), тел от этого не прибавилось. Светиться полотно
   // не может, и картинка на нём видна всегда — её освещает комната, как всякую
   // краску.
+  // Декоративное панно (правка 2026-11-21): плита в тонкой раме и рельеф —
+  // три светлые накладки разной величины. Цветных фигур, как у картины, нет.
+  wallPanel: modelParts(
+    modelBox("frame", { y: 0, depth: 0.5 }),
+    modelBox("field", { x: -0.47, width: 0.94, y: -0.3, depth: 0.3, z: 0.015, height: 0.97, material: "light" }),
+    modelBox("reliefLow", { x: -0.34, width: 0.3, y: -0.5, depth: 0.2, z: 0.08, height: 0.5, material: "light" }),
+    modelBox("reliefHigh", { x: 0.02, width: 0.34, y: -0.5, depth: 0.2, z: 0.36, height: 0.56, material: "light" }),
+    modelBox("reliefSmall", { x: -0.18, width: 0.16, y: -0.44, depth: 0.14, z: 0.66, height: 0.22, material: "light" }),
+  ),
+  // Реечная панель (правка 2026-11-21): тёмная подложка и восемь реек цветом вещи.
+  slatPanel: modelParts(
+    modelBox("backing", { y: 0.1, depth: 0.4, material: "dark" }),
+    modelBox("slat0", { x: -0.480, width: 0.07, y: -0.5, depth: 0.6, z: 0, height: 1 }),
+    modelBox("slat1", { x: -0.353, width: 0.07, y: -0.5, depth: 0.6, z: 0, height: 1 }),
+    modelBox("slat2", { x: -0.226, width: 0.07, y: -0.5, depth: 0.6, z: 0, height: 1 }),
+    modelBox("slat3", { x: -0.099, width: 0.07, y: -0.5, depth: 0.6, z: 0, height: 1 }),
+    modelBox("slat4", { x: 0.028, width: 0.07, y: -0.5, depth: 0.6, z: 0, height: 1 }),
+    modelBox("slat5", { x: 0.155, width: 0.07, y: -0.5, depth: 0.6, z: 0, height: 1 }),
+    modelBox("slat6", { x: 0.282, width: 0.07, y: -0.5, depth: 0.6, z: 0, height: 1 }),
+    modelBox("slat7", { x: 0.409, width: 0.07, y: -0.5, depth: 0.6, z: 0, height: 1 }),
+  ),
   picture: modelParts(
     modelBox("canvas", { x: -0.42, width: 0.84, y: -0.5, depth: 0.5, z: 0.08, height: 0.84, material: "light", art: "geometry" }),
     modelBox("frame", { y: 0, depth: 0.5 }),

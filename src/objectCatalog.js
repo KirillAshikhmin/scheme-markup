@@ -279,6 +279,32 @@ const CATALOG = [
     heightAboveFloorMm: 0,
     words: ["тумб"],
   },
+  // Шкаф-витрина и стол руководителя (правка 2026-11-21, по кабинету
+  // дизайн-проекта заказчика): шкаф со стеклянными дверцами и полками за ними;
+  // стол — длинная столешница на опоре-доске с одной стороны и тёмной тумбе с
+  // другой.
+  {
+    key: "glassCabinet",
+    category: "furniture",
+    mount: "floor",
+    shape: "rect",
+    widthMm: 1800,
+    depthMm: 400,
+    heightMm: 2300,
+    heightAboveFloorMm: 0,
+    words: ["витрин", "стеклянный шкаф", "книжный шкаф"],
+  },
+  {
+    key: "officeDesk",
+    category: "furniture",
+    mount: "floor",
+    shape: "rect",
+    widthMm: 2100,
+    depthMm: 800,
+    heightMm: 760,
+    heightAboveFloorMm: 0,
+    words: ["стол руководител", "офисный стол", "письменный стол"],
+  },
   {
     key: "cabinet",
     category: "furniture",
@@ -1244,6 +1270,31 @@ const CATALOG = [
   // ——— декор ———
   // Картина: 800 × 600 на стене, низ на 1300 — середина полотна приходится на
   // уровень глаз (1600), так её и вешают.
+  // Декоративное панно и реечная панель (правка 2026-11-21, по дизайн-проекту
+  // заказчика): плоские вещи на стене — рельефное панно в раме и панель из
+  // вертикальных реек. У картины на полотне цветные фигуры; у панно их нет.
+  {
+    key: "wallPanel",
+    category: "decor",
+    mount: "wall",
+    shape: "rect",
+    widthMm: 1200,
+    depthMm: 40,
+    heightMm: 2000,
+    heightAboveFloorMm: 500,
+    words: ["панно", "декоративная панель", "стеновая панель"],
+  },
+  {
+    key: "slatPanel",
+    category: "decor",
+    mount: "wall",
+    shape: "rect",
+    widthMm: 1200,
+    depthMm: 40,
+    heightMm: 2600,
+    heightAboveFloorMm: 100,
+    words: ["реечн", "рейки"],
+  },
   {
     key: "picture",
     category: "decor",

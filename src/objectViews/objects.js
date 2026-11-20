@@ -132,6 +132,21 @@ export const VIEWS_OBJECTS = {
     ),
   },
   // Шкаф: корпус, фасад и перегородки секций — так шкаф и показывают на плане.
+  // Шкаф-витрина сверху: корпус, линия стекла и две стойки.
+  glassCabinet: {
+    shapes: [],
+    parts: viewParts(
+      viewRect(-0.48, -0.4, 0.96, 0.8, 0.02),
+      viewLine(-0.48, -0.3, 0.48, -0.3),
+      viewLine(-0.16, -0.4, -0.16, -0.3),
+      viewLine(0.16, -0.4, 0.16, -0.3),
+    ),
+  },
+  // Стол руководителя сверху: столешница и тумба справа.
+  officeDesk: {
+    shapes: [],
+    parts: viewParts(viewRect(-0.48, -0.44, 0.96, 0.88, 0.02), viewRect(0.2, -0.4, 0.26, 0.8, 0.02)),
+  },
   cabinet: {
     shapes: [],
     parts: viewParts(
@@ -827,6 +842,22 @@ export const VIEWS_OBJECTS = {
 
   // ——— декор ———
   // Картина — с лица: рама, полотно и пейзаж в нём.
+  // Панно и реечная панель — с лица, как картина: рама и рельеф; рейки.
+  wallPanel: {
+    shapes: [],
+    parts: viewParts(viewRect(-0.44, -0.46, 0.88, 0.92, 0.02), viewRect(-0.3, -0.36, 0.26, 0.44, 0.02), viewRect(0.02, -0.12, 0.3, 0.48, 0.02)),
+  },
+  slatPanel: {
+    shapes: [],
+    parts: viewParts(
+      viewRect(-0.46, -0.46, 0.92, 0.92, 0.01),
+      viewLine(-0.3, -0.46, -0.3, 0.46),
+      viewLine(-0.15, -0.46, -0.15, 0.46),
+      viewLine(0, -0.46, 0, 0.46),
+      viewLine(0.15, -0.46, 0.15, 0.46),
+      viewLine(0.3, -0.46, 0.3, 0.46),
+    ),
+  },
   picture: {
     shapes: [],
     parts: viewParts(
