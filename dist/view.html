@@ -6705,7 +6705,7 @@ display: none;
     var label = document.getElementById("splash-step");
     var canvas = document.getElementById("splash-model");
     var STEPS = ["Расставляем розетки…","Проектируем щит…","Настраиваем сценарии…","Подбираем оборудование…","Чертим стены…","Развешиваем люстры…","Тянем кабель…","Маркируем линии…","Считаем длину ленты…","Калибруем масштаб…","Проверяем автоматы…","Вешаем шторы на карнизы…","Ищем, где спрятать кондиционер…","Учим выключатели проходить…","Уговариваем датчик движения не реагировать на кота…","Объясняем люстре, что она не главная…","Прячем провода за плинтус…","Ищем фазу. Нашли. Больше не ищем…","Считаем розетки. Опять не хватает…","Мирим тёплый пол с ковром…","Договариваемся с роботом-пылесосом о маршруте…","Убеждаем щит, что места в нём достаточно…","Учим шторы просыпаться вовремя…","Проверяем, что лампочка действительно горит…","Напоминаем термостату, что зима кончилась…","Вспоминаем, от чего этот автомат…"];
-    var PAGE_BYTES = 3164687;
+    var PAGE_BYTES = 3204576;
     var calm = false;
     try {
     calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -7903,6 +7903,11 @@ wallSplitEnd: "Делить стену можно не ближе {min} мм к 
 wallSplitOpening: "Здесь проём: стену делят между проёмами, а не по ним",
 paintColorInvalid: "Цвет краски — код вида #RRGGBB",
 paintPartInvalid: "Красятся стороны стены, пол и потолок помещения",
+slopeShort: "Участок ската — не меньше трёх точек",
+slopeEdgeUnknown: "У ската не отмечена кромка, от которой считается высота",
+slopeDegenerate: "Участок ската слишком мал или вытянут в линию",
+slopeNotFound: "Скат не найден",
+skylightNoSlope: "Мансардное окно ставится в скат: над этим местом потолок ровный. Сначала начертите скат инструментом «Скат»",
 markWallAtOutside: "Метка привязана за концом стены: {at} мм при длине {length} мм",
 openingNotFound: "Проём не найден",
 openingKindUnknown: "Такого вида проёма в каталоге нет",
@@ -9266,6 +9271,7 @@ fireplace: "Камин",
 kitchenIsland: "Кухонный остров",
 barCounter: "Барная стойка",
 wallMirror: "Зеркало",
+skylight: "Мансардное окно",
 rug: "Ковёр",
 chest: "Комод",
 shelving: "Стеллаж",
@@ -9330,6 +9336,7 @@ schemeObjectMounts: {
 floor: "Стоит на полу",
 wall: "Висит на стене — высота от пола задаёт, на какой",
 inFloor: "Утоплена в пол — высота считается от пола вверх",
+slope: "Врезана в скат потолка — высоту даёт скат",
 },
 equipmentPicker: {
 title: "Оборудование на метке {label}",
@@ -11052,7 +11059,8 @@ const OBJECT_CATEGORIES = [
 "decor",
 "transport",
 ];
-const OBJECT_MOUNTS = ["floor", "wall", "inFloor"];
+const OBJECT_MOUNTS = ["floor", "wall", "inFloor", "slope"];
+const OBJECT_SKYLIGHT_KEY = "skylight";
 const CATALOG = [
 {
 key: "table",
@@ -11549,6 +11557,17 @@ depthMm: 120,
 heightMm: 1250,
 heightAboveFloorMm: 1000,
 words: ["экран проектор", "проекционн", "экран"],
+},
+{
+key: "skylight",
+category: "structures",
+mount: "slope",
+shape: "rect",
+widthMm: 780,
+depthMm: 1400,
+heightMm: 60,
+heightAboveFloorMm: 0,
+words: ["мансардн", "окно в крыше", "окно в скате"],
 },
 {
 key: "column",
@@ -12848,6 +12867,14 @@ viewRect(-0.42, -0.28, 0.84, 0.62, 0.01),
 viewRect(-0.42, 0.26, 0.84, 0.08, 0.02),
 ),
 },
+skylight: {
+shapes: [],
+parts: viewParts(
+viewRect(-0.28, -0.46, 0.56, 0.92, 0.02),
+viewRect(-0.22, -0.4, 0.44, 0.8, 0.02),
+viewLine(-0.12, 0.2, 0.1, -0.2),
+),
+},
 column: {
 shapes: [],
 parts: viewParts(
@@ -14073,6 +14100,10 @@ modelBox("case", { y: -0.42, depth: 0.92 }),
 const MODELS_OBJECTS = {
 column: MODEL_SHAFT,
 duct: MODEL_SHAFT,
+skylight: modelParts(
+modelBox("frame", { z: 0, height: 0.5 }),
+modelBox("glass", { x: -0.44, width: 0.88, y: -0.46, depth: 0.92, z: 0.5, height: 0.5, material: "glass" }),
+),
 niche: modelParts(
 modelBox("back", { y: 0.25, depth: 0.25 }),
 modelBox("shelf", { x: -0.46, width: 0.92, y: -0.5, depth: 0.95, z: 0.46, height: 0.08, material: "light" }),
@@ -14612,6 +14643,415 @@ return Object.keys(MODELS_LINES);
 }
 function objectModelForName(name) {
 return objectModelByKey(objectCatalogKeyByName(name));
+}
+
+// src/slopes.js
+const SLOPE_AREA_MIN_MM2 = 25;
+const SLOPE_STEP_MIN_MM = 0.5;
+const SLOPE_REACH_MM = 400;
+function slopeSignedArea(points) {
+let sum = 0;
+for (let i = 0, j = points.length - 1; i < points.length; j = i, i += 1) {
+sum += points[j].x * points[i].y - points[i].x * points[j].y;
+}
+return sum / 2;
+}
+function slopeArea(points) {
+return Math.abs(slopeSignedArea(points || []));
+}
+function slopeOriented(points) {
+const list = points.map((point) => ({ x: Number(point.x), y: Number(point.y) }));
+return slopeSignedArea(list) < 0 ? list.reverse() : list;
+}
+function slopePlane(slope) {
+const points = slope && Array.isArray(slope.pointsMm) ? slope.pointsMm : [];
+const count = points.length;
+const edge = Number(slope && slope.edge);
+if (count < 3 || !Number.isInteger(edge) || edge < 0 || edge >= count) return null;
+const from = points[edge];
+const to = points[(edge + 1) % count];
+const dx = Number(to.x) - Number(from.x);
+const dy = Number(to.y) - Number(from.y);
+const len = Math.hypot(dx, dy);
+if (!(len > 0)) return null;
+const nx = -dy / len;
+const ny = dx / len;
+let far = 0;
+for (const point of points) {
+const reach = (Number(point.x) - Number(from.x)) * nx + (Number(point.y) - Number(from.y)) * ny;
+if (Math.abs(reach) > Math.abs(far)) far = reach;
+}
+if (!(Math.abs(far) >= 1)) return null;
+const low = Number(slope.lowMm);
+const high = Number(slope.highMm);
+if (!Number.isFinite(low) || !Number.isFinite(high)) return null;
+const rise = (high - low) / far;
+const ax = rise * nx;
+const ay = rise * ny;
+return { ax, ay, c: low - ax * Number(from.x) - ay * Number(from.y) };
+}
+function slopePlaneAt(plane, point) {
+return plane.ax * point.x + plane.ay * point.y + plane.c;
+}
+function slopeInside(point, points) {
+let inside = false;
+for (let i = 0, j = points.length - 1; i < points.length; j = i, i += 1) {
+const a = points[i];
+const b = points[j];
+if (a.y > point.y !== b.y > point.y && point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x) {
+inside = !inside;
+}
+}
+return inside;
+}
+function slopeGap(point, points) {
+let best = Infinity;
+for (let i = 0, j = points.length - 1; i < points.length; j = i, i += 1) {
+const a = points[j];
+const b = points[i];
+const dx = b.x - a.x;
+const dy = b.y - a.y;
+const len2 = dx * dx + dy * dy;
+const t = len2 > 0 ? Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / len2)) : 0;
+best = Math.min(best, Math.hypot(point.x - a.x - dx * t, point.y - a.y - dy * t));
+}
+return best;
+}
+function slopeCovers(slope, point, reachMm = 0) {
+const points = slope && Array.isArray(slope.pointsMm) ? slope.pointsMm : [];
+if (points.length < 3) return false;
+if (slopeInside(point, points)) return true;
+return reachMm > 0 && slopeGap(point, points) <= reachMm;
+}
+function slopesHeightAt(slopes, point, flatMm, reachMm = 0) {
+let best = null;
+for (const slope of slopes || []) {
+if (!slopeCovers(slope, point, reachMm)) continue;
+const plane = slopePlane(slope);
+if (!plane) continue;
+const height = slopePlaneAt(plane, point);
+if (best === null || height < best) best = height;
+}
+return best === null ? flatMm : Math.max(0, best);
+}
+function slopeIndexAt(slopes, point, reachMm = 0) {
+let best = null;
+let found = -1;
+(slopes || []).forEach((slope, index) => {
+if (!slopeCovers(slope, point, reachMm)) return;
+const plane = slopePlane(slope);
+if (!plane) return;
+const height = slopePlaneAt(plane, point);
+if (best === null || height < best) {
+best = height;
+found = index;
+}
+});
+return found;
+}
+function slopeConvex(points) {
+const count = points.length;
+for (let index = 0; index < count; index += 1) {
+const a = points[index];
+const b = points[(index + 1) % count];
+const c = points[(index + 2) % count];
+if ((b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x) < -1e-6) return false;
+}
+return true;
+}
+function slopeInTriangle(point, a, b, c) {
+const side = (p, q) => (q.x - p.x) * (point.y - p.y) - (q.y - p.y) * (point.x - p.x);
+return side(a, b) > 1e-9 && side(b, c) > 1e-9 && side(c, a) > -1e-9;
+}
+function slopeConvexParts(points) {
+const list = slopeOriented(points || []);
+if (list.length < 3) return [];
+if (slopeConvex(list)) return [list];
+const rest = [...list];
+const parts = [];
+let guard = rest.length * rest.length;
+while (rest.length > 3 && guard > 0) {
+guard -= 1;
+let cut = false;
+for (let index = 0; index < rest.length; index += 1) {
+const a = rest[(index + rest.length - 1) % rest.length];
+const b = rest[index];
+const c = rest[(index + 1) % rest.length];
+if ((b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x) <= 1e-9) continue;
+if (rest.some((point) => point !== a && point !== b && point !== c && slopeInTriangle(point, a, b, c))) continue;
+parts.push([a, b, c]);
+rest.splice(index, 1);
+cut = true;
+break;
+}
+if (!cut) break;
+}
+if (rest.length >= 3) parts.push(rest);
+return parts.filter((part) => slopeArea(part) > SLOPE_AREA_MIN_MM2);
+}
+function slopeClipHalf(points, value) {
+const out = [];
+for (let index = 0; index < points.length; index += 1) {
+const a = points[index];
+const b = points[(index + 1) % points.length];
+const va = value(a);
+const vb = value(b);
+if (va >= 0) out.push(a);
+if ((va > 0 && vb < 0) || (va < 0 && vb > 0)) {
+const t = va / (va - vb);
+out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+}
+}
+return out.length >= 3 && slopeArea(out) > SLOPE_AREA_MIN_MM2 ? out : null;
+}
+function slopeSplitBy(piece, part) {
+const outside = [];
+let rest = piece;
+for (let index = 0; index < part.length && rest; index += 1) {
+const a = part[index];
+const b = part[(index + 1) % part.length];
+const side = (point) => (b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x);
+const out = slopeClipHalf(rest, (point) => -side(point));
+if (out) outside.push(out);
+rest = slopeClipHalf(rest, side);
+}
+return { inside: rest, outside };
+}
+function slopeCeilingPieces(pointsMm, slopes, flatMm) {
+const list = (slopes || []).map((slope) => ({ slope, plane: slopePlane(slope) }));
+if (!list.some((item) => item.plane)) {
+return [{ points: (pointsMm || []).map((point) => ({ x: point.x, y: point.y, z: flatMm })), slope: -1 }];
+}
+let pieces = slopeConvexParts(pointsMm).map((poly) => ({ poly, slope: -1, plane: null }));
+list.forEach((item, index) => {
+if (!item.plane) return;
+for (const part of slopeConvexParts(item.slope.pointsMm)) {
+const next = [];
+for (const piece of pieces) {
+if (piece.slope === index) {
+next.push(piece);
+continue;
+}
+const { inside, outside } = slopeSplitBy(piece.poly, part);
+for (const poly of outside) next.push({ ...piece, poly });
+if (!inside) continue;
+if (piece.slope < 0) {
+next.push({ poly: inside, slope: index, plane: item.plane });
+continue;
+}
+const over = (point) => slopePlaneAt(piece.plane, point) - slopePlaneAt(item.plane, point);
+const lower = slopeClipHalf(inside, over);
+const upper = slopeClipHalf(inside, (point) => -over(point));
+if (lower) next.push({ poly: lower, slope: index, plane: item.plane });
+if (upper) next.push({ ...piece, poly: upper });
+}
+pieces = next;
+}
+});
+return pieces.map((piece) => ({
+points: piece.poly.map((point) => ({
+x: point.x,
+y: point.y,
+z: piece.plane ? Math.max(0, slopePlaneAt(piece.plane, point)) : flatMm,
+})),
+slope: piece.slope,
+}));
+}
+function slopePiecesCut(pieces, holeMm) {
+const hole = slopeOriented(holeMm || []);
+const kept = [];
+const cut = [];
+for (const piece of pieces || []) {
+const flat = slopeOriented(piece.points);
+const plane = slopePlaneThrough(piece.points);
+const lift = (poly) => ({
+...piece,
+points: poly.map((point) => ({ x: point.x, y: point.y, z: plane ? slopePlaneAt(plane, point) : piece.points[0].z })),
+});
+if (hole.length < 3) {
+kept.push(piece);
+continue;
+}
+const { inside, outside } = slopeSplitBy(flat, hole);
+if (!inside) {
+kept.push(piece);
+continue;
+}
+for (const poly of outside) kept.push(lift(poly));
+cut.push(lift(inside));
+}
+return { pieces: kept, cut };
+}
+function slopePlaneThrough(points) {
+for (let index = 2; index < points.length; index += 1) {
+const a = points[0];
+const b = points[index - 1];
+const c = points[index];
+const det = (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y);
+if (Math.abs(det) < 1e-6) continue;
+const ax = ((b.z - a.z) * (c.y - a.y) - (c.z - a.z) * (b.y - a.y)) / det;
+const ay = ((b.x - a.x) * (c.z - a.z) - (c.x - a.x) * (b.z - a.z)) / det;
+return { ax, ay, c: a.z - ax * a.x - ay * a.y };
+}
+return null;
+}
+function slopeProfile(slopes, a, b, flatMm, reachMm = SLOPE_REACH_MM) {
+const len = Math.hypot(b.x - a.x, b.y - a.y);
+if (!(len > 0)) return [];
+const ux = (b.x - a.x) / len;
+const uy = (b.y - a.y) / len;
+const at = (t) => ({ x: a.x + ux * t, y: a.y + uy * t });
+const list = (slopes || []).map((slope) => ({ slope, plane: slopePlane(slope) })).filter((item) => item.plane);
+const cuts = [0, len];
+for (const item of list) {
+const points = item.slope.pointsMm;
+for (let index = 0; index < points.length; index += 1) {
+const p = points[index];
+const q = points[(index + 1) % points.length];
+const ex = q.x - p.x;
+const ey = q.y - p.y;
+const cross = ux * ey - uy * ex;
+if (Math.abs(cross) < 1e-9) continue;
+const t = ((p.x - a.x) * ey - (p.y - a.y) * ex) / cross;
+if (t > SLOPE_STEP_MIN_MM && t < len - SLOPE_STEP_MIN_MM) cuts.push(t);
+}
+}
+for (let i = 0; i < list.length; i += 1) {
+for (let j = i + 1; j < list.length; j += 1) {
+const start = slopePlaneAt(list[i].plane, a) - slopePlaneAt(list[j].plane, a);
+const end = slopePlaneAt(list[i].plane, b) - slopePlaneAt(list[j].plane, b);
+if ((start > 0 && end < 0) || (start < 0 && end > 0)) cuts.push((start / (start - end)) * len);
+}
+}
+cuts.sort((first, second) => first - second);
+const parts = [];
+for (let index = 0; index + 1 < cuts.length; index += 1) {
+const from = cuts[index];
+const to = cuts[index + 1];
+if (!(to - from > SLOPE_STEP_MIN_MM)) continue;
+const mid = at((from + to) / 2);
+let best = null;
+for (const item of list) {
+if (!slopeCovers(item.slope, mid, reachMm)) continue;
+if (best === null || slopePlaneAt(item.plane, mid) < slopePlaneAt(best, mid)) best = item.plane;
+}
+const fromZ = best ? Math.max(0, slopePlaneAt(best, at(from))) : flatMm;
+const toZ = best ? Math.max(0, slopePlaneAt(best, at(to))) : flatMm;
+parts.push({ fromMm: from, toMm: to, fromZ, toZ });
+}
+return slopeProfileTidy(parts);
+}
+function slopeProfileTidy(parts) {
+const out = [];
+for (const part of parts) {
+const last = out[out.length - 1];
+if (last && Math.abs(last.toZ - part.fromZ) < 0.01) {
+const before = (last.toZ - last.fromZ) / (last.toMm - last.fromMm);
+const after = (part.toZ - part.fromZ) / (part.toMm - part.fromMm);
+if (Math.abs(before - after) < 1e-6) {
+last.toMm = part.toMm;
+last.toZ = part.toZ;
+continue;
+}
+}
+out.push({ ...part });
+}
+return out;
+}
+function slopeProfileAt(profile, alongMm) {
+let best = null;
+for (const part of profile || []) {
+if (alongMm < part.fromMm - 1e-6 || alongMm > part.toMm + 1e-6) continue;
+const span = part.toMm - part.fromMm;
+const z = span > 0 ? part.fromZ + ((part.toZ - part.fromZ) * (alongMm - part.fromMm)) / span : part.fromZ;
+if (best === null || z > best) best = z;
+}
+return best === null ? 0 : best;
+}
+function slopeProfileTop(profile) {
+let top = 0;
+for (const part of profile || []) top = Math.max(top, part.fromZ, part.toZ);
+return top;
+}
+function slopeProfileFlat(lengthMm, heightMm) {
+return [{ fromMm: 0, toMm: lengthMm, fromZ: heightMm, toZ: heightMm }];
+}
+function slopeProfileZ(part, alongMm) {
+const span = part.toMm - part.fromMm;
+return span > 0 ? part.fromZ + ((part.toZ - part.fromZ) * (alongMm - part.fromMm)) / span : part.fromZ;
+}
+function slopeProfileMax(first, second) {
+if (!first || first.length === 0) return second || [];
+if (!second || second.length === 0) return first;
+const cuts = new Set();
+for (const part of [...first, ...second]) {
+cuts.add(part.fromMm);
+cuts.add(part.toMm);
+}
+for (const one of first) {
+for (const two of second) {
+const from = Math.max(one.fromMm, two.fromMm);
+const to = Math.min(one.toMm, two.toMm);
+if (!(to - from > SLOPE_STEP_MIN_MM)) continue;
+const start = slopeProfileZ(one, from) - slopeProfileZ(two, from);
+const end = slopeProfileZ(one, to) - slopeProfileZ(two, to);
+if ((start > 0 && end < 0) || (start < 0 && end > 0)) cuts.add(from + (start / (start - end)) * (to - from));
+}
+}
+const sorted = [...cuts].sort((left, right) => left - right);
+const partAt = (profile, mid) => profile.find((part) => mid >= part.fromMm && mid <= part.toMm) || null;
+const out = [];
+for (let index = 0; index + 1 < sorted.length; index += 1) {
+const from = sorted[index];
+const to = sorted[index + 1];
+if (!(to - from > SLOPE_STEP_MIN_MM)) continue;
+const mid = (from + to) / 2;
+const one = partAt(first, mid);
+const two = partAt(second, mid);
+const pick = !one ? two : !two ? one : slopeProfileZ(one, mid) >= slopeProfileZ(two, mid) ? one : two;
+if (!pick) continue;
+out.push({ fromMm: from, toMm: to, fromZ: slopeProfileZ(pick, from), toZ: slopeProfileZ(pick, to) });
+}
+return slopeProfileTidy(out);
+}
+function slopeProfileClip(profile, polygon) {
+const eps = 0.01;
+if (polygon.every((point) => point.zMm <= slopeProfileAt(profile, point.alongMm) + eps)) return [polygon];
+const out = [];
+for (const part of profile || []) {
+const span = part.toMm - part.fromMm;
+if (!(span > 0)) continue;
+const top = (point) => part.fromZ + ((part.toZ - part.fromZ) * (point.alongMm - part.fromMm)) / span - point.zMm;
+let rest = slopeClipFlat(polygon, (point) => point.alongMm - part.fromMm);
+rest = rest && slopeClipFlat(rest, (point) => part.toMm - point.alongMm);
+rest = rest && slopeClipFlat(rest, top);
+if (rest) out.push(rest);
+}
+return out;
+}
+function slopeSpanClip(polygon, fromMm, toMm) {
+const rest = slopeClipFlat(polygon, (point) => point.alongMm - fromMm);
+return rest && slopeClipFlat(rest, (point) => toMm - point.alongMm);
+}
+function slopeClipFlat(points, value) {
+const out = [];
+for (let index = 0; index < points.length; index += 1) {
+const a = points[index];
+const b = points[(index + 1) % points.length];
+const va = value(a);
+const vb = value(b);
+if (va >= 0) out.push(a);
+if ((va > 0 && vb < 0) || (va < 0 && vb > 0)) {
+const t = va / (va - vb);
+out.push({ alongMm: a.alongMm + (b.alongMm - a.alongMm) * t, zMm: a.zMm + (b.zMm - a.zMm) * t });
+}
+}
+if (out.length < 3) return null;
+let area = 0;
+for (let i = 0, j = out.length - 1; i < out.length; j = i, i += 1) {
+area += out[j].alongMm * out[i].zMm - out[i].alongMm * out[j].zMm;
+}
+return Math.abs(area) / 2 > SLOPE_AREA_MIN_MM2 ? out : null;
 }
 
 // src/sim/hubTypes.js
@@ -19509,6 +19949,7 @@ heightMm: drawingHeightMm(heightMm),
 heightAboveFloorMm: drawingOffsetMm(heightAboveFloorMm),
 ...schemeObjectMirrorField(shape, mirror),
 };
+skylightSeat(project, object);
 return {
 project: withProject(project, {
 schemeObjects: [...schemeObjectsOf(project), object],
@@ -19549,8 +19990,18 @@ Object.prototype.hasOwnProperty.call(patch, "mirror") ? patch.mirror : current.m
 ),
 ...schemeObjectColorsField(schemeObjectColors(current)),
 };
+if (next.catalogKey !== current.catalogKey || JSON.stringify(next.atMm) !== JSON.stringify(current.atMm)) {
+skylightSeat(project, next);
+}
 const schemeObjects = schemeObjectsOf(project).map((object) => (object.id === objectId ? next : object));
 return { project: withProject(project, { schemeObjects }), schemeObject: next };
+}
+function schemeObjectIsSkylight(object) {
+return Boolean(object && object.catalogKey === OBJECT_SKYLIGHT_KEY && object.shape !== "polyline");
+}
+function skylightSeat(project, object) {
+if (!schemeObjectIsSkylight(object)) return;
+if (!slopeAtPoint(project, object.schemeId, object.atMm)) throw modelError("skylightNoSlope");
 }
 const SCHEME_OBJECT_COLOR_PARTS = Object.freeze(["main", "second"]);
 function schemeObjectColors(object) {
@@ -20027,6 +20478,224 @@ const { hasCeiling, ...rest } = item;
 return want === auto ? rest : { ...rest, hasCeiling: want };
 });
 return { project: withProject(project, { rooms }), room: rooms.find((item) => item.id === roomId), changed: true };
+}
+const SLOPE_PLOT_MIN_MM2 = 10000;
+function slopeValue(input) {
+const source = input && typeof input === "object" ? input : {};
+if (!Array.isArray(source.pointsMm) || source.pointsMm.length < 3) throw modelError("slopeShort");
+const pointsMm = source.pointsMm.map(drawingPointMm);
+const edge = Number(source.edge);
+if (!Number.isInteger(edge) || edge < 0 || edge >= pointsMm.length) throw modelError("slopeEdgeUnknown");
+const height = (value) => {
+const mm = drawingOffsetMm(value);
+if (mm > MARK_DIMENSION_MAX) {
+throw modelError("drawingHeightTooBig", { max: MARK_DIMENSION_MAX, unit: strings.markSizes.unit });
+}
+return mm;
+};
+const slope = { pointsMm, edge, lowMm: height(source.lowMm), highMm: height(source.highMm) };
+if (!(slopeArea(pointsMm) >= SLOPE_PLOT_MIN_MM2) || !slopePlane(slope)) throw modelError("slopeDegenerate");
+return slope;
+}
+function slopeReadable(item) {
+if (!item || typeof item !== "object" || !Array.isArray(item.pointsMm) || item.pointsMm.length < 3) return false;
+if (!item.pointsMm.every((point) => point && Number.isFinite(Number(point.x)) && Number.isFinite(Number(point.y)))) return false;
+return slopePlane(item) !== null;
+}
+function outlineSlopes(outline) {
+const list = outline && Array.isArray(outline.slopes) ? outline.slopes : [];
+return list.filter(slopeReadable);
+}
+function schemeHasSlopes(project, schemeId) {
+return slopeSchemeOutlines(project, schemeId).sloped;
+}
+function outlineSlopesWith(project, outlineId, change) {
+const outline = findOutline(project, outlineId);
+if (!outline) throw modelError("outlineNotFound");
+const next = change(Array.isArray(outline.slopes) ? [...outline.slopes] : []);
+const outlines = outlinesOf(project).map((item) => {
+if (item.id !== outlineId) return item;
+const { slopes, ...rest } = item;
+return next.length > 0 ? { ...rest, slopes: next } : rest;
+});
+return { project: withProject(project, { outlines }), outline: outlines.find((item) => item.id === outlineId) };
+}
+function addOutlineSlope(project, outlineId, input) {
+const slope = slopeValue(input);
+let index = 0;
+const result = outlineSlopesWith(project, outlineId, (list) => {
+index = list.length;
+return [...list, slope];
+});
+return { ...result, slope, index, changed: true };
+}
+function updateOutlineSlope(project, outlineId, index, patch) {
+const outline = findOutline(project, outlineId);
+if (!outline) throw modelError("outlineNotFound");
+const was = Array.isArray(outline.slopes) ? outline.slopes[index] : null;
+if (!was) throw modelError("slopeNotFound");
+const slope = slopeValue({ ...was, ...pick(patch, ["pointsMm", "edge", "lowMm", "highMm"]) });
+if (JSON.stringify(slope) === JSON.stringify(was)) return { project, outline, slope: was, index, changed: false };
+const result = outlineSlopesWith(project, outlineId, (list) => list.map((item, at) => (at === index ? slope : item)));
+return { ...result, slope, index, changed: true };
+}
+function deleteOutlineSlope(project, outlineId, index) {
+const outline = findOutline(project, outlineId);
+if (!outline) throw modelError("outlineNotFound");
+if (!Array.isArray(outline.slopes) || !outline.slopes[index]) throw modelError("slopeNotFound");
+const result = outlineSlopesWith(project, outlineId, (list) => list.filter((item, at) => at !== index));
+return { ...result, changed: true };
+}
+const SLOPE_SCHEME_CACHE = new WeakMap();
+const WALL_SLOPE_GAP_MM = 600;
+function slopeSchemeOutlines(project, schemeId) {
+if (!project || !schemeId) return { sloped: false, list: [] };
+let held = SLOPE_SCHEME_CACHE.get(project);
+if (!held) {
+held = new Map();
+SLOPE_SCHEME_CACHE.set(project, held);
+}
+if (held.has(schemeId)) return held.get(schemeId);
+const list = [];
+let sloped = false;
+if (outlinesOf(project).some((outline) => outline.schemeId === schemeId && outlineSlopes(outline).length > 0)) {
+for (const outline of outlinesInOrder(project, schemeId)) {
+const pointsMm = [];
+for (const point of outline.points || []) {
+const mm = planFractionToMm(project, schemeId, point);
+if (!mm) break;
+pointsMm.push(mm);
+}
+if (pointsMm.length < 3 || pointsMm.length !== (outline.points || []).length) continue;
+const slopes = outlineSlopes(outline);
+if (slopes.length > 0) sloped = true;
+list.push({ outline, pointsMm, slopes, flatMm: wallHeightShownMm(project, { schemeId, roomId: outline.roomId }).mm });
+}
+}
+const answer = { sloped, list };
+held.set(schemeId, answer);
+return answer;
+}
+function slopeOutlineAt(held, pointMm) {
+let found = null;
+for (const item of held.list) if (pointInOutline(pointMm, item.pointsMm)) found = item;
+return found;
+}
+function ceilingHeightAt(project, schemeId, pointMm) {
+const held = slopeSchemeOutlines(project, schemeId);
+if (held.sloped && pointMm) {
+const item = slopeOutlineAt(held, pointMm);
+if (item) return slopesHeightAt(item.slopes, pointMm, item.flatMm);
+}
+const fraction = pointMm ? planMmToFraction(project, schemeId, pointMm) : null;
+const outline = fraction ? outlineAtPoint(project, schemeId, fraction) : null;
+return wallHeightShownMm(project, { schemeId, roomId: outline ? outline.roomId : null }).mm;
+}
+function slopeAtPoint(project, schemeId, pointMm) {
+const held = slopeSchemeOutlines(project, schemeId);
+if (!held.sloped || !pointMm) return null;
+const item = slopeOutlineAt(held, pointMm);
+if (!item) return null;
+const at = slopeIndexAt(item.slopes, pointMm);
+if (at < 0) return null;
+const slope = item.slopes[at];
+return { outline: item.outline, index: (item.outline.slopes || []).indexOf(slope), slope };
+}
+function wallTopProfile(project, wallId) {
+const wall = findWall(project, wallId);
+if (!wall || wallOwnHeightMm(wall) !== null) return null;
+const held = slopeSchemeOutlines(project, wall.schemeId);
+if (!held.sloped) return null;
+const vectors = wallVectors(wall);
+if (!vectors) return null;
+const { len } = vectors;
+const left = wallSideCeiling(wall, vectors, held, 1, true);
+const right = wallSideCeiling(wall, vectors, held, -1, true);
+if (!left.spoke && !right.spoke) return null;
+const top = slopeProfileMax(left.parts, right.parts);
+const rest = wallHeightInheritedMm(project, wallId);
+const out = [];
+let cursor = 0;
+for (const part of top) {
+if (part.fromMm - cursor > 0.5) out.push({ fromMm: cursor, toMm: part.fromMm, fromZ: rest, toZ: rest });
+out.push(part);
+cursor = part.toMm;
+}
+if (len - cursor > 0.5) out.push({ fromMm: cursor, toMm: len, fromZ: rest, toZ: rest });
+return slopeProfileTidy(out);
+}
+function wallSideProfile(project, wallId, side) {
+const wall = findWall(project, wallId);
+if (!wall) return null;
+const held = slopeSchemeOutlines(project, wall.schemeId);
+if (!held.sloped) return null;
+const vectors = wallVectors(wall);
+if (!vectors) return null;
+const answer = wallSideCeiling(wall, vectors, held, side === "right" ? -1 : 1, false);
+return answer.spoke ? answer.parts : null;
+}
+function wallSideCeiling(wall, vectors, held, sign, quiet) {
+const { u, n, len } = vectors;
+const half = Number(wall.thicknessMm) / 2;
+const at = (along, across) => ({
+x: Number(wall.aMm.x) + u.x * along + n.x * across,
+y: Number(wall.aMm.y) + u.y * along + n.y * across,
+});
+let spoke = false;
+const probe = (half + WALL_ROOM_PROBE_MM) * sign;
+const start = at(0, probe);
+{
+const cuts = [0, len];
+for (const item of held.list) {
+for (let index = 0; index < item.pointsMm.length; index += 1) {
+const p = item.pointsMm[index];
+const q = item.pointsMm[(index + 1) % item.pointsMm.length];
+const ex = q.x - p.x;
+const ey = q.y - p.y;
+const cross = u.x * ey - u.y * ex;
+if (Math.abs(cross) < 1e-9) continue;
+const t = ((p.x - start.x) * ey - (p.y - start.y) * ex) / cross;
+const s = ((p.x - start.x) * u.y - (p.y - start.y) * u.x) / cross;
+if (s >= 0 && s <= 1 && t > 1 && t < len - 1) cuts.push(t);
+}
+}
+cuts.sort((first, second) => first - second);
+const spans = [];
+for (let index = 0; index + 1 < cuts.length; index += 1) {
+const from = cuts[index];
+const to = cuts[index + 1];
+if (!(to - from > 0.5)) continue;
+spans.push({ from, to, item: slopeOutlineAt(held, at((from + to) / 2, probe)) });
+}
+spans.forEach((span, index) => {
+if (span.item || span.to - span.from >= WALL_SLOPE_GAP_MM) return;
+const before = index > 0 ? spans[index - 1].item : null;
+const after = index + 1 < spans.length ? spans[index + 1].item : null;
+span.near = before || after;
+});
+const parts = [];
+for (const span of spans) {
+const { from, to } = span;
+const item = span.item || span.near;
+if (!item) continue;
+if (item.slopes.length === 0) {
+parts.push({ fromMm: from, toMm: to, fromZ: item.flatMm, toZ: item.flatMm });
+continue;
+}
+for (const part of slopeProfile(item.slopes, at(from, half * sign), at(to, half * sign), -1)) {
+const flat = part.fromZ < 0 || part.toZ < 0;
+if (flat && quiet) continue;
+if (!flat) spoke = true;
+parts.push({
+fromMm: from + part.fromMm,
+toMm: from + part.toMm,
+fromZ: flat ? item.flatMm : part.fromZ,
+toZ: flat ? item.flatMm : part.toZ,
+});
+}
+}
+return { parts: slopeProfileTidy(parts), spoke };
+}
 }
 const WALL_PAINT_SIDES = ["left", "right"];
 const ROOM_PAINT_PARTS = ["floor", "ceiling"];
@@ -20607,6 +21276,7 @@ if (!wall || !vectors) return [];
 const half = Number(wall.thicknessMm) / 2;
 const found = [];
 for (const object of schemeObjectsOnScheme(project, wall.schemeId)) {
+if (schemeObjectIsSkylight(object)) continue;
 const corners = schemeObjectCorners(object);
 if (corners.length === 0) continue;
 const gap = Math.min(...corners.map((point) => segmentDistanceMm(point, wall.aMm, wall.bMm)));
@@ -20890,7 +21560,32 @@ const own = wallOwnHeightMm(wall);
 const shown = own !== null ? { mm: own, known: true } : wallHeightShownMm(project, { schemeId: wall.schemeId, roomId });
 const room = roomId ? findRoom(project, roomId) : null;
 const named = wallNaming(project, wall.schemeId).walls.get(wallId) || { name: "", aLetter: "", bLetter: "" };
-return {
+const sloped = own === null ? wallSideProfile(project, wallId, view) : null;
+let topProfile = null;
+if (sloped) {
+topProfile = [];
+for (const part of sloped) {
+const sheet = sideSpan(length, part.fromMm, part.toMm, view);
+const flipped = view === "left";
+const fromZ = flipped ? part.toZ : part.fromZ;
+const toZ = flipped ? part.fromZ : part.toZ;
+const from = Math.max(sheet.fromMm, span.fromMm);
+const to = Math.min(sheet.toMm, span.toMm);
+if (!(to - from > 0.5)) continue;
+const wide = sheet.toMm - sheet.fromMm;
+const zAt = (along) => fromZ + ((toZ - fromZ) * (along - sheet.fromMm)) / wide;
+topProfile.push({
+fromMm: Math.round(from - span.fromMm),
+toMm: Math.round(to - span.fromMm),
+fromZ: Math.round(zAt(from)),
+toZ: Math.round(zAt(to)),
+});
+}
+topProfile.sort((first, second) => first.fromMm - second.fromMm);
+if (topProfile.length === 0) topProfile = null;
+}
+const slopedTop = topProfile ? Math.max(...topProfile.map((part) => Math.max(part.fromZ, part.toZ))) : 0;
+const sheet = {
 wallId,
 side: view,
 name: named.name,
@@ -20910,6 +21605,11 @@ marks: shownMarks,
 objects,
 crossings,
 };
+if (topProfile) {
+sheet.heightShownMm = Math.max(shown.mm, slopedTop);
+sheet.topProfile = topProfile;
+}
+return sheet;
 }
 function flipHinge(value) {
 return value === "end" ? "start" : "end";
@@ -30687,11 +31387,52 @@ if (spareSaid) {
 elevationText(ctx, spareSaid, inner.x + inner.width, captionY, "right", unit);
 }
 }
+const slopeTop = [];
+if (Array.isArray(elevation.topProfile) && elevation.topProfile.length > 0) {
+let cursor = 0;
+const full = elevation.heightShownMm;
+for (const part of elevation.topProfile) {
+if (part.fromMm - cursor > 0) slopeTop.push({ fromMm: cursor, toMm: part.fromMm, fromZ: full, toZ: full });
+slopeTop.push(part);
+cursor = part.toMm;
+}
+if (elevation.lengthMm - cursor > 0) slopeTop.push({ fromMm: cursor, toMm: elevation.lengthMm, fromZ: full, toZ: full });
+}
+const sloped = slopeTop.length > 0;
+const slopePath = () => {
+ctx.beginPath();
+ctx.moveTo(left, floor);
+for (const part of slopeTop) {
+ctx.lineTo(atX(part.fromMm), atY(part.fromZ));
+ctx.lineTo(atX(part.toMm), atY(part.toZ));
+}
+ctx.lineTo(left + wallWidth, floor);
+ctx.closePath();
+};
+const underSlope = (draw) => {
+if (!sloped) return draw();
+ctx.save();
+slopePath();
+ctx.clip();
+draw();
+ctx.restore();
+return undefined;
+};
 ctx.fillStyle = DRAWING_PAPER;
+if (sloped) {
+slopePath();
+ctx.fill();
+ctx.lineWidth = 1.5 * unit;
+ctx.strokeStyle = DRAWING_WALL;
+slopePath();
+ctx.stroke();
+} else {
 ctx.fillRect(left, floor - wallHeight, wallWidth, wallHeight);
 ctx.lineWidth = 1.5 * unit;
 ctx.strokeStyle = DRAWING_WALL;
 ctx.strokeRect(left, floor - wallHeight, wallWidth, wallHeight);
+}
+underSlope(() => {
 for (const cross of elevation.crossings || []) {
 const x = atX(cross.fromMm);
 const width = Math.max(thin, (cross.toMm - cross.fromMm) * scale);
@@ -30704,6 +31445,7 @@ if (cross.name) {
 elevationText(ctx, cross.name, x + width / 2, floor - wallHeight + 13 * unit, "center", unit);
 }
 }
+});
 const namedObjects = new Set();
 const namesObject = (mark) => {
 if (mark.objectId) namedObjects.add(mark.objectId);
@@ -30768,11 +31510,30 @@ const x = atX(opening.fromMm);
 const width = Math.max(thin, (opening.toMm - opening.fromMm) * scale);
 const top = atY(opening.topMm);
 const height = Math.max(thin, (opening.topMm - opening.floorMm) * scale);
-drawOpeningFace(ctx, { x, y: top, width, height }, opening, { unit, scale });
+underSlope(() => drawOpeningFace(ctx, { x, y: top, width, height }, opening, { unit, scale }));
 if (width < ELEVATION_LABEL_MIN_PX * unit) continue;
 elevationText(ctx, String(opening.topMm), x + width / 2, top - 8 * unit, "center", unit);
 if (opening.floorMm > 0) {
 elevationText(ctx, String(opening.floorMm), x + width / 2, top + height + 9 * unit, "center", unit);
+}
+}
+if (sloped) {
+ctx.lineWidth = 1.5 * unit;
+ctx.strokeStyle = DRAWING_WALL;
+slopePath();
+ctx.stroke();
+const said = new Set();
+for (const part of slopeTop) {
+for (const [mm, z] of [
+[part.fromMm, part.fromZ],
+[part.toMm, part.toZ],
+]) {
+const key = Math.round(mm) + ":" + Math.round(z);
+if (said.has(key) || Math.abs(z - elevation.heightShownMm) < 5) continue;
+said.add(key);
+const edge = mm <= 0 ? "left" : mm >= elevation.lengthMm ? "right" : "center";
+elevationText(ctx, String(Math.round(z)), atX(mm) + (edge === "left" ? 4 : edge === "right" ? -4 : 0) * unit, atY(z) - 8 * unit, edge, unit);
+}
 }
 }
 for (let index = 0; index < lines.length; index += 1) {
@@ -39286,7 +40047,7 @@ if (one.index === two.index) continue;
 const here = list[one.index];
 const there = list[two.index];
 if (!(here.half > 0) || !(there.half > 0)) continue;
-if (Math.abs(Number(heightOf(here.wall)) - Number(heightOf(there.wall))) > 1) continue;
+if (Math.abs(Number(heightOf(here.wall, one.end)) - Number(heightOf(there.wall, two.end))) > 1) continue;
 const hereFace = faceOf(here, one.end);
 const thereFace = faceOf(there, two.end);
 const cut = (item, face, other, end) => {
@@ -39306,9 +40067,10 @@ seatOf(two.index)[two.end === "a" ? "start" : "end"] = second;
 }
 return miters;
 }
-function volumeWallFaces(wall, openings, heightMm, out = [], openDoorIds = null, miter = null, rooms = null) {
+function volumeWallFaces(wall, openings, heightMm, out = [], openDoorIds = null, miter = null, rooms = null, profile = null) {
 const vectors = wallVectors(wall);
 if (!vectors || !(heightMm > 0)) return out;
+if (profile && profile.length > 0) return volumeWallSloped(wall, openings, heightMm, out, openDoorIds, miter, rooms, profile);
 const half = Number(wall.thicknessMm) / 2;
 const { u, n, len } = vectors;
 const own = out.length;
@@ -39408,6 +40170,195 @@ for (let index = from; index < out.length; index += 1) if (volumeIsWall(out[inde
 }
 }
 return out;
+}
+function volumeWallSloped(wall, openings, heightMm, out, openDoorIds, miter, rooms, profile) {
+const vectors = wallVectors(wall);
+const half = Number(wall.thicknessMm) / 2;
+const { u, n, len } = vectors;
+const own = out.length;
+const at = (along, across) => ({
+x: Number(wall.aMm.x) + u.x * along + n.x * across,
+y: Number(wall.aMm.y) + u.y * along + n.y * across,
+});
+const startOf = (side) => (miter && miter.start ? (side > 0 ? miter.start.left : miter.start.right) : 0);
+const endOf = (side) => (miter && miter.end ? (side > 0 ? miter.end.left : miter.end.right) : len);
+const reach = (along, side) => (along <= 0.001 ? startOf(side) : along >= len - 0.001 ? endOf(side) : along);
+const facing = (points, normal, options) => {
+const got = volumeFaceNormal(points);
+const turned = got.x * normal.x + got.y * normal.y + got.z * normal.z < 0;
+return volumeFace(turned ? [...points].reverse() : points, VOLUME_WALL_RGB, { ...options, normal });
+};
+const known = rooms && rooms.length > 0;
+for (const side of [1, -1]) {
+const normal = { x: n.x * side, y: n.y * side, z: 0 };
+const paint = volumeWallPaintRgb(wall, side);
+const stops = known ? volumeSideStops(wall, side, rooms) : [];
+const roomAt = (along) => (known ? volumeRoomKeyAt(rooms, at(along, (half + VOLUME_SUN_PROBE_MM) * side)) : null);
+for (const tile of volumeWallTiles(len, heightMm, openings)) {
+const bottomFrom = tile.bottomFromMm == null ? tile.bottomMm : tile.bottomFromMm;
+const bottomTo = tile.bottomToMm == null ? tile.bottomMm : tile.bottomToMm;
+const whole = [
+{ alongMm: tile.fromMm, zMm: bottomFrom },
+{ alongMm: tile.toMm, zMm: bottomTo },
+{ alongMm: tile.toMm, zMm: tile.topMm },
+{ alongMm: tile.fromMm, zMm: tile.topMm },
+];
+const arched = tile.bottomFromMm != null || tile.bottomToMm != null;
+const parts = arched
+? [{ fromMm: tile.fromMm, toMm: tile.toMm, room: roomAt((tile.fromMm + tile.toMm) / 2) }]
+: volumeSideParts(tile.fromMm, tile.toMm, stops, roomAt);
+for (const part of parts) {
+const span = parts.length === 1 ? whole : slopeSpanClip(whole, part.fromMm, part.toMm);
+if (!span) continue;
+for (const piece of slopeProfileClip(profile, span)) {
+const points = piece.map((point) => volumeAt(at(reach(point.alongMm, side), half * side), point.zMm));
+out.push(volumePainted(facing(points, normal, { room: part.room }), paint, "wall"));
+}
+}
+}
+}
+for (const end of [0, 1]) {
+if (end === 0 ? miter && miter.start : miter && miter.end) continue;
+const along = end === 0 ? 0 : len;
+const top = slopeProfileAt(profile, along);
+if (!(top > 0)) continue;
+const normal = { x: u.x * (end === 0 ? -1 : 1), y: u.y * (end === 0 ? -1 : 1), z: 0 };
+const left = at(along, half);
+const right = at(along, -half);
+const mid = at(along, 0);
+const inward = Math.min(len / 2, VOLUME_SUN_PROBE_MM) * (end === 0 ? 1 : -1);
+const pieces = known
+? [
+[left, mid, 1],
+[mid, right, -1],
+]
+: [[left, right, 0]];
+for (const [first, second, sign] of pieces) {
+const room = known ? volumeRoomKeyAt(rooms, at(along + inward, (half + VOLUME_SUN_PROBE_MM) * sign)) : null;
+out.push(
+volumePainted(
+facing([volumeAt(first, 0), volumeAt(second, 0), volumeAt(second, top), volumeAt(first, top)], normal, { room }),
+volumeWallPaintRgb(wall, sign),
+"wall",
+),
+);
+}
+}
+let before = null;
+for (const part of profile) {
+const fromL = reach(part.fromMm, 1);
+const toL = reach(part.toMm, 1);
+const fromR = reach(part.fromMm, -1);
+const toR = reach(part.toMm, -1);
+const lid = facing(
+[
+volumeAt(at(fromL, half), part.fromZ),
+volumeAt(at(toL, half), part.toZ),
+volumeAt(at(toR, -half), part.toZ),
+volumeAt(at(fromR, -half), part.fromZ),
+],
+{ x: 0, y: 0, z: 1 },
+{},
+);
+const real = volumeFaceNormal(lid.p);
+lid.n = real.z < 0 ? { x: -real.x, y: -real.y, z: -real.z } : real;
+out.push(lid);
+if (before && Math.abs(before.toZ - part.fromZ) > 1) {
+const low = Math.min(before.toZ, part.fromZ);
+const high = Math.max(before.toZ, part.fromZ);
+const sign = before.toZ > part.fromZ ? 1 : -1;
+out.push(
+facing(
+[
+volumeAt(at(part.fromMm, half), low),
+volumeAt(at(part.fromMm, -half), low),
+volumeAt(at(part.fromMm, -half), high),
+volumeAt(at(part.fromMm, half), high),
+],
+{ x: u.x * sign, y: u.y * sign, z: 0 },
+{},
+),
+);
+}
+before = part;
+}
+volumeGlassed(wall, out, own);
+for (const opening of openings || []) {
+const from = out.length;
+volumeOpeningFaces(wall, opening, heightMm, out, openDoorIds, rooms);
+if (rooms && rooms.length > 0) volumeTagSides(wall, opening, out, from, rooms);
+if (wallGlassOf(wall)) {
+for (let index = from; index < out.length; index += 1) if (volumeIsWall(out[index])) volumeGlassFace(out[index]);
+}
+volumeFacesUnder(wall, vectors, profile, out, from);
+}
+return out;
+}
+function volumeClipSpace(points, value) {
+const result = [];
+for (let index = 0; index < points.length; index += 1) {
+const a = points[index];
+const b = points[(index + 1) % points.length];
+const va = value(a);
+const vb = value(b);
+if (va >= 0) result.push(a);
+if ((va > 0 && vb < 0) || (va < 0 && vb > 0)) {
+const t = va / (va - vb);
+result.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, z: a.z + (b.z - a.z) * t });
+}
+}
+return result.length >= 3 ? result : null;
+}
+function volumeFacesUnder(wall, vectors, profile, faces, from) {
+const { u } = vectors;
+const alongOf = (point) => (point.x - Number(wall.aMm.x)) * u.x + (point.y - Number(wall.aMm.y)) * u.y;
+const eps = 0.5;
+const kept = [];
+let changed = false;
+for (let index = from; index < faces.length; index += 1) {
+const face = faces[index];
+const points = face.p || [];
+if (points.every((point) => point.z <= slopeProfileAt(profile, alongOf(point)) + eps)) {
+kept.push(face);
+continue;
+}
+changed = true;
+if (face.line) {
+if (points.some((point) => point.z <= slopeProfileAt(profile, alongOf(point)) + eps)) kept.push(face);
+continue;
+}
+const places = points.map(alongOf);
+if (Math.max(...places) - Math.min(...places) < eps) {
+const top = slopeProfileAt(profile, places[0]);
+const rest = volumeClipSpace(points, (point) => top - point.z);
+if (rest && Math.max(...rest.map((point) => point.z)) - Math.min(...rest.map((point) => point.z)) >= eps) {
+kept.push({ ...face, p: rest });
+}
+continue;
+}
+for (const part of profile) {
+const span = part.toMm - part.fromMm;
+if (!(span > 0)) continue;
+let rest = volumeClipSpace(points, (point) => alongOf(point) - part.fromMm);
+rest = rest && volumeClipSpace(rest, (point) => part.toMm - alongOf(point));
+rest =
+rest &&
+volumeClipSpace(rest, (point) => part.fromZ + ((part.toZ - part.fromZ) * (alongOf(point) - part.fromMm)) / span - point.z);
+if (!rest) continue;
+const zs = rest.map((point) => point.z);
+const alongs = rest.map(alongOf);
+const tall = Math.max(...zs) - Math.min(...zs);
+const wide = Math.max(...alongs) - Math.min(...alongs);
+const level = Math.abs(face.n.z) > 0.9;
+const across = Math.abs(face.n.x * u.x + face.n.y * u.y) > 0.9;
+if (!level && tall < eps) continue;
+if (!across && wide < eps) continue;
+kept.push({ ...face, p: rest });
+}
+}
+if (!changed) return;
+faces.length = from;
+for (const face of kept) faces.push(face);
 }
 function volumeTagSides(wall, opening, faces, from, rooms) {
 const vectors = wallVectors(wall);
@@ -40607,6 +41558,20 @@ const type = findType(project, mark.typeId);
 const style = styleOf(project, mark.typeId);
 return objectViewByName(typeObjectView(type)) || objectViewForShape(style.shape);
 }
+const VOLUME_SLOPE_PIECE_MM = 80;
+function volumeSlopePath(path) {
+const out = [];
+for (let index = 0; index + 1 < path.length; index += 1) {
+const a = path[index];
+const b = path[index + 1];
+const count = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / VOLUME_SLOPE_PIECE_MM));
+for (let step = 0; step < count; step += 1) {
+out.push({ x: a.x + ((b.x - a.x) * step) / count, y: a.y + ((b.y - a.y) * step) / count });
+}
+}
+if (path.length > 0) out.push(path[path.length - 1]);
+return out;
+}
 function volumePathPrisms(path, acrossMm, bottomMm, topMm) {
 const prisms = [];
 for (let index = 0; index + 1 < path.length; index += 1) {
@@ -41049,9 +42014,57 @@ const middle = seat && seat.x !== undefined && !line ? { x: seat.x, y: seat.y } 
 const room = heightMm === null ? volumeRoomAt(where, middle) : null;
 if (heightMm === null && !room) return { markId: mark.id, skip: VOLUME_MARK_NO_PLACE };
 const onFloor = axisOnFloor(heightMm);
+const slopes = heightMm === null && room && room.slopes ? room.slopes : null;
+const ceilingAt = (point) => (slopes ? slopesHeightAt(slopes, point, room.heightMm) : room.heightMm);
+if (slopes) {
+const gapMm = depthMm + VOLUME_MARK_LIFT_MM;
+if (line) {
+const pieces = volumeSlopePath(path);
+const prisms = [];
+for (let index = 0; index + 1 < pieces.length; index += 1) {
+const a = pieces[index];
+const b = pieces[index + 1];
+const length = Math.hypot(b.x - a.x, b.y - a.y);
+if (!(length > 0)) continue;
+const here = ceilingAt(a);
+const there = ceilingAt(b);
+const low = Math.min(here, there) - gapMm;
+prisms.push({
+corners: volumeBoxCorners({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, { x: (b.x - a.x) / length, y: (b.y - a.y) / length }, length, lengthMm),
+bottomMm: low - Math.abs(here - there),
+topMm: low + depthMm,
+});
+}
+if (prisms.length === 0) return { markId: mark.id, skip: VOLUME_MARK_NO_POINT };
+const flatBottom = room.heightMm - gapMm;
+const spots = repeating(path, lengthMm, flatBottom, flatBottom + depthMm);
+if (spots) {
+for (const frame of spots.frames) {
+const shift = ceilingAt(frame.at) - room.heightMm;
+if (repeat.toFloor) frame.heightMm = Math.max(VOLUME_MARK_LIFT_MM, frame.heightMm + shift);
+else frame.bottomMm += shift;
+}
+}
+const centre = ceilingAt(middle) - gapMm + depthMm / 2;
+return {
+...common,
+mode: VOLUME_MARK_CEILING,
+roomId: room ? room.roomId : null,
+heightMm: centre,
+prisms,
+repeat: spots,
+anchor: { x: middle.x, y: middle.y, z: centre },
+frame: null,
+face: null,
+};
+}
+}
+const lowest = slopes
+? Math.min(ceilingAt(middle), ...volumeBoxCorners(middle, { x: 1, y: 0 }, lengthMm, widthMm).map(ceilingAt))
+: null;
 const bottomMm =
 heightMm === null
-? room.heightMm - depthMm - VOLUME_MARK_LIFT_MM
+? (lowest === null ? room.heightMm : lowest) - depthMm - VOLUME_MARK_LIFT_MM
 : onFloor
 ? 0
 : heightMm - depthMm / 2;
@@ -41605,6 +42618,8 @@ hasCeiling: outlineHasCeiling(project, outline),
 floorRgb: volumePaintRgb(roomPaintOf(room, "floor")),
 ceilingRgb: volumePaintRgb(roomPaintOf(room, "ceiling")),
 });
+const slopes = outlineSlopes(outline);
+if (slopes.length > 0) rooms[rooms.length - 1].slopes = slopes;
 }
 return rooms;
 }
@@ -41923,11 +42938,22 @@ return schemeAnchorOriginMm(project, schemeId);
 }
 function volumeWallHeights(project, schemeId, fallbackMm) {
 const heights = new Map();
+const sloped = schemeHasSlopes(project, schemeId);
 for (const wall of wallsOnScheme(project, schemeId)) {
 const own = wallOwnHeightMm(wall);
-heights.set(wall.id, own !== null ? own : wallHeightMm(project, wall.id) || fallbackMm);
+const profile = own === null && sloped ? wallTopProfile(project, wall.id) : null;
+heights.set(wall.id, profile ? slopeProfileTop(profile) : own !== null ? own : wallHeightMm(project, wall.id) || fallbackMm);
 }
 return heights;
+}
+function volumeWallProfiles(project, schemeId) {
+const profiles = new Map();
+if (!schemeHasSlopes(project, schemeId)) return profiles;
+for (const wall of wallsOnScheme(project, schemeId)) {
+const profile = wallTopProfile(project, wall.id);
+if (profile) profiles.set(wall.id, profile);
+}
+return profiles;
 }
 function volumeFloorTopMm(project, schemeId) {
 return volumeHeightMm(project, schemeId, null).mm;
@@ -42838,6 +43864,15 @@ face.sides = sides;
 }
 }
 }
+const VOLUME_SKYLIGHT_FRAME_MM = 60;
+function volumeSkylightInner(object) {
+const cut = VOLUME_SKYLIGHT_FRAME_MM * 2;
+return {
+...object,
+widthMm: Math.max(1, Number(object.widthMm) - cut),
+depthMm: Math.max(1, Number(object.depthMm) - cut),
+};
+}
 function volumeScene(project, schemeId, options = {}) {
 return volumeRoundWith(options.roundSides, () => volumeSceneBuild(project, schemeId, options));
 }
@@ -42887,6 +43922,7 @@ const bounds = drawingBoundsMm(project, schemeId);
 const lift = bounds && options.upper !== true && options.order !== false ? volumeHouseLift(project, schemeId, schemeHeight.mm) : null;
 const lifted = Boolean(lift && lift.raiseMm > 0);
 const wallHeights = volumeWallHeights(project, schemeId, schemeHeight.mm);
+const wallProfiles = volumeWallProfiles(project, schemeId);
 const tallest = volumeWallsTopMm(project, schemeId, wallHeights);
 let landMm = null;
 if (bounds && options.upper !== true && !(lifted && rooms.length > 0)) {
@@ -43040,6 +44076,56 @@ volumeSlabFaces(room.pointsMm, 0, faces);
 }
 if (volumeCeilingUnderVoid(room, options.voids, options.capMm)) continue;
 if (room.hasCeiling === false) continue;
+if (room.slopes) {
+let pieces = slopeCeilingPieces(room.pointsMm, room.slopes, room.heightMm);
+for (const object of objects) {
+if (!schemeObjectIsSkylight(object) || !volumePointInside(object.atMm, room.pointsMm)) continue;
+const slopeAt = slopeIndexAt(room.slopes, object.atMm);
+if (slopeAt < 0) continue;
+const mine = pieces.filter((piece) => piece.slope === slopeAt);
+const hole = slopePiecesCut(mine, schemeObjectCorners(object));
+pieces = [...pieces.filter((piece) => piece.slope !== slopeAt), ...hole.pieces];
+if (options.roofOff === true) continue;
+const glass = slopePiecesCut(hole.cut, schemeObjectCorners(volumeSkylightInner(object)));
+const from = faces.length;
+for (const [list, rgb, clear] of [
+[glass.pieces, VOLUME_FRAME_RGB, false],
+[glass.cut, VOLUME_GLASS_RGB, "glass"],
+]) {
+for (const piece of list) {
+const points = piece.points.map((point) => volumeAt(point, point.z));
+const normal = volumeFaceNormal(points);
+const down = normal.z > 0;
+faces.push(
+volumeFace(down ? [...points].reverse() : points, rgb, {
+normal: down ? { x: -normal.x, y: -normal.y, z: -normal.z } : normal,
+both: true,
+clear,
+room: volumeRoomKey(room),
+}),
+);
+}
+}
+volumeTagThing(faces, from, object.id);
+}
+for (const piece of pieces) {
+const points = piece.points.map((point) => volumeAt(point, point.z));
+const normal = volumeFaceNormal(points);
+const down = normal.z > 0;
+faces.push(
+volumePainted(
+volumeFace(down ? [...points].reverse() : points, VOLUME_CEILING_RGB, {
+normal: down ? { x: -normal.x, y: -normal.y, z: -normal.z } : normal,
+both: options.roofOff !== true,
+room: volumeRoomKey(room),
+}),
+room.ceilingRgb,
+"ceiling",
+),
+);
+}
+continue;
+}
 faces.push(
 volumePainted(
 volumeFace(
@@ -43058,7 +44144,11 @@ notes.push(outlinesInOrder(project, schemeId).length > 0 ? "noBridge" : "noRooms
 const solids = [];
 const doors = [];
 const windows = [];
-const miters = volumeWallMiters(walls, (wall) => wallHeights.get(wall.id) || 0);
+const miters = volumeWallMiters(walls, (wall, end) => {
+const profile = wallProfiles.get(wall.id);
+if (!profile) return wallHeights.get(wall.id) || 0;
+return slopeProfileAt(profile, end === "b" ? profile[profile.length - 1].toMm : 0);
+});
 for (const wall of walls) {
 const covers = options.covers instanceof Map ? options.covers.get(wall.id) : null;
 const openings = openingsInWall(project, wall.id);
@@ -43070,7 +44160,8 @@ const own = wallHeights.get(wall.id);
 const cap = covers && covers.length > 0 ? Math.min(own, Number(options.capMm) || own) : own;
 const height = cap;
 if (height > 0) {
-volumeWallFaces(wall, openings, height, faces, options.openDoorIds || null, miters.get(wall.id) || null, rooms);
+const profile = cap === own ? wallProfiles.get(wall.id) || null : null;
+volumeWallFaces(wall, openings, height, faces, options.openDoorIds || null, miters.get(wall.id) || null, rooms, profile);
 }
 const vectors = wallVectors(wall);
 if (!vectors) continue;
@@ -43187,6 +44278,7 @@ const occluders = [];
 const modelled = new Set();
 const cupboards = [];
 for (const object of objects) {
+if (schemeObjectIsSkylight(object)) continue;
 const objectFrom = faces.length;
 if (volumeObjectModel(project, object)) modelled.add(object.id);
 const opens = volumeObjectOpens(project, object);
@@ -44554,6 +45646,9 @@ const shift = (shiftOf && shiftOf(face)) || null;
 const sx = nx * lift + (shift ? shift.x : 0);
 const sy = ny * lift + (shift ? shift.y : 0);
 const sz = nz * lift + (shift ? shift.z : 0);
+const back = face.backRgb
+? [volumeMeshLinear(face.backRgb[0] / 255), volumeMeshLinear(face.backRgb[1] / 255), volumeMeshLinear(face.backRgb[2] / 255)]
+: c;
 const emit = (p, sign) => {
 into.pos.push((p.x + sx) * S, (p.z + sz) * S, (p.y + sy) * S);
 let vx = nx;
@@ -44571,8 +45666,9 @@ vz = sum[2] / len;
 }
 }
 into.nor.push(vx * sign, vz * sign, vy * sign);
-if (into === clear) into.col.push(c[0], c[1], c[2], alpha);
-else into.col.push(c[0], c[1], c[2]);
+const tone = sign < 0 ? back : c;
+if (into === clear) into.col.push(tone[0], tone[1], tone[2], alpha);
+else into.col.push(tone[0], tone[1], tone[2]);
 };
 for (let i = 0; i < tri.length; i += 3) {
 const a = P[tri[i]];

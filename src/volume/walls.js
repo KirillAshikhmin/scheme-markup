@@ -40,7 +40,7 @@ import {
   VOLUME_WALL_RGB,
   volumeClearAlpha,
 } from "./measures.js";
-import { volumeAt, volumeFace, volumeIsWall, volumePaintRgb, volumePainted } from "./faces.js";
+import { volumeAt, volumeFace, volumeFaceNormal, volumeIsWall, volumePaintRgb, volumePainted } from "./faces.js";
 import {
   VOLUME_SUN_PROBE_MM,
   volumeBoxCorners,
@@ -49,6 +49,7 @@ import {
   volumeRoomKeyAt,
 } from "./shapes.js";
 import { volumeMiddleOf } from "./order.js";
+import { slopeProfileAt, slopeProfileClip, slopeSpanClip } from "../slopes.js";
 
 // ——— стена ———————————————————————————————————————————————————————————————
 
@@ -440,7 +441,9 @@ export function volumeWallMiters(walls, heightOf = () => 0) {
     const here = list[one.index];
     const there = list[two.index];
     if (!(here.half > 0) || !(there.half > 0)) continue;
-    if (Math.abs(Number(heightOf(here.wall)) - Number(heightOf(there.wall))) > 1) continue;
+    // Вторым доводом — конец стены: у стены под скатом высота на концах разная
+    // (ADR 043), и ус сводится по высоте в самом углу.
+    if (Math.abs(Number(heightOf(here.wall, one.end)) - Number(heightOf(there.wall, two.end))) > 1) continue;
     const hereFace = faceOf(here, one.end);
     const thereFace = faceOf(there, two.end);
     const cut = (item, face, other, end) => {
@@ -471,9 +474,11 @@ export function volumeWallMiters(walls, heightOf = () => 0) {
  * все двери будут закрыты». Раскрывается оно поимённо — `openDoorIds` — и живёт
  * это только в сеансе окна: в объект состояние двери не пишется (G68).
  */
-export function volumeWallFaces(wall, openings, heightMm, out = [], openDoorIds = null, miter = null, rooms = null) {
+export function volumeWallFaces(wall, openings, heightMm, out = [], openDoorIds = null, miter = null, rooms = null, profile = null) {
   const vectors = wallVectors(wall);
   if (!vectors || !(heightMm > 0)) return out;
+  // Стена под скатом (ADR 043) — своей сборкой: верх идёт по профилю.
+  if (profile && profile.length > 0) return volumeWallSloped(wall, openings, heightMm, out, openDoorIds, miter, rooms, profile);
   const half = Number(wall.thicknessMm) / 2;
   const { u, n, len } = vectors;
   const own = out.length;
@@ -604,6 +609,224 @@ export function volumeWallFaces(wall, openings, heightMm, out = [], openDoorIds 
     }
   }
   return out;
+}
+
+// ——— стена под скатом (ADR 043, правка 2026-11-21) ————————————————————————
+//
+// Верх такой стены — ломаная: `profile` — куски `{fromMm, toMm, fromZ, toZ}`
+// вдоль стены (`model.wallTopProfile`). Сборка та же, что у ровной стены —
+// стороны кусками вокруг проёмов, торцы, верх, проёмы, — только каждый кусок
+// стороны срезан профилем, верх лежит по нему полосами, а грани проёма,
+// поднявшиеся выше среза, обрезаны по нему же: окно во фронтоне остаётся
+// окном со стеклом-трапецией, а не пропадает.
+//
+// Ровная стена сюда не заходит вовсе (`volumeWallFaces` уходит сюда только с
+// профилем), и её грани прежние до байта.
+
+function volumeWallSloped(wall, openings, heightMm, out, openDoorIds, miter, rooms, profile) {
+  const vectors = wallVectors(wall);
+  const half = Number(wall.thicknessMm) / 2;
+  const { u, n, len } = vectors;
+  const own = out.length;
+  const at = (along, across) => ({
+    x: Number(wall.aMm.x) + u.x * along + n.x * across,
+    y: Number(wall.aMm.y) + u.y * along + n.y * across,
+  });
+  const startOf = (side) => (miter && miter.start ? (side > 0 ? miter.start.left : miter.start.right) : 0);
+  const endOf = (side) => (miter && miter.end ? (side > 0 ? miter.end.left : miter.end.right) : len);
+  // Место вдоль стороны с усом: крайние точки дотягиваются до соседки.
+  const reach = (along, side) => (along <= 0.001 ? startOf(side) : along >= len - 0.001 ? endOf(side) : along);
+  // Грань нормалью в нужную сторону: обход подбирается по счёту, а не знанием.
+  const facing = (points, normal, options) => {
+    const got = volumeFaceNormal(points);
+    const turned = got.x * normal.x + got.y * normal.y + got.z * normal.z < 0;
+    return volumeFace(turned ? [...points].reverse() : points, VOLUME_WALL_RGB, { ...options, normal });
+  };
+  const known = rooms && rooms.length > 0;
+  for (const side of [1, -1]) {
+    const normal = { x: n.x * side, y: n.y * side, z: 0 };
+    const paint = volumeWallPaintRgb(wall, side);
+    const stops = known ? volumeSideStops(wall, side, rooms) : [];
+    const roomAt = (along) => (known ? volumeRoomKeyAt(rooms, at(along, (half + VOLUME_SUN_PROBE_MM) * side)) : null);
+    for (const tile of volumeWallTiles(len, heightMm, openings)) {
+      const bottomFrom = tile.bottomFromMm == null ? tile.bottomMm : tile.bottomFromMm;
+      const bottomTo = tile.bottomToMm == null ? tile.bottomMm : tile.bottomToMm;
+      const whole = [
+        { alongMm: tile.fromMm, zMm: bottomFrom },
+        { alongMm: tile.toMm, zMm: bottomTo },
+        { alongMm: tile.toMm, zMm: tile.topMm },
+        { alongMm: tile.fromMm, zMm: tile.topMm },
+      ];
+      const arched = tile.bottomFromMm != null || tile.bottomToMm != null;
+      const parts = arched
+        ? [{ fromMm: tile.fromMm, toMm: tile.toMm, room: roomAt((tile.fromMm + tile.toMm) / 2) }]
+        : volumeSideParts(tile.fromMm, tile.toMm, stops, roomAt);
+      for (const part of parts) {
+        const span = parts.length === 1 ? whole : slopeSpanClip(whole, part.fromMm, part.toMm);
+        if (!span) continue;
+        for (const piece of slopeProfileClip(profile, span)) {
+          const points = piece.map((point) => volumeAt(at(reach(point.alongMm, side), half * side), point.zMm));
+          out.push(volumePainted(facing(points, normal, { room: part.room }), paint, "wall"));
+        }
+      }
+    }
+  }
+  for (const end of [0, 1]) {
+    if (end === 0 ? miter && miter.start : miter && miter.end) continue;
+    const along = end === 0 ? 0 : len;
+    const top = slopeProfileAt(profile, along);
+    if (!(top > 0)) continue;
+    const normal = { x: u.x * (end === 0 ? -1 : 1), y: u.y * (end === 0 ? -1 : 1), z: 0 };
+    const left = at(along, half);
+    const right = at(along, -half);
+    const mid = at(along, 0);
+    const inward = Math.min(len / 2, VOLUME_SUN_PROBE_MM) * (end === 0 ? 1 : -1);
+    const pieces = known
+      ? [
+          [left, mid, 1],
+          [mid, right, -1],
+        ]
+      : [[left, right, 0]];
+    for (const [first, second, sign] of pieces) {
+      const room = known ? volumeRoomKeyAt(rooms, at(along + inward, (half + VOLUME_SUN_PROBE_MM) * sign)) : null;
+      out.push(
+        volumePainted(
+          facing([volumeAt(first, 0), volumeAt(second, 0), volumeAt(second, top), volumeAt(first, top)], normal, { room }),
+          volumeWallPaintRgb(wall, sign),
+          "wall",
+        ),
+      );
+    }
+  }
+  // Верх — полосами по профилю; где профиль рвётся ступенью — подступёнок.
+  let before = null;
+  for (const part of profile) {
+    const fromL = reach(part.fromMm, 1);
+    const toL = reach(part.toMm, 1);
+    const fromR = reach(part.fromMm, -1);
+    const toR = reach(part.toMm, -1);
+    const lid = facing(
+      [
+        volumeAt(at(fromL, half), part.fromZ),
+        volumeAt(at(toL, half), part.toZ),
+        volumeAt(at(toR, -half), part.toZ),
+        volumeAt(at(fromR, -half), part.fromZ),
+      ],
+      { x: 0, y: 0, z: 1 },
+      {},
+    );
+    // Нормаль верха — настоящая, наклонная: по ней считается светлота.
+    const real = volumeFaceNormal(lid.p);
+    lid.n = real.z < 0 ? { x: -real.x, y: -real.y, z: -real.z } : real;
+    out.push(lid);
+    if (before && Math.abs(before.toZ - part.fromZ) > 1) {
+      const low = Math.min(before.toZ, part.fromZ);
+      const high = Math.max(before.toZ, part.fromZ);
+      const sign = before.toZ > part.fromZ ? 1 : -1;
+      out.push(
+        facing(
+          [
+            volumeAt(at(part.fromMm, half), low),
+            volumeAt(at(part.fromMm, -half), low),
+            volumeAt(at(part.fromMm, -half), high),
+            volumeAt(at(part.fromMm, half), high),
+          ],
+          { x: u.x * sign, y: u.y * sign, z: 0 },
+          {},
+        ),
+      );
+    }
+    before = part;
+  }
+  volumeGlassed(wall, out, own);
+  for (const opening of openings || []) {
+    const from = out.length;
+    volumeOpeningFaces(wall, opening, heightMm, out, openDoorIds, rooms);
+    if (rooms && rooms.length > 0) volumeTagSides(wall, opening, out, from, rooms);
+    if (wallGlassOf(wall)) {
+      for (let index = from; index < out.length; index += 1) if (volumeIsWall(out[index])) volumeGlassFace(out[index]);
+    }
+    volumeFacesUnder(wall, vectors, profile, out, from);
+  }
+  return out;
+}
+
+// Часть выпуклого многоугольника в пространстве, где `value(point) >= 0`.
+function volumeClipSpace(points, value) {
+  const result = [];
+  for (let index = 0; index < points.length; index += 1) {
+    const a = points[index];
+    const b = points[(index + 1) % points.length];
+    const va = value(a);
+    const vb = value(b);
+    if (va >= 0) result.push(a);
+    if ((va > 0 && vb < 0) || (va < 0 && vb > 0)) {
+      const t = va / (va - vb);
+      result.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, z: a.z + (b.z - a.z) * t });
+    }
+  }
+  return result.length >= 3 ? result : null;
+}
+
+/**
+ * **Грани проёма под срезом стены** (ADR 043): всё, что поднялось выше профиля,
+ * обрезается по нему — стекло, рама, откосы, полотно. Грань целиком под срезом
+ * остаётся **той же** по ссылке; обрезанная заменяется кусками с теми же
+ * полями. Линии (контуры) не режутся: выше среза они пропадают целиком.
+ */
+function volumeFacesUnder(wall, vectors, profile, faces, from) {
+  const { u } = vectors;
+  const alongOf = (point) => (point.x - Number(wall.aMm.x)) * u.x + (point.y - Number(wall.aMm.y)) * u.y;
+  const eps = 0.5;
+  const kept = [];
+  let changed = false;
+  for (let index = from; index < faces.length; index += 1) {
+    const face = faces[index];
+    const points = face.p || [];
+    if (points.every((point) => point.z <= slopeProfileAt(profile, alongOf(point)) + eps)) {
+      kept.push(face);
+      continue;
+    }
+    changed = true;
+    if (face.line) {
+      if (points.some((point) => point.z <= slopeProfileAt(profile, alongOf(point)) + eps)) kept.push(face);
+      continue;
+    }
+    // Грань поперёк стены (откос, торец полотна) стоит в одном месте вдоль неё
+    // и режется одной высотой — иначе на стыке кусков профиля она задвоилась бы.
+    const places = points.map(alongOf);
+    if (Math.max(...places) - Math.min(...places) < eps) {
+      const top = slopeProfileAt(profile, places[0]);
+      const rest = volumeClipSpace(points, (point) => top - point.z);
+      if (rest && Math.max(...rest.map((point) => point.z)) - Math.min(...rest.map((point) => point.z)) >= eps) {
+        kept.push({ ...face, p: rest });
+      }
+      continue;
+    }
+    for (const part of profile) {
+      const span = part.toMm - part.fromMm;
+      if (!(span > 0)) continue;
+      let rest = volumeClipSpace(points, (point) => alongOf(point) - part.fromMm);
+      rest = rest && volumeClipSpace(rest, (point) => part.toMm - alongOf(point));
+      rest =
+        rest &&
+        volumeClipSpace(rest, (point) => part.fromZ + ((part.toZ - part.fromZ) * (alongOf(point) - part.fromMm)) / span - point.z);
+      if (!rest) continue;
+      // Вырожденный обрезок (полоса в долю миллиметра) в сцену не идёт.
+      const zs = rest.map((point) => point.z);
+      const alongs = rest.map(alongOf);
+      const tall = Math.max(...zs) - Math.min(...zs);
+      const wide = Math.max(...alongs) - Math.min(...alongs);
+      const level = Math.abs(face.n.z) > 0.9;
+      const across = Math.abs(face.n.x * u.x + face.n.y * u.y) > 0.9;
+      if (!level && tall < eps) continue;
+      if (!across && wide < eps) continue;
+      kept.push({ ...face, p: rest });
+    }
+  }
+  if (!changed) return;
+  faces.length = from;
+  for (const face of kept) faces.push(face);
 }
 
 /**

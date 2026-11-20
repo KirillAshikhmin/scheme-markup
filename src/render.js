@@ -7419,18 +7419,66 @@ export function drawElevation(ctx, elevation, box, options = {}) {
     }
   }
 
+  // **Стена под скатом** (ADR 043): верх — ломаная по потолку этой стороны
+  // (`elevation.topProfile`, считает модель). Где профиль молчит (за краем
+  // помещения), стена идёт во всю высоту листа. Без профиля ни одного лишнего
+  // вызова холста нет — лист ровной стены прежний.
+  const slopeTop = [];
+  if (Array.isArray(elevation.topProfile) && elevation.topProfile.length > 0) {
+    let cursor = 0;
+    const full = elevation.heightShownMm;
+    for (const part of elevation.topProfile) {
+      if (part.fromMm - cursor > 0) slopeTop.push({ fromMm: cursor, toMm: part.fromMm, fromZ: full, toZ: full });
+      slopeTop.push(part);
+      cursor = part.toMm;
+    }
+    if (elevation.lengthMm - cursor > 0) slopeTop.push({ fromMm: cursor, toMm: elevation.lengthMm, fromZ: full, toZ: full });
+  }
+  const sloped = slopeTop.length > 0;
+  const slopePath = () => {
+    ctx.beginPath();
+    ctx.moveTo(left, floor);
+    for (const part of slopeTop) {
+      ctx.lineTo(atX(part.fromMm), atY(part.fromZ));
+      ctx.lineTo(atX(part.toMm), atY(part.toZ));
+    }
+    ctx.lineTo(left + wallWidth, floor);
+    ctx.closePath();
+  };
+  // Всё, что выше среза, обрезается по нему: проём во фронтоне остаётся проёмом
+  // с наклонным верхом, торец соседней стены кончается у потолка.
+  const underSlope = (draw) => {
+    if (!sloped) return draw();
+    ctx.save();
+    slopePath();
+    ctx.clip();
+    draw();
+    ctx.restore();
+    return undefined;
+  };
+
   // Поле стены.
   ctx.fillStyle = DRAWING_PAPER;
-  ctx.fillRect(left, floor - wallHeight, wallWidth, wallHeight);
-  ctx.lineWidth = 1.5 * unit;
-  ctx.strokeStyle = DRAWING_WALL;
-  ctx.strokeRect(left, floor - wallHeight, wallWidth, wallHeight);
+  if (sloped) {
+    slopePath();
+    ctx.fill();
+    ctx.lineWidth = 1.5 * unit;
+    ctx.strokeStyle = DRAWING_WALL;
+    slopePath();
+    ctx.stroke();
+  } else {
+    ctx.fillRect(left, floor - wallHeight, wallWidth, wallHeight);
+    ctx.lineWidth = 1.5 * unit;
+    ctx.strokeStyle = DRAWING_WALL;
+    ctx.strokeRect(left, floor - wallHeight, wallWidth, wallHeight);
+  }
 
   // Упирающиеся стены — торцом от пола до потолка (G201). Идут **первыми**, под
   // всем остальным: торец говорит «здесь угол», а не заменяет собой метки, и
   // загородить розетку возле угла он не имеет права. Заливка слабая нарочно —
   // в чёрно-белом листе `mono` снимает её как подкраску и оставляет контур
   // тушью, то есть на бумаге торец читается рамкой, а не чёрным пятном.
+  underSlope(() => {
   for (const cross of elevation.crossings || []) {
     const x = atX(cross.fromMm);
     const width = Math.max(thin, (cross.toMm - cross.fromMm) * scale);
@@ -7448,6 +7496,7 @@ export function drawElevation(ctx, elevation, box, options = {}) {
       elevationText(ctx, cross.name, x + width / 2, floor - wallHeight + 13 * unit, "center", unit);
     }
   }
+  });
 
   // **Имя прибора на листе печатается один раз** (таск 276). До этой правки
   // связанный прибор назывался дважды: вещь подписывала себя сама, а подпись
@@ -7593,12 +7642,35 @@ export function drawElevation(ctx, elevation, box, options = {}) {
     const width = Math.max(thin, (opening.toMm - opening.fromMm) * scale);
     const top = atY(opening.topMm);
     const height = Math.max(thin, (opening.topMm - opening.floorMm) * scale);
-    drawOpeningFace(ctx, { x, y: top, width, height }, opening, { unit, scale });
+    underSlope(() => drawOpeningFace(ctx, { x, y: top, width, height }, opening, { unit, scale }));
     if (width < ELEVATION_LABEL_MIN_PX * unit) continue;
     // Низ и верх проёма — числами у его косяка: именно от них отмеряют.
     elevationText(ctx, String(opening.topMm), x + width / 2, top - 8 * unit, "center", unit);
     if (opening.floorMm > 0) {
       elevationText(ctx, String(opening.floorMm), x + width / 2, top + height + 9 * unit, "center", unit);
+    }
+  }
+
+  // Кромка ската — поверх проёмов, которые она обрезала, и высоты на её
+  // изломах числами: по ним и видно, где потолок низкий.
+  if (sloped) {
+    ctx.lineWidth = 1.5 * unit;
+    ctx.strokeStyle = DRAWING_WALL;
+    slopePath();
+    ctx.stroke();
+    const said = new Set();
+    for (const part of slopeTop) {
+      for (const [mm, z] of [
+        [part.fromMm, part.fromZ],
+        [part.toMm, part.toZ],
+      ]) {
+        const key = Math.round(mm) + ":" + Math.round(z);
+        // Самая высокая точка уже названа размером слева.
+        if (said.has(key) || Math.abs(z - elevation.heightShownMm) < 5) continue;
+        said.add(key);
+        const edge = mm <= 0 ? "left" : mm >= elevation.lengthMm ? "right" : "center";
+        elevationText(ctx, String(Math.round(z)), atX(mm) + (edge === "left" ? 4 : edge === "right" ? -4 : 0) * unit, atY(z) - 8 * unit, edge, unit);
+      }
     }
   }
 

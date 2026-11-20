@@ -46,6 +46,7 @@ import {
   volumeRoomAt,
 } from "./shapes.js";
 import { volumeMiddleOf } from "./order.js";
+import { slopesHeightAt } from "../slopes.js";
 import { volumeArtFaces } from "./art.js";
 import {
   VOLUME_CURTAIN_BUNCH,
@@ -217,6 +218,24 @@ export function volumeMarkView(project, mark) {
 // Звенья ленты: по призме на отрезок пути, поперечник у всех один. То же, что у
 // ломаного объекта чертежа (`volumeObjectPrisms`), и по той же причине —
 // соседние звенья заходят друг в друга на изломе, как две стены в углу.
+/** Не длиннее этого кусок ломаной под скатом: ступень ленты по высоте мала, мм. */
+const VOLUME_SLOPE_PIECE_MM = 80;
+
+// Путь ломаной, раздробленный на короткие куски (ADR 043).
+function volumeSlopePath(path) {
+  const out = [];
+  for (let index = 0; index + 1 < path.length; index += 1) {
+    const a = path[index];
+    const b = path[index + 1];
+    const count = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / VOLUME_SLOPE_PIECE_MM));
+    for (let step = 0; step < count; step += 1) {
+      out.push({ x: a.x + ((b.x - a.x) * step) / count, y: a.y + ((b.y - a.y) * step) / count });
+    }
+  }
+  if (path.length > 0) out.push(path[path.length - 1]);
+  return out;
+}
+
 function volumePathPrisms(path, acrossMm, bottomMm, topMm) {
   const prisms = [];
   for (let index = 0; index + 1 < path.length; index += 1) {
@@ -1376,6 +1395,64 @@ export function volumeMarkPlacement(project, mark, where = [], seat = null, poin
   // (`axisOnFloor`, D34) — низом: робот-пылесос с выступом 90 занимает от
   // нуля до девяноста, а не от минус сорока пяти до сорока пяти.
   const onFloor = axisOnFloor(heightMm);
+  // **Под скатом потолочная метка садится на его плоскость** (ADR 043):
+  // высоту даёт та же дверь, которой сцена кладёт потолок (`slopesHeightAt`), а
+  // не одно число комнаты. Тело остаётся вертикальным и берёт самую низкую
+  // точку потолка над своим габаритом — в скат оно не врезается. У помещения
+  // без скатов ветка не работает вовсе, и кадр прежний.
+  const slopes = heightMm === null && room && room.slopes ? room.slopes : null;
+  const ceilingAt = (point) => (slopes ? slopesHeightAt(slopes, point, room.heightMm) : room.heightMm);
+  if (slopes) {
+    const gapMm = depthMm + VOLUME_MARK_LIFT_MM;
+    if (line) {
+      // Ломаная под скатом — ступенями: звено режется на куски, и каждый висит
+      // под своим местом потолка.
+      const pieces = volumeSlopePath(path);
+      const prisms = [];
+      for (let index = 0; index + 1 < pieces.length; index += 1) {
+        const a = pieces[index];
+        const b = pieces[index + 1];
+        const length = Math.hypot(b.x - a.x, b.y - a.y);
+        if (!(length > 0)) continue;
+        const here = ceilingAt(a);
+        const there = ceilingAt(b);
+        const low = Math.min(here, there) - gapMm;
+        // Кусок толще на свой подъём: соседние ступени заходят друг в друга, и
+        // лента идёт вверх по скату сплошной полосой, а не штрихами.
+        prisms.push({
+          corners: volumeBoxCorners({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, { x: (b.x - a.x) / length, y: (b.y - a.y) / length }, length, lengthMm),
+          bottomMm: low - Math.abs(here - there),
+          topMm: low + depthMm,
+        });
+      }
+      if (prisms.length === 0) return { markId: mark.id, skip: VOLUME_MARK_NO_POINT };
+      const flatBottom = room.heightMm - gapMm;
+      // Повторяющиеся элементы (светильники трека) — каждый под своим местом.
+      const spots = repeating(path, lengthMm, flatBottom, flatBottom + depthMm);
+      if (spots) {
+        for (const frame of spots.frames) {
+          const shift = ceilingAt(frame.at) - room.heightMm;
+          if (repeat.toFloor) frame.heightMm = Math.max(VOLUME_MARK_LIFT_MM, frame.heightMm + shift);
+          else frame.bottomMm += shift;
+        }
+      }
+      const centre = ceilingAt(middle) - gapMm + depthMm / 2;
+      return {
+        ...common,
+        mode: VOLUME_MARK_CEILING,
+        roomId: room ? room.roomId : null,
+        heightMm: centre,
+        prisms,
+        repeat: spots,
+        anchor: { x: middle.x, y: middle.y, z: centre },
+        frame: null,
+        face: null,
+      };
+    }
+  }
+  const lowest = slopes
+    ? Math.min(ceilingAt(middle), ...volumeBoxCorners(middle, { x: 1, y: 0 }, lengthMm, widthMm).map(ceilingAt))
+    : null;
   // Потолочная вещь висит **на два миллиметра ниже потолка** — ту же щель
   // (`VOLUME_MARK_LIFT_MM`), которой вещь на стене отходит от стены. До таска
   // 211 её верх лежал ровно в плоскости потолка, и это сходило с рук: потолок
@@ -1384,7 +1461,7 @@ export function volumeMarkPlacement(project, mark, where = [], seat = null, poin
   // лента проступали сквозь крышу на виде сверху.
   const bottomMm =
     heightMm === null
-      ? room.heightMm - depthMm - VOLUME_MARK_LIFT_MM
+      ? (lowest === null ? room.heightMm : lowest) - depthMm - VOLUME_MARK_LIFT_MM
       : onFloor
         ? 0
         : heightMm - depthMm / 2;

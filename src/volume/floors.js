@@ -15,6 +15,7 @@ import {
   openingWalkThrough,
   openingsInWall,
   outlineHasCeiling,
+  outlineSlopes,
   outlinesInOrder,
   planFractionToMm,
   planMmToFraction,
@@ -24,6 +25,7 @@ import {
   roomPaintOf,
   schemeAnchorOriginMm,
   schemeFloorOf,
+  schemeHasSlopes,
   schemeObjectColors,
   schemeObjectCorners,
   schemeObjectKeyOf,
@@ -33,9 +35,11 @@ import {
   wallHeightMm,
   wallHeightShownMm,
   wallOwnHeightMm,
+  wallTopProfile,
   wallVectors,
   wallsOnScheme,
 } from "../model.js";
+import { slopeProfileTop } from "../slopes.js";
 import { objectModelByKey } from "../objectModels/registry.js";
 import { objectStairKey, objectStairModel } from "../objectModels/stairs.js";
 import {
@@ -137,6 +141,10 @@ export function volumeRooms(project, schemeId) {
       floorRgb: volumePaintRgb(roomPaintOf(room, "floor")),
       ceilingRgb: volumePaintRgb(roomPaintOf(room, "ceiling")),
     });
+    // Скаты потолка (ADR 043): ключ появляется только у помещения со скатами —
+    // запись помещения без них прежняя поле в поле.
+    const slopes = outlineSlopes(outline);
+    if (slopes.length > 0) rooms[rooms.length - 1].slopes = slopes;
   }
   return rooms;
 }
@@ -826,15 +834,34 @@ export function volumeSchemeOriginMm(project, schemeId) {
  */
 export function volumeWallHeights(project, schemeId, fallbackMm) {
   const heights = new Map();
+  const sloped = schemeHasSlopes(project, schemeId);
   for (const wall of wallsOnScheme(project, schemeId)) {
     // Своя высота стены (правка после сборки сценариев) — главнее, и ноль у
     // неё значение: стены нет. Правило счёта одно и живёт в модели
     // (`wallHeightMm`); `fallbackMm` остался доводом ради прежних вызовов —
     // модель берёт ту же показанную высоту схемы сама.
     const own = wallOwnHeightMm(wall);
-    heights.set(wall.id, own !== null ? own : wallHeightMm(project, wall.id) || fallbackMm);
+    // Стена под скатом (ADR 043) — высотой по самой высокой точке профиля:
+    // по ней идут вынос земли, тень дома и накрытия стопки.
+    const profile = own === null && sloped ? wallTopProfile(project, wall.id) : null;
+    heights.set(wall.id, profile ? slopeProfileTop(profile) : own !== null ? own : wallHeightMm(project, wall.id) || fallbackMm);
   }
   return heights;
+}
+
+/**
+ * Профили верха стен под скатами (ADR 043): `Map` по идентификатору стены →
+ * куски `{fromMm, toMm, fromZ, toZ}`. Стены без ската в словаре нет — она
+ * ровная. Счёт — в модели (`wallTopProfile`), второго нет.
+ */
+export function volumeWallProfiles(project, schemeId) {
+  const profiles = new Map();
+  if (!schemeHasSlopes(project, schemeId)) return profiles;
+  for (const wall of wallsOnScheme(project, schemeId)) {
+    const profile = wallTopProfile(project, wall.id);
+    if (profile) profiles.set(wall.id, profile);
+  }
+  return profiles;
 }
 
 /**

@@ -5,7 +5,7 @@ import { strings, text } from "./strings.js";
 // Встроенный каталог вещей чертежа (таск 154): ключи, имена, габариты и место
 // установки. Данные сборки, а не справочник объекта, — поэтому модель их
 // читает, но никогда не правит.
-import { objectCatalogEntry, objectCatalogKeyByName, objectCatalogRetired } from "./objectCatalog.js";
+import { OBJECT_SKYLIGHT_KEY, objectCatalogEntry, objectCatalogKeyByName, objectCatalogRetired } from "./objectCatalog.js";
 import { openingCatalogEntry, openingCatalogKinds } from "./openingCatalog.js";
 // Реестр изображений (таск 135) — тоже данные сборки. Модель читает его, чтобы
 // знать, какое имя изображения существует и к чему ведёт форма знака: имя, в
@@ -17,6 +17,16 @@ import { objectViewByName, objectViewForShape } from "./objectViews/registry.js"
 // (таск 256). Своего списка здесь не заводится — отметка «Висячая» обязана
 // предлагаться ровно там, где её есть чем нарисовать.
 import { objectModelHangingKeys, objectModelSquareKeys } from "./objectModels/registry.js";
+// Скаты потолка (ADR 043): чистая геометрия плоскости и профиля.
+import {
+  slopeArea,
+  slopeIndexAt,
+  slopePlane,
+  slopeProfile,
+  slopeProfileMax,
+  slopeProfileTidy,
+  slopesHeightAt,
+} from "./slopes.js";
 // Словарь устройств имитации (таск 01 сценариев) — данные сборки, как
 // каталоги выше: объект хранит у типа и метки только ключи вида и сервисов,
 // а форматы и состав живут там.
@@ -8155,6 +8165,7 @@ export function addSchemeObject(
     heightAboveFloorMm: drawingOffsetMm(heightAboveFloorMm),
     ...schemeObjectMirrorField(shape, mirror),
   };
+  skylightSeat(project, object);
   return {
     project: withProject(project, {
       schemeObjects: [...schemeObjectsOf(project), object],
@@ -8202,8 +8213,25 @@ export function updateSchemeObject(project, objectId, patch = {}) {
     // без этой строки краска молча пропадала бы при первом же сдвиге ширины.
     ...schemeObjectColorsField(schemeObjectColors(current)),
   };
+  // Окно, которое двигают или которым стала другая вещь, обязано встать в
+  // скат; прочая правка окна, оставшегося без ската (скат сняли), проходит.
+  if (next.catalogKey !== current.catalogKey || JSON.stringify(next.atMm) !== JSON.stringify(current.atMm)) {
+    skylightSeat(project, next);
+  }
   const schemeObjects = schemeObjectsOf(project).map((object) => (object.id === objectId ? next : object));
   return { project: withProject(project, { schemeObjects }), schemeObject: next };
+}
+
+/** Мансардное ли это окно — вещь каталога, которая врезается в скат (ADR 043). */
+export function schemeObjectIsSkylight(object) {
+  return Boolean(object && object.catalogKey === OBJECT_SKYLIGHT_KEY && object.shape !== "polyline");
+}
+
+// Мансардное окно ставится только в скат: над его серединой должен быть
+// наклонный потолок. Иначе — отказ словами, а не окно, висящее в воздухе.
+function skylightSeat(project, object) {
+  if (!schemeObjectIsSkylight(object)) return;
+  if (!slopeAtPoint(project, object.schemeId, object.atMm)) throw modelError("skylightNoSlope");
 }
 
 // ——— цвета вещи чертежа (правка без автопилота, 2026-11-20) ————————————————
@@ -9250,6 +9278,308 @@ export function setRoomCeiling(project, roomId, on, schemeId = null) {
     return want === auto ? rest : { ...rest, hasCeiling: want };
   });
   return { project: withProject(project, { rooms }), room: rooms.find((item) => item.id === roomId), changed: true };
+}
+
+// ——— скаты: наклонный потолок мансарды (ADR 043, правка 2026-11-21) —————————
+//
+// Слова заказчика: «делать второй вариант однозначно» (свойством помещения, а
+// не вещью-клином); ввод — «участок и две высоты».
+//
+// **Где лежит.** У контура помещения — там, где помещение встречается со
+// схемой: `outline.slopes = [{pointsMm, edge, lowMm, highMm}]`. У самого
+// помещения (`room`) скату не место: помещение одно на все схемы, а участок
+// потолка начерчен на одной, и ссылку на схему пришлось бы называть в таблице
+// номеров (`ID_OWNERS`) вложенной ссылкой. Контур уже несёт и схему, и
+// помещение, уходит вместе с ними при удалении и сливается одной сущностью.
+//
+// **Ключ необязательный** (G68): нет его — потолок плоский, и объект прежней
+// сборки собирается грань в грань прежним и упаковывается байт в байт.
+// Последний снятый скат удаляет ключ.
+//
+// **Координаты — целые миллиметры чертежа** (ADR 008), как у стен: участок
+// обводят по углам стен, и калибровка плана его не двигает. Высоты — от пола.
+//
+// **Одна дверь высоты** — `ceilingHeightAt`: её спрашивают «Объём», развёртка
+// и посадка метки. Счёт плоскости — `slopes.js`, второго нет.
+
+/** Меньше этой площади участок ската — не участок, а промах руки, мм². */
+const SLOPE_PLOT_MIN_MM2 = 10000;
+
+function slopeValue(input) {
+  const source = input && typeof input === "object" ? input : {};
+  if (!Array.isArray(source.pointsMm) || source.pointsMm.length < 3) throw modelError("slopeShort");
+  const pointsMm = source.pointsMm.map(drawingPointMm);
+  const edge = Number(source.edge);
+  if (!Number.isInteger(edge) || edge < 0 || edge >= pointsMm.length) throw modelError("slopeEdgeUnknown");
+  const height = (value) => {
+    const mm = drawingOffsetMm(value);
+    if (mm > MARK_DIMENSION_MAX) {
+      throw modelError("drawingHeightTooBig", { max: MARK_DIMENSION_MAX, unit: strings.markSizes.unit });
+    }
+    return mm;
+  };
+  const slope = { pointsMm, edge, lowMm: height(source.lowMm), highMm: height(source.highMm) };
+  if (!(slopeArea(pointsMm) >= SLOPE_PLOT_MIN_MM2) || !slopePlane(slope)) throw modelError("slopeDegenerate");
+  return slope;
+}
+
+function slopeReadable(item) {
+  if (!item || typeof item !== "object" || !Array.isArray(item.pointsMm) || item.pointsMm.length < 3) return false;
+  if (!item.pointsMm.every((point) => point && Number.isFinite(Number(point.x)) && Number.isFinite(Number(point.y)))) return false;
+  return slopePlane(item) !== null;
+}
+
+/**
+ * Скаты контура помещения: список `{pointsMm, edge, lowMm, highMm}`. Нет ключа
+ * — пустой список. Запись, которую не прочесть (файл мог править не этот код),
+ * пропускается: счёту она не мешает, а в объекте остаётся как лежала.
+ */
+export function outlineSlopes(outline) {
+  const list = outline && Array.isArray(outline.slopes) ? outline.slopes : [];
+  return list.filter(slopeReadable);
+}
+
+/** Есть ли на схеме хоть один скат: сцена без них идёт прежней дорогой. */
+export function schemeHasSlopes(project, schemeId) {
+  return slopeSchemeOutlines(project, schemeId).sloped;
+}
+
+function outlineSlopesWith(project, outlineId, change) {
+  const outline = findOutline(project, outlineId);
+  if (!outline) throw modelError("outlineNotFound");
+  const next = change(Array.isArray(outline.slopes) ? [...outline.slopes] : []);
+  const outlines = outlinesOf(project).map((item) => {
+    if (item.id !== outlineId) return item;
+    const { slopes, ...rest } = item;
+    return next.length > 0 ? { ...rest, slopes: next } : rest;
+  });
+  return { project: withProject(project, { outlines }), outline: outlines.find((item) => item.id === outlineId) };
+}
+
+/** Добавить скат контуру помещения. Отдаёт и его номер в списке. */
+export function addOutlineSlope(project, outlineId, input) {
+  const slope = slopeValue(input);
+  let index = 0;
+  const result = outlineSlopesWith(project, outlineId, (list) => {
+    index = list.length;
+    return [...list, slope];
+  });
+  return { ...result, slope, index, changed: true };
+}
+
+/** Поправить скат: участок, кромку, высоты — что названо в `patch`. */
+export function updateOutlineSlope(project, outlineId, index, patch) {
+  const outline = findOutline(project, outlineId);
+  if (!outline) throw modelError("outlineNotFound");
+  const was = Array.isArray(outline.slopes) ? outline.slopes[index] : null;
+  if (!was) throw modelError("slopeNotFound");
+  const slope = slopeValue({ ...was, ...pick(patch, ["pointsMm", "edge", "lowMm", "highMm"]) });
+  if (JSON.stringify(slope) === JSON.stringify(was)) return { project, outline, slope: was, index, changed: false };
+  const result = outlineSlopesWith(project, outlineId, (list) => list.map((item, at) => (at === index ? slope : item)));
+  return { ...result, slope, index, changed: true };
+}
+
+/** Снять скат. Последний снятый удаляет ключ `slopes` у контура. */
+export function deleteOutlineSlope(project, outlineId, index) {
+  const outline = findOutline(project, outlineId);
+  if (!outline) throw modelError("outlineNotFound");
+  if (!Array.isArray(outline.slopes) || !outline.slopes[index]) throw modelError("slopeNotFound");
+  const result = outlineSlopesWith(project, outlineId, (list) => list.filter((item, at) => at !== index));
+  return { ...result, changed: true };
+}
+
+const SLOPE_SCHEME_CACHE = new WeakMap();
+/** Кусок стороны стены без помещения короче этого отходит соседнему, мм. */
+const WALL_SLOPE_GAP_MM = 600;
+
+// Контуры схемы в миллиметрах, от большего к меньшему, со скатами и плоской
+// высотой. Считается раз на объект: объект неизменяем, правка даёт новый.
+// Схема без скатов отвечает пустым списком — её никто дальше не спрашивает.
+function slopeSchemeOutlines(project, schemeId) {
+  if (!project || !schemeId) return { sloped: false, list: [] };
+  let held = SLOPE_SCHEME_CACHE.get(project);
+  if (!held) {
+    held = new Map();
+    SLOPE_SCHEME_CACHE.set(project, held);
+  }
+  if (held.has(schemeId)) return held.get(schemeId);
+  const list = [];
+  let sloped = false;
+  if (outlinesOf(project).some((outline) => outline.schemeId === schemeId && outlineSlopes(outline).length > 0)) {
+    for (const outline of outlinesInOrder(project, schemeId)) {
+      const pointsMm = [];
+      for (const point of outline.points || []) {
+        const mm = planFractionToMm(project, schemeId, point);
+        if (!mm) break;
+        pointsMm.push(mm);
+      }
+      if (pointsMm.length < 3 || pointsMm.length !== (outline.points || []).length) continue;
+      const slopes = outlineSlopes(outline);
+      if (slopes.length > 0) sloped = true;
+      list.push({ outline, pointsMm, slopes, flatMm: wallHeightShownMm(project, { schemeId, roomId: outline.roomId }).mm });
+    }
+  }
+  const answer = { sloped, list };
+  held.set(schemeId, answer);
+  return answer;
+}
+
+function slopeOutlineAt(held, pointMm) {
+  let found = null;
+  for (const item of held.list) if (pointInOutline(pointMm, item.pointsMm)) found = item;
+  return found;
+}
+
+/**
+ * **Высота потолка в точке чертежа** — одна дверь на «Объём», развёртку и
+ * посадку метки: под скатом — его плоскость (под несколькими — наименьшая),
+ * иначе высота помещения, а вне помещений — высота схемы.
+ */
+export function ceilingHeightAt(project, schemeId, pointMm) {
+  const held = slopeSchemeOutlines(project, schemeId);
+  if (held.sloped && pointMm) {
+    const item = slopeOutlineAt(held, pointMm);
+    if (item) return slopesHeightAt(item.slopes, pointMm, item.flatMm);
+  }
+  const fraction = pointMm ? planMmToFraction(project, schemeId, pointMm) : null;
+  const outline = fraction ? outlineAtPoint(project, schemeId, fraction) : null;
+  return wallHeightShownMm(project, { schemeId, roomId: outline ? outline.roomId : null }).mm;
+}
+
+/** Скат над точкой чертежа: `{outline, index, slope}` или `null`. */
+export function slopeAtPoint(project, schemeId, pointMm) {
+  const held = slopeSchemeOutlines(project, schemeId);
+  if (!held.sloped || !pointMm) return null;
+  const item = slopeOutlineAt(held, pointMm);
+  if (!item) return null;
+  const at = slopeIndexAt(item.slopes, pointMm);
+  if (at < 0) return null;
+  const slope = item.slopes[at];
+  return { outline: item.outline, index: (item.outline.slopes || []).indexOf(slope), slope };
+}
+
+/**
+ * **Профиль верха стены** под скатами: `[{fromMm, toMm, fromZ, toZ}]` вдоль
+ * стены от конца `a`, или `null` — скатов у стены нет и она ровная, высотой
+ * `wallHeightMm`, как всегда.
+ *
+ * Правило — продолжение правила плоских потолков («высоту стене даёт большая
+ * из сторон»): в каждой точке берётся больший из потолков двух сторон. Скат
+ * говорит только там, где он над гранью стены; сторона без помещения (улица)
+ * молчит, и наружная стена под скатом опускается вместе с ним. Где не говорит
+ * ни одна сторона — прежняя высота стены. Своя высота стены (`wall.heightMm`)
+ * главнее и здесь: такая стена ровная.
+ */
+export function wallTopProfile(project, wallId) {
+  const wall = findWall(project, wallId);
+  if (!wall || wallOwnHeightMm(wall) !== null) return null;
+  const held = slopeSchemeOutlines(project, wall.schemeId);
+  if (!held.sloped) return null;
+  const vectors = wallVectors(wall);
+  if (!vectors) return null;
+  const { len } = vectors;
+  const left = wallSideCeiling(wall, vectors, held, 1, true);
+  const right = wallSideCeiling(wall, vectors, held, -1, true);
+  if (!left.spoke && !right.spoke) return null;
+  const top = slopeProfileMax(left.parts, right.parts);
+  const rest = wallHeightInheritedMm(project, wallId);
+  const out = [];
+  let cursor = 0;
+  for (const part of top) {
+    if (part.fromMm - cursor > 0.5) out.push({ fromMm: cursor, toMm: part.fromMm, fromZ: rest, toZ: rest });
+    out.push(part);
+    cursor = part.toMm;
+  }
+  if (len - cursor > 0.5) out.push({ fromMm: cursor, toMm: len, fromZ: rest, toZ: rest });
+  return slopeProfileTidy(out);
+}
+
+/**
+ * **Потолок вдоль одной стороны стены** — то, что видит человек в комнате и
+ * что рисует развёртка этой стороны: `[{fromMm, toMm, fromZ, toZ}]` от конца
+ * `a`, или `null` — скатов над этой стороной нет. Куски без помещения в ответ
+ * не входят; плоская часть помещения со скатами идёт своей высотой.
+ */
+export function wallSideProfile(project, wallId, side) {
+  const wall = findWall(project, wallId);
+  if (!wall) return null;
+  const held = slopeSchemeOutlines(project, wall.schemeId);
+  if (!held.sloped) return null;
+  const vectors = wallVectors(wall);
+  if (!vectors) return null;
+  const answer = wallSideCeiling(wall, vectors, held, side === "right" ? -1 : 1, false);
+  return answer.spoke ? answer.parts : null;
+}
+
+// Потолок над гранью стены со стороны `sign`. `quiet` — плоская часть
+// помещения со скатами молчит (так считается верх самой стены: там её держит
+// прежнее правило высоты); без него она идёт высотой помещения.
+function wallSideCeiling(wall, vectors, held, sign, quiet) {
+  const { u, n, len } = vectors;
+  const half = Number(wall.thicknessMm) / 2;
+  const at = (along, across) => ({
+    x: Number(wall.aMm.x) + u.x * along + n.x * across,
+    y: Number(wall.aMm.y) + u.y * along + n.y * across,
+  });
+  let spoke = false;
+  const probe = (half + WALL_ROOM_PROBE_MM) * sign;
+  const start = at(0, probe);
+  {
+    const cuts = [0, len];
+    for (const item of held.list) {
+      for (let index = 0; index < item.pointsMm.length; index += 1) {
+        const p = item.pointsMm[index];
+        const q = item.pointsMm[(index + 1) % item.pointsMm.length];
+        const ex = q.x - p.x;
+        const ey = q.y - p.y;
+        const cross = u.x * ey - u.y * ex;
+        if (Math.abs(cross) < 1e-9) continue;
+        const t = ((p.x - start.x) * ey - (p.y - start.y) * ex) / cross;
+        const s = ((p.x - start.x) * u.y - (p.y - start.y) * u.x) / cross;
+        if (s >= 0 && s <= 1 && t > 1 && t < len - 1) cuts.push(t);
+      }
+    }
+    cuts.sort((first, second) => first - second);
+    const spans = [];
+    for (let index = 0; index + 1 < cuts.length; index += 1) {
+      const from = cuts[index];
+      const to = cuts[index + 1];
+      if (!(to - from > 0.5)) continue;
+      spans.push({ from, to, item: slopeOutlineAt(held, at((from + to) / 2, probe)) });
+    }
+    // Короткий кусок без помещения — угол за соседней стеной или промах обводки
+    // мимо оси: он отходит соседу, иначе у угла стена встала бы зубцом.
+    spans.forEach((span, index) => {
+      if (span.item || span.to - span.from >= WALL_SLOPE_GAP_MM) return;
+      const before = index > 0 ? spans[index - 1].item : null;
+      const after = index + 1 < spans.length ? spans[index + 1].item : null;
+      span.near = before || after;
+    });
+    const parts = [];
+    for (const span of spans) {
+      const { from, to } = span;
+      const item = span.item || span.near;
+      if (!item) continue;
+      if (item.slopes.length === 0) {
+        parts.push({ fromMm: from, toMm: to, fromZ: item.flatMm, toZ: item.flatMm });
+        continue;
+      }
+      // Плоская часть помещения со скатами помечена минус единицей и молчит:
+      // там стену держит прежнее правило.
+      for (const part of slopeProfile(item.slopes, at(from, half * sign), at(to, half * sign), -1)) {
+        const flat = part.fromZ < 0 || part.toZ < 0;
+        if (flat && quiet) continue;
+        if (!flat) spoke = true;
+        parts.push({
+          fromMm: from + part.fromMm,
+          toMm: from + part.toMm,
+          fromZ: flat ? item.flatMm : part.fromZ,
+          toZ: flat ? item.flatMm : part.toZ,
+        });
+      }
+    }
+    return { parts: slopeProfileTidy(parts), spoke };
+  }
 }
 
 // ——— покраска стен, пола и потолка (правка без автопилота, 2026-10-25) ————————
@@ -10458,6 +10788,8 @@ export function wallObjectsOn(project, wallId, side) {
   const half = Number(wall.thicknessMm) / 2;
   const found = [];
   for (const object of schemeObjectsOnScheme(project, wall.schemeId)) {
+    // Мансардное окно лежит в скате, а не стоит у стены (ADR 043).
+    if (schemeObjectIsSkylight(object)) continue;
     const corners = schemeObjectCorners(object);
     if (corners.length === 0) continue;
     const gap = Math.min(...corners.map((point) => segmentDistanceMm(point, wall.aMm, wall.bMm)));
@@ -11043,7 +11375,36 @@ export function wallElevation(project, wallId, side = "left", cut = null) {
   const shown = own !== null ? { mm: own, known: true } : wallHeightShownMm(project, { schemeId: wall.schemeId, roomId });
   const room = roomId ? findRoom(project, roomId) : null;
   const named = wallNaming(project, wall.schemeId).walls.get(wallId) || { name: "", aLetter: "", bLetter: "" };
-  return {
+  // **Верх стороны под скатом** (ADR 043): потолок этой стороны ломаной, в
+  // осях листа — слева направо от левого угла участка. Ключ появляется только
+  // у стороны со скатом: лист стены без него прежний поле в поле (G68).
+  const sloped = own === null ? wallSideProfile(project, wallId, view) : null;
+  let topProfile = null;
+  if (sloped) {
+    topProfile = [];
+    for (const part of sloped) {
+      // Сторона «слева» читается от конца `b`: кусок зеркалится целиком.
+      const sheet = sideSpan(length, part.fromMm, part.toMm, view);
+      const flipped = view === "left";
+      const fromZ = flipped ? part.toZ : part.fromZ;
+      const toZ = flipped ? part.fromZ : part.toZ;
+      const from = Math.max(sheet.fromMm, span.fromMm);
+      const to = Math.min(sheet.toMm, span.toMm);
+      if (!(to - from > 0.5)) continue;
+      const wide = sheet.toMm - sheet.fromMm;
+      const zAt = (along) => fromZ + ((toZ - fromZ) * (along - sheet.fromMm)) / wide;
+      topProfile.push({
+        fromMm: Math.round(from - span.fromMm),
+        toMm: Math.round(to - span.fromMm),
+        fromZ: Math.round(zAt(from)),
+        toZ: Math.round(zAt(to)),
+      });
+    }
+    topProfile.sort((first, second) => first.fromMm - second.fromMm);
+    if (topProfile.length === 0) topProfile = null;
+  }
+  const slopedTop = topProfile ? Math.max(...topProfile.map((part) => Math.max(part.fromZ, part.toZ))) : 0;
+  const sheet = {
     wallId,
     side: view,
     // Имя стены (G200) и буквы углов участка — каждая на своём краю листа.
@@ -11075,6 +11436,12 @@ export function wallElevation(project, wallId, side = "left", cut = null) {
     // Упирающиеся стены, видные с этой стороны (G201).
     crossings,
   };
+  if (topProfile) {
+    // Лист поднимается до самой высокой точки ската, если она выше помещения.
+    sheet.heightShownMm = Math.max(shown.mm, slopedTop);
+    sheet.topProfile = topProfile;
+  }
+  return sheet;
 }
 
 function flipHinge(value) {

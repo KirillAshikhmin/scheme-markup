@@ -13,6 +13,8 @@ import {
   openingFamilyOf,
   openingsInWall,
   outlinesInOrder,
+  schemeObjectCorners,
+  schemeObjectIsSkylight,
   schemeObjectsOnScheme,
   wallGlassOf,
   wallOwnHeightMm,
@@ -23,13 +25,15 @@ import {
 import {
   VOLUME_CEILING_RGB,
   VOLUME_FLOOR_RGB,
+  VOLUME_FRAME_RGB,
+  VOLUME_GLASS_RGB,
   VOLUME_LAND_OUT_MM,
   VOLUME_LAND_RGB,
   VOLUME_LAYER_BASE,
   VOLUME_SLAB_RGB,
   VOLUME_WALL_RGB,
 } from "./measures.js";
-import { volumeAt, volumeClockwise, volumeFace, volumePainted, volumeShadowShift } from "./faces.js";
+import { volumeAt, volumeClockwise, volumeFace, volumeFaceNormal, volumePainted, volumeShadowShift } from "./faces.js";
 import {
   VOLUME_FLOOR_LAP,
   VOLUME_SUN_PROBE_MM,
@@ -42,6 +46,7 @@ import {
   volumeShiftPoints,
 } from "./shapes.js";
 import { volumeMiddleOf, volumeOrderAll, volumeOrderStack, volumeOrderTree } from "./order.js";
+import { slopeCeilingPieces, slopeIndexAt, slopePiecesCut, slopeProfileAt } from "../slopes.js";
 import {
   volumeSideParts,
   volumeSideStops,
@@ -79,6 +84,7 @@ import {
   volumeWallCovers,
   volumeWallFree,
   volumeWallHeights,
+  volumeWallProfiles,
   volumeWallsTopMm,
 } from "./floors.js";
 import { volumeTagIndoor, volumeTagRoom, volumeTagThing } from "./walk.js";
@@ -532,6 +538,19 @@ function volumeStackRoomsJoin(faces, alias, under = null) {
 
 // ——— сцена ———————————————————————————————————————————————————————————————
 
+/** Ширина рамы мансардного окна на плане, мм. */
+const VOLUME_SKYLIGHT_FRAME_MM = 60;
+
+// Стекло мансардного окна: тот же габарит, уменьшенный на раму с каждой стороны.
+function volumeSkylightInner(object) {
+  const cut = VOLUME_SKYLIGHT_FRAME_MM * 2;
+  return {
+    ...object,
+    widthMm: Math.max(1, Number(object.widthMm) - cut),
+    depthMm: Math.max(1, Number(object.depthMm) - cut),
+  };
+}
+
 /**
  * Вся сцена схемы: грани, препятствия, помещения, границы, где встать.
  *
@@ -650,6 +669,8 @@ function volumeSceneBuild(project, schemeId, options = {}) {
   // от стены на полторы высоты. Вынос считается от высоты, а не взят на глаз:
   // `VOLUME_LAND_OUT` высот от габарита во все стороны.
   const wallHeights = volumeWallHeights(project, schemeId, schemeHeight.mm);
+  // Стены под скатами (ADR 043): профиль верха; у схемы без скатов словарь пуст.
+  const wallProfiles = volumeWallProfiles(project, schemeId);
   const tallest = volumeWallsTopMm(project, schemeId, wallHeights);
   // Прямоугольник плиты, когда она работает землёй (D52): им фон узнаёт, где
   // кончается земля сцены. `null` — плита сама пол, и земли у сцены нет вовсе.
@@ -885,6 +906,63 @@ function volumeSceneBuild(project, schemeId, options = {}) {
     // сценариев): балкон, у которого стены к улице ниже этажа, или помещение,
     // которому потолок сняли рукой. Пол при этом остаётся — «только пол».
     if (room.hasCeiling === false) continue;
+    // **Потолок со скатами** (ADR 043) — кусками: наклонные грани под скатами
+    // и плоская часть там, где их нет. Грань та же двусторонняя — изнанкой
+    // крыша, — и «Снять крышу» снимает её тем же правилом.
+    if (room.slopes) {
+      let pieces = slopeCeilingPieces(room.pointsMm, room.slopes, room.heightMm);
+      // **Мансардные окна** (ADR 043): под габаритом окна из ската вырезается
+      // отверстие, в него встают рама и стекло — в плоскости того же ската.
+      // Окно принадлежит скату над своей серединой; над плоской частью потолка
+      // оно не рисуется вовсе (поставить его туда модель не даёт).
+      for (const object of objects) {
+        if (!schemeObjectIsSkylight(object) || !volumePointInside(object.atMm, room.pointsMm)) continue;
+        const slopeAt = slopeIndexAt(room.slopes, object.atMm);
+        if (slopeAt < 0) continue;
+        const mine = pieces.filter((piece) => piece.slope === slopeAt);
+        const hole = slopePiecesCut(mine, schemeObjectCorners(object));
+        pieces = [...pieces.filter((piece) => piece.slope !== slopeAt), ...hole.pieces];
+        if (options.roofOff === true) continue;
+        const glass = slopePiecesCut(hole.cut, schemeObjectCorners(volumeSkylightInner(object)));
+        const from = faces.length;
+        for (const [list, rgb, clear] of [
+          [glass.pieces, VOLUME_FRAME_RGB, false],
+          [glass.cut, VOLUME_GLASS_RGB, "glass"],
+        ]) {
+          for (const piece of list) {
+            const points = piece.points.map((point) => volumeAt(point, point.z));
+            const normal = volumeFaceNormal(points);
+            const down = normal.z > 0;
+            faces.push(
+              volumeFace(down ? [...points].reverse() : points, rgb, {
+                normal: down ? { x: -normal.x, y: -normal.y, z: -normal.z } : normal,
+                both: true,
+                clear,
+                room: volumeRoomKey(room),
+              }),
+            );
+          }
+        }
+        volumeTagThing(faces, from, object.id);
+      }
+      for (const piece of pieces) {
+        const points = piece.points.map((point) => volumeAt(point, point.z));
+        const normal = volumeFaceNormal(points);
+        const down = normal.z > 0;
+        faces.push(
+          volumePainted(
+            volumeFace(down ? [...points].reverse() : points, VOLUME_CEILING_RGB, {
+              normal: down ? { x: -normal.x, y: -normal.y, z: -normal.z } : normal,
+              both: options.roofOff !== true,
+              room: volumeRoomKey(room),
+            }),
+            room.ceilingRgb,
+            "ceiling",
+          ),
+        );
+      }
+      continue;
+    }
     // **Потолок двусторонний** (таск 211, дефект D62): снизу это потолок
     // комнаты, сверху — крыша. До таска у него была одна сторона, нормалью
     // вниз, и сверху он отбрасывался отбором — поэтому в кадре сверху потолок
@@ -928,7 +1006,11 @@ function volumeSceneBuild(project, schemeId, options = {}) {
   // Высоты посчитаны выше, до плиты: по ним идёт вынос земли и тень дома (D43),
   // по ним же сводятся углы (G265) — ус ставится только между стенами одной
   // высоты.
-  const miters = volumeWallMiters(walls, (wall) => wallHeights.get(wall.id) || 0);
+  const miters = volumeWallMiters(walls, (wall, end) => {
+    const profile = wallProfiles.get(wall.id);
+    if (!profile) return wallHeights.get(wall.id) || 0;
+    return slopeProfileAt(profile, end === "b" ? profile[profile.length - 1].toMm : 0);
+  });
   for (const wall of walls) {
     // **Накрытые куски стены** (таск 214, дефект D65): там, где у этажа выше
     // стоит его собственная стена, эта уступает ей — накрытый кусок выше
@@ -959,7 +1041,10 @@ function volumeSceneBuild(project, schemeId, options = {}) {
     // граней, ни препятствия. Остаётся пол под ней — полоса ниже, — и по нему
     // выходят на балкон.
     if (height > 0) {
-      volumeWallFaces(wall, openings, height, faces, options.openDoorIds || null, miters.get(wall.id) || null, rooms);
+      // Профиль ската — только у стены во всю свою высоту: накрытая стеной
+      // этажа выше кончается ровно, по перекрытию.
+      const profile = cap === own ? wallProfiles.get(wall.id) || null : null;
+      volumeWallFaces(wall, openings, height, faces, options.openDoorIds || null, miters.get(wall.id) || null, rooms, profile);
     }
     const vectors = wallVectors(wall);
     if (!vectors) continue;
@@ -1166,6 +1251,8 @@ function volumeSceneBuild(project, schemeId, options = {}) {
     // этого не пострадал — он спрашивается по расстоянию до габарита
     // (`volumeStairNear`), а не по упору в него, и теперь срабатывает ещё
     // вернее: встать можно прямо на лестницу.
+    // Мансардное окно — не тело, а отверстие в скате: его уже врезал потолок.
+    if (schemeObjectIsSkylight(object)) continue;
     const objectFrom = faces.length;
     if (volumeObjectModel(project, object)) modelled.add(object.id);
     const opens = volumeObjectOpens(project, object);

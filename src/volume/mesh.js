@@ -218,6 +218,11 @@ export function volumeMeshBuild(faces, options = {}) {
     const sx = nx * lift + (shift ? shift.x : 0);
     const sy = ny * lift + (shift ? shift.y : 0);
     const sz = nz * lift + (shift ? shift.z : 0);
+    // Изнанка крашеного потолка — крыша: она держит цвет сборки (`backRgb`),
+    // как и в кадре Canvas 2D (`volumeFacePolygons`).
+    const back = face.backRgb
+      ? [volumeMeshLinear(face.backRgb[0] / 255), volumeMeshLinear(face.backRgb[1] / 255), volumeMeshLinear(face.backRgb[2] / 255)]
+      : c;
     const emit = (p, sign) => {
       into.pos.push((p.x + sx) * S, (p.z + sz) * S, (p.y + sy) * S);
       let vx = nx;
@@ -235,8 +240,9 @@ export function volumeMeshBuild(faces, options = {}) {
         }
       }
       into.nor.push(vx * sign, vz * sign, vy * sign);
-      if (into === clear) into.col.push(c[0], c[1], c[2], alpha);
-      else into.col.push(c[0], c[1], c[2]);
+      const tone = sign < 0 ? back : c;
+      if (into === clear) into.col.push(tone[0], tone[1], tone[2], alpha);
+      else into.col.push(tone[0], tone[1], tone[2]);
     };
     for (let i = 0; i < tri.length; i += 3) {
       const a = P[tri[i]];
