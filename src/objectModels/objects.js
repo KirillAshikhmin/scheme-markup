@@ -292,6 +292,7 @@ export const MODELS_OBJECTS = {
     modelBox("top", { z: 0.66, height: 0.15, material: "light" }),
     modelBox("basin", { x: -0.3, width: 0.6, y: -0.34, depth: 0.6, z: 0.81, height: 0.01, material: "dark" }),
     modelBox("tap", { x: -0.03, width: 0.06, y: 0.3, depth: 0.12, z: 0.81, height: 0.19, material: "metal" }),
+    modelBox("spout", { x: -0.03, width: 0.06, y: 0.02, depth: 0.28, z: 0.96, height: 0.04, material: "metal" }),
   ),
   // Подвесной унитаз с инсталляцией (правка 2026-11-20): чаша на стене,
   // сиденье с крышкой одним телом и клавиша смыва над ней. Бачка нет — он в
@@ -306,6 +307,7 @@ export const MODELS_OBJECTS = {
     modelCyl("bowl", { x: -0.4, width: 0.8, y: -0.44, depth: 0.74, z: 0.55, height: 0.45, material: "light" }),
     modelBox("pedestal", { x: -0.18, width: 0.36, y: -0.2, depth: 0.4, z: 0, height: 0.55 }),
     modelBox("tap", { x: -0.06, width: 0.12, y: 0.3, depth: 0.12, z: 0.8, height: 0.2, material: "metal" }),
+    modelBox("spout", { x: -0.04, width: 0.08, y: 0.02, depth: 0.28, z: 0.95, height: 0.05, material: "metal" }),
   ),
   // Полотенцесушитель уехал к меткам (таск 186, G279): тело то же, лежит оно
   // теперь в `objectModels/things.js`.
@@ -671,6 +673,10 @@ export const MODELS_OBJECTS = {
     modelBox("top", { z: 0.74, height: 0.04, material: "light" }),
     modelBox("basin", { x: -0.34, width: 0.68, y: -0.3, depth: 0.52, z: 0.78, height: 0.01, material: "dark" }),
     modelBox("tap", { x: -0.03, width: 0.06, y: 0.26, depth: 0.12, z: 0.78, height: 0.22, material: "metal" }),
+    // Излив (правка 2026-11-20, слова заказчика: «на смесителях добавь ещё
+    // горизонтальную линию — излив, а то так не очень понятно»): стойка без
+    // него читалась столбиком на столешнице.
+    modelBox("spout", { x: -0.03, width: 0.06, y: -0.02, depth: 0.28, z: 0.96, height: 0.04, material: "metal" }),
   ),
   kitchenCabinet: modelParts(
     modelBox("case", { y: -0.3, depth: 0.8 }),
