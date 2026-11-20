@@ -22,6 +22,7 @@ import {
   VOLUME_HOUSE_WING_MM,
   volumeGroundAim,
   volumeHallFaces,
+  volumeHallHolds,
   volumeHouseLift,
   volumeHouseOutline,
   volumeHouseParts,
@@ -194,4 +195,31 @@ test("за входной дверью — коридор этажа: пол, п
   assert.equal(found.side, "south");
   assert.deepEqual(found.out, { x: 0, y: 1 });
   assert.ok(Math.abs(found.y - 5100) < 1, "вход не на наружной грани стены: " + found.y);
+});
+
+test("вышедший за входную дверь стоит в коридоре: дом его не закрывает, коридор рисуется", () => {
+  const house = {
+    floor: 5,
+    floors: 9,
+    groundMm: -12000,
+    floorMm: -200,
+    ceilingMm: 2700,
+    roofMm: 14700,
+    rect: { minX: 0, maxX: 6000, minY: 0, maxY: 16000 },
+    wings: [{ side: "south", minX: 0, maxX: 6000, minY: 4000, maxY: 16000 }],
+    entry: { side: "south", x: 3000, y: 4000, out: { x: 0, y: 1 } },
+  };
+  const inFlat = { x: 3000, y: 3000, z: 1600 };
+  const inHall = { x: 3500, y: 5000, z: 1600 };
+  const beyond = { x: 3000, y: 9000, z: 1600 };
+  assert.equal(volumeHallHolds(house, inHall), true);
+  assert.equal(volumeHallHolds(house, beyond), false);
+  assert.equal(volumeHallHolds(house, { ...inHall, z: 5000 }), false);
+  assert.equal(volumeHallHolds({ ...house, entry: null }, inHall), false);
+  const pass = (eye) => Object.fromEntries(volumeHouseParts(house, eye).map((part) => [part.name, part.pass]));
+  assert.equal(pass(inFlat).wing, "before");
+  // Главное: в коридоре сосед не ложится поверх сцены.
+  assert.equal(pass(inHall).wing, "before");
+  assert.equal(pass(inHall).high, "before");
+  assert.equal(pass(beyond).wing, "after");
 });

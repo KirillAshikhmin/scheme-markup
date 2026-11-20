@@ -75,6 +75,28 @@ export function volumeHallFaces(entry, heightMm) {
   return faces;
 }
 
+/**
+ * Стоит ли глаз в коридоре этажа (правка 2026-11-20, дефект заказчика: «пока
+ * мы внутри помещения, то видим комнату на этаже, но стоит выйти за дверь — и
+ * всё пропадает»). Вышедший за порог остаётся **внутри дома**: коридор
+ * рисуется по-прежнему, а соседняя секция и верх дома его не закрывают.
+ * Запас в полметра — на толщину стены и на шаг через порог.
+ */
+export function volumeHallHolds(house, eye) {
+  const entry = house && house.entry;
+  if (!entry || !eye) return false;
+  const out = entry.out;
+  const deep = (eye.x - entry.x) * out.x + (eye.y - entry.y) * out.y;
+  const side = (eye.x - entry.x) * -out.y + (eye.y - entry.y) * out.x;
+  return (
+    deep >= -500 &&
+    deep <= VOLUME_HALL_DEEP_MM &&
+    Math.abs(side) <= VOLUME_HALL_HALF_MM &&
+    eye.z >= house.floorMm &&
+    eye.z <= house.ceilingMm
+  );
+}
+
 function housePlan(rect) {
   // Обход по кругу, при котором наружу смотрит правый перпендикуляр ребра
   // (`volumeDrawMegaBox`): север, восток, юг, запад.
@@ -102,15 +124,19 @@ export function volumeHouseParts(house, eye, roofOff = false) {
     parts.push({ name: "low", rect: house.rect, bottomMm: house.groundMm, topMm: house.floorMm, floors: below, pass: "before", roof: true });
   }
   if (roofOff) return parts;
+  // Глаз в коридоре этажа — он внутри дома: соседи и верх рисуются до сцены,
+  // как для стоящего в квартире.
+  const hall = volumeHallHolds(house, eye);
   for (const wing of house.wings) {
     const outside =
-      wing.side === "west"
+      !hall &&
+      (wing.side === "west"
         ? eye.x < wing.maxX
         : wing.side === "east"
           ? eye.x > wing.minX
           : wing.side === "north"
             ? eye.y < wing.maxY
-            : eye.y > wing.minY;
+            : eye.y > wing.minY);
     parts.push({ name: "wing", rect: wing, bottomMm: house.floorMm, topMm: house.ceilingMm, floors: 1, pass: outside ? "after" : "before", roof: false });
   }
   const above = house.floors - house.floor;
@@ -122,7 +148,7 @@ export function volumeHouseParts(house, eye, roofOff = false) {
     bottomMm: house.ceilingMm,
     topMm: Math.max(house.roofMm, house.ceilingMm + 300),
     floors: Math.max(1, above),
-    pass: eye.z > house.ceilingMm ? "after" : "before",
+    pass: !hall && eye.z > house.ceilingMm ? "after" : "before",
     roof: true,
   });
   return parts;
@@ -155,8 +181,22 @@ export function volumeDrawHouse(ctx, box, camera, mood, scene, pass, roofOff = f
   const entry = house.entry;
   if (pass === "before" && entry) {
     const inside = (camera.at.x - entry.x) * entry.out.x + (camera.at.y - entry.y) * entry.out.y < 0;
-    if (inside && camera.at.z < house.ceilingMm) {
-      for (const face of volumeHallFaces(entry, house.ceilingMm)) {
+    if ((inside && camera.at.z < house.ceilingMm) || volumeHallHolds(house, camera.at)) {
+      // Стоящему в коридоре нужна и четвёртая стена — та, в которой дверь
+      // квартиры: саму квартирную стену рисует сцена поверх, а там, где её нет
+      // (вырез Г-образной квартиры), без этой стены была бы видна улица. Из
+      // квартиры она не рисуется: легла бы в проём входной двери.
+      const deep = (camera.at.x - entry.x) * entry.out.x + (camera.at.y - entry.y) * entry.out.y;
+      const faces = volumeHallFaces(entry, house.ceilingMm);
+      if (deep > 0) {
+        const along = { x: -entry.out.y, y: entry.out.x };
+        const corner = (side, z) => ({ x: entry.x + along.x * side, y: entry.y + along.y * side, z });
+        faces.unshift({
+          color: HALL_WALL,
+          points: [corner(-VOLUME_HALL_HALF_MM, 0), corner(VOLUME_HALL_HALF_MM, 0), corner(VOLUME_HALL_HALF_MM, house.ceilingMm), corner(-VOLUME_HALL_HALF_MM, house.ceilingMm)],
+        });
+      }
+      for (const face of faces) {
         ctx.beginPath();
         if (!volumeMegaPath(ctx, aim, face.points)) continue;
         ctx.fillStyle = face.color;
