@@ -208,13 +208,21 @@
             // кадр их только выкладывает. Своего рисования здесь нет.
             // `--gl`: сцена видеокарты — круглые тела и непрозрачные вещи, как в окне.
             const glOptions = job.gl ? { roundSides: volume.VOLUME_ROUND_SIDES, objectsClear: false } : {};
-            let scene = volume.volumeScene(project, schemeId, { roofOff: job.roofOff === true, ...glOptions });
+            // `--all-floors`: стопка этажей, как отметка «Все этажи» в окне объёма.
+            const sceneOf = (options) => {
+              if (job.allFloors) {
+                const stack = volume.volumeStackScene(project, volume.volumeFloorPlan(project, schemeId), () => options);
+                if (stack) return stack;
+              }
+              return volume.volumeScene(project, schemeId, options);
+            };
+            let scene = sceneOf({ roofOff: job.roofOff === true, ...glOptions });
             // `--open-cupboards`: какие шкафы открываются, знает сама сцена.
             const opened = scene
               ? [...(job.openCupboards ? scene.cupboards || [] : []), ...(job.openDoors ? scene.doors || [] : [])]
               : [];
             if (opened.length > 0) {
-              scene = volume.volumeScene(project, schemeId, { roofOff: job.roofOff === true, openDoorIds: new Set(opened), ...glOptions });
+              scene = sceneOf({ roofOff: job.roofOff === true, openDoorIds: new Set(opened), ...glOptions });
             }
             if (!scene || scene.empty) throw new Error("у схемы нет чертежа — объём рисовать нечем");
             const site = volume.volumeSiteOf(project);

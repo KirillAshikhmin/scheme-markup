@@ -371,6 +371,28 @@ test("мансардное окно: в скате — отверстие со �
   assert.equal(scene.objectBoxes.length, bare.objectBoxes.length);
 });
 
+test("у каждой грани сцены свои точки: стопка этажей двигает их на месте", () => {
+  // Найдено на объекте заказчика: вершина конуса (крона цветка) была общей на
+  // все его бока, перенос этажа сдвигал её по разу на грань, и «Все этажи»
+  // зацикливали дерево порядка. Скаты режут грани на куски — те же грабли.
+  const base = attic();
+  let project = addOutlineSlope(base.project, base.outlineId, WHOLE).project;
+  project = addOpening(project, { wallId: base.walls.east, kind: "window", atMm: 1500, widthMm: 1000, heightMm: 2400, heightAboveFloorMm: 500 }).project;
+  for (const key of ["plant", "treePot"]) {
+    project = addSchemeObject(project, { schemeId: base.schemeId, catalogKey: key, shape: "rect", atMm: { x: 3000, y: 2000 }, widthMm: 500, depthMm: 500, heightMm: 1500, heightAboveFloorMm: 0 }).project;
+  }
+  project = addSchemeObject(project, { schemeId: base.schemeId, catalogKey: "skylight", shape: "rect", atMm: { x: 5000, y: 3000 }, widthMm: 780, depthMm: 1400, heightMm: 60, heightAboveFloorMm: 0 }).project;
+  const scene = volumeScene(project, base.schemeId, {});
+  const seen = new Map();
+  for (const face of scene.faces) {
+    for (const point of face.p || []) {
+      const owner = seen.get(point);
+      assert.ok(!owner || owner === face, "точка общая у двух граней: " + JSON.stringify(point) + " (вещь " + face.thing + ")");
+      seen.set(point, face);
+    }
+  }
+});
+
 // ——— развёртка ——————————————————————————————————————————————————————————————
 
 test("развёртка: верх стороны под скатом — ломаная, лист ровной стены прежний", () => {

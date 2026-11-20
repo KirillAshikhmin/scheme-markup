@@ -705,12 +705,17 @@ function volumeWallSloped(wall, openings, heightMm, out, openDoorIds, miter, roo
     const toL = reach(part.toMm, 1);
     const fromR = reach(part.fromMm, -1);
     const toR = reach(part.toMm, -1);
+    // Высота — по линии куска в месте самой точки: ус сдвигает углы вдоль
+    // стены, и с высотой несдвинутого места грань перестала бы быть плоской
+    // (дерево порядка на неплоской грани зацикливается).
+    const rise = (part.toZ - part.fromZ) / Math.max(1e-9, part.toMm - part.fromMm);
+    const zAt = (along) => part.fromZ + rise * (along - part.fromMm);
     const lid = facing(
       [
-        volumeAt(at(fromL, half), part.fromZ),
-        volumeAt(at(toL, half), part.toZ),
-        volumeAt(at(toR, -half), part.toZ),
-        volumeAt(at(fromR, -half), part.fromZ),
+        volumeAt(at(fromL, half), zAt(fromL)),
+        volumeAt(at(toL, half), zAt(toL)),
+        volumeAt(at(toR, -half), zAt(toR)),
+        volumeAt(at(fromR, -half), zAt(fromR)),
       ],
       { x: 0, y: 0, z: 1 },
       {},
@@ -778,6 +783,9 @@ function volumeFacesUnder(wall, vectors, profile, faces, from) {
   const { u } = vectors;
   const alongOf = (point) => (point.x - Number(wall.aMm.x)) * u.x + (point.y - Number(wall.aMm.y)) * u.y;
   const eps = 0.5;
+  // У каждого обрезка свои точки: стопка этажей двигает точки граней на месте,
+  // и общая на два куска точка уехала бы дважды.
+  const own = (point) => ({ x: point.x, y: point.y, z: point.z });
   const kept = [];
   let changed = false;
   for (let index = from; index < faces.length; index += 1) {
@@ -799,7 +807,7 @@ function volumeFacesUnder(wall, vectors, profile, faces, from) {
       const top = slopeProfileAt(profile, places[0]);
       const rest = volumeClipSpace(points, (point) => top - point.z);
       if (rest && Math.max(...rest.map((point) => point.z)) - Math.min(...rest.map((point) => point.z)) >= eps) {
-        kept.push({ ...face, p: rest });
+        kept.push({ ...face, p: rest.map(own) });
       }
       continue;
     }
@@ -821,7 +829,7 @@ function volumeFacesUnder(wall, vectors, profile, faces, from) {
       const across = Math.abs(face.n.x * u.x + face.n.y * u.y) > 0.9;
       if (!level && tall < eps) continue;
       if (!across && wide < eps) continue;
-      kept.push({ ...face, p: rest });
+      kept.push({ ...face, p: rest.map(own) });
     }
   }
   if (!changed) return;

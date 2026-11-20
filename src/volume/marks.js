@@ -1878,10 +1878,16 @@ export function volumeConeFaces(frame, part, rgb, out = [], options = {}) {
   }
   const apex = at(cx, cy, part.z + part.height);
   const middle = at(cx, cy, part.z + part.height / 3);
+  // **У каждой грани свои точки.** Стопка этажей переставляет грани на базу
+  // этажа, двигая их точки на месте (`volumeFloorFaces`): вершина, общая на все
+  // бока, уезжала по разу на грань, конус переставал быть плоским в своих
+  // гранях, и дерево порядка на нём зацикливалось — «Все этажи» роняли кадр на
+  // объекте с цветком или деревом в кадке (найдено на объекте заказчика).
+  const own = (point) => ({ x: point.x, y: point.y, z: point.z });
   for (let index = 0; index < ring.length; index += 1) {
-    out.push(volumeFaceOut([ring[index], ring[(index + 1) % ring.length], apex], middle, rgb, options));
+    out.push(volumeFaceOut([own(ring[index]), own(ring[(index + 1) % ring.length]), own(apex)], middle, rgb, options));
   }
-  out.push(volumeFaceOut(ring, apex, rgb, options));
+  out.push(volumeFaceOut(ring.map(own), apex, rgb, options));
   return out;
 }
 

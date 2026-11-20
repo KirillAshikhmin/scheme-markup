@@ -144,6 +144,8 @@ export function jobOf(command, project, keys) {
     // `--gl`: кадр рисует видеокарта (`src/volumeGl.js`), как в окне объёма.
     gl: keys.has("gl"),
     openDoors: keys.has("open-doors"),
+    // `--all-floors`: стопка этажей («Все этажи»), а не одна схема.
+    allFloors: keys.has("all-floors"),
     format: typeof keys.get("sheet") === "string" ? keys.get("sheet") : null,
     orientation: typeof keys.get("orientation") === "string" ? keys.get("orientation") : null,
   };

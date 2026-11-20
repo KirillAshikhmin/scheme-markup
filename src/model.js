@@ -7706,8 +7706,12 @@ function checkOpeningHeight(project, wall, opening) {
   // двусвета в 6000 окно на 4000 законно, а в стену высотой ноль проём не
   // ставится вовсе.
   const own = wallOwnHeightMm(wall);
-  const height = own !== null ? own : Number(wallHeightOf(project, { schemeId: wall.schemeId })) || 0;
+  let height = own !== null ? own : Number(wallHeightOf(project, { schemeId: wall.schemeId })) || 0;
   if (own === null && !(height > 0)) return;
+  // Стена под скатом (ADR 043) бывает выше схемы: окно во фронтоне законно до
+  // самой высокой точки её профиля, а выше ската его обрежет сам скат.
+  const profile = own === null ? wallTopProfile(project, wall.id) : null;
+  if (profile) for (const part of profile) height = Math.max(height, part.fromZ, part.toZ);
   const top = Number(opening.heightAboveFloorMm) + Number(opening.heightMm);
   if (top > height) throw modelError("openingAboveHeight", { top, height });
 }

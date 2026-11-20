@@ -6742,7 +6742,7 @@ display: none;
     var label = document.getElementById("splash-step");
     var canvas = document.getElementById("splash-model");
     var STEPS = ["Расставляем розетки…","Проектируем щит…","Настраиваем сценарии…","Подбираем оборудование…","Чертим стены…","Развешиваем люстры…","Тянем кабель…","Маркируем линии…","Считаем длину ленты…","Калибруем масштаб…","Проверяем автоматы…","Вешаем шторы на карнизы…","Ищем, где спрятать кондиционер…","Учим выключатели проходить…","Уговариваем датчик движения не реагировать на кота…","Объясняем люстре, что она не главная…","Прячем провода за плинтус…","Ищем фазу. Нашли. Больше не ищем…","Считаем розетки. Опять не хватает…","Мирим тёплый пол с ковром…","Договариваемся с роботом-пылесосом о маршруте…","Убеждаем щит, что места в нём достаточно…","Учим шторы просыпаться вовремя…","Проверяем, что лампочка действительно горит…","Напоминаем термостату, что зима кончилась…","Вспоминаем, от чего этот автомат…"];
-    var PAGE_BYTES = 3217788;
+    var PAGE_BYTES = 3218266;
     var calm = false;
     try {
     calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -19732,8 +19732,10 @@ throw modelError("openingsOverlap", { from: otherFrom, to: otherTo });
 }
 function checkOpeningHeight(project, wall, opening) {
 const own = wallOwnHeightMm(wall);
-const height = own !== null ? own : Number(wallHeightOf(project, { schemeId: wall.schemeId })) || 0;
+let height = own !== null ? own : Number(wallHeightOf(project, { schemeId: wall.schemeId })) || 0;
 if (own === null && !(height > 0)) return;
+const profile = own === null ? wallTopProfile(project, wall.id) : null;
+if (profile) for (const part of profile) height = Math.max(height, part.fromZ, part.toZ);
 const top = Number(opening.heightAboveFloorMm) + Number(opening.heightMm);
 if (top > height) throw modelError("openingAboveHeight", { top, height });
 }
@@ -40305,12 +40307,14 @@ const fromL = reach(part.fromMm, 1);
 const toL = reach(part.toMm, 1);
 const fromR = reach(part.fromMm, -1);
 const toR = reach(part.toMm, -1);
+const rise = (part.toZ - part.fromZ) / Math.max(1e-9, part.toMm - part.fromMm);
+const zAt = (along) => part.fromZ + rise * (along - part.fromMm);
 const lid = facing(
 [
-volumeAt(at(fromL, half), part.fromZ),
-volumeAt(at(toL, half), part.toZ),
-volumeAt(at(toR, -half), part.toZ),
-volumeAt(at(fromR, -half), part.fromZ),
+volumeAt(at(fromL, half), zAt(fromL)),
+volumeAt(at(toL, half), zAt(toL)),
+volumeAt(at(toR, -half), zAt(toR)),
+volumeAt(at(fromR, -half), zAt(fromR)),
 ],
 { x: 0, y: 0, z: 1 },
 {},
@@ -40368,6 +40372,7 @@ function volumeFacesUnder(wall, vectors, profile, faces, from) {
 const { u } = vectors;
 const alongOf = (point) => (point.x - Number(wall.aMm.x)) * u.x + (point.y - Number(wall.aMm.y)) * u.y;
 const eps = 0.5;
+const own = (point) => ({ x: point.x, y: point.y, z: point.z });
 const kept = [];
 let changed = false;
 for (let index = from; index < faces.length; index += 1) {
@@ -40387,7 +40392,7 @@ if (Math.max(...places) - Math.min(...places) < eps) {
 const top = slopeProfileAt(profile, places[0]);
 const rest = volumeClipSpace(points, (point) => top - point.z);
 if (rest && Math.max(...rest.map((point) => point.z)) - Math.min(...rest.map((point) => point.z)) >= eps) {
-kept.push({ ...face, p: rest });
+kept.push({ ...face, p: rest.map(own) });
 }
 continue;
 }
@@ -40408,7 +40413,7 @@ const level = Math.abs(face.n.z) > 0.9;
 const across = Math.abs(face.n.x * u.x + face.n.y * u.y) > 0.9;
 if (!level && tall < eps) continue;
 if (!across && wide < eps) continue;
-kept.push({ ...face, p: rest });
+kept.push({ ...face, p: rest.map(own) });
 }
 }
 if (!changed) return;
@@ -42322,10 +42327,11 @@ ring.push(at(cx + (Math.cos(angle) * part.width) / 2, cy + (Math.sin(angle) * pa
 }
 const apex = at(cx, cy, part.z + part.height);
 const middle = at(cx, cy, part.z + part.height / 3);
+const own = (point) => ({ x: point.x, y: point.y, z: point.z });
 for (let index = 0; index < ring.length; index += 1) {
-out.push(volumeFaceOut([ring[index], ring[(index + 1) % ring.length], apex], middle, rgb, options));
+out.push(volumeFaceOut([own(ring[index]), own(ring[(index + 1) % ring.length]), own(apex)], middle, rgb, options));
 }
-out.push(volumeFaceOut(ring, apex, rgb, options));
+out.push(volumeFaceOut(ring.map(own), apex, rgb, options));
 return out;
 }
 function volumeTubeFaces(frame, part, rgb, out = [], options = {}) {
