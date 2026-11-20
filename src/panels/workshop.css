@@ -294,6 +294,55 @@
 
 /* Кнопка высот говорит числом, что перебитые комнаты есть: по ней это видно, не
    открывая окна. Тот же приём, что у кнопок связей и размеров метки. */
+/* ——— скаты потолка (ADR 043) ————————————————————————————————————————————
+   Плашка поверх поля, пока чертят и правят скаты: подсказка, список, две
+   высоты выбранного. Стоит в подвале списка стен под своей кнопкой: поверх
+   поля она закрывала бы комнату, в которой чертят. */
+.workshop__slopes {
+  max-height: 46vh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  color: var(--panel-text);
+  font-size: 12px;
+}
+
+.workshop__slopes[hidden] {
+  display: none;
+}
+
+.workshop__slopesTitle {
+  margin: 0;
+  font-weight: 600;
+}
+
+.workshop__slopesRow {
+  display: flex;
+  gap: 6px;
+}
+
+.workshop__slopesRow > * {
+  flex: 1 1 0;
+}
+
+.workshop__slopesList {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.workshop__slopesItem {
+  text-align: left;
+}
+
+.workshop__slopesItem.is-set {
+  border-color: var(--accent);
+}
+
 .workshop__foot .ui-btn.is-set {
   border-color: var(--accent);
 }

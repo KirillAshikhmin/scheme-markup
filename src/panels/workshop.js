@@ -97,6 +97,15 @@ import {
   OPENING_SWINGS,
   PLAN_SCALE_SHORT_SHARE,
   WALL_THICKNESS_MM_MAX,
+  MARK_DIMENSION_MAX,
+  addOutlineSlope,
+  deleteOutlineSlope,
+  outlineAtPoint,
+  outlineSlopes,
+  outlinesInOrder,
+  planMmToFraction,
+  updateOutlineSlope,
+  wallHeightShownMm,
   addOpening,
   addSchemeObject,
   addWall,
@@ -176,6 +185,7 @@ import {
   labelOf,
   markOfObject,
 } from "../model.js";
+import { slopeArea, slopeCovers } from "../slopes.js";
 import {
   CANVAS_FRESH_VERTEX_MS,
   CANVAS_WALL_PICK_PX,
@@ -2285,6 +2295,12 @@ function createWorkshop({ api, hosts }) {
   // Ожидание щелчка по месту деления стены (правка после сборки сценариев):
   // `{wallId, at}` — какую стену и где сейчас черта под рукой.
   let splitPick = null;
+  // Скаты потолка (ADR 043): `null` — инструмент закрыт; иначе `{draft, chosen}`,
+  // где `draft` — участок, который обводят (`{points, cursor}`), а `chosen` —
+  // выбранный скат (`{outlineId, index}`). Устроено ожиданием поверх занятия,
+  // как деление стены: `tool` не трогается, и «Готово» возвращает человека туда,
+  // где он был.
+  let slopeMode = null;
   let drag = null;
   let pan = null;
   // Нажатие, которое ещё не решило, чем станет: клик занятия или панорама.
@@ -2642,7 +2658,38 @@ function createWorkshop({ api, hosts }) {
     title: strings.workshop.heightHint,
     on: { click: () => openHeights() },
   });
-  const wallsFoot = uiEl("div", { class: "workshop__foot" }, [heightButton]);
+  const slopeButton = uiButton(strings.workshop.slopeOpenNone, {
+    class: "ui-btn ui-btn--wide",
+    title: strings.workshop.slopeOpenHint,
+    on: { click: () => toggleSlopes() },
+  });
+  // Плашка скатов — в подвале списка стен, под своей кнопкой, а не поверх поля:
+  // поверх поля она закрывала ровно ту комнату, в которой чертят (живой прогон).
+  const slopeHint = uiEl("p", { class: "workshop__note" });
+  const slopeEdgeInput = uiNumber(0, MARK_DIMENSION_MAX);
+  const slopeFarInput = uiNumber(0, MARK_DIMENSION_MAX);
+  uiApply(slopeEdgeInput, () => applySlopeHeights());
+  uiApply(slopeFarInput, () => applySlopeHeights());
+  const slopeFields = uiEl("div", { class: "workshop__slopesRow ui-fields" }, [
+    uiField(strings.workshop.slopeEdgeHeight, slopeEdgeInput),
+    uiField(strings.workshop.slopeFarHeight, slopeFarInput),
+  ]);
+  const slopeRemoveButton = uiButton(strings.workshop.slopeRemove, {
+    class: "ui-btn ui-btn--danger ui-btn--wide",
+    on: { click: () => removeSlope() },
+  });
+  const slopeList = uiEl("div", { class: "workshop__slopesList" });
+  const slopeDrawButton = uiButton(strings.workshop.slopeDraw, { on: { click: () => startSlopeDraft() } });
+  const slopeDoneButton = uiButton(strings.workshop.slopeDone, { on: { click: () => toggleSlopes(false) } });
+  const slopeBox = uiEl("div", { class: "workshop__slopes", hidden: true }, [
+    uiEl("p", { class: "workshop__slopesTitle", text: strings.workshop.slopeTitle }),
+    slopeHint,
+    slopeFields,
+    slopeRemoveButton,
+    slopeList,
+    uiEl("div", { class: "workshop__slopesRow" }, [slopeDrawButton, slopeDoneButton]),
+  ]);
+  const wallsFoot = uiEl("div", { class: "workshop__foot" }, [heightButton, slopeButton, slopeBox]);
 
   // ——— где что стоит (таск 153, переложено в таске 187) ———
   //
@@ -3311,6 +3358,315 @@ function createWorkshop({ api, hosts }) {
       ctx.moveTo(at.x + nx * half, at.y + ny * half);
       ctx.lineTo(at.x - nx * half, at.y - ny * half);
       ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // ——— скаты потолка (ADR 043, правка 2026-11-21) ———
+  //
+  // Слова заказчика о вводе: «участок и две высоты» — обвести участок потолка
+  // по точкам, отметить нижнюю кромку, ввести высоту у неё и у верхней. Скат
+  // лежит у контура помещения (`outline.slopes`), правит его только модель, в
+  // историю идёт через `canvasCommit` своей строкой.
+
+  /** Скаты схемы списком: `[{outline, index, slope}]`. */
+  function slopesHere() {
+    const found = [];
+    for (const outline of outlinesInOrder(project(), schemeId)) {
+      outlineSlopes(outline).forEach((slope) => {
+        found.push({ outline, index: (outline.slopes || []).indexOf(slope), slope });
+      });
+    }
+    return found;
+  }
+
+  function slopeChosen() {
+    if (!slopeMode || !slopeMode.chosen) return null;
+    const { outlineId, index } = slopeMode.chosen;
+    return slopesHere().find((item) => item.outline.id === outlineId && item.index === index) || null;
+  }
+
+  function toggleSlopes(on) {
+    const want = on === undefined ? !slopeMode : on;
+    if (want === Boolean(slopeMode)) return;
+    if (want) {
+      settleDraft();
+      splitPick = null;
+      anchorPick = null;
+      slopeMode = { draft: null, chosen: null };
+    } else slopeMode = null;
+    sync();
+  }
+
+  function startSlopeDraft() {
+    if (!slopeMode) return;
+    slopeMode = { draft: { points: [], cursor: null }, chosen: null };
+    sync();
+  }
+
+  /** Куда сядет точка участка: углы стен, сетка и ровный угол — как у стены. */
+  function slopeSnap(event) {
+    const points = slopeMode && slopeMode.draft ? slopeMode.draft.points : [];
+    return workshopSnapMm(points, mmOf(event), view, {
+      free: Boolean(event.altKey),
+      gridMm: gridMm(),
+      gridSnap: gridSnap(),
+      corners: cornersMm(),
+    });
+  }
+
+  function finishSlopeDraft() {
+    const points = slopeMode && slopeMode.draft ? slopeMode.draft.points : [];
+    if (points.length < 3) return;
+    const centre = {
+      x: points.reduce((sum, point) => sum + point.x, 0) / points.length,
+      y: points.reduce((sum, point) => sum + point.y, 0) / points.length,
+    };
+    const fraction = planMmToFraction(project(), schemeId, centre);
+    const outline = fraction ? outlineAtPoint(project(), schemeId, fraction) : null;
+    if (!outline) {
+      notify(strings.workshop.slopeNoRoom, "error");
+      return;
+    }
+    // Высоты для начала: верх — высота помещения, низ — метр (ниже — уже не
+    // потолок, а ниша); человек тут же правит оба числа в плашке.
+    const high = wallHeightShownMm(project(), { schemeId, roomId: outline.roomId }).mm;
+    let result;
+    try {
+      result = addOutlineSlope(project(), outline.id, { pointsMm: points, edge: 0, lowMm: Math.min(1000, high), highMm: high });
+    } catch (error) {
+      fail(error);
+      return;
+    }
+    slopeMode = { draft: null, chosen: { outlineId: outline.id, index: result.index } };
+    commit(result.project, strings.history.slopeAdd);
+    notify(strings.workshop.slopeAdded, "success");
+    sync();
+  }
+
+  function slopeTap(event) {
+    if (slopeMode.draft) {
+      const draftNow = slopeMode.draft;
+      const snap = slopeSnap(event);
+      const first = draftNow.points[0];
+      if (draftNow.points.length >= 3 && first) {
+        // Замыкает и рука у первой точки, и притяжка, севшая ровно в неё.
+        const a = screenOf(first);
+        const b = pointOf(event);
+        const caught = snap.point.x === first.x && snap.point.y === first.y;
+        if (caught || Math.hypot(a.x - b.x, a.y - b.y) <= 12) {
+          finishSlopeDraft();
+          return;
+        }
+      }
+      const last = draftNow.points[draftNow.points.length - 1];
+      if (!last || last.x !== snap.point.x || last.y !== snap.point.y) {
+        slopeMode = { ...slopeMode, draft: { points: [...draftNow.points, snap.point], cursor: snap.point } };
+      }
+      redraw();
+      return;
+    }
+    const at = mmOf(event);
+    const chosen = slopeChosen();
+    if (chosen) {
+      // Щелчок по кромке выбранного — она становится кромкой отсчёта.
+      const points = chosen.slope.pointsMm;
+      const reach = 8 / Math.max(1e-6, view.zoom);
+      let best = -1;
+      let bestGap = reach;
+      for (let index = 0; index < points.length; index += 1) {
+        const gap = segmentDistanceMm(at, points[index], points[(index + 1) % points.length]);
+        if (gap <= bestGap) {
+          bestGap = gap;
+          best = index;
+        }
+      }
+      if (best >= 0) {
+        if (best !== chosen.slope.edge) patchSlope({ edge: best });
+        return;
+      }
+    }
+    // Иначе — выбор ската под рукой: самый маленький из накрывших точку.
+    let found = null;
+    let foundArea = Infinity;
+    for (const item of slopesHere()) {
+      if (!slopeCovers(item.slope, at)) continue;
+      const area = slopeArea(item.slope.pointsMm);
+      if (area < foundArea) {
+        found = item;
+        foundArea = area;
+      }
+    }
+    slopeMode = { draft: null, chosen: found ? { outlineId: found.outline.id, index: found.index } : null };
+    sync();
+  }
+
+  function patchSlope(patch) {
+    const chosen = slopeChosen();
+    if (!chosen) return;
+    let result;
+    try {
+      result = updateOutlineSlope(project(), chosen.outline.id, chosen.index, patch);
+    } catch (error) {
+      fail(error);
+      sync();
+      return;
+    }
+    if (result.changed) commit(result.project, strings.history.slopeEdit);
+    sync();
+  }
+
+  function applySlopeHeights() {
+    patchSlope({ lowMm: slopeEdgeInput.value, highMm: slopeFarInput.value });
+  }
+
+  function removeSlope() {
+    const chosen = slopeChosen();
+    if (!chosen) return;
+    let result;
+    try {
+      result = deleteOutlineSlope(project(), chosen.outline.id, chosen.index);
+    } catch (error) {
+      fail(error);
+      return;
+    }
+    slopeMode = { draft: null, chosen: null };
+    commit(result.project, strings.history.slopeDelete);
+    sync();
+  }
+
+  function syncSlopes() {
+    const list = slopesHere();
+    slopeButton.textContent = list.length > 0 ? text("workshop.slopeOpen", { count: list.length }) : strings.workshop.slopeOpenNone;
+    slopeButton.classList.toggle("is-set", Boolean(slopeMode));
+    slopeBox.hidden = !slopeMode;
+    if (!slopeMode) return;
+    // Выбранный скат сняли отменой — выбор гаснет.
+    if (slopeMode.chosen && !slopeChosen()) slopeMode = { ...slopeMode, chosen: null };
+    const chosen = slopeChosen();
+    const drafting = Boolean(slopeMode.draft);
+    slopeHint.textContent = drafting ? strings.workshop.slopeDrafting : chosen ? strings.workshop.slopeChosen : strings.workshop.slopeIdle;
+    slopeFields.hidden = !chosen;
+    slopeRemoveButton.hidden = !chosen;
+    slopeDrawButton.className = "ui-btn" + (drafting ? " ui-btn--accent" : "");
+    if (chosen) {
+      if (document.activeElement !== slopeEdgeInput) slopeEdgeInput.value = String(chosen.slope.lowMm);
+      if (document.activeElement !== slopeFarInput) slopeFarInput.value = String(chosen.slope.highMm);
+    }
+    slopeList.replaceChildren(
+      ...list.map((item) => {
+        const room = findRoom(project(), item.outline.roomId);
+        const row = uiButton(text("workshop.slopeRow", { room: room ? room.name : "", low: item.slope.lowMm, high: item.slope.highMm }), {
+          class: "ui-btn workshop__slopesItem" + (chosen && chosen.outline.id === item.outline.id && chosen.index === item.index ? " is-set" : ""),
+          on: {
+            click: () => {
+              slopeMode = { draft: null, chosen: { outlineId: item.outline.id, index: item.index } };
+              sync();
+            },
+          },
+        });
+        return row;
+      }),
+    );
+  }
+
+  /** Скаты на чертеже: контур участка, стрелка уклона и две высоты. */
+  function paintSlopes() {
+    if (!layerOn("drawingShown")) return;
+    const list = slopesHere();
+    const chosen = slopeChosen();
+    if (list.length === 0 && !(slopeMode && slopeMode.draft)) return;
+    ctx.save();
+    ctx.font = drawFont(11, 600);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    for (const item of list) {
+      const mine = Boolean(chosen && chosen.outline.id === item.outline.id && chosen.index === item.index);
+      const points = item.slope.pointsMm.map(screenOf);
+      ctx.beginPath();
+      points.forEach((point, index) => (index === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y)));
+      ctx.closePath();
+      ctx.globalAlpha = mine ? 0.16 : 0.07;
+      ctx.fillStyle = WORKSHOP_ANCHOR;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = WORKSHOP_ANCHOR;
+      ctx.lineWidth = mine ? 1.5 : 1;
+      ctx.setLineDash([6, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // Кромка отсчёта — жирной чертой; стрелка — от неё к самой дальней вершине.
+      const count = item.slope.pointsMm.length;
+      const from = item.slope.pointsMm[item.slope.edge];
+      const to = item.slope.pointsMm[(item.slope.edge + 1) % count];
+      const a = screenOf(from);
+      const b = screenOf(to);
+      ctx.lineWidth = mine ? 4 : 2.5;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+      const length = Math.hypot(to.x - from.x, to.y - from.y) || 1;
+      const normal = { x: -(to.y - from.y) / length, y: (to.x - from.x) / length };
+      let far = 0;
+      for (const point of item.slope.pointsMm) {
+        const reach = (point.x - from.x) * normal.x + (point.y - from.y) * normal.y;
+        if (Math.abs(reach) > Math.abs(far)) far = reach;
+      }
+      const middle = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+      const tail = screenOf(middle);
+      const head = screenOf({ x: middle.x + normal.x * far, y: middle.y + normal.y * far });
+      const run = Math.hypot(head.x - tail.x, head.y - tail.y);
+      if (run > 24) {
+        const ux = (head.x - tail.x) / run;
+        const uy = (head.y - tail.y) / run;
+        // Стрелка смотрит вверх по скату: от меньшей высоты к большей.
+        const up = item.slope.highMm >= item.slope.lowMm;
+        const start = up ? { x: tail.x + ux * 14, y: tail.y + uy * 14 } : { x: head.x - ux * 14, y: head.y - uy * 14 };
+        const end = up ? { x: head.x - ux * 14, y: head.y - uy * 14 } : { x: tail.x + ux * 14, y: tail.y + uy * 14 };
+        const dx = (end.x - start.x) / (Math.hypot(end.x - start.x, end.y - start.y) || 1);
+        const dy = (end.y - start.y) / (Math.hypot(end.x - start.x, end.y - start.y) || 1);
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(start.x, start.y);
+        ctx.lineTo(end.x, end.y);
+        ctx.moveTo(end.x, end.y);
+        ctx.lineTo(end.x - dx * 9 - dy * 4, end.y - dy * 9 + dx * 4);
+        ctx.moveTo(end.x, end.y);
+        ctx.lineTo(end.x - dx * 9 + dy * 4, end.y - dy * 9 - dx * 4);
+        ctx.stroke();
+        ctx.fillStyle = WORKSHOP_ANCHOR;
+        const label = (value, at) => {
+          const word = String(value);
+          const wide = ctx.measureText(word).width + 6;
+          ctx.fillStyle = WORKSHOP_PAPER;
+          ctx.fillRect(at.x - wide / 2, at.y - 7, wide, 14);
+          ctx.fillStyle = WORKSHOP_ANCHOR;
+          ctx.fillText(word, at.x, at.y);
+        };
+        label(item.slope.lowMm, { x: tail.x + ux * 14, y: tail.y + uy * 14 });
+        label(item.slope.highMm, { x: head.x - ux * 14, y: head.y - uy * 14 });
+      }
+    }
+    const draftNow = slopeMode ? slopeMode.draft : null;
+    if (draftNow && draftNow.points.length > 0) {
+      const points = draftNow.points.map(screenOf);
+      ctx.strokeStyle = WORKSHOP_ACCENT;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      points.forEach((point, index) => (index === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y)));
+      if (draftNow.cursor) {
+        const cursor = screenOf(draftNow.cursor);
+        ctx.lineTo(cursor.x, cursor.y);
+      }
+      ctx.stroke();
+      ctx.fillStyle = WORKSHOP_HANDLE;
+      points.forEach((point, index) => {
+        ctx.beginPath();
+        ctx.arc(point.x, point.y, index === 0 ? 5 : 3.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      });
     }
     ctx.restore();
   }
@@ -4086,7 +4442,7 @@ function createWorkshop({ api, hosts }) {
     // Пока мерят, под руку не берётся ничего — по той же причине, по которой
     // ничего не берётся в ожидании точки привязки: нажатие обязано дойти до
     // клика, а не увести стену из-под линейки (таск 237).
-    if (tool === "edit" && !anchorPick && !splitPick && !measuring()) {
+    if (tool === "edit" && !anchorPick && !splitPick && !slopeMode && !measuring()) {
       const pick = workshopPick(project(), schemeId, mmOf(event), view, selected, hiddenObjects());
       if (pick) {
         grab(pick, event);
@@ -4157,6 +4513,11 @@ function createWorkshop({ api, hosts }) {
       placeSplit(event);
       return;
     }
+    // Скаты (ADR 043): пока плашка открыта, щелчок в поле — её.
+    if (slopeMode) {
+      slopeTap(event);
+      return;
+    }
     if (tool === "walls") {
       addVertex(event);
       return;
@@ -4215,6 +4576,10 @@ function createWorkshop({ api, hosts }) {
 
   stage.addEventListener("dblclick", (event) => {
     event.preventDefault();
+    if (slopeMode) {
+      if (slopeMode.draft) finishSlopeDraft();
+      return;
+    }
     if (tool === "walls") {
       finishChain();
       return;
@@ -4344,6 +4709,15 @@ function createWorkshop({ api, hosts }) {
     }
     // Призрак точки привязки идёт за рукой — как призрак вещи (таск 208).
     // Стоит выше занятий по той же причине, что и клик: ожидание их старше.
+    if (slopeMode) {
+      if (slopeMode.draft) {
+        const snap = onField(event) ? slopeSnap(event) : null;
+        slopeMode = { ...slopeMode, draft: { ...slopeMode.draft, cursor: snap ? snap.point : null } };
+        markCorner(snap ? snap.corner : null);
+        redraw();
+      }
+      return;
+    }
     if (splitPick) {
       const next = onField(event) ? splitAtOf(event) : null;
       const was = splitPick.at;
@@ -4722,6 +5096,16 @@ function createWorkshop({ api, hosts }) {
         setState({ measuring: false });
         return;
       }
+      // Скаты (ADR 043): Esc снимает сперва участок, потом выбор, потом плашку.
+      if (slopeMode) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (slopeMode.draft) slopeMode = { draft: null, chosen: null };
+        else if (slopeMode.chosen) slopeMode = { draft: null, chosen: null };
+        else slopeMode = null;
+        sync();
+        return;
+      }
       // Лесенка целиком — в `workshopEscStep`, здесь только исполнение.
       // Слушатель висит в фазе перехвата: иначе окно закрылось бы раньше, чем
       // черновик успел отмениться.
@@ -4754,6 +5138,11 @@ function createWorkshop({ api, hosts }) {
         // Добавление кончилось — занятие возвращается к правке (G260).
         setMode("select");
       }
+      return;
+    }
+    if (event.key === "Enter" && slopeMode && slopeMode.draft && !uiFieldTarget(event.target)) {
+      event.preventDefault();
+      finishSlopeDraft();
       return;
     }
     if (event.key === "Enter" && draft) {
@@ -4966,6 +5355,7 @@ function createWorkshop({ api, hosts }) {
     // Объекты под стенами: колонна в стене и короб у стены принадлежат полу, а
     // стена — главное на чертеже, и прятать её под габаритом нельзя.
     paintDrawing();
+    paintSlopes();
     paintAnchor();
     paintSplit();
     paintObjectHandles();
@@ -5550,6 +5940,7 @@ function createWorkshop({ api, hosts }) {
     syncModeNote();
     syncDetails(current, wall);
     syncHeightButton(current);
+    syncSlopes();
     syncElevation(current, wall);
     syncList(current);
     hintPlate.update(workshopHint(tool, workshopObjectWay, measuring()));
@@ -5582,7 +5973,7 @@ function createWorkshop({ api, hosts }) {
   function syncCursor() {
     node.style.cursor = cursorFor({
       pan: Boolean(pan),
-      place: Boolean(anchorPick) || Boolean(splitPick) || tool !== "edit",
+      place: Boolean(anchorPick) || Boolean(splitPick) || Boolean(slopeMode && slopeMode.draft) || tool !== "edit",
     });
   }
 

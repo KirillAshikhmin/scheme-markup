@@ -5755,6 +5755,43 @@ margin-bottom: -12px;
 border-top: 1px solid var(--panel-line);
 background: var(--panel-bg);
 }
+.workshop__slopes {
+max-height: 46vh;
+overflow: auto;
+display: flex;
+flex-direction: column;
+gap: 6px;
+padding: 8px;
+border: 1px solid var(--accent);
+border-radius: 8px;
+color: var(--panel-text);
+font-size: 12px;
+}
+.workshop__slopes[hidden] {
+display: none;
+}
+.workshop__slopesTitle {
+margin: 0;
+font-weight: 600;
+}
+.workshop__slopesRow {
+display: flex;
+gap: 6px;
+}
+.workshop__slopesRow > * {
+flex: 1 1 0;
+}
+.workshop__slopesList {
+display: flex;
+flex-direction: column;
+gap: 3px;
+}
+.workshop__slopesItem {
+text-align: left;
+}
+.workshop__slopesItem.is-set {
+border-color: var(--accent);
+}
 .workshop__foot .ui-btn.is-set {
 border-color: var(--accent);
 }
@@ -6705,7 +6742,7 @@ display: none;
     var label = document.getElementById("splash-step");
     var canvas = document.getElementById("splash-model");
     var STEPS = ["Расставляем розетки…","Проектируем щит…","Настраиваем сценарии…","Подбираем оборудование…","Чертим стены…","Развешиваем люстры…","Тянем кабель…","Маркируем линии…","Считаем длину ленты…","Калибруем масштаб…","Проверяем автоматы…","Вешаем шторы на карнизы…","Ищем, где спрятать кондиционер…","Учим выключатели проходить…","Уговариваем датчик движения не реагировать на кота…","Объясняем люстре, что она не главная…","Прячем провода за плинтус…","Ищем фазу. Нашли. Больше не ищем…","Считаем розетки. Опять не хватает…","Мирим тёплый пол с ковром…","Договариваемся с роботом-пылесосом о маршруте…","Убеждаем щит, что места в нём достаточно…","Учим шторы просыпаться вовремя…","Проверяем, что лампочка действительно горит…","Напоминаем термостату, что зима кончилась…","Вспоминаем, от чего этот автомат…"];
-    var PAGE_BYTES = 3204576;
+    var PAGE_BYTES = 3217788;
     var calm = false;
     try {
     calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -7709,6 +7746,9 @@ wallHeight: "высота стен схемы",
 roomWallHeight: "высота стен помещения",
 wallOwnHeight: "высота стены",
 wallSplit: "деление стены",
+slopeAdd: "новый скат потолка",
+slopeEdit: "правка ската",
+slopeDelete: "удаление ската",
 roomCeiling: "потолок помещения",
 wallPaint: "покраска стены",
 wallGlass: "стеклянная стена",
@@ -8472,6 +8512,21 @@ paintStreet: "улица",
 wallGlass: "Стекло",
 wallGlassHint: "Стеклянная стена: в «Объёме» сквозь неё видно, тени дома она не бросает, а пройти сквозь неё нельзя. Краска сторон остаётся и вернётся, если снять отметку",
 wallSplit: "Разделить стену",
+slopeOpen: "Скаты потолка: {count}",
+slopeOpenNone: "Скаты потолка",
+slopeOpenHint: "Наклонный потолок мансарды: обвести участок на плане, отметить кромку и задать две высоты",
+slopeTitle: "Скаты потолка",
+slopeIdle: "Выберите скат на плане или в списке — или начертите новый.",
+slopeDrafting: "Щёлкайте по углам участка потолка. Замкнуть — щелчок по первой точке, Enter или двойной щелчок; Esc — отменить.",
+slopeChosen: "Жирная кромка — та, от которой считается высота (обычно нижняя). Щёлкните по другой кромке участка, чтобы отсчитывать от неё.",
+slopeDraw: "Начертить скат",
+slopeDone: "Готово",
+slopeEdgeHeight: "Высота у кромки, мм",
+slopeFarHeight: "Высота в дальней точке, мм",
+slopeRemove: "Удалить скат",
+slopeRow: "{room}: {low} → {high} мм",
+slopeNoRoom: "Скат чертят внутри обведённого помещения: середина участка не попала ни в один контур",
+slopeAdded: "Скат начерчен. Отметьте кромку и поправьте две высоты",
 wallSplitHint: "Разрезать стену на два отрезка — у каждого своя высота. Проёмы и метки остаются на своих местах",
 removeWallTitle: "Удалить стену вместе с проёмами?",
 removeWallAsk: "В этой стене проёмов: {count}. Они живут в ней и уйдут вместе с ней — вернуть их можно будет только отменой (Ctrl+Z).",
@@ -77996,6 +78051,7 @@ let ghost = null;
 let objectGhost = null;
 let anchorPick = null;
 let splitPick = null;
+let slopeMode = null;
 let drag = null;
 let pan = null;
 let press = null;
@@ -78235,7 +78291,36 @@ class: "ui-btn ui-btn--wide",
 title: strings.workshop.heightHint,
 on: { click: () => openHeights() },
 });
-const wallsFoot = uiEl("div", { class: "workshop__foot" }, [heightButton]);
+const slopeButton = uiButton(strings.workshop.slopeOpenNone, {
+class: "ui-btn ui-btn--wide",
+title: strings.workshop.slopeOpenHint,
+on: { click: () => toggleSlopes() },
+});
+const slopeHint = uiEl("p", { class: "workshop__note" });
+const slopeEdgeInput = uiNumber(0, MARK_DIMENSION_MAX);
+const slopeFarInput = uiNumber(0, MARK_DIMENSION_MAX);
+uiApply(slopeEdgeInput, () => applySlopeHeights());
+uiApply(slopeFarInput, () => applySlopeHeights());
+const slopeFields = uiEl("div", { class: "workshop__slopesRow ui-fields" }, [
+uiField(strings.workshop.slopeEdgeHeight, slopeEdgeInput),
+uiField(strings.workshop.slopeFarHeight, slopeFarInput),
+]);
+const slopeRemoveButton = uiButton(strings.workshop.slopeRemove, {
+class: "ui-btn ui-btn--danger ui-btn--wide",
+on: { click: () => removeSlope() },
+});
+const slopeList = uiEl("div", { class: "workshop__slopesList" });
+const slopeDrawButton = uiButton(strings.workshop.slopeDraw, { on: { click: () => startSlopeDraft() } });
+const slopeDoneButton = uiButton(strings.workshop.slopeDone, { on: { click: () => toggleSlopes(false) } });
+const slopeBox = uiEl("div", { class: "workshop__slopes", hidden: true }, [
+uiEl("p", { class: "workshop__slopesTitle", text: strings.workshop.slopeTitle }),
+slopeHint,
+slopeFields,
+slopeRemoveButton,
+slopeList,
+uiEl("div", { class: "workshop__slopesRow" }, [slopeDrawButton, slopeDoneButton]),
+]);
+const wallsFoot = uiEl("div", { class: "workshop__foot" }, [heightButton, slopeButton, slopeBox]);
 stage.append(hintPlate.node, summaryPlate.node);
 hosts.stage.replaceChildren(stage);
 hosts.side.replaceChildren(
@@ -78668,6 +78753,285 @@ ctx.beginPath();
 ctx.moveTo(at.x + nx * half, at.y + ny * half);
 ctx.lineTo(at.x - nx * half, at.y - ny * half);
 ctx.stroke();
+}
+ctx.restore();
+}
+function slopesHere() {
+const found = [];
+for (const outline of outlinesInOrder(project(), schemeId)) {
+outlineSlopes(outline).forEach((slope) => {
+found.push({ outline, index: (outline.slopes || []).indexOf(slope), slope });
+});
+}
+return found;
+}
+function slopeChosen() {
+if (!slopeMode || !slopeMode.chosen) return null;
+const { outlineId, index } = slopeMode.chosen;
+return slopesHere().find((item) => item.outline.id === outlineId && item.index === index) || null;
+}
+function toggleSlopes(on) {
+const want = on === undefined ? !slopeMode : on;
+if (want === Boolean(slopeMode)) return;
+if (want) {
+settleDraft();
+splitPick = null;
+anchorPick = null;
+slopeMode = { draft: null, chosen: null };
+} else slopeMode = null;
+sync();
+}
+function startSlopeDraft() {
+if (!slopeMode) return;
+slopeMode = { draft: { points: [], cursor: null }, chosen: null };
+sync();
+}
+function slopeSnap(event) {
+const points = slopeMode && slopeMode.draft ? slopeMode.draft.points : [];
+return workshopSnapMm(points, mmOf(event), view, {
+free: Boolean(event.altKey),
+gridMm: gridMm(),
+gridSnap: gridSnap(),
+corners: cornersMm(),
+});
+}
+function finishSlopeDraft() {
+const points = slopeMode && slopeMode.draft ? slopeMode.draft.points : [];
+if (points.length < 3) return;
+const centre = {
+x: points.reduce((sum, point) => sum + point.x, 0) / points.length,
+y: points.reduce((sum, point) => sum + point.y, 0) / points.length,
+};
+const fraction = planMmToFraction(project(), schemeId, centre);
+const outline = fraction ? outlineAtPoint(project(), schemeId, fraction) : null;
+if (!outline) {
+notify(strings.workshop.slopeNoRoom, "error");
+return;
+}
+const high = wallHeightShownMm(project(), { schemeId, roomId: outline.roomId }).mm;
+let result;
+try {
+result = addOutlineSlope(project(), outline.id, { pointsMm: points, edge: 0, lowMm: Math.min(1000, high), highMm: high });
+} catch (error) {
+fail(error);
+return;
+}
+slopeMode = { draft: null, chosen: { outlineId: outline.id, index: result.index } };
+commit(result.project, strings.history.slopeAdd);
+notify(strings.workshop.slopeAdded, "success");
+sync();
+}
+function slopeTap(event) {
+if (slopeMode.draft) {
+const draftNow = slopeMode.draft;
+const snap = slopeSnap(event);
+const first = draftNow.points[0];
+if (draftNow.points.length >= 3 && first) {
+const a = screenOf(first);
+const b = pointOf(event);
+const caught = snap.point.x === first.x && snap.point.y === first.y;
+if (caught || Math.hypot(a.x - b.x, a.y - b.y) <= 12) {
+finishSlopeDraft();
+return;
+}
+}
+const last = draftNow.points[draftNow.points.length - 1];
+if (!last || last.x !== snap.point.x || last.y !== snap.point.y) {
+slopeMode = { ...slopeMode, draft: { points: [...draftNow.points, snap.point], cursor: snap.point } };
+}
+redraw();
+return;
+}
+const at = mmOf(event);
+const chosen = slopeChosen();
+if (chosen) {
+const points = chosen.slope.pointsMm;
+const reach = 8 / Math.max(1e-6, view.zoom);
+let best = -1;
+let bestGap = reach;
+for (let index = 0; index < points.length; index += 1) {
+const gap = segmentDistanceMm(at, points[index], points[(index + 1) % points.length]);
+if (gap <= bestGap) {
+bestGap = gap;
+best = index;
+}
+}
+if (best >= 0) {
+if (best !== chosen.slope.edge) patchSlope({ edge: best });
+return;
+}
+}
+let found = null;
+let foundArea = Infinity;
+for (const item of slopesHere()) {
+if (!slopeCovers(item.slope, at)) continue;
+const area = slopeArea(item.slope.pointsMm);
+if (area < foundArea) {
+found = item;
+foundArea = area;
+}
+}
+slopeMode = { draft: null, chosen: found ? { outlineId: found.outline.id, index: found.index } : null };
+sync();
+}
+function patchSlope(patch) {
+const chosen = slopeChosen();
+if (!chosen) return;
+let result;
+try {
+result = updateOutlineSlope(project(), chosen.outline.id, chosen.index, patch);
+} catch (error) {
+fail(error);
+sync();
+return;
+}
+if (result.changed) commit(result.project, strings.history.slopeEdit);
+sync();
+}
+function applySlopeHeights() {
+patchSlope({ lowMm: slopeEdgeInput.value, highMm: slopeFarInput.value });
+}
+function removeSlope() {
+const chosen = slopeChosen();
+if (!chosen) return;
+let result;
+try {
+result = deleteOutlineSlope(project(), chosen.outline.id, chosen.index);
+} catch (error) {
+fail(error);
+return;
+}
+slopeMode = { draft: null, chosen: null };
+commit(result.project, strings.history.slopeDelete);
+sync();
+}
+function syncSlopes() {
+const list = slopesHere();
+slopeButton.textContent = list.length > 0 ? text("workshop.slopeOpen", { count: list.length }) : strings.workshop.slopeOpenNone;
+slopeButton.classList.toggle("is-set", Boolean(slopeMode));
+slopeBox.hidden = !slopeMode;
+if (!slopeMode) return;
+if (slopeMode.chosen && !slopeChosen()) slopeMode = { ...slopeMode, chosen: null };
+const chosen = slopeChosen();
+const drafting = Boolean(slopeMode.draft);
+slopeHint.textContent = drafting ? strings.workshop.slopeDrafting : chosen ? strings.workshop.slopeChosen : strings.workshop.slopeIdle;
+slopeFields.hidden = !chosen;
+slopeRemoveButton.hidden = !chosen;
+slopeDrawButton.className = "ui-btn" + (drafting ? " ui-btn--accent" : "");
+if (chosen) {
+if (document.activeElement !== slopeEdgeInput) slopeEdgeInput.value = String(chosen.slope.lowMm);
+if (document.activeElement !== slopeFarInput) slopeFarInput.value = String(chosen.slope.highMm);
+}
+slopeList.replaceChildren(
+...list.map((item) => {
+const room = findRoom(project(), item.outline.roomId);
+const row = uiButton(text("workshop.slopeRow", { room: room ? room.name : "", low: item.slope.lowMm, high: item.slope.highMm }), {
+class: "ui-btn workshop__slopesItem" + (chosen && chosen.outline.id === item.outline.id && chosen.index === item.index ? " is-set" : ""),
+on: {
+click: () => {
+slopeMode = { draft: null, chosen: { outlineId: item.outline.id, index: item.index } };
+sync();
+},
+},
+});
+return row;
+}),
+);
+}
+function paintSlopes() {
+if (!layerOn("drawingShown")) return;
+const list = slopesHere();
+const chosen = slopeChosen();
+if (list.length === 0 && !(slopeMode && slopeMode.draft)) return;
+ctx.save();
+ctx.font = drawFont(11, 600);
+ctx.textAlign = "center";
+ctx.textBaseline = "middle";
+for (const item of list) {
+const mine = Boolean(chosen && chosen.outline.id === item.outline.id && chosen.index === item.index);
+const points = item.slope.pointsMm.map(screenOf);
+ctx.beginPath();
+points.forEach((point, index) => (index === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y)));
+ctx.closePath();
+ctx.globalAlpha = mine ? 0.16 : 0.07;
+ctx.fillStyle = WORKSHOP_ANCHOR;
+ctx.fill();
+ctx.globalAlpha = 1;
+ctx.strokeStyle = WORKSHOP_ANCHOR;
+ctx.lineWidth = mine ? 1.5 : 1;
+ctx.setLineDash([6, 4]);
+ctx.stroke();
+ctx.setLineDash([]);
+const count = item.slope.pointsMm.length;
+const from = item.slope.pointsMm[item.slope.edge];
+const to = item.slope.pointsMm[(item.slope.edge + 1) % count];
+const a = screenOf(from);
+const b = screenOf(to);
+ctx.lineWidth = mine ? 4 : 2.5;
+ctx.beginPath();
+ctx.moveTo(a.x, a.y);
+ctx.lineTo(b.x, b.y);
+ctx.stroke();
+const length = Math.hypot(to.x - from.x, to.y - from.y) || 1;
+const normal = { x: -(to.y - from.y) / length, y: (to.x - from.x) / length };
+let far = 0;
+for (const point of item.slope.pointsMm) {
+const reach = (point.x - from.x) * normal.x + (point.y - from.y) * normal.y;
+if (Math.abs(reach) > Math.abs(far)) far = reach;
+}
+const middle = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+const tail = screenOf(middle);
+const head = screenOf({ x: middle.x + normal.x * far, y: middle.y + normal.y * far });
+const run = Math.hypot(head.x - tail.x, head.y - tail.y);
+if (run > 24) {
+const ux = (head.x - tail.x) / run;
+const uy = (head.y - tail.y) / run;
+const up = item.slope.highMm >= item.slope.lowMm;
+const start = up ? { x: tail.x + ux * 14, y: tail.y + uy * 14 } : { x: head.x - ux * 14, y: head.y - uy * 14 };
+const end = up ? { x: head.x - ux * 14, y: head.y - uy * 14 } : { x: tail.x + ux * 14, y: tail.y + uy * 14 };
+const dx = (end.x - start.x) / (Math.hypot(end.x - start.x, end.y - start.y) || 1);
+const dy = (end.y - start.y) / (Math.hypot(end.x - start.x, end.y - start.y) || 1);
+ctx.lineWidth = 1.2;
+ctx.beginPath();
+ctx.moveTo(start.x, start.y);
+ctx.lineTo(end.x, end.y);
+ctx.moveTo(end.x, end.y);
+ctx.lineTo(end.x - dx * 9 - dy * 4, end.y - dy * 9 + dx * 4);
+ctx.moveTo(end.x, end.y);
+ctx.lineTo(end.x - dx * 9 + dy * 4, end.y - dy * 9 - dx * 4);
+ctx.stroke();
+ctx.fillStyle = WORKSHOP_ANCHOR;
+const label = (value, at) => {
+const word = String(value);
+const wide = ctx.measureText(word).width + 6;
+ctx.fillStyle = WORKSHOP_PAPER;
+ctx.fillRect(at.x - wide / 2, at.y - 7, wide, 14);
+ctx.fillStyle = WORKSHOP_ANCHOR;
+ctx.fillText(word, at.x, at.y);
+};
+label(item.slope.lowMm, { x: tail.x + ux * 14, y: tail.y + uy * 14 });
+label(item.slope.highMm, { x: head.x - ux * 14, y: head.y - uy * 14 });
+}
+}
+const draftNow = slopeMode ? slopeMode.draft : null;
+if (draftNow && draftNow.points.length > 0) {
+const points = draftNow.points.map(screenOf);
+ctx.strokeStyle = WORKSHOP_ACCENT;
+ctx.lineWidth = 1.5;
+ctx.beginPath();
+points.forEach((point, index) => (index === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y)));
+if (draftNow.cursor) {
+const cursor = screenOf(draftNow.cursor);
+ctx.lineTo(cursor.x, cursor.y);
+}
+ctx.stroke();
+ctx.fillStyle = WORKSHOP_HANDLE;
+points.forEach((point, index) => {
+ctx.beginPath();
+ctx.arc(point.x, point.y, index === 0 ? 5 : 3.5, 0, Math.PI * 2);
+ctx.fill();
+ctx.stroke();
+});
 }
 ctx.restore();
 }
@@ -79142,7 +79506,7 @@ pan = { x: event.clientX, y: event.clientY };
 syncCursor();
 return;
 }
-if (tool === "edit" && !anchorPick && !splitPick && !measuring()) {
+if (tool === "edit" && !anchorPick && !splitPick && !slopeMode && !measuring()) {
 const pick = workshopPick(project(), schemeId, mmOf(event), view, selected, hiddenObjects());
 if (pick) {
 grab(pick, event);
@@ -79187,6 +79551,10 @@ if (splitPick) {
 placeSplit(event);
 return;
 }
+if (slopeMode) {
+slopeTap(event);
+return;
+}
 if (tool === "walls") {
 addVertex(event);
 return;
@@ -79225,6 +79593,10 @@ paint();
 }
 stage.addEventListener("dblclick", (event) => {
 event.preventDefault();
+if (slopeMode) {
+if (slopeMode.draft) finishSlopeDraft();
+return;
+}
 if (tool === "walls") {
 finishChain();
 return;
@@ -79311,6 +79683,15 @@ return;
 }
 if (measuring()) {
 if (event.pointerType !== "touch") measureHover(event);
+return;
+}
+if (slopeMode) {
+if (slopeMode.draft) {
+const snap = onField(event) ? slopeSnap(event) : null;
+slopeMode = { ...slopeMode, draft: { ...slopeMode.draft, cursor: snap ? snap.point : null } };
+markCorner(snap ? snap.corner : null);
+redraw();
+}
 return;
 }
 if (splitPick) {
@@ -79573,6 +79954,15 @@ measureDropAll();
 setState({ measuring: false });
 return;
 }
+if (slopeMode) {
+event.preventDefault();
+event.stopPropagation();
+if (slopeMode.draft) slopeMode = { draft: null, chosen: null };
+else if (slopeMode.chosen) slopeMode = { draft: null, chosen: null };
+else slopeMode = null;
+sync();
+return;
+}
 const step = workshopEscStep({
 anchorPick: Boolean(anchorPick),
 splitPick: Boolean(splitPick),
@@ -79597,6 +79987,11 @@ select(null);
 } else {
 setMode("select");
 }
+return;
+}
+if (event.key === "Enter" && slopeMode && slopeMode.draft && !uiFieldTarget(event.target)) {
+event.preventDefault();
+finishSlopeDraft();
 return;
 }
 if (event.key === "Enter" && draft) {
@@ -79718,6 +80113,7 @@ drawDrawingGrid(ctx, drawingUnitBridge(view), box, gridMm());
 paintOverlay();
 if (spot.kind === "ready") paintOrigin();
 paintDrawing();
+paintSlopes();
 paintAnchor();
 paintSplit();
 paintObjectHandles();
@@ -80073,6 +80469,7 @@ syncAddPlate();
 syncModeNote();
 syncDetails(current, wall);
 syncHeightButton(current);
+syncSlopes();
 syncElevation(current, wall);
 syncList(current);
 hintPlate.update(workshopHint(tool, workshopObjectWay, measuring()));
@@ -80085,7 +80482,7 @@ redraw();
 function syncCursor() {
 node.style.cursor = cursorFor({
 pan: Boolean(pan),
-place: Boolean(anchorPick) || Boolean(splitPick) || tool !== "edit",
+place: Boolean(anchorPick) || Boolean(splitPick) || Boolean(slopeMode && slopeMode.draft) || tool !== "edit",
 });
 }
 function syncModeNote() {
