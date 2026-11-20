@@ -751,6 +751,26 @@ export function volumeScene(project, schemeId, options = {}) {
   // Дом вокруг квартиры: контур по габариту, фасад — стороны с окнами.
   let house = null;
   if (lift) {
+    // **Габарит дома — по помещениям под крышей** (правка 2026-11-20, дефект
+    // заказчика: «балкон внутри здания»). Балкон начерчен помещением без
+    // потолка и стенами нулевой высоты; он висит на фасаде, а не стоит в
+    // корпусе, и в габарит дома не идёт. Помещения не обведены — габарит по
+    // чертежу, как было.
+    const roofed = rooms.filter((room) => room.hasCeiling !== false && room.pointsMm.length >= 3);
+    let core = bounds;
+    if (roofed.length > 0) {
+      // Контур обводят по внутренней грани стены: запас — на её толщину.
+      const pad = 150;
+      core = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+      for (const room of roofed) {
+        for (const point of room.pointsMm) {
+          core.minX = Math.min(core.minX, point.x - pad);
+          core.maxX = Math.max(core.maxX, point.x + pad);
+          core.minY = Math.min(core.minY, point.y - pad);
+          core.maxY = Math.max(core.maxY, point.y + pad);
+        }
+      }
+    }
     const windows = { north: false, east: false, south: false, west: false };
     const near = 700;
     for (const wall of walls) {
@@ -760,14 +780,13 @@ export function volumeScene(project, schemeId, options = {}) {
       const bx = Number(wall.bMm.x);
       const by = Number(wall.bMm.y);
       if (Math.abs(ay - by) <= Math.abs(ax - bx)) {
-        if (Math.abs((ay + by) / 2 - bounds.minY) < near) windows.north = true;
-        if (Math.abs((ay + by) / 2 - bounds.maxY) < near) windows.south = true;
+        if (Math.abs((ay + by) / 2 - core.minY) < near) windows.north = true;
+        if (Math.abs((ay + by) / 2 - core.maxY) < near) windows.south = true;
       } else {
-        if (Math.abs((ax + bx) / 2 - bounds.minX) < near) windows.west = true;
-        if (Math.abs((ax + bx) / 2 - bounds.maxX) < near) windows.east = true;
+        if (Math.abs((ax + bx) / 2 - core.minX) < near) windows.west = true;
+        if (Math.abs((ax + bx) / 2 - core.maxX) < near) windows.east = true;
       }
     }
-    const outline = volumeHouseOutline(bounds, windows);
     // Вход в квартиру: дверь в стене на глухой стороне габарита. За ней дом
     // рисует коридор этажа (`volume/house.js`), иначе из двери видна улица.
     let entry = null;
@@ -781,14 +800,14 @@ export function volumeScene(project, schemeId, options = {}) {
       const by = Number(wall.bMm.y);
       const flat = Math.abs(ay - by) <= Math.abs(ax - bx);
       const side = flat
-        ? Math.abs((ay + by) / 2 - bounds.maxY) < near
+        ? Math.abs((ay + by) / 2 - core.maxY) < near
           ? "south"
-          : Math.abs((ay + by) / 2 - bounds.minY) < near
+          : Math.abs((ay + by) / 2 - core.minY) < near
             ? "north"
             : null
-        : Math.abs((ax + bx) / 2 - bounds.maxX) < near
+        : Math.abs((ax + bx) / 2 - core.maxX) < near
           ? "east"
-          : Math.abs((ax + bx) / 2 - bounds.minX) < near
+          : Math.abs((ax + bx) / 2 - core.minX) < near
             ? "west"
             : null;
       if (!side || windows[side]) continue;
@@ -807,10 +826,26 @@ export function volumeScene(project, schemeId, options = {}) {
         break;
       }
     }
+    // Контур — после входа: за входной дверью дом продолжается всегда, даже
+    // если окна стоят на всех остальных сторонах.
+    const outline = volumeHouseOutline(core, windows, entry ? entry.side : null);
+    if (entry) {
+      // Коридор не выходит за дом: его длина режется по корпусу вдоль стены.
+      const flatSide = entry.side === "south" || entry.side === "north";
+      const low = flatSide ? outline.rect.minX - entry.x : outline.rect.minY - entry.y;
+      const high = flatSide ? outline.rect.maxX - entry.x : outline.rect.maxY - entry.y;
+      // «Вдоль» у коридора — поворот нормали на четверть: у южного и
+      // западного входа он смотрит против оси, и края меняются местами.
+      const flip = entry.out.y - entry.out.x > 0 ? -1 : 1;
+      entry.fromMm = flip > 0 ? low : -high;
+      entry.toMm = flip > 0 ? high : -low;
+    }
     house = {
       ...lift,
       rect: outline.rect,
       wings: outline.wings,
+      // Габарит самой квартиры под крышей: по нему решается, внутри ли глаз.
+      core,
       entry,
       // Низ и верх самой квартиры: под ней дом до земли, над ней — до крыши.
       floorMm: -VOLUME_SLAB_MM,

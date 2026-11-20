@@ -478,7 +478,7 @@ import {
   volumeAroundTarget,
   volumeMarkerFaces,
 } from "./volume/around.js";
-import { volumeDrawHouse, volumeHallFaces, volumeHallHolds, volumeHouseParts } from "./volume/house.js";
+import { volumeDrawHouse, volumeHallFaces, volumeHallHolds, volumeHallSpan, volumeHouseParts } from "./volume/house.js";
 
 export {
   VOLUME_ARCH_SEGMENTS,
@@ -685,6 +685,7 @@ export {
   volumeHouseParts,
   volumeHallFaces,
   volumeHallHolds,
+  volumeHallSpan,
   volumeCurtainGather,
   volumeCurtainOpen,
   volumeCurtainShare,

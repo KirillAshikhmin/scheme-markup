@@ -22,6 +22,7 @@ import {
   VOLUME_HOUSE_WING_MM,
   volumeGroundAim,
   volumeHallFaces,
+  volumeHallSpan,
   volumeHallHolds,
   volumeHouseLift,
   volumeHouseOutline,
@@ -222,4 +223,33 @@ test("вышедший за входную дверь стоит в коридо
   assert.equal(pass(inHall).wing, "before");
   assert.equal(pass(inHall).high, "before");
   assert.equal(pass(beyond).wing, "after");
+});
+
+test("за входной дверью дом продолжается всегда, а коридор не длиннее дома", () => {
+  const bounds = { minX: 0, maxX: 9000, minY: 0, maxY: 8000 };
+  // Окна на всех сторонах: прежде соседей не было вовсе, и коридор висел в воздухе.
+  const all = { north: true, east: true, south: true, west: true };
+  assert.deepEqual(volumeHouseOutline(bounds, all).wings, []);
+  const forced = volumeHouseOutline(bounds, all, "south");
+  assert.deepEqual(forced.wings.map((wing) => wing.side), ["south"]);
+  assert.equal(forced.rect.maxY, 8000 + 12000);
+  // Коридор режется по корпусу и не короче прохода у двери.
+  assert.deepEqual(volumeHallSpan({ fromMm: -1500, toMm: 2500 }), { from: -1500, to: 2500 });
+  assert.deepEqual(volumeHallSpan({ fromMm: -100, toMm: 99999 }).from, -600);
+  assert.ok(volumeHallSpan({}).to > 3000);
+});
+
+test("соседние секции рисуются от дальней к ближней", () => {
+  const house = {
+    floor: 5, floors: 9, groundMm: -12000, floorMm: -200, ceilingMm: 2700, roofMm: 14700,
+    rect: { minX: 0, maxX: 18000, minY: 0, maxY: 16000 },
+    wings: [
+      { side: "east", minX: 6000, maxX: 18000, minY: 0, maxY: 16000 },
+      { side: "south", minX: 0, maxX: 6000, minY: 4000, maxY: 16000 },
+    ],
+    entry: null,
+  };
+  const order = (eye) => volumeHouseParts(house, eye).filter((part) => part.name === "wing").map((part) => part.rect.side);
+  assert.deepEqual(order({ x: 10000, y: 30000, z: 1000 }), ["south", "east"]);
+  assert.deepEqual(order({ x: 3000, y: 30000, z: 1000 }), ["east", "south"]);
 });

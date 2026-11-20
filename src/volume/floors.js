@@ -598,10 +598,13 @@ export function volumeHouseLift(project, schemeId, heightMm) {
  * габариту: гадать, где у него соседи, нечем. `wings` — куски дома на уровне
  * самой квартиры, за её глухими сторонами.
  */
-export function volumeHouseOutline(bounds, windows) {
+export function volumeHouseOutline(bounds, windows, entrySide = null) {
   const sides = ["north", "east", "south", "west"];
   const open = sides.filter((side) => windows && windows[side]);
-  const grow = open.length === 0 || open.length === 4 ? () => 0 : (side) => (windows[side] ? 0 : VOLUME_HOUSE_WING_MM);
+  // `entrySide` — сторона входной двери: за ней дом продолжается всегда
+  // (правка 2026-11-20: иначе коридор этажа висел бы в воздухе).
+  const rule = open.length === 0 || open.length === 4 ? () => 0 : (side) => (windows[side] ? 0 : VOLUME_HOUSE_WING_MM);
+  const grow = (side) => (side === entrySide ? VOLUME_HOUSE_WING_MM : rule(side));
   const rect = {
     minX: bounds.minX - grow("west"),
     maxX: bounds.maxX + grow("east"),

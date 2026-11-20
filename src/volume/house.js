@@ -46,30 +46,43 @@ const HALL_HANDLE = "#d9d5cc";
  * Чистая — по ней идёт и кадр, и тест. `entry` — вход квартиры
  * (`scene.house.entry`), `heightMm` — высота потолка.
  */
+/**
+ * Откуда и докуда коридор тянется вдоль стены от середины двери. Дом короче
+ * коридора — он режется по корпусу (`entry.fromMm`, `entry.toMm` от сцены).
+ */
+export function volumeHallSpan(entry) {
+  const from = Number.isFinite(entry && entry.fromMm) ? Math.max(-VOLUME_HALL_HALF_MM, entry.fromMm) : -VOLUME_HALL_HALF_MM;
+  const to = Number.isFinite(entry && entry.toMm) ? Math.min(VOLUME_HALL_HALF_MM, entry.toMm) : VOLUME_HALL_HALF_MM;
+  return { from: Math.min(from, -600), to: Math.max(to, 600) };
+}
+
 export function volumeHallFaces(entry, heightMm) {
   if (!entry || !(heightMm > 0)) return [];
   const out = entry.out;
   const along = { x: -out.y, y: out.x };
   const at = (side, deep, z) => ({ x: entry.x + along.x * side + out.x * deep, y: entry.y + along.y * side + out.y * deep, z });
-  const L = VOLUME_HALL_HALF_MM;
+  const span = volumeHallSpan(entry);
+  const A = span.from;
+  const B = span.to;
   const D = VOLUME_HALL_DEEP_MM;
   const H = heightMm;
   const faces = [
-    { color: HALL_FLOOR, points: [at(-L, 0, 0), at(L, 0, 0), at(L, D, 0), at(-L, D, 0)] },
-    { color: HALL_CEILING, points: [at(-L, 0, H), at(L, 0, H), at(L, D, H), at(-L, D, H)] },
-    { color: HALL_WALL, points: [at(-L, D, 0), at(L, D, 0), at(L, D, H), at(-L, D, H)] },
-    { color: HALL_SIDE, points: [at(-L, 0, 0), at(-L, D, 0), at(-L, D, H), at(-L, 0, H)] },
-    { color: HALL_SIDE, points: [at(L, 0, 0), at(L, D, 0), at(L, D, H), at(L, 0, H)] },
+    { color: HALL_FLOOR, points: [at(A, 0, 0), at(B, 0, 0), at(B, D, 0), at(A, D, 0)] },
+    { color: HALL_CEILING, points: [at(A, 0, H), at(B, 0, H), at(B, D, H), at(A, D, H)] },
+    { color: HALL_WALL, points: [at(A, D, 0), at(B, D, 0), at(B, D, H), at(A, D, H)] },
+    { color: HALL_SIDE, points: [at(A, 0, 0), at(A, D, 0), at(A, D, H), at(A, 0, H)] },
+    { color: HALL_SIDE, points: [at(B, 0, 0), at(B, D, 0), at(B, D, H), at(B, 0, H)] },
   ];
   const half = VOLUME_HALL_DOOR_MM.width / 2;
   const tall = Math.min(VOLUME_HALL_DOOR_MM.height, H - 100);
   // Три двери напротив и по одной в торцах — пять квартир на площадке.
   for (const middle of [-2900, 0, 2900]) {
+    // Дверь, не поместившаяся в укороченный коридор, не рисуется.
+    if (middle - half < A + 150 || middle + half > B - 150) continue;
     faces.push({ color: HALL_DOOR, points: [at(middle - half, D - 8, 0), at(middle + half, D - 8, 0), at(middle + half, D - 8, tall), at(middle - half, D - 8, tall)] });
     faces.push({ color: HALL_HANDLE, points: [at(middle + half - 150, D - 16, 980), at(middle + half - 60, D - 16, 980), at(middle + half - 60, D - 16, 1040), at(middle + half - 150, D - 16, 1040)] });
   }
-  for (const side of [-1, 1]) {
-    const x = side * (L - 8);
+  for (const x of [A + 8, B - 8]) {
     faces.push({ color: HALL_DOOR, points: [at(x, D / 2 - half, 0), at(x, D / 2 + half, 0), at(x, D / 2 + half, tall), at(x, D / 2 - half, tall)] });
   }
   return faces;
@@ -91,7 +104,8 @@ export function volumeHallHolds(house, eye) {
   return (
     deep >= -500 &&
     deep <= VOLUME_HALL_DEEP_MM &&
-    Math.abs(side) <= VOLUME_HALL_HALF_MM &&
+    side >= volumeHallSpan(entry).from &&
+    side <= volumeHallSpan(entry).to &&
     eye.z >= house.floorMm &&
     eye.z <= house.ceilingMm
   );
@@ -127,7 +141,11 @@ export function volumeHouseParts(house, eye, roofOff = false) {
   // Глаз в коридоре этажа — он внутри дома: соседи и верх рисуются до сцены,
   // как для стоящего в квартире.
   const hall = volumeHallHolds(house, eye);
-  for (const wing of house.wings) {
+  // Соседние секции стоят встык и рисуются коробками: дальняя от глаза —
+  // раньше, иначе торец дальней ложится поверх ближней (правка 2026-11-20).
+  const away = (rect) => Math.hypot(Math.max(rect.minX - eye.x, 0, eye.x - rect.maxX), Math.max(rect.minY - eye.y, 0, eye.y - rect.maxY));
+  const wings = [...house.wings].sort((one, two) => away(two) - away(one));
+  for (const wing of wings) {
     const outside =
       !hall &&
       (wing.side === "west"
@@ -180,7 +198,15 @@ export function volumeDrawHouse(ctx, box, camera, mood, scene, pass, roofOff = f
   // закрывает, и видно его только глазу, стоящему по квартирную сторону входа.
   const entry = house.entry;
   if (pass === "before" && entry) {
-    const inside = (camera.at.x - entry.x) * entry.out.x + (camera.at.y - entry.y) * entry.out.y < 0;
+    // «Внутри» — в самой квартире, а не просто по её сторону от стены: снаружи
+    // дома коридор не рисуется, иначе он виден сквозь воздух.
+    const core = house.core || house.rect;
+    const inside =
+      (camera.at.x - entry.x) * entry.out.x + (camera.at.y - entry.y) * entry.out.y < 0 &&
+      camera.at.x >= core.minX &&
+      camera.at.x <= core.maxX &&
+      camera.at.y >= core.minY &&
+      camera.at.y <= core.maxY;
     if ((inside && camera.at.z < house.ceilingMm) || volumeHallHolds(house, camera.at)) {
       // Стоящему в коридоре нужна и четвёртая стена — та, в которой дверь
       // квартиры: саму квартирную стену рисует сцена поверх, а там, где её нет
@@ -191,9 +217,10 @@ export function volumeDrawHouse(ctx, box, camera, mood, scene, pass, roofOff = f
       if (deep > 0) {
         const along = { x: -entry.out.y, y: entry.out.x };
         const corner = (side, z) => ({ x: entry.x + along.x * side, y: entry.y + along.y * side, z });
+        const span = volumeHallSpan(entry);
         faces.unshift({
           color: HALL_WALL,
-          points: [corner(-VOLUME_HALL_HALF_MM, 0), corner(VOLUME_HALL_HALF_MM, 0), corner(VOLUME_HALL_HALF_MM, house.ceilingMm), corner(-VOLUME_HALL_HALF_MM, house.ceilingMm)],
+          points: [corner(span.from, 0), corner(span.to, 0), corner(span.to, house.ceilingMm), corner(span.from, house.ceilingMm)],
         });
       }
       for (const face of faces) {

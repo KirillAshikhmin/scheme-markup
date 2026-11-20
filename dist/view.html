@@ -6705,7 +6705,7 @@ display: none;
     var label = document.getElementById("splash-step");
     var canvas = document.getElementById("splash-model");
     var STEPS = ["Расставляем розетки…","Проектируем щит…","Настраиваем сценарии…","Подбираем оборудование…","Чертим стены…","Развешиваем люстры…","Тянем кабель…","Маркируем линии…","Считаем длину ленты…","Калибруем масштаб…","Проверяем автоматы…","Вешаем шторы на карнизы…","Ищем, где спрятать кондиционер…","Учим выключатели проходить…","Уговариваем датчик движения не реагировать на кота…","Объясняем люстре, что она не главная…","Прячем провода за плинтус…","Ищем фазу. Нашли. Больше не ищем…","Считаем розетки. Опять не хватает…","Мирим тёплый пол с ковром…","Договариваемся с роботом-пылесосом о маршруте…","Убеждаем щит, что места в нём достаточно…","Учим шторы просыпаться вовремя…","Проверяем, что лампочка действительно горит…","Напоминаем термостату, что зима кончилась…","Вспоминаем, от чего этот автомат…"];
-    var PAGE_BYTES = 3119571;
+    var PAGE_BYTES = 3121351;
     var calm = false;
     try {
     calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -41412,10 +41412,11 @@ const floors = Math.max(building.floors, floor);
 const raiseMm = (floor - 1) * storeyMm;
 return { floor, floors, storeyMm, raiseMm, groundMm: raiseMm === 0 ? 0 : -raiseMm, roofMm: wall + (floors - floor) * storeyMm };
 }
-function volumeHouseOutline(bounds, windows) {
+function volumeHouseOutline(bounds, windows, entrySide = null) {
 const sides = ["north", "east", "south", "west"];
 const open = sides.filter((side) => windows && windows[side]);
-const grow = open.length === 0 || open.length === 4 ? () => 0 : (side) => (windows[side] ? 0 : VOLUME_HOUSE_WING_MM);
+const rule = open.length === 0 || open.length === 4 ? () => 0 : (side) => (windows[side] ? 0 : VOLUME_HOUSE_WING_MM);
+const grow = (side) => (side === entrySide ? VOLUME_HOUSE_WING_MM : rule(side));
 const rect = {
 minX: bounds.minX - grow("west"),
 maxX: bounds.maxX + grow("east"),
@@ -42505,6 +42506,20 @@ heightMm: height,
 if (lifted) shadowBoxes.length = 0;
 let house = null;
 if (lift) {
+const roofed = rooms.filter((room) => room.hasCeiling !== false && room.pointsMm.length >= 3);
+let core = bounds;
+if (roofed.length > 0) {
+const pad = 150;
+core = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+for (const room of roofed) {
+for (const point of room.pointsMm) {
+core.minX = Math.min(core.minX, point.x - pad);
+core.maxX = Math.max(core.maxX, point.x + pad);
+core.minY = Math.min(core.minY, point.y - pad);
+core.maxY = Math.max(core.maxY, point.y + pad);
+}
+}
+}
 const windows = { north: false, east: false, south: false, west: false };
 const near = 700;
 for (const wall of walls) {
@@ -42514,14 +42529,13 @@ const ay = Number(wall.aMm.y);
 const bx = Number(wall.bMm.x);
 const by = Number(wall.bMm.y);
 if (Math.abs(ay - by) <= Math.abs(ax - bx)) {
-if (Math.abs((ay + by) / 2 - bounds.minY) < near) windows.north = true;
-if (Math.abs((ay + by) / 2 - bounds.maxY) < near) windows.south = true;
+if (Math.abs((ay + by) / 2 - core.minY) < near) windows.north = true;
+if (Math.abs((ay + by) / 2 - core.maxY) < near) windows.south = true;
 } else {
-if (Math.abs((ax + bx) / 2 - bounds.minX) < near) windows.west = true;
-if (Math.abs((ax + bx) / 2 - bounds.maxX) < near) windows.east = true;
+if (Math.abs((ax + bx) / 2 - core.minX) < near) windows.west = true;
+if (Math.abs((ax + bx) / 2 - core.maxX) < near) windows.east = true;
 }
 }
-const outline = volumeHouseOutline(bounds, windows);
 let entry = null;
 for (const wall of walls) {
 if (entry) break;
@@ -42533,14 +42547,14 @@ const bx = Number(wall.bMm.x);
 const by = Number(wall.bMm.y);
 const flat = Math.abs(ay - by) <= Math.abs(ax - bx);
 const side = flat
-? Math.abs((ay + by) / 2 - bounds.maxY) < near
+? Math.abs((ay + by) / 2 - core.maxY) < near
 ? "south"
-: Math.abs((ay + by) / 2 - bounds.minY) < near
+: Math.abs((ay + by) / 2 - core.minY) < near
 ? "north"
 : null
-: Math.abs((ax + bx) / 2 - bounds.maxX) < near
+: Math.abs((ax + bx) / 2 - core.maxX) < near
 ? "east"
-: Math.abs((ax + bx) / 2 - bounds.minX) < near
+: Math.abs((ax + bx) / 2 - core.minX) < near
 ? "west"
 : null;
 if (!side || windows[side]) continue;
@@ -42558,10 +42572,20 @@ out,
 break;
 }
 }
+const outline = volumeHouseOutline(core, windows, entry ? entry.side : null);
+if (entry) {
+const flatSide = entry.side === "south" || entry.side === "north";
+const low = flatSide ? outline.rect.minX - entry.x : outline.rect.minY - entry.y;
+const high = flatSide ? outline.rect.maxX - entry.x : outline.rect.maxY - entry.y;
+const flip = entry.out.y - entry.out.x > 0 ? -1 : 1;
+entry.fromMm = flip > 0 ? low : -high;
+entry.toMm = flip > 0 ? high : -low;
+}
 house = {
 ...lift,
 rect: outline.rect,
 wings: outline.wings,
+core,
 entry,
 floorMm: -VOLUME_SLAB_MM,
 ceilingMm: schemeHeight.mm,
@@ -46613,29 +46637,36 @@ const HALL_FLOOR = "#8d8880";
 const HALL_CEILING = "#efece6";
 const HALL_DOOR = "#8a6a4a";
 const HALL_HANDLE = "#d9d5cc";
+function volumeHallSpan(entry) {
+const from = Number.isFinite(entry && entry.fromMm) ? Math.max(-VOLUME_HALL_HALF_MM, entry.fromMm) : -VOLUME_HALL_HALF_MM;
+const to = Number.isFinite(entry && entry.toMm) ? Math.min(VOLUME_HALL_HALF_MM, entry.toMm) : VOLUME_HALL_HALF_MM;
+return { from: Math.min(from, -600), to: Math.max(to, 600) };
+}
 function volumeHallFaces(entry, heightMm) {
 if (!entry || !(heightMm > 0)) return [];
 const out = entry.out;
 const along = { x: -out.y, y: out.x };
 const at = (side, deep, z) => ({ x: entry.x + along.x * side + out.x * deep, y: entry.y + along.y * side + out.y * deep, z });
-const L = VOLUME_HALL_HALF_MM;
+const span = volumeHallSpan(entry);
+const A = span.from;
+const B = span.to;
 const D = VOLUME_HALL_DEEP_MM;
 const H = heightMm;
 const faces = [
-{ color: HALL_FLOOR, points: [at(-L, 0, 0), at(L, 0, 0), at(L, D, 0), at(-L, D, 0)] },
-{ color: HALL_CEILING, points: [at(-L, 0, H), at(L, 0, H), at(L, D, H), at(-L, D, H)] },
-{ color: HALL_WALL, points: [at(-L, D, 0), at(L, D, 0), at(L, D, H), at(-L, D, H)] },
-{ color: HALL_SIDE, points: [at(-L, 0, 0), at(-L, D, 0), at(-L, D, H), at(-L, 0, H)] },
-{ color: HALL_SIDE, points: [at(L, 0, 0), at(L, D, 0), at(L, D, H), at(L, 0, H)] },
+{ color: HALL_FLOOR, points: [at(A, 0, 0), at(B, 0, 0), at(B, D, 0), at(A, D, 0)] },
+{ color: HALL_CEILING, points: [at(A, 0, H), at(B, 0, H), at(B, D, H), at(A, D, H)] },
+{ color: HALL_WALL, points: [at(A, D, 0), at(B, D, 0), at(B, D, H), at(A, D, H)] },
+{ color: HALL_SIDE, points: [at(A, 0, 0), at(A, D, 0), at(A, D, H), at(A, 0, H)] },
+{ color: HALL_SIDE, points: [at(B, 0, 0), at(B, D, 0), at(B, D, H), at(B, 0, H)] },
 ];
 const half = VOLUME_HALL_DOOR_MM.width / 2;
 const tall = Math.min(VOLUME_HALL_DOOR_MM.height, H - 100);
 for (const middle of [-2900, 0, 2900]) {
+if (middle - half < A + 150 || middle + half > B - 150) continue;
 faces.push({ color: HALL_DOOR, points: [at(middle - half, D - 8, 0), at(middle + half, D - 8, 0), at(middle + half, D - 8, tall), at(middle - half, D - 8, tall)] });
 faces.push({ color: HALL_HANDLE, points: [at(middle + half - 150, D - 16, 980), at(middle + half - 60, D - 16, 980), at(middle + half - 60, D - 16, 1040), at(middle + half - 150, D - 16, 1040)] });
 }
-for (const side of [-1, 1]) {
-const x = side * (L - 8);
+for (const x of [A + 8, B - 8]) {
 faces.push({ color: HALL_DOOR, points: [at(x, D / 2 - half, 0), at(x, D / 2 + half, 0), at(x, D / 2 + half, tall), at(x, D / 2 - half, tall)] });
 }
 return faces;
@@ -46649,7 +46680,8 @@ const side = (eye.x - entry.x) * -out.y + (eye.y - entry.y) * out.x;
 return (
 deep >= -500 &&
 deep <= VOLUME_HALL_DEEP_MM &&
-Math.abs(side) <= VOLUME_HALL_HALF_MM &&
+side >= volumeHallSpan(entry).from &&
+side <= volumeHallSpan(entry).to &&
 eye.z >= house.floorMm &&
 eye.z <= house.ceilingMm
 );
@@ -46674,7 +46706,9 @@ parts.push({ name: "low", rect: house.rect, bottomMm: house.groundMm, topMm: hou
 }
 if (roofOff) return parts;
 const hall = volumeHallHolds(house, eye);
-for (const wing of house.wings) {
+const away = (rect) => Math.hypot(Math.max(rect.minX - eye.x, 0, eye.x - rect.maxX), Math.max(rect.minY - eye.y, 0, eye.y - rect.maxY));
+const wings = [...house.wings].sort((one, two) => away(two) - away(one));
+for (const wing of wings) {
 const outside =
 !hall &&
 (wing.side === "west"
@@ -46717,16 +46751,23 @@ drawn += 1;
 }
 const entry = house.entry;
 if (pass === "before" && entry) {
-const inside = (camera.at.x - entry.x) * entry.out.x + (camera.at.y - entry.y) * entry.out.y < 0;
+const core = house.core || house.rect;
+const inside =
+(camera.at.x - entry.x) * entry.out.x + (camera.at.y - entry.y) * entry.out.y < 0 &&
+camera.at.x >= core.minX &&
+camera.at.x <= core.maxX &&
+camera.at.y >= core.minY &&
+camera.at.y <= core.maxY;
 if ((inside && camera.at.z < house.ceilingMm) || volumeHallHolds(house, camera.at)) {
 const deep = (camera.at.x - entry.x) * entry.out.x + (camera.at.y - entry.y) * entry.out.y;
 const faces = volumeHallFaces(entry, house.ceilingMm);
 if (deep > 0) {
 const along = { x: -entry.out.y, y: entry.out.x };
 const corner = (side, z) => ({ x: entry.x + along.x * side, y: entry.y + along.y * side, z });
+const span = volumeHallSpan(entry);
 faces.unshift({
 color: HALL_WALL,
-points: [corner(-VOLUME_HALL_HALF_MM, 0), corner(VOLUME_HALL_HALF_MM, 0), corner(VOLUME_HALL_HALF_MM, house.ceilingMm), corner(-VOLUME_HALL_HALF_MM, house.ceilingMm)],
+points: [corner(span.from, 0), corner(span.to, 0), corner(span.to, house.ceilingMm), corner(span.from, house.ceilingMm)],
 });
 }
 for (const face of faces) {
