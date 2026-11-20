@@ -90,6 +90,11 @@ export function volumeGlMake(THREE) {
   renderer.toneMappingExposure = 1.1;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  // Карты теней пересчитываются не каждый кадр, а когда меняется то, что их
+  // определяет: сцена, набор и места ламп, солнце (`shadowKey`). Тень теперь у
+  // каждой лампы — иначе свет проходит сквозь стены (дефект заказчика:
+  // «включил свет в туалете за глухой стеной, а свет попадает и в гостиную»).
+  renderer.shadowMap.autoUpdate = false;
   renderer.setClearColor(0x000000, 0);
   renderer.setPixelRatio(1);
   const canvas = renderer.domElement;
@@ -168,8 +173,9 @@ export function volumeGlMake(THREE) {
   const spots = [];
   for (let at = 0; at < VOLUME_GL_SPOTS; at += 1) {
     const lamp = new THREE.SpotLight(0xffe6c4, 0, 0, 1.25, 0.9, 2);
-    lamp.castShadow = at < VOLUME_GL_SHADOWED;
-    lamp.shadow.mapSize.set(1024, 1024);
+    lamp.castShadow = true;
+    // Ближним — карта подробнее, остальным хватает половины.
+    lamp.shadow.mapSize.set(at < VOLUME_GL_SHADOWED ? 1024 : 512, at < VOLUME_GL_SHADOWED ? 1024 : 512);
     // Запас побольше: под скользящим светом стена шла рябью (дефект заказчика).
     lamp.shadow.bias = -0.004;
     lamp.shadow.normalBias = 0.06;
@@ -181,13 +187,28 @@ export function volumeGlMake(THREE) {
   const points = [];
   for (let at = 0; at < VOLUME_GL_POINTS; at += 1) {
     const lamp = new THREE.PointLight(0xffe6c4, 0, 0, 2);
+    lamp.castShadow = true;
+    lamp.shadow.mapSize.set(512, 512);
+    lamp.shadow.bias = -0.004;
+    lamp.shadow.normalBias = 0.06;
+    lamp.shadow.camera.near = 0.05;
+    lamp.shadow.camera.far = 14;
     world.add(lamp);
     points.push(lamp);
   }
   const fill = new THREE.PointLight(0xffe6c4, 0, 0, 2);
+  // Отражённый свет тоже не ходит сквозь стены.
+  fill.castShadow = true;
+  fill.shadow.mapSize.set(256, 256);
+  fill.shadow.bias = -0.006;
+  fill.shadow.normalBias = 0.08;
+  fill.shadow.camera.near = 0.05;
+  fill.shadow.camera.far = 14;
+  let shadowKey = "";
   world.add(fill);
 
   let sceneWas = null;
+  let sceneStamp = 0;
   let litFaces = [];
   let glowKey = "";
   let overWas = null;
@@ -381,6 +402,7 @@ export function volumeGlMake(THREE) {
     if (scene !== sceneWas) {
       sceneWas = scene;
       sceneMesh(scene);
+      sceneStamp += 1;
     }
     glowMesh(frame.glow || null);
     overMesh(frame.extra || null);
@@ -404,6 +426,15 @@ export function volumeGlMake(THREE) {
     // «Вверх» — как у `volumeBasis`: при взгляде отвесно вниз кадр не переворачивается.
     camera.up.set(-Math.sin(pitch) * Math.cos(yaw), cp, -Math.sin(pitch) * Math.sin(yaw));
     camera.lookAt(px + Math.cos(yaw) * cp, py + Math.sin(pitch), pz + Math.sin(yaw) * cp);
+    // Что определяет тени: сцена, где стоят и горят ли источники, где солнце.
+    let lit = String(sceneStamp);
+    for (const node of [...spots, ...points, fill, sun]) {
+      lit += "|" + (node.intensity > 0 ? Math.round(node.position.x * 50) + "," + Math.round(node.position.y * 50) + "," + Math.round(node.position.z * 50) : "-");
+    }
+    if (lit !== shadowKey) {
+      shadowKey = lit;
+      renderer.shadowMap.needsUpdate = true;
+    }
     renderer.render(world, camera);
     return canvas;
   }

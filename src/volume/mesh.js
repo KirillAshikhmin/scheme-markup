@@ -355,7 +355,12 @@ export function volumeMeshLampPick(lamps, eye, limits = { spots: 8, points: 3 })
   let fx = 0;
   let fy = 0;
   let power = 0;
+  // Отражённый свет — у **ближайшего горящего помещения**: середина ламп
+  // разных комнат пришлась бы в стену или к соседям, а сквозь стены он теперь
+  // не ходит (у источника тень).
+  const lead = spots[0] && points[0] ? ((spots[0].x - eye.x) ** 2 + (spots[0].y - eye.y) ** 2 <= (points[0].x - eye.x) ** 2 + (points[0].y - eye.y) ** 2 ? spots[0] : points[0]) : spots[0] || points[0] || null;
   for (const item of [...spots, ...points]) {
+    if (lead && item.room !== lead.room) continue;
     fx += item.x * item.power;
     fy += item.y * item.power;
     power += item.power;
