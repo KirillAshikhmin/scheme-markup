@@ -136,6 +136,11 @@ export function volumeGlMake(THREE) {
   solid.receiveShadow = true;
   const glass = new THREE.Mesh(empty(), mats.clear);
   glass.renderOrder = 2;
+  // Тела светильников тени не бросают (дефект заказчика: «свет от люстры
+  // неверно рассчитывается, откуда там такая тень?»): источник стоит внутри
+  // самого светильника, и его плафоны закрывали бы от него полкомнаты.
+  const fixtures = new THREE.Mesh(empty(), mats.solid);
+  fixtures.receiveShadow = true;
   const land = new THREE.Mesh(empty(), mats.land);
   land.receiveShadow = true;
   const lines = new THREE.LineSegments(empty(), mats.line);
@@ -149,7 +154,7 @@ export function volumeGlMake(THREE) {
   overClear.renderOrder = 4;
   const overLines = new THREE.LineSegments(empty(), mats.overLine);
   overLines.renderOrder = 5;
-  world.add(solid, land, glass, lines, led, glow, overSolid, overClear, overLines);
+  world.add(solid, fixtures, land, glass, lines, led, glow, overSolid, overClear, overLines);
 
   const hemi = new THREE.HemisphereLight(0xdfe9f5, 0x8b8577, 1);
   const sun = new THREE.DirectionalLight(0xfff4d6, 0);
@@ -201,8 +206,12 @@ export function volumeGlMake(THREE) {
     // фигуры полотна — по порядку записи (дефект заказчика: «на телевизоре
     // картинка артефактами идёт… или там, где плоскости пересекаются»).
     const art = volumeMeshArtLift();
+    // Светильник — метка, у которой есть тело, способное светиться.
+    const shining = new Set();
+    for (const face of scene.faces) if (face.lit && face.markId && !face.art) shining.add(face.markId);
+    const isFixture = (face) => Boolean(face.markId) && shining.has(face.markId) && !face.line && !(face.clear || face.alpha < 1);
     const mesh = volumeMeshBuild(scene.faces, {
-      keep: (face) => !isLed(face) && !isScreen(face) && !isLand(face),
+      keep: (face) => !isLed(face) && !isScreen(face) && !isLand(face) && !isFixture(face),
       // Плита земли лежит в одной плоскости с полами (в кадре Canvas 2D их
       // разводил ярус): опускается на 4 мм (дефект заказчика: «у одноэтажных
       // объектов пересекаются фон земли и пола»).
@@ -212,6 +221,7 @@ export function volumeGlMake(THREE) {
     swap(glass, geometry(mesh.clear, 4));
     swap(lines, geometry(mesh.lines, 3));
     swap(led, geometry(volumeMeshBuild(scene.faces, { keep: isLed, alpha: () => 1 }).solid, 3));
+    swap(fixtures, geometry(volumeMeshBuild(scene.faces, { keep: (face) => isFixture(face) && !isLed(face) && !isScreen(face), lift: volumeMeshThingLift }).solid, 3));
     swap(land, geometry(volumeMeshBuild(scene.faces, { keep: isLand, alpha: () => 1, lift: () => -4 }).solid, 3));
     litFaces = scene.faces.filter((face) => !face.line && (face.lit || isScreen(face)) && face.markId);
     triangles = mesh.triangles;
@@ -394,7 +404,7 @@ export function volumeGlMake(THREE) {
   }
 
   function drop() {
-    for (const node of [solid, land, glass, lines, led, glow, overSolid, overClear, overLines]) node.geometry.dispose();
+    for (const node of [solid, fixtures, land, glass, lines, led, glow, overSolid, overClear, overLines]) node.geometry.dispose();
     for (const name of Object.keys(mats)) mats[name].dispose();
     renderer.dispose();
     sceneWas = null;

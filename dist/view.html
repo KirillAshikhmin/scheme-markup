@@ -6705,7 +6705,7 @@ display: none;
     var label = document.getElementById("splash-step");
     var canvas = document.getElementById("splash-model");
     var STEPS = ["Расставляем розетки…","Проектируем щит…","Настраиваем сценарии…","Подбираем оборудование…","Чертим стены…","Развешиваем люстры…","Тянем кабель…","Маркируем линии…","Считаем длину ленты…","Калибруем масштаб…","Проверяем автоматы…","Вешаем шторы на карнизы…","Ищем, где спрятать кондиционер…","Учим выключатели проходить…","Уговариваем датчик движения не реагировать на кота…","Объясняем люстре, что она не главная…","Прячем провода за плинтус…","Ищем фазу. Нашли. Больше не ищем…","Считаем розетки. Опять не хватает…","Мирим тёплый пол с ковром…","Договариваемся с роботом-пылесосом о маршруте…","Убеждаем щит, что места в нём достаточно…","Учим шторы просыпаться вовремя…","Проверяем, что лампочка действительно горит…","Напоминаем термостату, что зима кончилась…","Вспоминаем, от чего этот автомат…"];
-    var PAGE_BYTES = 3147478;
+    var PAGE_BYTES = 3148021;
     var calm = false;
     try {
     calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -72330,6 +72330,8 @@ solid.castShadow = true;
 solid.receiveShadow = true;
 const glass = new THREE.Mesh(empty(), mats.clear);
 glass.renderOrder = 2;
+const fixtures = new THREE.Mesh(empty(), mats.solid);
+fixtures.receiveShadow = true;
 const land = new THREE.Mesh(empty(), mats.land);
 land.receiveShadow = true;
 const lines = new THREE.LineSegments(empty(), mats.line);
@@ -72343,7 +72345,7 @@ const overClear = new THREE.Mesh(empty(), mats.overClear);
 overClear.renderOrder = 4;
 const overLines = new THREE.LineSegments(empty(), mats.overLine);
 overLines.renderOrder = 5;
-world.add(solid, land, glass, lines, led, glow, overSolid, overClear, overLines);
+world.add(solid, fixtures, land, glass, lines, led, glow, overSolid, overClear, overLines);
 const hemi = new THREE.HemisphereLight(0xdfe9f5, 0x8b8577, 1);
 const sun = new THREE.DirectionalLight(0xfff4d6, 0);
 sun.castShadow = true;
@@ -72383,14 +72385,18 @@ const isScreen = (face) => face.art === "screen";
 const isLand = (face) => face.layer === VOLUME_LAYER_BASE && face.flat === true;
 const isLed = (face) => Boolean(face.led) && !face.line && !isScreen(face);
 const art = volumeMeshArtLift();
+const shining = new Set();
+for (const face of scene.faces) if (face.lit && face.markId && !face.art) shining.add(face.markId);
+const isFixture = (face) => Boolean(face.markId) && shining.has(face.markId) && !face.line && !(face.clear || face.alpha < 1);
 const mesh = volumeMeshBuild(scene.faces, {
-keep: (face) => !isLed(face) && !isScreen(face) && !isLand(face),
+keep: (face) => !isLed(face) && !isScreen(face) && !isLand(face) && !isFixture(face),
 lift: (face) => (face.layer === VOLUME_LAYER_BASE ? -4 : volumeMeshThingLift(face) + (face.art ? art(face) : 0)),
 });
 swap(solid, geometry(mesh.solid, 3));
 swap(glass, geometry(mesh.clear, 4));
 swap(lines, geometry(mesh.lines, 3));
 swap(led, geometry(volumeMeshBuild(scene.faces, { keep: isLed, alpha: () => 1 }).solid, 3));
+swap(fixtures, geometry(volumeMeshBuild(scene.faces, { keep: (face) => isFixture(face) && !isLed(face) && !isScreen(face), lift: volumeMeshThingLift }).solid, 3));
 swap(land, geometry(volumeMeshBuild(scene.faces, { keep: isLand, alpha: () => 1, lift: () => -4 }).solid, 3));
 litFaces = scene.faces.filter((face) => !face.line && (face.lit || isScreen(face)) && face.markId);
 triangles = mesh.triangles;
@@ -72552,7 +72558,7 @@ renderer.render(world, camera);
 return canvas;
 }
 function drop() {
-for (const node of [solid, land, glass, lines, led, glow, overSolid, overClear, overLines]) node.geometry.dispose();
+for (const node of [solid, fixtures, land, glass, lines, led, glow, overSolid, overClear, overLines]) node.geometry.dispose();
 for (const name of Object.keys(mats)) mats[name].dispose();
 renderer.dispose();
 sceneWas = null;
