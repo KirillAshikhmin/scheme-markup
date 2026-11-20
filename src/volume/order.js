@@ -373,29 +373,55 @@ function volumeFacesSame(was, now) {
 export function volumeOrderInsert(node, faces, cuts = null) {
   if (!faces || faces.length === 0) return node;
   if (!node) return volumeOrderNode(faces, cuts);
-  const same = [];
-  const front = [];
-  const back = [];
-  for (const face of faces) {
-    const side = volumeFaceSide(node.plane, face);
-    if (side === 0) same.push(face);
-    else if (side === 1) front.push(face);
-    else if (side === -1) back.push(face);
-    else {
-      const cut = volumeSplitFace(face, node.plane, cuts);
-      if (cut.front) front.push(cut.front);
-      if (cut.back) back.push(cut.back);
+  // Без рекурсии (правка 2026-11-21): глубина дерева на большом объекте с
+  // круглыми телами — тысячи узлов, и стек браузера на ней кончался
+  // («Maximum call stack size exceeded» у заказчика). Порядок обхода прежний:
+  // ближняя половина раньше дальней — от него зависит порядок резов (`cuts`).
+  let top = null;
+  const made = [];
+  const jobs = [{ node, faces, set: (next) => (top = next) }];
+  while (jobs.length > 0) {
+    const job = jobs.pop();
+    if (!job.faces || job.faces.length === 0) {
+      job.set(job.node);
+      continue;
     }
+    if (!job.node) {
+      job.set(volumeOrderNode(job.faces, cuts));
+      continue;
+    }
+    const same = [];
+    const front = [];
+    const back = [];
+    for (const face of job.faces) {
+      const side = volumeFaceSide(job.node.plane, face);
+      if (side === 0) same.push(face);
+      else if (side === 1) front.push(face);
+      else if (side === -1) back.push(face);
+      else {
+        const cut = volumeSplitFace(face, job.node.plane, cuts);
+        if (cut.front) front.push(cut.front);
+        if (cut.back) back.push(cut.back);
+      }
+    }
+    const next = {
+      plane: job.node.plane,
+      same: same.length > 0 ? [...job.node.same, ...same] : job.node.same,
+      front: null,
+      back: null,
+      count: 0,
+    };
+    job.set(next);
+    made.push(next);
+    jobs.push({ node: job.node.back, faces: back, set: (child) => (next.back = child) });
+    jobs.push({ node: job.node.front, faces: front, set: (child) => (next.front = child) });
   }
-  const next = {
-    plane: node.plane,
-    same: same.length > 0 ? [...node.same, ...same] : node.same,
-    front: volumeOrderInsert(node.front, front, cuts),
-    back: volumeOrderInsert(node.back, back, cuts),
-    count: 0,
-  };
-  next.count = next.same.length + (next.front ? next.front.count : 0) + (next.back ? next.back.count : 0);
-  return next;
+  // Счёт — от листьев к корню: потомок заведён позже родителя.
+  for (let at = made.length - 1; at >= 0; at -= 1) {
+    const item = made[at];
+    item.count = item.same.length + (item.front ? item.front.count : 0) + (item.back ? item.back.count : 0);
+  }
+  return top;
 }
 
 /**
@@ -405,6 +431,28 @@ export function volumeOrderInsert(node, faces, cuts = null) {
  */
 function volumeOrderNode(items, cuts = null) {
   if (items.length === 0) return null;
+  // Без рекурсии — см. `volumeOrderInsert`. Узлы заводятся в том же порядке,
+  // в каком их заводила рекурсия: ближняя половина целиком, потом дальняя.
+  let top = null;
+  const made = [];
+  const jobs = [{ items, set: (node) => (top = node) }];
+  while (jobs.length > 0) {
+    const job = jobs.pop();
+    const split = volumeOrderSplit(job.items, cuts);
+    job.set(split.node);
+    made.push(split.node);
+    if (split.back && split.back.length > 0) jobs.push({ items: split.back, set: (node) => (split.node.back = node) });
+    if (split.front && split.front.length > 0) jobs.push({ items: split.front, set: (node) => (split.node.front = node) });
+  }
+  for (let at = made.length - 1; at >= 0; at -= 1) {
+    const node = made[at];
+    node.count = node.same.length + (node.front ? node.front.count : 0) + (node.back ? node.back.count : 0);
+  }
+  return top;
+}
+
+/** Один узел: его плоскость, свои грани и две половины, ещё не разобранные. */
+function volumeOrderSplit(items, cuts) {
   let best = null;
   const tries = Math.min(items.length, VOLUME_ORDER_TRIES);
   for (let at = 0; at < tries; at += 1) {
@@ -424,7 +472,7 @@ function volumeOrderNode(items, cuts = null) {
   }
   // Все грани в одной плоскости: делить нечем, и незачем — коплоскостные грани
   // друг друга не закрывают.
-  if (!best) return { plane: volumePlaneOf(items[0]), same: items, front: null, back: null, count: items.length };
+  if (!best) return { node: { plane: volumePlaneOf(items[0]), same: items, front: null, back: null, count: items.length }, front: null, back: null };
   const plane = best.plane;
   const same = [];
   const front = [];
@@ -447,9 +495,7 @@ function volumeOrderNode(items, cuts = null) {
     if (cut.front) front.push(cut.front);
     if (cut.back) back.push(cut.back);
   }
-  const node = { plane, same, front: volumeOrderNode(front, cuts), back: volumeOrderNode(back, cuts), count: 0 };
-  node.count = same.length + (node.front ? node.front.count : 0) + (node.back ? node.back.count : 0);
-  return node;
+  return { node: { plane, same, front: null, back: null, count: 0 }, front, back };
 }
 
 /**
@@ -457,11 +503,20 @@ function volumeOrderNode(items, cuts = null) {
  * ближнее поддерево. Возвращает грани в порядке рисования.
  */
 export function volumeOrderWalk(tree, eye, out = []) {
-  if (!tree) return out;
-  const near = volumePointSide(tree.plane, eye) >= 0;
-  volumeOrderWalk(near ? tree.back : tree.front, eye, out);
-  for (const face of tree.same) out.push(face);
-  volumeOrderWalk(near ? tree.front : tree.back, eye, out);
+  // Без рекурсии — см. `volumeOrderInsert`: свой стек вместо стека вызовов.
+  const stack = [];
+  let node = tree;
+  while (node || stack.length > 0) {
+    while (node) {
+      const near = volumePointSide(node.plane, eye) >= 0;
+      stack.push(node, near);
+      node = near ? node.back : node.front;
+    }
+    const near = stack.pop();
+    const at = stack.pop();
+    for (const face of at.same) out.push(face);
+    node = near ? at.front : at.back;
+  }
   return out;
 }
 
@@ -492,10 +547,14 @@ export function volumeOrderRank(tree, eye, point) {
 
 /** Все грани дерева порядка — куски, как они лежат в узлах. */
 export function volumeOrderAll(node, out = []) {
-  if (!node) return out;
-  for (const face of node.same) out.push(face);
-  volumeOrderAll(node.front, out);
-  volumeOrderAll(node.back, out);
+  // Без рекурсии — см. `volumeOrderInsert`. Порядок прежний: свои, ближние, дальние.
+  const stack = node ? [node] : [];
+  while (stack.length > 0) {
+    const at = stack.pop();
+    for (const face of at.same) out.push(face);
+    if (at.back) stack.push(at.back);
+    if (at.front) stack.push(at.front);
+  }
   return out;
 }
 

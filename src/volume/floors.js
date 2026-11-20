@@ -1199,10 +1199,14 @@ export function volumeCeilingUnderVoid(room, voids, capMm) {
 
 /** Плоскости дерева уезжают вместе с гранями: перенос сдвигает `d` на `n·t`. */
 function volumeMovePlanes(node, dx, dy, dz) {
-  if (!node) return;
-  node.plane.d += node.plane.x * dx + node.plane.y * dy + node.plane.z * dz;
-  volumeMovePlanes(node.front, dx, dy, dz);
-  volumeMovePlanes(node.back, dx, dy, dz);
+  // Без рекурсии: дерево большого объекта глубже стека браузера (правка 2026-11-21).
+  const stack = node ? [node] : [];
+  while (stack.length > 0) {
+    const at = stack.pop();
+    at.plane.d += at.plane.x * dx + at.plane.y * dy + at.plane.z * dz;
+    if (at.front) stack.push(at.front);
+    if (at.back) stack.push(at.back);
+  }
 }
 
 /**

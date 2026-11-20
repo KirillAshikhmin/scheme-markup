@@ -6705,7 +6705,7 @@ display: none;
     var label = document.getElementById("splash-step");
     var canvas = document.getElementById("splash-model");
     var STEPS = ["Расставляем розетки…","Проектируем щит…","Настраиваем сценарии…","Подбираем оборудование…","Чертим стены…","Развешиваем люстры…","Тянем кабель…","Маркируем линии…","Считаем длину ленты…","Калибруем масштаб…","Проверяем автоматы…","Вешаем шторы на карнизы…","Ищем, где спрятать кондиционер…","Учим выключатели проходить…","Уговариваем датчик движения не реагировать на кота…","Объясняем люстре, что она не главная…","Прячем провода за плинтус…","Ищем фазу. Нашли. Больше не ищем…","Считаем розетки. Опять не хватает…","Мирим тёплый пол с ковром…","Договариваемся с роботом-пылесосом о маршруте…","Убеждаем щит, что места в нём достаточно…","Учим шторы просыпаться вовремя…","Проверяем, что лампочка действительно горит…","Напоминаем термостату, что зима кончилась…","Вспоминаем, от чего этот автомат…"];
-    var PAGE_BYTES = 3163357;
+    var PAGE_BYTES = 3164687;
     var calm = false;
     try {
     calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -38306,32 +38306,71 @@ return true;
 function volumeOrderInsert(node, faces, cuts = null) {
 if (!faces || faces.length === 0) return node;
 if (!node) return volumeOrderNode(faces, cuts);
+let top = null;
+const made = [];
+const jobs = [{ node, faces, set: (next) => (top = next) }];
+while (jobs.length > 0) {
+const job = jobs.pop();
+if (!job.faces || job.faces.length === 0) {
+job.set(job.node);
+continue;
+}
+if (!job.node) {
+job.set(volumeOrderNode(job.faces, cuts));
+continue;
+}
 const same = [];
 const front = [];
 const back = [];
-for (const face of faces) {
-const side = volumeFaceSide(node.plane, face);
+for (const face of job.faces) {
+const side = volumeFaceSide(job.node.plane, face);
 if (side === 0) same.push(face);
 else if (side === 1) front.push(face);
 else if (side === -1) back.push(face);
 else {
-const cut = volumeSplitFace(face, node.plane, cuts);
+const cut = volumeSplitFace(face, job.node.plane, cuts);
 if (cut.front) front.push(cut.front);
 if (cut.back) back.push(cut.back);
 }
 }
 const next = {
-plane: node.plane,
-same: same.length > 0 ? [...node.same, ...same] : node.same,
-front: volumeOrderInsert(node.front, front, cuts),
-back: volumeOrderInsert(node.back, back, cuts),
+plane: job.node.plane,
+same: same.length > 0 ? [...job.node.same, ...same] : job.node.same,
+front: null,
+back: null,
 count: 0,
 };
-next.count = next.same.length + (next.front ? next.front.count : 0) + (next.back ? next.back.count : 0);
-return next;
+job.set(next);
+made.push(next);
+jobs.push({ node: job.node.back, faces: back, set: (child) => (next.back = child) });
+jobs.push({ node: job.node.front, faces: front, set: (child) => (next.front = child) });
+}
+for (let at = made.length - 1; at >= 0; at -= 1) {
+const item = made[at];
+item.count = item.same.length + (item.front ? item.front.count : 0) + (item.back ? item.back.count : 0);
+}
+return top;
 }
 function volumeOrderNode(items, cuts = null) {
 if (items.length === 0) return null;
+let top = null;
+const made = [];
+const jobs = [{ items, set: (node) => (top = node) }];
+while (jobs.length > 0) {
+const job = jobs.pop();
+const split = volumeOrderSplit(job.items, cuts);
+job.set(split.node);
+made.push(split.node);
+if (split.back && split.back.length > 0) jobs.push({ items: split.back, set: (node) => (split.node.back = node) });
+if (split.front && split.front.length > 0) jobs.push({ items: split.front, set: (node) => (split.node.front = node) });
+}
+for (let at = made.length - 1; at >= 0; at -= 1) {
+const node = made[at];
+node.count = node.same.length + (node.front ? node.front.count : 0) + (node.back ? node.back.count : 0);
+}
+return top;
+}
+function volumeOrderSplit(items, cuts) {
 let best = null;
 const tries = Math.min(items.length, VOLUME_ORDER_TRIES);
 for (let at = 0; at < tries; at += 1) {
@@ -38349,7 +38388,7 @@ if (front === 0 && back === 0 && splits === 0) continue;
 const score = splits * VOLUME_ORDER_SPLIT_COST + Math.abs(front - back);
 if (!best || score < best.score) best = { plane, score };
 }
-if (!best) return { plane: volumePlaneOf(items[0]), same: items, front: null, back: null, count: items.length };
+if (!best) return { node: { plane: volumePlaneOf(items[0]), same: items, front: null, back: null, count: items.length }, front: null, back: null };
 const plane = best.plane;
 const same = [];
 const front = [];
@@ -38372,16 +38411,22 @@ const cut = volumeSplitFace(item, plane, cuts);
 if (cut.front) front.push(cut.front);
 if (cut.back) back.push(cut.back);
 }
-const node = { plane, same, front: volumeOrderNode(front, cuts), back: volumeOrderNode(back, cuts), count: 0 };
-node.count = same.length + (node.front ? node.front.count : 0) + (node.back ? node.back.count : 0);
-return node;
+return { node: { plane, same, front: null, back: null, count: 0 }, front, back };
 }
 function volumeOrderWalk(tree, eye, out = []) {
-if (!tree) return out;
-const near = volumePointSide(tree.plane, eye) >= 0;
-volumeOrderWalk(near ? tree.back : tree.front, eye, out);
-for (const face of tree.same) out.push(face);
-volumeOrderWalk(near ? tree.front : tree.back, eye, out);
+const stack = [];
+let node = tree;
+while (node || stack.length > 0) {
+while (node) {
+const near = volumePointSide(node.plane, eye) >= 0;
+stack.push(node, near);
+node = near ? node.back : node.front;
+}
+const near = stack.pop();
+const at = stack.pop();
+for (const face of at.same) out.push(face);
+node = near ? at.front : at.back;
+}
 return out;
 }
 function volumeOrderRank(tree, eye, point) {
@@ -38403,10 +38448,13 @@ node = second;
 return rank;
 }
 function volumeOrderAll(node, out = []) {
-if (!node) return out;
-for (const face of node.same) out.push(face);
-volumeOrderAll(node.front, out);
-volumeOrderAll(node.back, out);
+const stack = node ? [node] : [];
+while (stack.length > 0) {
+const at = stack.pop();
+for (const face of at.same) out.push(face);
+if (at.back) stack.push(at.back);
+if (at.front) stack.push(at.front);
+}
 return out;
 }
 function volumeInTree(face) {
@@ -42048,10 +42096,13 @@ if (Math.abs((Number(room.heightMm) || 0) - slabMm) > VOLUME_PLANE_EPS_MM) retur
 return voids.some((hole) => volumePolysOverlap(room.pointsMm, hole));
 }
 function volumeMovePlanes(node, dx, dy, dz) {
-if (!node) return;
-node.plane.d += node.plane.x * dx + node.plane.y * dy + node.plane.z * dz;
-volumeMovePlanes(node.front, dx, dy, dz);
-volumeMovePlanes(node.back, dx, dy, dz);
+const stack = node ? [node] : [];
+while (stack.length > 0) {
+const at = stack.pop();
+at.plane.d += at.plane.x * dx + at.plane.y * dy + at.plane.z * dz;
+if (at.front) stack.push(at.front);
+if (at.back) stack.push(at.back);
+}
 }
 function volumeFloorPlace(part, { baseMm = 0, shiftMm = null } = {}) {
 if (!part || !part.at) return part;
