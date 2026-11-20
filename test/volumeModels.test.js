@@ -887,6 +887,9 @@ const LIT_PARTS = [
   "mirror.glow",
   // Квадратное зеркало (правка 2026-11-21): светится тот же контур.
   "mirrorSquare.glow",
+  // Бра «вверх и вниз» (правка 2026-11-21): светятся две пластины кубика.
+  "lampUpdown.glowUp",
+  "lampUpdown.glowDown",
   "stripVertical.diffuser",
   "tv.screen",
   // Монитор компьютерного стола (таск 255, G394). Слова заказчика: «В Объекте

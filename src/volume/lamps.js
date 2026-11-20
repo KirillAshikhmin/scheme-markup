@@ -371,7 +371,11 @@ export function volumeLampSources(place, scene = null, roomId = null) {
   // Точечный и подсветка светят узко, люстра — широко.
   const beam = most <= 120 ? 0.6 : most >= 400 ? 1.15 : 1;
   const room = roomId || (rooms && rooms[0]) || null;
-  return [{ at: lift(place.anchor), power: volumeLampPower(place), dir: out(place.anchor.z), wall, beam, room }];
+  // Бра «вверх и вниз» (правка 2026-11-21): источник тот же и на том же месте
+  // — прежняя отрисовка рисует его прежним пятном, — а признак `updown` читает
+  // видеокарта и ставит вместо него два луча по стене (`volumeMeshLamps`).
+  const updown = place.updown === true && wall ? { updown: true } : {};
+  return [{ at: lift(place.anchor), power: volumeLampPower(place), dir: out(place.anchor.z), wall, beam, room, ...updown }];
 }
 
 /**

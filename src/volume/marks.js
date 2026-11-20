@@ -17,6 +17,7 @@ import {
   labelOf,
   markHanging,
   markSquare,
+  markUpdown,
   markRevealOpening,
   markIsComment,
   markObjectId,
@@ -33,7 +34,7 @@ import {
   wallVectors,
 } from "../model.js";
 import { MODEL_CYL_SIDES } from "../objectModels/kit.js";
-import { objectLineModel, objectModelByKey, objectModelChannels, objectModelHanging, objectModelSquare } from "../objectModels/registry.js";
+import { objectLineModel, objectModelByKey, objectModelChannels, objectModelHanging, objectModelSquare, objectModelUpdown } from "../objectModels/registry.js";
 import { objectViewByName, objectViewForShape } from "../objectViews/registry.js";
 import { VOLUME_LAYER_MARK } from "./measures.js";
 import { volumeClockwise, volumeFace, volumeFaceNormal, volumeLine } from "./faces.js";
@@ -1163,6 +1164,7 @@ export function volumeMarkPlacement(project, mark, where = [], seat = null, poin
     const frames = volumeLineFrames(repeat, spotPath, acrossMm, bottomMm, topMm);
     return frames.length === 0 ? null : { key: repeat.key, parts: repeat.parts, frames };
   };
+  const updown = !line && markUpdown(project, mark);
   const common = {
     markId: mark.id,
     label: labelOf(project, mark.id),
@@ -1209,15 +1211,22 @@ export function volumeMarkPlacement(project, mark, where = [], seat = null, poin
     // неё грань в грань прежний (G68).
     // **Квадратное зеркало — тем же приёмом** (правка 2026-11-21): отметка
     // `mark.square` подменяет описание зеркала подсветки.
+    // **Бра «вверх и вниз» — тем же приёмом** (правка 2026-11-21): отметка
+    // `mark.updown` подменяет описание светильника кубиком; свет двумя лучами
+    // по стене читает признак `updown` места (`volumeLampSources`).
     model: view
-      ? objectModelSquare(
-          objectModelHanging(
-            objectModelChannels(objectModelByKey(view.name), typeChannels(project, mark.typeId)),
-            markHanging(project, mark),
+      ? objectModelUpdown(
+          objectModelSquare(
+            objectModelHanging(
+              objectModelChannels(objectModelByKey(view.name), typeChannels(project, mark.typeId)),
+              markHanging(project, mark),
+            ),
+            markSquare(project, mark),
           ),
-          markSquare(project, mark),
+          updown,
         )
       : null,
+    ...(updown ? { updown: true } : {}),
   };
   // Высота ряда многорядной рамки старше записанной (таск 242): четыре
   // выключателя одной высоты, нарисованные 2 × 2, иначе легли бы в один ряд —

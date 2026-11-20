@@ -238,6 +238,17 @@ export const MODELS_LIGHT = {
     modelTube("glass", { axis: "y", round: true, sides: 4, x: -0.44, width: 0.88, y: -0.5, depth: 0.3, z: 0.06, height: 0.88, material: "glass" }),
     modelTube("glow", { axis: "y", round: true, sides: 4, y: -0.2, depth: 0.7, material: "light", lit: true }),
   ),
+  // **Бра «вверх и вниз»** (правка без автопилота, 2026-11-21; слова
+  // заказчика: «Бра сделай которые светят вверх и вниз»). На рендере
+  // дизайн-проекта это чёрный кубик на стене, от которого по стене идут два
+  // узких луча. Тело — кубик в середине габарита бра и две светящиеся
+  // пластины, сверху и снизу: по ним видно, что он горит. Выбирает описание
+  // отметка метки (`mark.updown`), пара объявлена ниже — `MODELS_LIGHT_UPDOWN`.
+  lampUpdown: modelParts(
+    modelBox("body", { x: -0.34, width: 0.68, z: 0.3, height: 0.4, material: "dark" }),
+    modelBox("glowUp", { x: -0.26, width: 0.52, y: -0.38, depth: 0.76, z: 0.7, height: 0.02, material: "light", lit: true }),
+    modelBox("glowDown", { x: -0.26, width: 0.52, y: -0.38, depth: 0.76, z: 0.28, height: 0.02, material: "light", lit: true }),
+  ),
   // ——— люстра (таск 216, G323) ———
   //
   // Слова заказчика: «И люстру сделай более красивой всё-таки, а то просто
@@ -361,3 +372,11 @@ export const MODELS_LIGHT_HANGING = Object.freeze({ chandelier: "chandelierHangi
  * (`objectModelSquare`, `objectModelSquareKeys`).
  */
 export const MODELS_LIGHT_SQUARE = Object.freeze({ mirror: "mirrorSquare" });
+
+/**
+ * **Варианты «вверх и вниз»** (правка 2026-11-21): «обычный ключ → ключ бра с
+ * двумя лучами». Устроено как пара висячей люстры (`objectModelUpdown`,
+ * `objectModelUpdownKeys`); кому отметку предлагать, решает ещё и посадка —
+ * только метке на стене (`markUpdownCan` в `model.js`).
+ */
+export const MODELS_LIGHT_UPDOWN = Object.freeze({ lamp: "lampUpdown" });

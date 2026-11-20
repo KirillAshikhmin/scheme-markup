@@ -28,6 +28,11 @@ export const VOLUME_MESH_WASH_OUT_MM = 260;
 export const VOLUME_MESH_WASH_DROP_MM = 900;
 /** Источник ниже потолка на столько — светильник висячий. */
 export const VOLUME_MESH_HANG_MM = 250;
+/** Бра «вверх и вниз»: вынос луча от стены, начало луча от середины бра, цель вдоль стены и её заглубление в стену. */
+export const VOLUME_MESH_UPDOWN_OUT_MM = 45;
+export const VOLUME_MESH_UPDOWN_START_MM = 75;
+export const VOLUME_MESH_UPDOWN_REACH_MM = 1000;
+export const VOLUME_MESH_UPDOWN_IN_MM = 150;
 
 /** Канал sRGB 0…1 → линейный: свет складывается в линейных числах. */
 export function volumeMeshLinear(value) {
@@ -308,6 +313,33 @@ export function volumeMeshLamps(scene, light, live = null) {
       // меньше единицы) светит не во все стороны, а конусом вниз вдоль стены —
       // на картину под ним (`aim`).
       const wall = source.wall || null;
+      // Бра «вверх и вниз» (правка 2026-11-21, слова заказчика: «Бра сделай
+      // которые светят вверх и вниз»): вместо источника во все стороны — два
+      // узких конуса вдоль стены, к потолку и к полу; сила делится пополам.
+      // Каждый стоит чуть за торцом кубика и целит в стену поодаль: так на
+      // стене ложится вытянутый клин, а не круг.
+      if (wall && source.updown === true) {
+        for (const sign of [1, -1]) {
+          out.push({
+            x: source.at.x + wall.x * VOLUME_MESH_UPDOWN_OUT_MM,
+            y: source.at.y + wall.y * VOLUME_MESH_UPDOWN_OUT_MM,
+            z: source.at.z + sign * VOLUME_MESH_UPDOWN_START_MM,
+            wall: true,
+            narrow: true,
+            aim: {
+              x: source.at.x - wall.x * VOLUME_MESH_UPDOWN_IN_MM,
+              y: source.at.y - wall.y * VOLUME_MESH_UPDOWN_IN_MM,
+              z: source.at.z + sign * VOLUME_MESH_UPDOWN_REACH_MM,
+            },
+            power: (source.power * strength) / 2,
+            down: true,
+            hang: false,
+            room: source.room || null,
+            rgb,
+          });
+        }
+        continue;
+      }
       const wash = Boolean(wall) && Number(source.beam) < 1;
       const off = wall ? (wash ? VOLUME_MESH_WASH_OUT_MM : VOLUME_MESH_WALL_OUT_MM) : 0;
       out.push({

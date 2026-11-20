@@ -16,7 +16,7 @@ import { objectViewByName, objectViewForShape } from "./objectViews/registry.js"
 // читает у него **один** список: у каких изображений есть висячий вариант тела
 // (таск 256). Своего списка здесь не заводится — отметка «Висячая» обязана
 // предлагаться ровно там, где её есть чем нарисовать.
-import { objectModelHangingKeys, objectModelSquareKeys } from "./objectModels/registry.js";
+import { objectModelHangingKeys, objectModelSquareKeys, objectModelUpdownKeys } from "./objectModels/registry.js";
 // Скаты потолка (ADR 043): чистая геометрия плоскости и профиля.
 import {
   slopeArea,
@@ -3992,6 +3992,8 @@ const MARK_PATCH_FIELDS = [
   "reveal",
   // Отметка «Квадратное» у зеркала подсветки (правка 2026-11-21) — того же рода.
   "square",
+  // Отметка «Светит вверх и вниз» у бра (правка 2026-11-21) — того же рода.
+  "updown",
   // Связь с вещью чертежа (R01). Поле стоит здесь, а не правится в обход
   // белого списка, как ярус `z`: иначе оно молча исчезало бы на первой же
   // правке карточки. Правило у связи одно — `markObjectCan`, — и проверяется
@@ -4086,6 +4088,19 @@ export function updateMark(project, markId, patch) {
       delete changes.square;
     }
   }
+  // «Светит вверх и вниз» у бра — тем же порядком: ставится только
+  // светильнику на стене, снятая убирает ключ.
+  let unupdown = false;
+  if (Object.prototype.hasOwnProperty.call(changes, "updown")) {
+    if (changes.updown === true) {
+      if (!markUpdownCan(project, project.marks.find((mark) => mark.id === markId))) {
+        throw modelError("updownOnlyWallLamp");
+      }
+    } else {
+      unupdown = true;
+      delete changes.updown;
+    }
+  }
   // Связь с вещью: одно правило на обе двери. Пустое значение — «снять», и
   // поле тогда **убирается**, а не обнуляется (G68).
   let unlink = false;
@@ -4106,6 +4121,7 @@ export function updateMark(project, markId, patch) {
     if (unhang) delete next.hanging;
     if (unreveal) delete next.reveal;
     if (unsquare) delete next.square;
+    if (unupdown) delete next.updown;
     return unlink ? markWithoutObject(next) : next;
   });
   return { project: withProject(project, { marks }), mark: marks.find((mark) => mark.id === markId) };
@@ -10165,6 +10181,43 @@ export function markSquare(project, mark) {
 /** Поставить или снять отметку «Квадратное». Снятая **убирает** ключ, а не пишет `false`. */
 export function setMarkSquare(project, markId, on) {
   return updateMark(project, markId, { square: on === true ? true : null });
+}
+
+// ——— бра «вверх и вниз» (правка без автопилота, 2026-11-21) ————————————————
+//
+// Слова заказчика: «Бра сделай которые светят вверх и вниз» — на рендере
+// дизайн-проекта это чёрный кубик на стене и два узких луча по стене от него.
+//
+// **Та же механика, что у «Висячей» и «Квадратного»:** необязательное поле
+// метки (`mark.updown`), которое попадает в объект, только когда оно стоит;
+// «предлагается ли» (`markUpdownCan`) и «стоит ли» (`markUpdown`) — разные
+// двери; отметка у метки, которой вариант больше не предлагается (метку сняли
+// со стены, сменили тип), не значит ничего, но и не снимается молча (G68).
+// Миграции нет: нет поля — бра прежнее. Знак на плане и рисунок на развёртке
+// общие; меняются тело и свет в «Объёме».
+//
+// Правил два, и оба нужны: у изображения метки есть такой вариант тела
+// (реестр, `objectModelUpdownKeys` — сегодня это общий светильник `lamp`) **и**
+// метка привязана к стене — лучам нужна стена, по которой идти.
+
+/** Предлагается ли метке отметка «Светит вверх и вниз»: точечный светильник на стене. */
+export function markUpdownCan(project, mark) {
+  if (!mark || mark.kind !== "point" || markIsComment(mark)) return false;
+  const binding = markWall(mark);
+  if (!binding || !findWall(project, binding.wallId)) return false;
+  const name = typeViewName(project, mark.typeId);
+  return name !== null && objectModelUpdownKeys().includes(name);
+}
+
+/** Светит ли это бра вверх и вниз: отметка стоит и предлагается. */
+export function markUpdown(project, mark) {
+  if (!mark || mark.updown !== true) return false;
+  return markUpdownCan(project, mark);
+}
+
+/** Поставить или снять отметку «Светит вверх и вниз». Снятая **убирает** ключ. */
+export function setMarkUpdown(project, markId, on) {
+  return updateMark(project, markId, { updown: on === true ? true : null });
 }
 
 // ——— метка в откосе (правка без автопилота, 2026-11-20) ————————————————————

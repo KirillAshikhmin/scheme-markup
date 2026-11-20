@@ -26,7 +26,7 @@
 import { objectCatalogEntry, objectCatalogKeyByName } from "../objectCatalog.js";
 import { MODELS_CLIMATE } from "./climate.js";
 import { MODELS_LINES } from "./lines.js";
-import { MODELS_LIGHT, MODELS_LIGHT_HANGING, MODELS_LIGHT_SQUARE } from "./light.js";
+import { MODELS_LIGHT, MODELS_LIGHT_HANGING, MODELS_LIGHT_SQUARE, MODELS_LIGHT_UPDOWN } from "./light.js";
 import { MODELS_NET } from "./net.js";
 import { MODELS_OBJECTS } from "./objects.js";
 import { MODELS_KEYED, MODELS_POWER } from "./power.js";
@@ -267,6 +267,26 @@ export function objectModelSquareKeys() {
  */
 export function objectModelSquare(model, square) {
   const key = model && square === true ? MODELS_SQUARE[model.key] : null;
+  const other = key ? objectModelByKey(key) : null;
+  return other || model;
+}
+
+// ——— бра «вверх и вниз» (правка без автопилота, 2026-11-21) ————————————————
+//
+// Слова заказчика: «Бра сделай которые светят вверх и вниз». Та же лестница:
+// отметка у метки (`mark.updown`, правило — `markUpdownCan` в `model.js`)
+// подменяет модель светильника на кубик с двумя светящимися пластинами. Пары
+// объявлены рядом с описаниями (`MODELS_LIGHT_UPDOWN` в `light.js`).
+const MODELS_UPDOWN = { ...MODELS_LIGHT_UPDOWN };
+
+/** Имена изображений, у которых есть вариант «вверх и вниз». */
+export function objectModelUpdownKeys() {
+  return Object.keys(MODELS_UPDOWN);
+}
+
+/** Вариант «вверх и вниз»: без отметки и без варианта — та же ссылка (G68). */
+export function objectModelUpdown(model, updown) {
+  const key = model && updown === true ? MODELS_UPDOWN[model.key] : null;
   const other = key ? objectModelByKey(key) : null;
   return other || model;
 }

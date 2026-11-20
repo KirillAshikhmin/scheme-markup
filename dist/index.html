@@ -6748,7 +6748,7 @@ display: none;
     var label = document.getElementById("splash-step");
     var canvas = document.getElementById("splash-model");
     var STEPS = ["Расставляем розетки…","Проектируем щит…","Настраиваем сценарии…","Подбираем оборудование…","Чертим стены…","Развешиваем люстры…","Тянем кабель…","Маркируем линии…","Считаем длину ленты…","Калибруем масштаб…","Проверяем автоматы…","Вешаем шторы на карнизы…","Ищем, где спрятать кондиционер…","Учим выключатели проходить…","Уговариваем датчик движения не реагировать на кота…","Объясняем люстре, что она не главная…","Прячем провода за плинтус…","Ищем фазу. Нашли. Больше не ищем…","Считаем розетки. Опять не хватает…","Мирим тёплый пол с ковром…","Договариваемся с роботом-пылесосом о маршруте…","Убеждаем щит, что места в нём достаточно…","Учим шторы просыпаться вовремя…","Проверяем, что лампочка действительно горит…","Напоминаем термостату, что зима кончилась…","Вспоминаем, от чего этот автомат…"];
-    var PAGE_BYTES = 3220031;
+    var PAGE_BYTES = 3223906;
     var calm = false;
     try {
     calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -7974,6 +7974,7 @@ markCurtainSide: "сторона открывания шторы",
 markHanging: "вид люстры",
 markReveal: "метка в откосе",
 markSquare: "форма зеркала",
+markUpdown: "свет бра вверх и вниз",
 addScenario: "новый сценарий",
 editScenario: "правка сценария",
 removeScenario: "удаление сценария",
@@ -8051,6 +8052,7 @@ pointerUnknown: "Указатель или включён, или выключе
 curtainSideUnknown: "Штора открывается влево, вправо или от центра",
 revealNoOpening: "В откос метка встаёт у края окна или двери: рядом с этой меткой проёма нет",
 hangingOnlyChandelier: "Висячей бывает люстра: у остальных меток висячего тела нет, и нарисовать его нечем",
+updownOnlyWallLamp: "Вверх и вниз светит светильник на стене: метку сначала привяжите к стене",
 squareOnlyMirror: "Квадратным бывает зеркало подсветки: у остальных меток квадратного тела нет",
 commentNoLinks: "Комментарий ничем не управляет — это надпись на плане, а не устройство",
 commentNoEquipment: "Оборудование ставится в точку, а не в комментарий",
@@ -9137,6 +9139,8 @@ curtainSides: { left: "Влево", right: "Вправо", center: "От цен�
 reveal: "В откосе",
 revealHint: "Метка стоит не на стене, а на откосе ближайшего окна или двери. На плане она остаётся у края проёма; в «Объёме» переезжает на откос, в таблицах к расположению дописывается «в откосе»",
 revealPlace: "в откосе",
+updown: "Светит вверх и вниз",
+updownHint: "Бра-кубик: два узких луча по стене — к потолку и к полу. Видно в «Объёме»; на плане и на развёртке знак прежний",
 square: "Квадратное",
 squareHint: "Зеркало подсветки не круглое, а квадратное: сторона — по большей стороне габарита метки. Видно в «Объёме»; на плане и на развёртке знак у обоих зеркал один",
 hanging: "Висячая",
@@ -13995,6 +13999,11 @@ mirrorSquare: modelParts(
 modelTube("glass", { axis: "y", round: true, sides: 4, x: -0.44, width: 0.88, y: -0.5, depth: 0.3, z: 0.06, height: 0.88, material: "glass" }),
 modelTube("glow", { axis: "y", round: true, sides: 4, y: -0.2, depth: 0.7, material: "light", lit: true }),
 ),
+lampUpdown: modelParts(
+modelBox("body", { x: -0.34, width: 0.68, z: 0.3, height: 0.4, material: "dark" }),
+modelBox("glowUp", { x: -0.26, width: 0.52, y: -0.38, depth: 0.76, z: 0.7, height: 0.02, material: "light", lit: true }),
+modelBox("glowDown", { x: -0.26, width: 0.52, y: -0.38, depth: 0.76, z: 0.28, height: 0.02, material: "light", lit: true }),
+),
 chandelier: modelParts(
 modelBox("canopy", { x: -0.2, width: 0.4, y: -0.2, depth: 0.4, z: 0.9, height: 0.1, material: "metal" }),
 modelBox("dropLong", { x: -0.42, width: 0.12, y: -0.1, depth: 0.2, z: 0, height: 0.9, material: "light", lit: true }),
@@ -14021,6 +14030,7 @@ modelBox("profile", { y: -0.2, depth: 0.7 }),
 };
 const MODELS_LIGHT_HANGING = Object.freeze({ chandelier: "chandelierHanging" });
 const MODELS_LIGHT_SQUARE = Object.freeze({ mirror: "mirrorSquare" });
+const MODELS_LIGHT_UPDOWN = Object.freeze({ lamp: "lampUpdown" });
 
 // src/objectModels/net.js
 const MODELS_NET = {
@@ -14831,6 +14841,15 @@ return Object.keys(MODELS_SQUARE);
 }
 function objectModelSquare(model, square) {
 const key = model && square === true ? MODELS_SQUARE[model.key] : null;
+const other = key ? objectModelByKey(key) : null;
+return other || model;
+}
+const MODELS_UPDOWN = { ...MODELS_LIGHT_UPDOWN };
+function objectModelUpdownKeys() {
+return Object.keys(MODELS_UPDOWN);
+}
+function objectModelUpdown(model, updown) {
+const key = model && updown === true ? MODELS_UPDOWN[model.key] : null;
 const other = key ? objectModelByKey(key) : null;
 return other || model;
 }
@@ -17805,6 +17824,7 @@ const MARK_PATCH_FIELDS = [
 "hanging",
 "reveal",
 "square",
+"updown",
 "objectId",
 ...MARK_DIMENSION_FIELDS,
 ];
@@ -17870,6 +17890,17 @@ unsquare = true;
 delete changes.square;
 }
 }
+let unupdown = false;
+if (Object.prototype.hasOwnProperty.call(changes, "updown")) {
+if (changes.updown === true) {
+if (!markUpdownCan(project, project.marks.find((mark) => mark.id === markId))) {
+throw modelError("updownOnlyWallLamp");
+}
+} else {
+unupdown = true;
+delete changes.updown;
+}
+}
 let unlink = false;
 if (Object.prototype.hasOwnProperty.call(changes, "objectId")) {
 const wanted = changes.objectId == null || changes.objectId === "" ? null : changes.objectId;
@@ -17888,6 +17919,7 @@ const next = { ...mark, ...changes };
 if (unhang) delete next.hanging;
 if (unreveal) delete next.reveal;
 if (unsquare) delete next.square;
+if (unupdown) delete next.updown;
 return unlink ? markWithoutObject(next) : next;
 });
 return { project: withProject(project, { marks }), mark: marks.find((mark) => mark.id === markId) };
@@ -21207,6 +21239,20 @@ return markSquareCan(project, mark);
 }
 function setMarkSquare(project, markId, on) {
 return updateMark(project, markId, { square: on === true ? true : null });
+}
+function markUpdownCan(project, mark) {
+if (!mark || mark.kind !== "point" || markIsComment(mark)) return false;
+const binding = markWall(mark);
+if (!binding || !findWall(project, binding.wallId)) return false;
+const name = typeViewName(project, mark.typeId);
+return name !== null && objectModelUpdownKeys().includes(name);
+}
+function markUpdown(project, mark) {
+if (!mark || mark.updown !== true) return false;
+return markUpdownCan(project, mark);
+}
+function setMarkUpdown(project, markId, on) {
+return updateMark(project, markId, { updown: on === true ? true : null });
 }
 const MARK_REVEAL_REACH_MM = 400;
 function markRevealOpening(project, mark) {
@@ -42079,6 +42125,7 @@ if (!repeat) return null;
 const frames = volumeLineFrames(repeat, spotPath, acrossMm, bottomMm, topMm);
 return frames.length === 0 ? null : { key: repeat.key, parts: repeat.parts, frames };
 };
+const updown = !line && markUpdown(project, mark);
 const common = {
 markId: mark.id,
 label: labelOf(project, mark.id),
@@ -42092,14 +42139,18 @@ spare: box.guessed,
 objectId: null,
 postMm,
 model: view
-? objectModelSquare(
+? objectModelUpdown(
+objectModelSquare(
 objectModelHanging(
 objectModelChannels(objectModelByKey(view.name), typeChannels(project, mark.typeId)),
 markHanging(project, mark),
 ),
 markSquare(project, mark),
+),
+updown,
 )
 : null,
+...(updown ? { updown: true } : {}),
 };
 const heightMm = seat && typeof seat.heightMm === "number" ? seat.heightMm : sizes.heightAboveFloor;
 const owned = volumeObjectPlace(project, mark);
@@ -44752,7 +44803,8 @@ const size = volumeLampFace(place);
 const most = Math.max(size.widthMm, size.heightMm);
 const beam = most <= 120 ? 0.6 : most >= 400 ? 1.15 : 1;
 const room = roomId || (rooms && rooms[0]) || null;
-return [{ at: lift(place.anchor), power: volumeLampPower(place), dir: out(place.anchor.z), wall, beam, room }];
+const updown = place.updown === true && wall ? { updown: true } : {};
+return [{ at: lift(place.anchor), power: volumeLampPower(place), dir: out(place.anchor.z), wall, beam, room, ...updown }];
 }
 function volumeLampSourcesOf(scene, markId, roomId) {
 const places = volumeMarkPlaces(scene, markId);
@@ -45695,6 +45747,10 @@ const VOLUME_MESH_WALL_OUT_MM = 180;
 const VOLUME_MESH_WASH_OUT_MM = 260;
 const VOLUME_MESH_WASH_DROP_MM = 900;
 const VOLUME_MESH_HANG_MM = 250;
+const VOLUME_MESH_UPDOWN_OUT_MM = 45;
+const VOLUME_MESH_UPDOWN_START_MM = 75;
+const VOLUME_MESH_UPDOWN_REACH_MM = 1000;
+const VOLUME_MESH_UPDOWN_IN_MM = 150;
 function volumeMeshLinear(value) {
 return value <= 0.04045 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4);
 }
@@ -45917,6 +45973,28 @@ const chandelier = Boolean(place && place.view && place.view.name === "chandelie
 for (const source of volumeLampSourcesOf(scene, markId, item ? item.roomId : undefined)) {
 if (!source || !source.at || !(source.power > 0)) continue;
 const wall = source.wall || null;
+if (wall && source.updown === true) {
+for (const sign of [1, -1]) {
+out.push({
+x: source.at.x + wall.x * VOLUME_MESH_UPDOWN_OUT_MM,
+y: source.at.y + wall.y * VOLUME_MESH_UPDOWN_OUT_MM,
+z: source.at.z + sign * VOLUME_MESH_UPDOWN_START_MM,
+wall: true,
+narrow: true,
+aim: {
+x: source.at.x - wall.x * VOLUME_MESH_UPDOWN_IN_MM,
+y: source.at.y - wall.y * VOLUME_MESH_UPDOWN_IN_MM,
+z: source.at.z + sign * VOLUME_MESH_UPDOWN_REACH_MM,
+},
+power: (source.power * strength) / 2,
+down: true,
+hang: false,
+room: source.room || null,
+rgb,
+});
+}
+continue;
+}
 const wash = Boolean(wall) && Number(source.beam) < 1;
 const off = wall ? (wash ? VOLUME_MESH_WASH_OUT_MM : VOLUME_MESH_WALL_OUT_MM) : 0;
 out.push({
@@ -67308,6 +67386,7 @@ curtain: markIsCurtain(project, mark.id) ? markCurtainSide(project, mark.id) : n
 hanging: markHangingCan(project, mark) ? markHanging(project, mark) : null,
 reveal: markRevealCan(project, mark) ? markInReveal(project, mark) : null,
 square: markSquareCan(project, mark) ? markSquare(project, mark) : null,
+updown: markUpdownCan(project, mark) ? markUpdown(project, mark) : null,
 lengthText: marksLengthText(project, mark),
 wallText: marksWallText(project, mark),
 wallId: markWall(mark) ? mark.wallId : null,
@@ -67728,6 +67807,22 @@ fail(error);
 });
 return uiCheckRow(box, strings.marks.square, strings.marks.squareHint);
 }
+function updownField(state, mark, on) {
+const box = uiEl("input", { type: "checkbox" });
+box.checked = on === true;
+if (!appAllows("editMarks", state)) box.disabled = true;
+box.addEventListener("change", () => {
+const now = getState();
+if (!now.project) return;
+try {
+const next = setMarkUpdown(now.project, mark.id, box.checked);
+if (next.project !== now.project) canvasCommit(now.project, next.project, strings.history.markUpdown);
+} catch (error) {
+fail(error);
+}
+});
+return uiCheckRow(box, strings.marks.updown, strings.marks.updownHint);
+}
 function roomField(state, mark) {
 const manual = markRoomManual(mark);
 const select = uiEl("select", {
@@ -67906,6 +68001,9 @@ view.fields && view.fields.reveal !== null && view.fields.reveal !== undefined
 : null,
 view.fields && view.fields.square !== null && view.fields.square !== undefined
 ? squareField(state, mark, view.fields.square)
+: null,
+view.fields && view.fields.updown !== null && view.fields.updown !== undefined
+? updownField(state, mark, view.fields.updown)
 : null,
 view.fields
 ? uiEl("div", { class: "mark-row__fields" }, [
@@ -73982,6 +74080,9 @@ sync();
 // src/volumeGl.js
 const VOLUME_GL_MODULE = "./vendor/three/three.module.min.js";
 const VOLUME_GL_SPOTS = 8;
+const VOLUME_GL_SPOT_ANGLE = 1.25;
+const VOLUME_GL_NARROW_ANGLE = 0.42;
+const VOLUME_GL_NARROW_GAIN = 2.2;
 const VOLUME_GL_POINTS = 5;
 const VOLUME_GL_SHADOWED = 2;
 const VOLUME_GL_LAMP_GAIN = 3.6;
@@ -74075,7 +74176,7 @@ sun.shadow.normalBias = 0.05;
 world.add(hemi, sun, sun.target);
 const spots = [];
 for (let at = 0; at < VOLUME_GL_SPOTS; at += 1) {
-const lamp = new THREE.SpotLight(0xffe6c4, 0, 0, 1.25, 0.9, 2);
+const lamp = new THREE.SpotLight(0xffe6c4, 0, 0, VOLUME_GL_SPOT_ANGLE, 0.9, 2);
 lamp.castShadow = true;
 lamp.shadow.mapSize.set(at < VOLUME_GL_SHADOWED ? 1024 : 512, at < VOLUME_GL_SHADOWED ? 1024 : 512);
 lamp.shadow.bias = -0.004;
@@ -74233,7 +74334,9 @@ continue;
 node.position.set(item.x * S, (item.aim ? item.z : item.z - 60) * S, item.y * S);
 if (item.aim) node.target.position.set(item.aim.x * S, item.aim.z * S, item.aim.y * S);
 else node.target.position.set(item.x * S, -10, item.y * S);
-node.intensity = VOLUME_GL_LAMP_GAIN * item.power;
+node.angle = item.narrow ? VOLUME_GL_NARROW_ANGLE : VOLUME_GL_SPOT_ANGLE;
+node.penumbra = item.narrow ? 0.55 : 0.9;
+node.intensity = VOLUME_GL_LAMP_GAIN * item.power * (item.narrow ? VOLUME_GL_NARROW_GAIN : 1);
 linearRgb(node.color, item.rgb);
 }
 for (let at = 0; at < VOLUME_GL_POINTS; at += 1) {

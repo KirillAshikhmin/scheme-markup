@@ -46,6 +46,10 @@ export const VOLUME_GL_MODULE = "./vendor/three/three.module.min.js";
 
 /** Источников у видеокарты: число постоянно, погашенные стоят с нулевой силой. */
 export const VOLUME_GL_SPOTS = 8;
+/** Половина угла конуса: обычного потолочного и узкого луча бра «вверх и вниз»; во сколько раз узкий ярче. */
+const VOLUME_GL_SPOT_ANGLE = 1.25;
+const VOLUME_GL_NARROW_ANGLE = 0.42;
+const VOLUME_GL_NARROW_GAIN = 2.2;
 export const VOLUME_GL_POINTS = 5;
 export const VOLUME_GL_SHADOWED = 2;
 /** Сила источника на единицу мощности лампы сцены (подобрано на прототипе). */
@@ -172,7 +176,7 @@ export function volumeGlMake(THREE) {
   // пятно), настенные и напольные — во все стороны.
   const spots = [];
   for (let at = 0; at < VOLUME_GL_SPOTS; at += 1) {
-    const lamp = new THREE.SpotLight(0xffe6c4, 0, 0, 1.25, 0.9, 2);
+    const lamp = new THREE.SpotLight(0xffe6c4, 0, 0, VOLUME_GL_SPOT_ANGLE, 0.9, 2);
     lamp.castShadow = true;
     // Ближним — карта подробнее, остальным хватает половины.
     lamp.shadow.mapSize.set(at < VOLUME_GL_SHADOWED ? 1024 : 512, at < VOLUME_GL_SHADOWED ? 1024 : 512);
@@ -354,7 +358,11 @@ export function volumeGlMake(THREE) {
       // Подсветка картины целит в стену под собой, остальные — отвесно вниз.
       if (item.aim) node.target.position.set(item.aim.x * S, item.aim.z * S, item.aim.y * S);
       else node.target.position.set(item.x * S, -10, item.y * S);
-      node.intensity = VOLUME_GL_LAMP_GAIN * item.power;
+      // Луч бра «вверх и вниз» узкий: на стене от него клин, а не зарево.
+      // Узкий конус собирает тот же поток в меньший угол — силу множим.
+      node.angle = item.narrow ? VOLUME_GL_NARROW_ANGLE : VOLUME_GL_SPOT_ANGLE;
+      node.penumbra = item.narrow ? 0.55 : 0.9;
+      node.intensity = VOLUME_GL_LAMP_GAIN * item.power * (item.narrow ? VOLUME_GL_NARROW_GAIN : 1);
       linearRgb(node.color, item.rgb);
     }
     for (let at = 0; at < VOLUME_GL_POINTS; at += 1) {
