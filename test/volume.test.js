@@ -3642,7 +3642,7 @@ test("кадр берёт час готовым, а не считает его �
   assert.deepEqual(volumeMood({ minutes: 1200, times: DAY_TIMES, kind: "city" }), mood, "снимок часа чист");
   assert.equal(mood.kind, "city");
   assert.equal(volumeMood({ minutes: 1200, kind: "ничего такого" }).kind, VOLUME_BACKDROP_DEFAULT);
-  assert.deepEqual(VOLUME_BACKDROP_KINDS, ["plain", "nature", "city"]);
+  assert.deepEqual(VOLUME_BACKDROP_KINDS, ["plain", "nature", "city", "megapolis"]);
   assert.equal(volumeBackdropKindOf(undefined), "nature");
   assert.equal(volumeBackdropKindOf("city"), "city");
   // Полдень по умолчанию — тот фон, что был до таска 181.

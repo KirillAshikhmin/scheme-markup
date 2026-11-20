@@ -27,7 +27,24 @@ import {
   VOLUME_CITY_ASPHALT_FAR,
   VOLUME_CITY_CARS,
   VOLUME_CITY_GLASS,
+  VOLUME_CITY_LIGHT,
   VOLUME_CITY_LIT_MAX,
+  VOLUME_MEGA_BEACON,
+  VOLUME_MEGA_BRICK,
+  VOLUME_MEGA_BRICK_SIDE,
+  VOLUME_MEGA_GLASS,
+  VOLUME_MEGA_GLASS_BAND,
+  VOLUME_MEGA_GLASS_SIDE,
+  VOLUME_MEGA_PANEL,
+  VOLUME_MEGA_PANEL_SIDE,
+  VOLUME_MEGA_ROOF,
+  VOLUME_MEGA_SKYLINE_FAR,
+  VOLUME_MEGA_SKYLINE_NEAR,
+  VOLUME_MEGA_TOWERS_RGB,
+  VOLUME_MEGA_TOWER_GLINT,
+  VOLUME_MEGA_TOWER_SHADE,
+  VOLUME_MEGA_WARM_RGB,
+  VOLUME_MEGA_WARM_SHARE,
   VOLUME_CITY_MARK,
   VOLUME_CITY_ROOF,
   VOLUME_CITY_SIDE,
@@ -654,7 +671,8 @@ export function volumeMood(options = {}) {
     // горизонта она не тянется в бесконечность, а гаснет — так же плавно, как
     // темнеет небо.
     shadow: { az: sun.az, rise: sun.rise, fade: sun.up ? volumeShare(sun.height, 1, 7) * see : 0 },
-    palette: volumeBackdropPalette(tint, season),
+    // Третий довод — закат на стекле мегаполиса: солнце низко, но ещё не ушло.
+    palette: volumeBackdropPalette(tint, season, volumeShare(sun.height, 14, 2) * volumeShare(sun.height, -8, -2) * see),
     // Погода и время года — для неба, листвы, тумана и осадков.
     weather,
     season,
@@ -791,8 +809,12 @@ export const VOLUME_SEASON_PALETTE = Object.freeze({
   },
 });
 
-export function volumeBackdropPalette(tint, season = "summer") {
+export function volumeBackdropPalette(tint, season = "summer", warm = 0) {
   const css = (hex) => volumeTintCss(volumeHexRgb(hex), tint);
+  // Закат на стекле мегаполиса: цвет сводится к солнечному на долю `warm` и
+  // только потом красится часом — стекло отражает небо, а не светится само.
+  const glow = (hex) =>
+    volumeTintCss(volumeMix(volumeHexRgb(hex), VOLUME_MEGA_WARM_RGB, Math.max(0, Math.min(1, warm)) * VOLUME_MEGA_WARM_SHARE), tint);
   const look = VOLUME_SEASON_PALETTE[season] || VOLUME_SEASON_PALETTE.summer;
   const pick = (key, fallback) => css(look[key] || fallback);
   return {
@@ -832,6 +854,25 @@ export function volumeBackdropPalette(tint, season = "summer") {
     asphaltFar: css(VOLUME_CITY_ASPHALT_FAR),
     mark: css(VOLUME_CITY_MARK),
     car: VOLUME_CITY_CARS.map((hex) => css(hex)),
+    // Краски «Мегаполиса» (`volume/megapolis.js`). Свет окон и огонь башни
+    // часом не красятся: светит — значит не темнеет.
+    mega: {
+      glass: glow(VOLUME_MEGA_GLASS),
+      glassSide: css(VOLUME_MEGA_GLASS_SIDE),
+      glassBand: glow(VOLUME_MEGA_GLASS_BAND),
+      panel: css(VOLUME_MEGA_PANEL),
+      panelSide: css(VOLUME_MEGA_PANEL_SIDE),
+      brick: css(VOLUME_MEGA_BRICK),
+      brickSide: css(VOLUME_MEGA_BRICK_SIDE),
+      roof: css(VOLUME_MEGA_ROOF),
+      towers: VOLUME_MEGA_TOWERS_RGB.map((hex) => glow(hex)),
+      towerShade: css(VOLUME_MEGA_TOWER_SHADE),
+      towerGlint: glow(VOLUME_MEGA_TOWER_GLINT),
+      skylineFar: css(VOLUME_MEGA_SKYLINE_FAR),
+      skylineNear: css(VOLUME_MEGA_SKYLINE_NEAR),
+      light: VOLUME_CITY_LIGHT,
+      beacon: VOLUME_MEGA_BEACON,
+    },
   };
 }
 

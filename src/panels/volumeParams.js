@@ -1210,12 +1210,14 @@ function dayOf(at) {
 function backdropLabel(kind) {
   if (kind === "plain") return strings.volume.backdropPlain;
   if (kind === "city") return strings.volume.backdropCity;
+  if (kind === "megapolis") return strings.volume.backdropMegapolis;
   return strings.volume.backdropNature;
 }
 
 function backdropHint(kind) {
   if (kind === "plain") return strings.volume.backdropPlainHint;
   if (kind === "city") return strings.volume.backdropCityHint;
+  if (kind === "megapolis") return strings.volume.backdropMegapolisHint;
   return strings.volume.backdropNatureHint;
 }
 

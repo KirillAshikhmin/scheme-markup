@@ -11,6 +11,7 @@ import { volumeShare01, volumeTintCss } from "./faces.js";
 import { volumeBasis, volumeFocal, volumeHorizon } from "./camera.js";
 import {
   VOLUME_BACKDROP_DEFAULT,
+  VOLUME_CITY_LIGHT,
   VOLUME_HILL_FAR,
   VOLUME_HILL_NEAR,
   VOLUME_MOUNTAIN_FAR_ROCK,
@@ -26,6 +27,18 @@ import {
   volumeMood,
   volumeMoonShape,
 } from "./sky.js";
+import {
+  VOLUME_MEGA_BLOCKS,
+  VOLUME_MEGA_CARS,
+  VOLUME_MEGA_FLOOR_MM,
+  VOLUME_MEGA_GREENS,
+  VOLUME_MEGA_SKYLINE,
+  VOLUME_MEGA_STREETS,
+  VOLUME_MEGA_TOWERS,
+  volumeDrawMegaBlock,
+  volumeDrawMegaSkyline,
+  volumeDrawMegaTower,
+} from "./megapolis.js";
 
 /** Ближе этого направление считается ушедшим за край: делить на нуль нельзя. */
 const VOLUME_SKY_NEAR = 0.08;
@@ -513,6 +526,7 @@ export function volumeBackdropPlaces(land) {
           park: VOLUME_CITY_PARK,
           banners: VOLUME_CITY_BANNER_PLACES,
           cityGreens: VOLUME_CITY_GREENS,
+          mega: VOLUME_MEGA_PLACES,
         }
       : {
           push,
@@ -541,6 +555,21 @@ export function volumeBackdropPlaces(land) {
             halfMm: banner.halfMm * push,
           })),
           cityGreens: VOLUME_CITY_GREENS.map((green) => volumePushSpot(green, push)),
+          mega: {
+            towers: VOLUME_MEGA_PLACES.towers.map((tower) => ({ ...volumePushSpot(tower, push), halfMm: tower.halfMm * push })),
+            blocks: VOLUME_MEGA_PLACES.blocks.map((block) => ({
+              ...volumePushSpot(block, push),
+              halfMm: block.halfMm * push,
+              deepMm: block.deepMm * push,
+            })),
+            skyline: VOLUME_MEGA_PLACES.skyline.map((ridge) => ({
+              ...ridge,
+              nodes: ridge.nodes.map((node) => volumePushSpot(node, push)),
+            })),
+            streets: VOLUME_MEGA_PLACES.streets.map((street) => ({ ...street, nodes: volumePushBand(street.nodes, push), marks: street.marks ? volumePushBand(street.marks, push) : null })),
+            cars: VOLUME_MEGA_PLACES.cars.map((car) => volumePushSpot(car, push)),
+            greens: VOLUME_MEGA_PLACES.greens.map((green) => volumePushSpot(green, push)),
+          },
         };
   VOLUME_BACKDROP_CACHE.set(push, made);
   return made;
@@ -854,6 +883,32 @@ function volumeDrawGround(ctx, box, camera, hour, land, near) {
     take(places.park, (spot) => volumeDrawCar(ctx, aim, spot, palette));
     take(places.banners, (spot) => volumeDrawBanner(ctx, aim, spot, hour));
     take(places.cityGreens, (spot) => volumeDrawTree(ctx, aim, spot, palette));
+  } else if (hour.kind === "megapolis") {
+    // «Мегаполис» (правка 2026-11-20): кисти и таблицы — `megapolis.js`, проекция
+    // и порядок — здешние. Дальнее раньше ближнего: башни кластера, гряды
+    // крыш, потом всё лежащее на земле, потом дома по дальности.
+    const mega = places.mega;
+    const point = (x, y, z) => volumeGroundPoint(aim, x, y, z);
+    if (!near) {
+      const towers = mega.towers
+        .map((tower, index) => ({ tower, index, depth: Math.hypot(tower.x - at.x, tower.y - at.y) }))
+        .sort((one, two) => two.depth - one.depth);
+      for (const item of towers) volumeDrawMegaTower(ctx, point, item.tower, item.index, hour, volumeCityWindowLit);
+      for (const ridge of mega.skyline) {
+        volumeDrawMegaSkyline(ctx, point, ridge, ridge.far ? palette.mega.skylineFar : palette.mega.skylineNear);
+      }
+      for (const street of mega.streets) {
+        volumeDrawStrip(ctx, aim, street.nodes, (run) =>
+          street.river
+            ? volumeStripFill(ctx, run, palette.riverNear, palette.riverFar)
+            : volumeStripFill(ctx, run, palette.asphalt, palette.asphaltFar),
+        );
+        if (street.marks) volumeDrawStrip(ctx, aim, street.marks, () => palette.mark);
+      }
+    }
+    take(mega.blocks, (spot, index) => volumeDrawMegaBlock(ctx, point, at, spot, index, hour, volumeCityWindowLit));
+    take(mega.cars, (spot) => volumeDrawCar(ctx, aim, spot, palette));
+    take(mega.greens, (spot) => volumeDrawTree(ctx, aim, spot, palette));
   } else {
     if (!near) {
       // Горы — самое далёкое, что есть в панораме: раньше всего, что стоит на
@@ -1408,8 +1463,7 @@ function volumeDrawBareTree(ctx, base, height, trunk, tree, palette) {
     ctx.fillRect(base.x - trunk / 2, topY, trunk, Math.max(1, trunk * 0.6));
   }
 }
-/** Свет в окне — он же самое яркое в ночном кадре. */
-const VOLUME_CITY_LIGHT = "#ffe6a3";
+
 
 /**
  * Рекламные щиты у дороги (G310): полотно и краска полос. Текста нет — писать
@@ -1659,3 +1713,46 @@ export const VOLUME_MOOD_NOON = volumeMood({
   minutes: (VOLUME_SUNRISE_MIN + VOLUME_SUNSET_MIN) / 2,
   kind: VOLUME_BACKDROP_DEFAULT,
 });
+
+// ——— мегаполис: таблицы в места (правка 2026-11-20) ———————————————————————
+//
+// Числа таблиц — у `megapolis.js` (метры и градусы); места на земле из них
+// делаются здесь, теми же руками, что у «Города»: `volumeAway`,
+// `volumeBandNodes`, `volumeStreetMarks`. Считается один раз на модуль.
+const VOLUME_MEGA_PLACES = {
+  towers: VOLUME_MEGA_TOWERS.map(([az, away, half, height, shape]) => ({
+    ...volumeAway(az, away),
+    awayMm: away * VOLUME_M,
+    halfMm: half * VOLUME_M,
+    heightMm: height * VOLUME_M,
+    shape,
+  })),
+  blocks: VOLUME_MEGA_BLOCKS.map(([az, away, half, deep, height, tone]) => ({
+    ...volumeAway(az, away),
+    awayMm: away * VOLUME_M,
+    halfMm: half * VOLUME_M,
+    deepMm: deep * VOLUME_M,
+    heightMm: height * VOLUME_M,
+    floors: Math.max(2, Math.round((height * VOLUME_M) / VOLUME_MEGA_FLOOR_MM)),
+    tone,
+  })),
+  skyline: VOLUME_MEGA_SKYLINE.map((ridge) => ({
+    far: ridge.far,
+    nodes: ridge.rises.map((rise, index) => ({
+      ...volumeAway((index * 360) / ridge.rises.length, ridge.awayM),
+      awayMm: ridge.awayM * VOLUME_M,
+      heightMm: rise * VOLUME_M,
+    })),
+  })),
+  streets: VOLUME_MEGA_STREETS.map((street) => {
+    const nodes = volumeBandNodes(street.points, street.widthM);
+    return { river: street.river === true, nodes, marks: street.river ? null : volumeStreetMarks(nodes) };
+  }),
+  cars: VOLUME_MEGA_CARS.map(([az, away, height], index) => volumeCar(az, away, height, index)),
+  greens: VOLUME_MEGA_GREENS.map(([az, away, height]) => volumeStanding(az, away, height, "tree")),
+};
+
+/** Места «Мегаполиса» без отодвигания — для тестов и оценки цены кадра. */
+export function volumeMegaPlaces() {
+  return VOLUME_MEGA_PLACES;
+}

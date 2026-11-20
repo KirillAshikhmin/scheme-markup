@@ -81,7 +81,11 @@ export const VOLUME_MOUNTAIN_SNOW = "#f1f6fc";
 // потребовал бы миграции ради того, что человек меняет кнопкой. Координаты
 // (таск 188) — наоборот, свойство объекта, и живут в нём.
 
-export const VOLUME_BACKDROP_KINDS = ["plain", "nature", "city"];
+// «Мегаполис» — четвёртый вид (правка 2026-11-20): деловой кластер вдали,
+// плотная застройка, проспекты и река. Умолчание прежнее, и незнакомое
+// значение по-прежнему читается как умолчание — прежняя страница, встретив
+// «megapolis» в настройках, покажет «Природу».
+export const VOLUME_BACKDROP_KINDS = ["plain", "nature", "city", "megapolis"];
 export const VOLUME_BACKDROP_DEFAULT = "nature";
 
 export function volumeBackdropKindOf(kind) {
@@ -115,5 +119,31 @@ export const VOLUME_CITY_ASPHALT = "#8d8f92";
 export const VOLUME_CITY_ASPHALT_FAR = "#c2c4c7";
 export const VOLUME_CITY_MARK = "#d8dadd";
 export const VOLUME_CITY_CARS = ["#b5443c", "#3f5e8c", "#d8d9dc", "#4f6f52", "#2f3338"];
+// ——— мегаполис (правка 2026-11-20) ———
+// Стекло башен синее и холоднее бетона «Города»; панель спального района
+// бело-розовая, кирпич тёплый. Башни дальнего плана — три близких тона, чтобы
+// кластер читался группой разных зданий, а не одним гребнем. На закате стекло
+// и башни подмешивают цвет солнца (`volumeBackdropPalette`, довод `warm`).
+export const VOLUME_MEGA_GLASS = "#7f9fc0";
+export const VOLUME_MEGA_GLASS_SIDE = "#5f7fa3";
+export const VOLUME_MEGA_GLASS_BAND = "#a9c4de";
+export const VOLUME_MEGA_PANEL = "#d9cfc9";
+export const VOLUME_MEGA_PANEL_SIDE = "#b9aea9";
+export const VOLUME_MEGA_BRICK = "#b28f7c";
+export const VOLUME_MEGA_BRICK_SIDE = "#93735f";
+export const VOLUME_MEGA_ROOF = "#5f6672";
+export const VOLUME_MEGA_TOWERS_RGB = ["#8fa9c6", "#9db4cc", "#7f98b8"];
+export const VOLUME_MEGA_TOWER_SHADE = "#6c84a3";
+export const VOLUME_MEGA_TOWER_GLINT = "#cfdeee";
+export const VOLUME_MEGA_SKYLINE_FAR = "#aab3bf";
+export const VOLUME_MEGA_SKYLINE_NEAR = "#939dab";
+/** Цвет заката на стекле и доля, на которую он подмешивается в самый низ солнца. */
+export const VOLUME_MEGA_WARM_RGB = [255, 168, 112];
+export const VOLUME_MEGA_WARM_SHARE = 0.55;
+/** Красный огонь на верхушке башни: светит — значит часом не красится. */
+export const VOLUME_MEGA_BEACON = "#ff4a3d";
+
+/** Свет в окне: тёплый и постоянный — светит, значит часом не красится. Один на «Город» и «Мегаполис». */
+export const VOLUME_CITY_LIGHT = "#ffe6a3";
 /** Какая доля окон светится в самую тёмную ночь: дом спит, а не празднует. */
 export const VOLUME_CITY_LIT_MAX = 0.55;
