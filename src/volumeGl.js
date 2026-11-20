@@ -339,13 +339,16 @@ export function volumeGlMake(THREE) {
         node.intensity = 0;
         continue;
       }
-      node.position.set(item.x * S, item.z * S, item.y * S);
-      node.intensity = VOLUME_GL_LAMP_GAIN * 0.35 * item.power;
+      // Люстра под самым потолком светит из-под себя, а не из перекрытия.
+      node.position.set(item.x * S, (item.hang ? item.z - 250 : item.z) * S, item.y * S);
+      // Люстра на подвесе светит сильнее бра и торшера: она главный свет комнаты.
+      node.intensity = VOLUME_GL_LAMP_GAIN * (item.hang ? 0.55 : 0.35) * item.power;
       linearRgb(node.color, item.rgb);
     }
     if (pick.fill) {
-      fill.position.set(pick.fill.x * S, 1.3, pick.fill.y * S);
-      fill.intensity = VOLUME_GL_LAMP_GAIN * 0.07 * pick.fill.power;
+      fill.position.set(pick.fill.x * S, 1.1, pick.fill.y * S);
+      // Отражённый свет: от него светлеет потолок над потолочными светильниками.
+      fill.intensity = VOLUME_GL_LAMP_GAIN * 0.13 * pick.fill.power;
     } else fill.intensity = 0;
     return pick;
   }

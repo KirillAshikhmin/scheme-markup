@@ -15,11 +15,14 @@
 
 import { VOLUME_LAMP_LIGHT_RGB } from "./measures.js";
 import { volumeLampSourcesOf } from "./lamps.js";
+import { volumeMarkPlace } from "./scene.js";
 
 /** Миллиметры → метры. */
 export const VOLUME_MESH_SCALE = 0.001;
 /** Соседние источники ближе этого сливаются в один: у видеокарты их считаные. */
 export const VOLUME_MESH_LAMP_JOIN_MM = 1500;
+/** Источник ниже потолка на столько — светильник висячий. */
+export const VOLUME_MESH_HANG_MM = 250;
 
 /** Канал sRGB 0…1 → линейный: свет складывается в линейных числах. */
 export function volumeMeshLinear(value) {
@@ -265,11 +268,18 @@ export function volumeMeshBuild(faces, options = {}) {
  */
 export function volumeMeshLamps(scene, light, live = null) {
   const out = [];
+  // Висячий светильник (источник заметно ниже потолка — люстра на подвесе)
+  // светит во все стороны, а не конусом вниз: потолок над ним освещён
+  // (слово заказчика: «потолок тоже должен освещаться»).
+  const ceilingMm = Number(scene && scene.heightMm) || 0;
   if (!scene || !light || !light.lamps) return out;
   for (const [markId, strength] of light.lamps) {
     if (!(strength > 0)) continue;
     const item = live ? live.get(markId) : null;
     const rgb = (light.colors && light.colors.get(markId)) || VOLUME_LAMP_LIGHT_RGB;
+    // Люстра светит во все стороны, как бы высоко её ни повесили.
+    const place = volumeMarkPlace(scene, markId);
+    const chandelier = Boolean(place && place.view && place.view.name === "chandelier");
     for (const source of volumeLampSourcesOf(scene, markId, item ? item.roomId : undefined)) {
       if (!source || !source.at || !(source.power > 0)) continue;
       out.push({
@@ -277,7 +287,8 @@ export function volumeMeshLamps(scene, light, live = null) {
         y: source.at.y,
         z: source.at.z,
         power: source.power * strength,
-        down: Boolean(source.dir && source.dir.z < 0),
+        down: Boolean(source.dir && source.dir.z < 0) && !chandelier && !(ceilingMm > 0 && source.at.z < ceilingMm - VOLUME_MESH_HANG_MM),
+        hang: Boolean(source.dir && source.dir.z < 0) && (chandelier || (ceilingMm > 0 && source.at.z < ceilingMm - VOLUME_MESH_HANG_MM)),
         room: source.room || null,
         rgb,
       });
@@ -306,6 +317,7 @@ export function volumeMeshLampJoin(lamps) {
     near.z = (near.z * near.power + lamp.z * lamp.power) / sum;
     near.rgb = [0, 1, 2].map((at) => (near.rgb[at] * near.power + lamp.rgb[at] * lamp.power) / sum);
     near.power = sum;
+    near.hang = near.hang || lamp.hang;
   }
   return out;
 }

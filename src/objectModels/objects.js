@@ -437,11 +437,23 @@ export const MODELS_OBJECTS = {
   // Доли считаны от габарита 850 × 1900 × 1400: дека до 0.16 — это 224 мм (у
   // домашних дорожек рама 180–250), консоль от 0.78 — 1090 мм, то есть под
   // руку бегущему.
+  //
+  // **Перерисована 2026-11-20** (слово заказчика: «модель беговой дорожки
+  // сделай внятнее»): прежние четыре коробки читались тумбой со спинкой. Теперь
+  // низкая рама с тёмным полотном и светлыми бортами, кожух мотора спереди,
+  // две стойки, консоль с экраном и поручни назад от стоек.
   treadmill: modelParts(
-    modelBox("deck", { x: -0.44, width: 0.88, y: -0.5, depth: 0.76, z: 0, height: 0.16 }),
-    modelBox("belt", { x: -0.3, width: 0.6, y: -0.48, depth: 0.7, z: 0.16, height: 0.04, material: "dark" }),
-    modelBox("post", { x: -0.4, width: 0.8, y: 0.26, depth: 0.16, z: 0, height: 0.78, material: "metal" }),
-    modelBox("console", { x: -0.4, width: 0.8, y: 0.24, depth: 0.22, z: 0.78, height: 0.22, material: "light" }),
+    modelBox("deck", { x: -0.44, width: 0.88, y: -0.5, depth: 0.8, z: 0.02, height: 0.09 }),
+    modelBox("belt", { x: -0.3, width: 0.6, y: -0.48, depth: 0.76, z: 0.11, height: 0.012, material: "dark" }),
+    modelBox("sideLeft", { x: -0.44, width: 0.13, y: -0.5, depth: 0.78, z: 0.11, height: 0.018, material: "light" }),
+    modelBox("sideRight", { x: 0.31, width: 0.13, y: -0.5, depth: 0.78, z: 0.11, height: 0.018, material: "light" }),
+    modelBox("hood", { x: -0.42, width: 0.84, y: 0.28, depth: 0.2, z: 0.02, height: 0.17, material: "dark" }),
+    modelBox("postLeft", { x: -0.42, width: 0.08, y: 0.36, depth: 0.05, z: 0.19, height: 0.63, material: "metal" }),
+    modelBox("postRight", { x: 0.34, width: 0.08, y: 0.36, depth: 0.05, z: 0.19, height: 0.63, material: "metal" }),
+    modelBox("console", { x: -0.44, width: 0.88, y: 0.3, depth: 0.14, z: 0.82, height: 0.18 }),
+    modelBox("screen", { x: -0.22, width: 0.44, y: 0.29, depth: 0.012, z: 0.86, height: 0.1, material: "dark" }),
+    modelBox("railLeft", { x: -0.42, width: 0.07, y: 0.06, depth: 0.3, z: 0.76, height: 0.035, material: "metal" }),
+    modelBox("railRight", { x: 0.35, width: 0.07, y: 0.06, depth: 0.3, z: 0.76, height: 0.035, material: "metal" }),
   ),
   // Экран проектора: кассета у верха габарита, светлое полотно вниз от неё и
   // тёмный утяжелитель по нижней кромке. Габарит описывает **развёрнутый**

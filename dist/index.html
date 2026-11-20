@@ -6711,7 +6711,7 @@ display: none;
     var label = document.getElementById("splash-step");
     var canvas = document.getElementById("splash-model");
     var STEPS = ["Расставляем розетки…","Проектируем щит…","Настраиваем сценарии…","Подбираем оборудование…","Чертим стены…","Развешиваем люстры…","Тянем кабель…","Маркируем линии…","Считаем длину ленты…","Калибруем масштаб…","Проверяем автоматы…","Вешаем шторы на карнизы…","Ищем, где спрятать кондиционер…","Учим выключатели проходить…","Уговариваем датчик движения не реагировать на кота…","Объясняем люстре, что она не главная…","Прячем провода за плинтус…","Ищем фазу. Нашли. Больше не ищем…","Считаем розетки. Опять не хватает…","Мирим тёплый пол с ковром…","Договариваемся с роботом-пылесосом о маршруте…","Убеждаем щит, что места в нём достаточно…","Учим шторы просыпаться вовремя…","Проверяем, что лампочка действительно горит…","Напоминаем термостату, что зима кончилась…","Вспоминаем, от чего этот автомат…"];
-    var PAGE_BYTES = 3148021;
+    var PAGE_BYTES = 3149321;
     var calm = false;
     try {
     calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -14224,10 +14224,17 @@ modelBox("doorLow", { x: -0.46, width: 0.92, y: -0.5, depth: 0.18, z: 0.02, heig
 modelBox("case", { y: -0.32, depth: 0.82 }),
 ),
 treadmill: modelParts(
-modelBox("deck", { x: -0.44, width: 0.88, y: -0.5, depth: 0.76, z: 0, height: 0.16 }),
-modelBox("belt", { x: -0.3, width: 0.6, y: -0.48, depth: 0.7, z: 0.16, height: 0.04, material: "dark" }),
-modelBox("post", { x: -0.4, width: 0.8, y: 0.26, depth: 0.16, z: 0, height: 0.78, material: "metal" }),
-modelBox("console", { x: -0.4, width: 0.8, y: 0.24, depth: 0.22, z: 0.78, height: 0.22, material: "light" }),
+modelBox("deck", { x: -0.44, width: 0.88, y: -0.5, depth: 0.8, z: 0.02, height: 0.09 }),
+modelBox("belt", { x: -0.3, width: 0.6, y: -0.48, depth: 0.76, z: 0.11, height: 0.012, material: "dark" }),
+modelBox("sideLeft", { x: -0.44, width: 0.13, y: -0.5, depth: 0.78, z: 0.11, height: 0.018, material: "light" }),
+modelBox("sideRight", { x: 0.31, width: 0.13, y: -0.5, depth: 0.78, z: 0.11, height: 0.018, material: "light" }),
+modelBox("hood", { x: -0.42, width: 0.84, y: 0.28, depth: 0.2, z: 0.02, height: 0.17, material: "dark" }),
+modelBox("postLeft", { x: -0.42, width: 0.08, y: 0.36, depth: 0.05, z: 0.19, height: 0.63, material: "metal" }),
+modelBox("postRight", { x: 0.34, width: 0.08, y: 0.36, depth: 0.05, z: 0.19, height: 0.63, material: "metal" }),
+modelBox("console", { x: -0.44, width: 0.88, y: 0.3, depth: 0.14, z: 0.82, height: 0.18 }),
+modelBox("screen", { x: -0.22, width: 0.44, y: 0.29, depth: 0.012, z: 0.86, height: 0.1, material: "dark" }),
+modelBox("railLeft", { x: -0.42, width: 0.07, y: 0.06, depth: 0.3, z: 0.76, height: 0.035, material: "metal" }),
+modelBox("railRight", { x: 0.35, width: 0.07, y: 0.06, depth: 0.3, z: 0.76, height: 0.035, material: "metal" }),
 ),
 projectorScreen: modelParts(
 modelBox("case", { z: 0.9, height: 0.1 }),
@@ -44172,6 +44179,7 @@ return out;
 // src/volume/mesh.js
 const VOLUME_MESH_SCALE = 0.001;
 const VOLUME_MESH_LAMP_JOIN_MM = 1500;
+const VOLUME_MESH_HANG_MM = 250;
 function volumeMeshLinear(value) {
 return value <= 0.04045 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4);
 }
@@ -44374,11 +44382,14 @@ triangles: (solid.pos.length + clear.pos.length) / 9,
 }
 function volumeMeshLamps(scene, light, live = null) {
 const out = [];
+const ceilingMm = Number(scene && scene.heightMm) || 0;
 if (!scene || !light || !light.lamps) return out;
 for (const [markId, strength] of light.lamps) {
 if (!(strength > 0)) continue;
 const item = live ? live.get(markId) : null;
 const rgb = (light.colors && light.colors.get(markId)) || VOLUME_LAMP_LIGHT_RGB;
+const place = volumeMarkPlace(scene, markId);
+const chandelier = Boolean(place && place.view && place.view.name === "chandelier");
 for (const source of volumeLampSourcesOf(scene, markId, item ? item.roomId : undefined)) {
 if (!source || !source.at || !(source.power > 0)) continue;
 out.push({
@@ -44386,7 +44397,8 @@ x: source.at.x,
 y: source.at.y,
 z: source.at.z,
 power: source.power * strength,
-down: Boolean(source.dir && source.dir.z < 0),
+down: Boolean(source.dir && source.dir.z < 0) && !chandelier && !(ceilingMm > 0 && source.at.z < ceilingMm - VOLUME_MESH_HANG_MM),
+hang: Boolean(source.dir && source.dir.z < 0) && (chandelier || (ceilingMm > 0 && source.at.z < ceilingMm - VOLUME_MESH_HANG_MM)),
 room: source.room || null,
 rgb,
 });
@@ -44413,6 +44425,7 @@ near.y = (near.y * near.power + lamp.y * lamp.power) / sum;
 near.z = (near.z * near.power + lamp.z * lamp.power) / sum;
 near.rgb = [0, 1, 2].map((at) => (near.rgb[at] * near.power + lamp.rgb[at] * lamp.power) / sum);
 near.power = sum;
+near.hang = near.hang || lamp.hang;
 }
 return out;
 }
@@ -72652,13 +72665,13 @@ if (!item) {
 node.intensity = 0;
 continue;
 }
-node.position.set(item.x * S, item.z * S, item.y * S);
-node.intensity = VOLUME_GL_LAMP_GAIN * 0.35 * item.power;
+node.position.set(item.x * S, (item.hang ? item.z - 250 : item.z) * S, item.y * S);
+node.intensity = VOLUME_GL_LAMP_GAIN * (item.hang ? 0.55 : 0.35) * item.power;
 linearRgb(node.color, item.rgb);
 }
 if (pick.fill) {
-fill.position.set(pick.fill.x * S, 1.3, pick.fill.y * S);
-fill.intensity = VOLUME_GL_LAMP_GAIN * 0.07 * pick.fill.power;
+fill.position.set(pick.fill.x * S, 1.1, pick.fill.y * S);
+fill.intensity = VOLUME_GL_LAMP_GAIN * 0.13 * pick.fill.power;
 } else fill.intensity = 0;
 return pick;
 }
