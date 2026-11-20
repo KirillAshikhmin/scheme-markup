@@ -6711,7 +6711,7 @@ display: none;
     var label = document.getElementById("splash-step");
     var canvas = document.getElementById("splash-model");
     var STEPS = ["Расставляем розетки…","Проектируем щит…","Настраиваем сценарии…","Подбираем оборудование…","Чертим стены…","Развешиваем люстры…","Тянем кабель…","Маркируем линии…","Считаем длину ленты…","Калибруем масштаб…","Проверяем автоматы…","Вешаем шторы на карнизы…","Ищем, где спрятать кондиционер…","Учим выключатели проходить…","Уговариваем датчик движения не реагировать на кота…","Объясняем люстре, что она не главная…","Прячем провода за плинтус…","Ищем фазу. Нашли. Больше не ищем…","Считаем розетки. Опять не хватает…","Мирим тёплый пол с ковром…","Договариваемся с роботом-пылесосом о маршруте…","Убеждаем щит, что места в нём достаточно…","Учим шторы просыпаться вовремя…","Проверяем, что лампочка действительно горит…","Напоминаем термостату, что зима кончилась…","Вспоминаем, от чего этот автомат…"];
-    var PAGE_BYTES = 3154691;
+    var PAGE_BYTES = 3157823;
     var calm = false;
     try {
     calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -9382,6 +9382,8 @@ stool: "Табуретка",
 chair: "Стул",
 billiardTable: "Бильярдный стол",
 treadmill: "Беговая дорожка",
+exerciseBike: "Велотренажёр",
+bench: "Скамья",
 projectorScreen: "Экран проектора",
 stairsExit: "Выход с лестницы",
 car: "Автомобиль",
@@ -11239,6 +11241,17 @@ heightAboveFloorMm: 0,
 words: ["кресл"],
 },
 {
+key: "bench",
+category: "furniture",
+mount: "floor",
+shape: "rect",
+widthMm: 1200,
+depthMm: 400,
+heightMm: 450,
+heightAboveFloorMm: 0,
+words: ["скамь", "лавочк", "лавк", "банкетк"],
+},
+{
 key: "coffeeTable",
 category: "furniture",
 mount: "floor",
@@ -11623,6 +11636,17 @@ depthMm: 350,
 heightMm: 95,
 heightAboveFloorMm: 0,
 words: ["пылесос"],
+},
+{
+key: "exerciseBike",
+category: "appliances",
+mount: "floor",
+shape: "rect",
+widthMm: 600,
+depthMm: 1100,
+heightMm: 1350,
+heightAboveFloorMm: 0,
+words: ["велотренаж"],
 },
 {
 key: "treadmill",
@@ -12874,6 +12898,21 @@ viewLine(-0.37, 0.27, 0.37, 0.27),
 viewCircle(0, -0.18, 0.12),
 viewCircle(0, -0.18, 0.04),
 viewCircle(-0.25, 0.33, 0.06),
+),
+},
+bench: {
+shapes: [],
+parts: viewParts(viewRect(-0.48, -0.4, 0.96, 0.8, 0.04), viewLine(-0.38, -0.4, -0.38, 0.4), viewLine(0.38, -0.4, 0.38, 0.4)),
+},
+exerciseBike: {
+shapes: [],
+parts: viewParts(
+viewLine(-0.46, -0.4, 0.46, -0.4),
+viewLine(-0.46, 0.38, 0.46, 0.38),
+viewLine(0, -0.4, 0, 0.38),
+viewCircle(0, 0.2, 0.16),
+viewRect(-0.18, -0.36, 0.36, 0.22, 0.05),
+viewLine(-0.4, 0.3, 0.4, 0.3),
 ),
 },
 treadmill: {
@@ -14175,8 +14214,29 @@ modelBox("legRight", { x: 0.3, width: 0.16, y: -0.3, depth: 0.6, z: 0, height: 0
 ),
 bed: modelParts(
 modelBox("frame", { z: 0, height: 0.5 }),
-modelBox("mattress", { x: -0.46, width: 0.92, y: -0.5, depth: 0.85, z: 0.5, height: 0.5, material: "light" }),
+modelBox("mattress", { x: -0.46, width: 0.92, y: -0.5, depth: 0.85, z: 0.5, height: 0.34, material: "light" }),
+modelBox("cover", { x: -0.47, width: 0.94, y: -0.5, depth: 0.56, z: 0.84, height: 0.03 }),
+modelBox("pillowLeft", { x: -0.4, width: 0.36, y: 0.12, depth: 0.2, z: 0.84, height: 0.14, material: "light" }),
+modelBox("pillowRight", { x: 0.04, width: 0.36, y: 0.12, depth: 0.2, z: 0.84, height: 0.14, material: "light" }),
 modelBox("headboard", { y: 0.35, depth: 0.15, material: "dark" }),
+),
+bench: modelParts(
+modelBox("seat", { z: 0.82, height: 0.18, material: "light" }),
+modelBox("legLeft", { x: -0.44, width: 0.08, y: -0.42, depth: 0.84, z: 0, height: 0.82 }),
+modelBox("legRight", { x: 0.36, width: 0.08, y: -0.42, depth: 0.84, z: 0, height: 0.82 }),
+modelBox("rail", { x: -0.36, width: 0.72, y: -0.04, depth: 0.08, z: 0.3, height: 0.08 }),
+),
+exerciseBike: modelParts(
+modelBox("footFront", { x: -0.5, width: 1, y: 0.34, depth: 0.08, z: 0, height: 0.05, material: "dark" }),
+modelBox("footBack", { x: -0.5, width: 1, y: -0.44, depth: 0.08, z: 0, height: 0.05, material: "dark" }),
+modelBox("beam", { x: -0.07, width: 0.14, y: -0.44, depth: 0.86, z: 0.05, height: 0.07 }),
+modelTube("wheel", { axis: "x", round: true, x: -0.1, width: 0.2, y: 0.02, depth: 0.4, z: 0.1, height: 0.36, material: "dark" }),
+modelBox("seatPost", { x: -0.05, width: 0.1, y: -0.28, depth: 0.08, z: 0.12, height: 0.52, material: "metal" }),
+modelBox("seat", { x: -0.2, width: 0.4, y: -0.38, depth: 0.26, z: 0.64, height: 0.05, material: "dark" }),
+modelBox("barPost", { x: -0.05, width: 0.1, y: 0.3, depth: 0.08, z: 0.12, height: 0.74, material: "metal" }),
+modelBox("bar", { x: -0.42, width: 0.84, y: 0.26, depth: 0.05, z: 0.84, height: 0.04, material: "metal" }),
+modelBox("console", { x: -0.16, width: 0.32, y: 0.3, depth: 0.05, z: 0.86, height: 0.14, material: "light" }),
+modelBox("pedals", { x: -0.34, width: 0.68, y: 0.18, depth: 0.08, z: 0.24, height: 0.03, material: "metal" }),
 ),
 pool: modelParts(
 modelBox("basin", { z: 0, height: 0.78 }),
@@ -37680,7 +37740,7 @@ const VOLUME_LAMP_LIGHT_RGB = [255, 224, 176];
 const VOLUME_LAMP_LIGHT_SHARE = 0.14;
 const VOLUME_LAMP_LIFT = 0.55;
 const VOLUME_SLAB_RGB = [186, 181, 173];
-const VOLUME_OBJECT_RGB = [150, 126, 190];
+const VOLUME_OBJECT_RGB = [187, 180, 168];
 const VOLUME_DOOR_RGB = [176, 132, 92];
 const VOLUME_HANDLE_RGB = [186, 190, 198];
 const VOLUME_FRAME_RGB = [240, 242, 244];
@@ -44366,6 +44426,7 @@ const keep = options.keep || null;
 const paint = options.paint || null;
 const alphaOf = options.alpha || null;
 const liftOf = options.lift || null;
+const shiftOf = options.shift || null;
 const solid = { pos: [], nor: [], col: [] };
 const clear = { pos: [], nor: [], col: [] };
 const lines = { pos: [], col: [] };
@@ -44443,8 +44504,12 @@ const alpha = own !== null && own !== undefined ? own : face.clear ? (typeof fac
 const into = alpha < 1 ? clear : solid;
 const smooth = Boolean(face.smooth && face.n && P.length <= 4);
 const lift = liftOf ? Number(liftOf(face)) || 0 : 0;
+const shift = (shiftOf && shiftOf(face)) || null;
+const sx = nx * lift + (shift ? shift.x : 0);
+const sy = ny * lift + (shift ? shift.y : 0);
+const sz = nz * lift + (shift ? shift.z : 0);
 const emit = (p, sign) => {
-into.pos.push((p.x + nx * lift) * S, (p.z + nz * lift) * S, (p.y + ny * lift) * S);
+into.pos.push((p.x + sx) * S, (p.z + sz) * S, (p.y + sy) * S);
 let vx = nx;
 let vy = ny;
 let vz = nz;
@@ -44559,6 +44624,13 @@ return { spots, points, fill: power > 0 ? { x: fx / power, y: fy / power, power 
 function volumeMeshThingLift(face) {
 const id = face && face.thing !== undefined && face.thing !== null ? Number(face.thing) : NaN;
 return Number.isFinite(id) ? 0.1 + (Math.abs(id) % 7) * 0.12 : 0;
+}
+function volumeMeshThingShift(face) {
+const id = face && face.thing !== undefined && face.thing !== null ? Number(face.thing) : NaN;
+if (!Number.isFinite(id)) return null;
+const size = volumeMeshThingLift(face);
+const n = Math.abs(Math.trunc(id));
+return { x: n & 1 ? size : -size, y: n & 2 ? size : -size, z: size };
 }
 function volumeMeshArtLift(baseMm = 1) {
 let count = 0;
@@ -72676,13 +72748,14 @@ for (const face of scene.faces) if (face.lit && face.markId && !face.art) shinin
 const isFixture = (face) => Boolean(face.markId) && shining.has(face.markId) && !face.line && !(face.clear || face.alpha < 1);
 const mesh = volumeMeshBuild(scene.faces, {
 keep: (face) => !isLed(face) && !isScreen(face) && !isLand(face) && !isFixture(face),
-lift: (face) => (face.layer === VOLUME_LAYER_BASE ? -4 : volumeMeshThingLift(face) + (face.art ? art(face) : 0)),
+lift: (face) => (face.layer === VOLUME_LAYER_BASE ? -4 : face.art ? art(face) : 0),
+shift: volumeMeshThingShift,
 });
 swap(solid, geometry(mesh.solid, 3));
 swap(glass, geometry(mesh.clear, 4));
 swap(lines, geometry(mesh.lines, 3));
 swap(led, geometry(volumeMeshBuild(scene.faces, { keep: isLed, alpha: () => 1 }).solid, 3));
-swap(fixtures, geometry(volumeMeshBuild(scene.faces, { keep: (face) => isFixture(face) && !isLed(face) && !isScreen(face), lift: volumeMeshThingLift }).solid, 3));
+swap(fixtures, geometry(volumeMeshBuild(scene.faces, { keep: (face) => isFixture(face) && !isLed(face) && !isScreen(face), shift: volumeMeshThingShift }).solid, 3));
 swap(land, geometry(volumeMeshBuild(scene.faces, { keep: isLand, alpha: () => 1, lift: () => -4 }).solid, 3));
 litFaces = scene.faces.filter((face) => !face.line && (face.lit || isScreen(face)) && face.markId);
 triangles = mesh.triangles;
@@ -72716,7 +72789,8 @@ return Math.max(0, Math.min(1, (item.level === undefined ? 1 : item.level) * fad
 };
 const screen = volumeMeshArtLift();
 const mesh = volumeMeshBuild(litFaces, {
-lift: (face) => volumeMeshThingLift(face) + (face.art === "screen" ? screen(face) : 0.5),
+lift: (face) => (face.art === "screen" ? screen(face) : 0.5),
+shift: volumeMeshThingShift,
 keep: (face) => shine(face) > 0.01,
 alpha: () => 1,
 paint: (face) => {

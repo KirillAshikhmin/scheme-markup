@@ -266,10 +266,39 @@ export const MODELS_OBJECTS = {
   // Кровать: каркас, матрас, спинка — «матрас плюс спинка» заказчика, плюс то,
   // на чём они лежат. Спинка сзади, в головах: перёд кровати — её ножной край,
   // и габарит 1600 × 2000 читается как ширина × длина.
+  //
+  // С 2026-11-21 — с покрывалом и двумя подушками (слово заказчика: «подушки на
+  // кровать»): матрас чуть ниже, поверх него покрывало цветом вещи на две трети
+  // длины и две светлые подушки у спинки.
   bed: modelParts(
     modelBox("frame", { z: 0, height: 0.5 }),
-    modelBox("mattress", { x: -0.46, width: 0.92, y: -0.5, depth: 0.85, z: 0.5, height: 0.5, material: "light" }),
+    modelBox("mattress", { x: -0.46, width: 0.92, y: -0.5, depth: 0.85, z: 0.5, height: 0.34, material: "light" }),
+    modelBox("cover", { x: -0.47, width: 0.94, y: -0.5, depth: 0.56, z: 0.84, height: 0.03 }),
+    modelBox("pillowLeft", { x: -0.4, width: 0.36, y: 0.12, depth: 0.2, z: 0.84, height: 0.14, material: "light" }),
+    modelBox("pillowRight", { x: 0.04, width: 0.36, y: 0.12, depth: 0.2, z: 0.84, height: 0.14, material: "light" }),
     modelBox("headboard", { y: 0.35, depth: 0.15, material: "dark" }),
+  ),
+  // Скамья (правка 2026-11-21): сиденье и две опоры-доски.
+  bench: modelParts(
+    modelBox("seat", { z: 0.82, height: 0.18, material: "light" }),
+    modelBox("legLeft", { x: -0.44, width: 0.08, y: -0.42, depth: 0.84, z: 0, height: 0.82 }),
+    modelBox("legRight", { x: 0.36, width: 0.08, y: -0.42, depth: 0.84, z: 0, height: 0.82 }),
+    modelBox("rail", { x: -0.36, width: 0.72, y: -0.04, depth: 0.08, z: 0.3, height: 0.08 }),
+  ),
+  // Велотренажёр (правка 2026-11-21): две поперечины опоры, рама, маховик
+  // диском спереди, сиденье на стойке сзади, руль с консолью. Перёд (руль) —
+  // у дальнего края габарита, как консоль у беговой дорожки.
+  exerciseBike: modelParts(
+    modelBox("footFront", { x: -0.5, width: 1, y: 0.34, depth: 0.08, z: 0, height: 0.05, material: "dark" }),
+    modelBox("footBack", { x: -0.5, width: 1, y: -0.44, depth: 0.08, z: 0, height: 0.05, material: "dark" }),
+    modelBox("beam", { x: -0.07, width: 0.14, y: -0.44, depth: 0.86, z: 0.05, height: 0.07 }),
+    modelTube("wheel", { axis: "x", round: true, x: -0.1, width: 0.2, y: 0.02, depth: 0.4, z: 0.1, height: 0.36, material: "dark" }),
+    modelBox("seatPost", { x: -0.05, width: 0.1, y: -0.28, depth: 0.08, z: 0.12, height: 0.52, material: "metal" }),
+    modelBox("seat", { x: -0.2, width: 0.4, y: -0.38, depth: 0.26, z: 0.64, height: 0.05, material: "dark" }),
+    modelBox("barPost", { x: -0.05, width: 0.1, y: 0.3, depth: 0.08, z: 0.12, height: 0.74, material: "metal" }),
+    modelBox("bar", { x: -0.42, width: 0.84, y: 0.26, depth: 0.05, z: 0.84, height: 0.04, material: "metal" }),
+    modelBox("console", { x: -0.16, width: 0.32, y: 0.3, depth: 0.05, z: 0.86, height: 0.14, material: "light" }),
+    modelBox("pedals", { x: -0.34, width: 0.68, y: 0.18, depth: 0.08, z: 0.24, height: 0.03, material: "metal" }),
   ),
   // Бассейн: чаша и вода у края — «просто прямоугольником на полу» заказчика.
   // Куда уходит сам габарит, модель не решает: это каталог говорит, что

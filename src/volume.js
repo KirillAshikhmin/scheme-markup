@@ -414,6 +414,7 @@ import {
   volumeMeshLamps,
   volumeMeshLinear,
   volumeMeshThingLift,
+  volumeMeshThingShift,
 } from "./volume/mesh.js";
 import {
   VOLUME_LED_ALERT_RGB,
@@ -765,6 +766,7 @@ export {
   volumeMeshLamps,
   volumeMeshLinear,
   volumeMeshThingLift,
+  volumeMeshThingShift,
   volumeLine,
   volumeLineSpots,
   volumeLinkLines,

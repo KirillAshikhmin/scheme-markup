@@ -38,7 +38,7 @@ import {
   volumeMeshBuild,
   volumeMeshLampPick,
   volumeMeshLinear,
-  volumeMeshThingLift,
+  volumeMeshThingShift,
 } from "./volume.js";
 
 /** Копия three.js рядом со страницей (`web/vendor/three/`, версия — в README там же). */
@@ -215,13 +215,14 @@ export function volumeGlMake(THREE) {
       // Плита земли лежит в одной плоскости с полами (в кадре Canvas 2D их
       // разводил ярус): опускается на 4 мм (дефект заказчика: «у одноэтажных
       // объектов пересекаются фон земли и пола»).
-      lift: (face) => (face.layer === VOLUME_LAYER_BASE ? -4 : volumeMeshThingLift(face) + (face.art ? art(face) : 0)),
+      lift: (face) => (face.layer === VOLUME_LAYER_BASE ? -4 : face.art ? art(face) : 0),
+      shift: volumeMeshThingShift,
     });
     swap(solid, geometry(mesh.solid, 3));
     swap(glass, geometry(mesh.clear, 4));
     swap(lines, geometry(mesh.lines, 3));
     swap(led, geometry(volumeMeshBuild(scene.faces, { keep: isLed, alpha: () => 1 }).solid, 3));
-    swap(fixtures, geometry(volumeMeshBuild(scene.faces, { keep: (face) => isFixture(face) && !isLed(face) && !isScreen(face), lift: volumeMeshThingLift }).solid, 3));
+    swap(fixtures, geometry(volumeMeshBuild(scene.faces, { keep: (face) => isFixture(face) && !isLed(face) && !isScreen(face), shift: volumeMeshThingShift }).solid, 3));
     swap(land, geometry(volumeMeshBuild(scene.faces, { keep: isLand, alpha: () => 1, lift: () => -4 }).solid, 3));
     litFaces = scene.faces.filter((face) => !face.line && (face.lit || isScreen(face)) && face.markId);
     triangles = mesh.triangles;
@@ -259,7 +260,8 @@ export function volumeGlMake(THREE) {
     const screen = volumeMeshArtLift();
     const mesh = volumeMeshBuild(litFaces, {
       // Стекло экрана — над телом, фигуры картинки — над стеклом и друг над другом.
-      lift: (face) => volumeMeshThingLift(face) + (face.art === "screen" ? screen(face) : 0.5),
+      lift: (face) => (face.art === "screen" ? screen(face) : 0.5),
+      shift: volumeMeshThingShift,
       keep: (face) => shine(face) > 0.01,
       alpha: () => 1,
       paint: (face) => {

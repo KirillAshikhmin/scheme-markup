@@ -119,6 +119,9 @@ export function volumeMeshColor(color, fallback = [60, 60, 60]) {
  * Буфер глубины не разводит грани, лежащие в одной плоскости (дерево порядка
  * разводило их очередью): столешницы двух вещей на одной высоте, фигуры
  * картинки на стекле экрана. Вынос на доли миллиметра решает, кто сверху.
+ * `options.shift(face)` — сдвиг грани целиком `{x, y, z}` в мм: вещь едет вся
+ * разом, и щелей на её рёбрах не открывается (вынос по нормали их открывал —
+ * дефект заказчика «рябь на гранях»).
  *
  * Сглаживание: у грани круглого тела (`face.smooth`, `volumeRoundWith`)
  * нормаль вершины — среднее нормалей боков, сходящихся в ней. Днище (точек
@@ -130,6 +133,7 @@ export function volumeMeshBuild(faces, options = {}) {
   const paint = options.paint || null;
   const alphaOf = options.alpha || null;
   const liftOf = options.lift || null;
+  const shiftOf = options.shift || null;
   const solid = { pos: [], nor: [], col: [] };
   const clear = { pos: [], nor: [], col: [] };
   const lines = { pos: [], col: [] };
@@ -210,8 +214,12 @@ export function volumeMeshBuild(faces, options = {}) {
     const into = alpha < 1 ? clear : solid;
     const smooth = Boolean(face.smooth && face.n && P.length <= 4);
     const lift = liftOf ? Number(liftOf(face)) || 0 : 0;
+    const shift = (shiftOf && shiftOf(face)) || null;
+    const sx = nx * lift + (shift ? shift.x : 0);
+    const sy = ny * lift + (shift ? shift.y : 0);
+    const sz = nz * lift + (shift ? shift.z : 0);
     const emit = (p, sign) => {
-      into.pos.push((p.x + nx * lift) * S, (p.z + nz * lift) * S, (p.y + ny * lift) * S);
+      into.pos.push((p.x + sx) * S, (p.z + sz) * S, (p.y + sy) * S);
       let vx = nx;
       let vy = ny;
       let vz = nz;
@@ -356,8 +364,20 @@ export function volumeMeshLampPick(lamps, eye, limits = { spots: 8, points: 3 })
  */
 export function volumeMeshThingLift(face) {
   const id = face && face.thing !== undefined && face.thing !== null ? Number(face.thing) : NaN;
-  // Доли миллиметра: больший вынос раскрывает щели на рёбрах самой вещи.
   return Number.isFinite(id) ? 0.1 + (Math.abs(id) % 7) * 0.12 : 0;
+}
+
+/**
+ * Сдвиг вещи целиком, мм: тем же числом по всем трём осям, со знаками по номеру
+ * вещи. Грани двух вещей в одной плоскости расходятся, а сама вещь остаётся
+ * целой — её грани едут вместе, и щелей на рёбрах нет.
+ */
+export function volumeMeshThingShift(face) {
+  const id = face && face.thing !== undefined && face.thing !== null ? Number(face.thing) : NaN;
+  if (!Number.isFinite(id)) return null;
+  const size = volumeMeshThingLift(face);
+  const n = Math.abs(Math.trunc(id));
+  return { x: n & 1 ? size : -size, y: n & 2 ? size : -size, z: size };
 }
 
 /**

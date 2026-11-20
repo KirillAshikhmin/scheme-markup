@@ -178,6 +178,18 @@ const CATALOG = [
   // настолько, насколько ниже сиденье дивана, у которого он и стоит. От
   // обеденного (1400 × 800 × 750) его отличает и габарит, и высота: розетку в
   // полу у него просят, а над ним — нет.
+  // Скамья (правка 2026-11-21): лавочка в прихожей, раздевалке, у бассейна.
+  {
+    key: "bench",
+    category: "furniture",
+    mount: "floor",
+    shape: "rect",
+    widthMm: 1200,
+    depthMm: 400,
+    heightMm: 450,
+    heightAboveFloorMm: 0,
+    words: ["скамь", "лавочк", "лавк", "банкетк"],
+  },
   {
     key: "coffeeTable",
     category: "furniture",
@@ -743,6 +755,17 @@ const CATALOG = [
   // высота по консоли с поручнями 1300–1450. Взяты середины: 1900 × 850 × 1400.
   // Перёд вещи — **свободный конец**, с которого на неё заходят: консоль
   // уходит назад, к стене, как спинка у дивана и кровати.
+  {
+    key: "exerciseBike",
+    category: "appliances",
+    mount: "floor",
+    shape: "rect",
+    widthMm: 600,
+    depthMm: 1100,
+    heightMm: 1350,
+    heightAboveFloorMm: 0,
+    words: ["велотренаж"],
+  },
   {
     key: "treadmill",
     category: "appliances",
