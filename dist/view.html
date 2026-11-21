@@ -6742,7 +6742,7 @@ display: none;
     var label = document.getElementById("splash-step");
     var canvas = document.getElementById("splash-model");
     var STEPS = ["Расставляем розетки…","Проектируем щит…","Настраиваем сценарии…","Подбираем оборудование…","Чертим стены…","Развешиваем люстры…","Тянем кабель…","Маркируем линии…","Считаем длину ленты…","Калибруем масштаб…","Проверяем автоматы…","Вешаем шторы на карнизы…","Ищем, где спрятать кондиционер…","Учим выключатели проходить…","Уговариваем датчик движения не реагировать на кота…","Объясняем люстре, что она не главная…","Прячем провода за плинтус…","Ищем фазу. Нашли. Больше не ищем…","Считаем розетки. Опять не хватает…","Мирим тёплый пол с ковром…","Договариваемся с роботом-пылесосом о маршруте…","Убеждаем щит, что места в нём достаточно…","Учим шторы просыпаться вовремя…","Проверяем, что лампочка действительно горит…","Напоминаем термостату, что зима кончилась…","Вспоминаем, от чего этот автомат…"];
-    var PAGE_BYTES = 3224222;
+    var PAGE_BYTES = 3234208;
     var calm = false;
     try {
     calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -8574,6 +8574,7 @@ objectNoWall: "Рядом нет стены, к которой довернут�
 ghostSize: "{width} × {depth} · {turn}°",
 objectHeight: "Высота, мм",
 objectFloor: "От пола, мм",
+objectDrop: "Опуск от потолка, мм",
 objectHeightHint: "Пустая высота — «во всю высоту помещения»: так стоят колонна, ниша и короб.",
 objectFullHeight: "Во всю высоту помещения",
 objectTop: "верх {top} мм",
@@ -9331,6 +9332,9 @@ kitchenIsland: "Кухонный остров",
 barCounter: "Барная стойка",
 wallMirror: "Зеркало",
 skylight: "Мансардное окно",
+beam: "Балка",
+ceilingBox: "Короб потолочный",
+airDuct: "Воздуховод круглый",
 rug: "Ковёр",
 chest: "Комод",
 shelving: "Стеллаж",
@@ -9396,6 +9400,7 @@ floor: "Стоит на полу",
 wall: "Висит на стене — высота от пола задаёт, на какой",
 inFloor: "Утоплена в пол — высота считается от пола вверх",
 slope: "Врезана в скат потолка — высоту даёт скат",
+ceiling: "Висит под потолком — высоту даёт потолок, под скатом ложится вдоль длины по его уклону; ниже потолка опускает «Опуск»",
 },
 equipmentPicker: {
 title: "Оборудование на метке {label}",
@@ -11118,7 +11123,7 @@ const OBJECT_CATEGORIES = [
 "decor",
 "transport",
 ];
-const OBJECT_MOUNTS = ["floor", "wall", "inFloor", "slope"];
+const OBJECT_MOUNTS = ["floor", "wall", "inFloor", "slope", "ceiling"];
 const OBJECT_SKYLIGHT_KEY = "skylight";
 const CATALOG = [
 {
@@ -11627,6 +11632,39 @@ depthMm: 1400,
 heightMm: 60,
 heightAboveFloorMm: 0,
 words: ["мансардн", "окно в крыше", "окно в скате"],
+},
+{
+key: "beam",
+category: "structures",
+mount: "ceiling",
+shape: "rect",
+widthMm: 3000,
+depthMm: 150,
+heightMm: 200,
+heightAboveFloorMm: 0,
+words: ["балк", "стропил"],
+},
+{
+key: "ceilingBox",
+category: "structures",
+mount: "ceiling",
+shape: "rect",
+widthMm: 3000,
+depthMm: 300,
+heightMm: 300,
+heightAboveFloorMm: 0,
+words: ["короб потолочн", "потолочный короб"],
+},
+{
+key: "airDuct",
+category: "structures",
+mount: "ceiling",
+shape: "rect",
+widthMm: 4000,
+depthMm: 315,
+heightMm: 315,
+heightAboveFloorMm: 0,
+words: ["воздуховод"],
 },
 {
 key: "column",
@@ -12934,6 +12972,22 @@ viewRect(-0.22, -0.4, 0.44, 0.8, 0.02),
 viewLine(-0.12, 0.2, 0.1, -0.2),
 ),
 },
+beam: {
+shapes: [],
+parts: viewParts(viewRect(-0.46, -0.14, 0.92, 0.28, 0.01), viewLine(-0.38, -0.14, -0.38, 0.14), viewLine(0.38, -0.14, 0.38, 0.14)),
+},
+ceilingBox: {
+shapes: [],
+parts: viewParts(viewRect(-0.46, -0.2, 0.92, 0.4, 0.02), viewLine(-0.46, 0.1, 0.46, 0.1)),
+},
+airDuct: {
+shapes: [],
+parts: viewParts(
+viewRect(-0.46, -0.16, 0.92, 0.32, 0.14),
+viewRect(-0.3, -0.06, 0.14, 0.12, 0.01),
+viewRect(0.16, -0.06, 0.14, 0.12, 0.01),
+),
+},
 column: {
 shapes: [],
 parts: viewParts(
@@ -14169,6 +14223,21 @@ skylight: modelParts(
 modelBox("frame", { z: 0, height: 0.5 }),
 modelBox("glass", { x: -0.44, width: 0.88, y: -0.46, depth: 0.92, z: 0.5, height: 0.5, material: "glass" }),
 ),
+beam: modelParts(
+modelBox("beam", { y: -0.4, depth: 0.8, z: 0, height: 0.88 }),
+modelBox("cap", { z: 0.88, height: 0.12 }),
+),
+ceilingBox: modelParts(
+modelBox("box", { z: 0.12, height: 0.88 }),
+modelBox("shelf", { y: -0.5, depth: 1, z: 0, height: 0.12, material: "dark" }),
+),
+airDuct: modelParts(
+modelTube("pipe", { axis: "x", material: "metal" }),
+modelBox("grille1", { x: -0.4, width: 0.05, y: -0.34, depth: 0.68, z: 0, height: 0.14, material: "light" }),
+modelBox("grille2", { x: -0.15, width: 0.05, y: -0.34, depth: 0.68, z: 0, height: 0.14, material: "light" }),
+modelBox("grille3", { x: 0.1, width: 0.05, y: -0.34, depth: 0.68, z: 0, height: 0.14, material: "light" }),
+modelBox("grille4", { x: 0.35, width: 0.05, y: -0.34, depth: 0.68, z: 0, height: 0.14, material: "light" }),
+),
 niche: modelParts(
 modelBox("back", { y: 0.25, depth: 0.25 }),
 modelBox("shelf", { x: -0.46, width: 0.92, y: -0.5, depth: 0.95, z: 0.46, height: 0.08, material: "light" }),
@@ -14799,12 +14868,15 @@ return reachMm > 0 && slopeGap(point, points) <= reachMm;
 }
 function slopesHeightAt(slopes, point, flatMm, reachMm = 0) {
 let best = null;
+for (const reach of [0, reachMm]) {
 for (const slope of slopes || []) {
-if (!slopeCovers(slope, point, reachMm)) continue;
+if (!slopeCovers(slope, point, reach)) continue;
 const plane = slopePlane(slope);
 if (!plane) continue;
 const height = slopePlaneAt(plane, point);
 if (best === null || height < best) best = height;
+}
+if (best !== null || !(reachMm > 0)) break;
 }
 return best === null ? flatMm : Math.max(0, best);
 }
@@ -14931,6 +15003,63 @@ z: piece.plane ? Math.max(0, slopePlaneAt(piece.plane, point)) : flatMm,
 slope: piece.slope,
 }));
 }
+const SLOPE_CHEEK_MIN_MM = 10;
+function slopePieceStray(piece) {
+if (!piece || piece.slope >= 0 || !Array.isArray(piece.points) || piece.points.length < 3) return false;
+let around = 0;
+for (let i = 0, j = piece.points.length - 1; i < piece.points.length; j = i, i += 1) {
+around += Math.hypot(piece.points[i].x - piece.points[j].x, piece.points[i].y - piece.points[j].y);
+}
+return around > 0 && (2 * slopeArea(piece.points)) / around < SLOPE_REACH_MM / 2;
+}
+function slopeCheeks(pieces) {
+const out = [];
+const list = (pieces || []).filter((piece) => !slopePieceStray(piece));
+const lerp = (from, to, t) => from + (to - from) * t;
+for (let i = 0; i < list.length; i += 1) {
+for (let j = i + 1; j < list.length; j += 1) {
+const first = list[i].points;
+const second = list[j].points;
+for (let ei = 0; ei < first.length; ei += 1) {
+const a = first[ei];
+const b = first[(ei + 1) % first.length];
+const dx = b.x - a.x;
+const dy = b.y - a.y;
+const len = Math.hypot(dx, dy);
+if (!(len > SLOPE_STEP_MIN_MM)) continue;
+const ux = dx / len;
+const uy = dy / len;
+for (let ej = 0; ej < second.length; ej += 1) {
+const c = second[ej];
+const d = second[(ej + 1) % second.length];
+const offC = (c.x - a.x) * -uy + (c.y - a.y) * ux;
+const offD = (d.x - a.x) * -uy + (d.y - a.y) * ux;
+if (Math.abs(offC) > SLOPE_STEP_MIN_MM || Math.abs(offD) > SLOPE_STEP_MIN_MM) continue;
+const tc = (c.x - a.x) * ux + (c.y - a.y) * uy;
+const td = (d.x - a.x) * ux + (d.y - a.y) * uy;
+if (!(Math.abs(td - tc) > SLOPE_STEP_MIN_MM)) continue;
+const from = Math.max(0, Math.min(tc, td));
+const to = Math.min(len, Math.max(tc, td));
+if (!(to - from > SLOPE_CHEEK_MIN_MM)) continue;
+const mine = (t) => lerp(a.z, b.z, t / len);
+const theirs = (t) => lerp(c.z, d.z, (t - tc) / (td - tc));
+const at = (t, z) => ({ x: a.x + ux * t, y: a.y + uy * t, z });
+const gapFrom = mine(from) - theirs(from);
+const gapTo = mine(to) - theirs(to);
+if (Math.abs(gapFrom) < SLOPE_CHEEK_MIN_MM && Math.abs(gapTo) < SLOPE_CHEEK_MIN_MM) continue;
+const spans = gapFrom * gapTo < -1e-9 ? [[from, from + ((to - from) * gapFrom) / (gapFrom - gapTo)], [from + ((to - from) * gapFrom) / (gapFrom - gapTo), to]] : [[from, to]];
+for (const [t0, t1] of spans) {
+const points = [at(t0, mine(t0)), at(t1, mine(t1))];
+if (Math.abs(mine(t1) - theirs(t1)) >= SLOPE_CHEEK_MIN_MM / 2) points.push(at(t1, theirs(t1)));
+if (Math.abs(mine(t0) - theirs(t0)) >= SLOPE_CHEEK_MIN_MM / 2) points.push(at(t0, theirs(t0)));
+if (points.length >= 3) out.push({ points });
+}
+}
+}
+}
+}
+return out;
+}
 function slopePiecesCut(pieces, holeMm) {
 const hole = slopeOriented(holeMm || []);
 const kept = [];
@@ -15005,9 +15134,12 @@ const to = cuts[index + 1];
 if (!(to - from > SLOPE_STEP_MIN_MM)) continue;
 const mid = at((from + to) / 2);
 let best = null;
+for (const reach of [0, reachMm]) {
 for (const item of list) {
-if (!slopeCovers(item.slope, mid, reachMm)) continue;
+if (!slopeCovers(item.slope, mid, reach)) continue;
 if (best === null || slopePlaneAt(item.plane, mid) < slopePlaneAt(best, mid)) best = item.plane;
+}
+if (best !== null || !(reachMm > 0)) break;
 }
 const fromZ = best ? Math.max(0, slopePlaneAt(best, at(from))) : flatMm;
 const toZ = best ? Math.max(0, slopePlaneAt(best, at(to))) : flatMm;
@@ -20085,6 +20217,38 @@ skylightSeat(project, next);
 const schemeObjects = schemeObjectsOf(project).map((object) => (object.id === objectId ? next : object));
 return { project: withProject(project, { schemeObjects }), schemeObject: next };
 }
+const CEILING_SEAT_GAP_MM = 2;
+function schemeObjectIsCeiling(project, object) {
+return Boolean(object && object.shape !== "polyline" && object.atMm && schemeObjectMountOf(project, object) === "ceiling");
+}
+function schemeObjectCeilingSeat(project, object) {
+if (!schemeObjectIsCeiling(project, object)) return null;
+const angle = ((Number(object.turnDeg) || 0) * Math.PI) / 180;
+const u = { x: Math.cos(angle), y: Math.sin(angle) };
+const half = Number(object.widthMm) / 2;
+const side = Number(object.depthMm) / 2;
+const at = { x: Number(object.atMm.x), y: Number(object.atMm.y) };
+const inset = Math.min(half, 20);
+const lowestAt = (along) => {
+let best = Infinity;
+for (const across of [-side, 0, side]) {
+const point = { x: at.x + u.x * along - u.y * across, y: at.y + u.y * along + u.x * across };
+best = Math.min(best, ceilingHeightAt(project, object.schemeId, point));
+}
+return best;
+};
+let from = lowestAt(-(half - inset));
+let to = lowestAt(half - inset);
+const perMm = half > inset ? (to - from) / (2 * (half - inset)) : 0;
+from -= perMm * inset;
+to += perMm * inset;
+const sag = (from + to) / 2 - lowestAt(0);
+const drop = sag > 0 ? sag : 0;
+const heightMm = typeof object.heightMm === "number" && object.heightMm > 0 ? object.heightMm : 200;
+const hang = Math.max(0, Number(object.heightAboveFloorMm) || 0);
+const topMm = (from + to) / 2 - drop - hang - CEILING_SEAT_GAP_MM;
+return { bottomMm: topMm - heightMm, topMm, perMm, u };
+}
 function schemeObjectIsSkylight(object) {
 return Boolean(object && object.catalogKey === OBJECT_SKYLIGHT_KEY && object.shape !== "polyline");
 }
@@ -21379,7 +21543,7 @@ if (!wall || !vectors) return [];
 const half = Number(wall.thicknessMm) / 2;
 const found = [];
 for (const object of schemeObjectsOnScheme(project, wall.schemeId)) {
-if (schemeObjectIsSkylight(object)) continue;
+if (schemeObjectIsSkylight(object) || schemeObjectIsCeiling(project, object)) continue;
 const corners = schemeObjectCorners(object);
 if (corners.length === 0) continue;
 const gap = Math.min(...corners.map((point) => segmentDistanceMm(point, wall.aMm, wall.bMm)));
@@ -38881,6 +39045,8 @@ const clear = options.clear || false;
 const channel = options.channel === undefined ? null : options.channel;
 const lit = options.lit === true;
 const bulb = Number.isInteger(options.bulb) ? options.bulb : null;
+const tilt = options.tilt && Number.isFinite(options.tilt.perMm) && options.tilt.perMm !== 0 ? options.tilt : null;
+if (tilt) return volumeTiltedPrism(corners, bottomMm, topMm, rgb, out, tilt, { markId, doorId, clear, channel, lit, bulb });
 for (let index = 0; index < corners.length; index += 1) {
 const a = corners[index];
 const b = corners[(index + 1) % corners.length];
@@ -38916,6 +39082,28 @@ rgb,
 ),
 );
 }
+return out;
+}
+function volumeTiltLift(tilt, point) {
+if (!tilt) return 0;
+return ((point.x - tilt.at.x) * tilt.u.x + (point.y - tilt.at.y) * tilt.u.y) * tilt.perMm;
+}
+function volumeTiltedPrism(corners, bottomMm, topMm, rgb, out, tilt, own) {
+const low = (point) => volumeAt(point, bottomMm + volumeTiltLift(tilt, point));
+const high = (point) => volumeAt(point, topMm + volumeTiltLift(tilt, point));
+for (let index = 0; index < corners.length; index += 1) {
+const a = corners[index];
+const b = corners[(index + 1) % corners.length];
+const dx = b.x - a.x;
+const dy = b.y - a.y;
+if (dx === 0 && dy === 0) continue;
+const length = Math.hypot(dx, dy);
+out.push(volumeFace([low(a), low(b), high(b), high(a)], rgb, { normal: { x: dy / length, y: -dx / length, z: 0 }, ...own }));
+}
+const size = Math.hypot(tilt.u.x * tilt.perMm, tilt.u.y * tilt.perMm, 1);
+const up = { x: (-tilt.u.x * tilt.perMm) / size, y: (-tilt.u.y * tilt.perMm) / size, z: 1 / size };
+out.push(volumeFace(corners.map(high), rgb, { normal: up, ...own }));
+out.push(volumeFace(corners.map(low), rgb, { normal: { x: -up.x, y: -up.y, z: -up.z }, ...own }));
 return out;
 }
 function volumePointInside(point, corners) {
@@ -41664,18 +41852,28 @@ const type = findType(project, mark.typeId);
 const style = styleOf(project, mark.typeId);
 return objectViewByName(typeObjectView(type)) || objectViewForShape(style.shape);
 }
-const VOLUME_SLOPE_PIECE_MM = 80;
-function volumeSlopePath(path) {
+const VOLUME_SLOPE_PROBE_MM = 20;
+const VOLUME_SLOPE_BEND_MM = 1.5;
+function volumeSlopeRuns(path, ceilingAt) {
 const out = [];
 for (let index = 0; index + 1 < path.length; index += 1) {
 const a = path[index];
 const b = path[index + 1];
-const count = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / VOLUME_SLOPE_PIECE_MM));
-for (let step = 0; step < count; step += 1) {
-out.push({ x: a.x + ((b.x - a.x) * step) / count, y: a.y + ((b.y - a.y) * step) / count });
+const length = Math.hypot(b.x - a.x, b.y - a.y);
+if (!(length > 0)) continue;
+const count = Math.max(1, Math.ceil(length / VOLUME_SLOPE_PROBE_MM));
+const at = (step) => ({ x: a.x + ((b.x - a.x) * step) / count, y: a.y + ((b.y - a.y) * step) / count });
+const zs = [];
+for (let step = 0; step <= count; step += 1) zs.push(ceilingAt(at(step)));
+let from = 0;
+while (from < count) {
+let to = from + 1;
+const rise = zs[to] - zs[from];
+while (to < count && Math.abs(zs[to + 1] - (zs[from] + rise * (to + 1 - from))) <= VOLUME_SLOPE_BEND_MM) to += 1;
+out.push({ a: at(from), b: at(to), fromZ: zs[from], toZ: zs[to] });
+from = to;
 }
 }
-if (path.length > 0) out.push(path[path.length - 1]);
 return out;
 }
 function volumePathPrisms(path, acrossMm, bottomMm, topMm) {
@@ -42130,20 +42328,21 @@ const ceilingAt = (point) => (slopes ? slopesHeightAt(slopes, point, room.height
 if (slopes) {
 const gapMm = depthMm + VOLUME_MARK_LIFT_MM;
 if (line) {
-const pieces = volumeSlopePath(path);
 const prisms = [];
-for (let index = 0; index + 1 < pieces.length; index += 1) {
-const a = pieces[index];
-const b = pieces[index + 1];
+for (const run of volumeSlopeRuns(path, ceilingAt)) {
+const a = run.a;
+const b = run.b;
 const length = Math.hypot(b.x - a.x, b.y - a.y);
 if (!(length > 0)) continue;
-const here = ceilingAt(a);
-const there = ceilingAt(b);
-const low = Math.min(here, there) - gapMm;
+const at = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+const u = { x: (b.x - a.x) / length, y: (b.y - a.y) / length };
+const low = (run.fromZ + run.toZ) / 2 - gapMm;
+const perMm = (run.toZ - run.fromZ) / length;
 prisms.push({
-corners: volumeBoxCorners({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, { x: (b.x - a.x) / length, y: (b.y - a.y) / length }, length, lengthMm),
-bottomMm: low - Math.abs(here - there),
+corners: volumeBoxCorners(at, u, length, lengthMm),
+bottomMm: low,
 topMm: low + depthMm,
+...(perMm !== 0 ? { tilt: { at, u, perMm } } : {}),
 });
 }
 if (prisms.length === 0) return { markId: mark.id, skip: VOLUME_MARK_NO_POINT };
@@ -42263,7 +42462,7 @@ return volumeModelFaces(place.frame, model, place.bodyRgb, out, { markId: place.
 }
 const lit = !place.repeat;
 for (const prism of place.prisms || []) {
-volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, place.bodyRgb, out, { markId: place.markId, lit });
+volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, place.bodyRgb, out, { markId: place.markId, lit, tilt: prism.tilt });
 }
 const frames = (place.repeat && place.repeat.frames) || [];
 const gather = frames.length > 0 ? volumeCurtainGather(place, frames[0].u) : "min";
@@ -42600,7 +42799,7 @@ for (const prism of place.prisms || []) {
 const middleZ = (prism.bottomMm + prism.topMm) / 2;
 out.push(
 volumeLine(
-prism.corners.map((point) => ({ x: point.x, y: point.y, z: middleZ })),
+prism.corners.map((point) => ({ x: point.x, y: point.y, z: middleZ + volumeTiltLift(prism.tilt, point) })),
 VOLUME_SELECT_COLOR,
 { closed: true, dash: VOLUME_SELECT_DASH, width: 2, layer: VOLUME_LAYER_MARK },
 ),
@@ -42798,6 +42997,11 @@ return { x, y };
 function volumeObjectPrisms(project, schemeId, object, fallbackHeightMm) {
 const corners = schemeObjectCorners(object);
 if (corners.length === 0) return [];
+const seat = schemeObjectCeilingSeat(project, object);
+if (seat) {
+const tilt = seat.perMm !== 0 ? { tilt: { at: { x: Number(object.atMm.x), y: Number(object.atMm.y) }, u: seat.u, perMm: seat.perMm } } : {};
+return [{ corners: volumeClockwise(corners), bottomMm: seat.bottomMm, topMm: seat.topMm, ...tilt }];
+}
 const bottom = Math.max(0, Number(object.heightAboveFloorMm || 0));
 const own = typeof object.heightMm === "number" ? Number(object.heightMm) : null;
 const topAt = (middle) => (own === null ? volumeHeightAt(project, schemeId, middle, fallbackHeightMm) : bottom + own);
@@ -42863,7 +43067,23 @@ f: { x: sin, y: -cos },
 widthMm: Number(object.widthMm),
 depthMm: Number(object.depthMm),
 heightMm: prism.topMm - prism.bottomMm,
+...(prism.tilt ? { tilt: prism.tilt } : {}),
 };
+}
+function volumeTiltFaces(faces, from, tilt) {
+const gx = tilt.u.x * tilt.perMm;
+const gy = tilt.u.y * tilt.perMm;
+for (let index = from; index < faces.length; index += 1) {
+const face = faces[index];
+for (const point of face.p) point.z += volumeTiltLift(tilt, point);
+if (face.n) {
+const x = face.n.x - gx * face.n.z;
+const y = face.n.y - gy * face.n.z;
+const size = Math.hypot(x, y, face.n.z) || 1;
+face.n = { x: x / size, y: y / size, z: face.n.z / size };
+}
+}
+return faces;
 }
 function volumeObjectFaces(project, schemeId, object, fallbackHeightMm, out = [], clear = true, open = false) {
 const own = clear !== false;
@@ -42879,9 +43099,14 @@ const shown = leafId && open ? { key: model.key, parts: volumeCupboardModel(mode
 const colors = schemeObjectColors(object);
 const bodyRgb = colors.main ? volumePaintRgb(colors.main) : VOLUME_OBJECT_RGB;
 const lightRgb = colors.second ? volumePaintRgb(colors.second) : null;
-if (frame) return volumeModelFaces(frame, stair ? { key: model.key, parts: stair } : shown, bodyRgb, out, { clear: own, markId, leafId, lightRgb });
+if (frame) {
+const from = out.length;
+volumeModelFaces(frame, stair ? { key: model.key, parts: stair } : shown, bodyRgb, out, { clear: own, markId, leafId, lightRgb });
+if (frame.tilt) volumeTiltFaces(out, from, frame.tilt);
+return out;
+}
 for (const prism of volumeObjectPrisms(project, schemeId, object, fallbackHeightMm)) {
-volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, bodyRgb, out, { clear: own, markId });
+volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, bodyRgb, out, { clear: own, markId, tilt: prism.tilt });
 }
 return out;
 }
@@ -43226,10 +43451,13 @@ return { x: x / points.length, y: y / points.length };
 };
 return volumePointInside(middle(a), b) || volumePointInside(middle(b), a);
 }
-function volumeCeilingUnderVoid(room, voids, capMm) {
+function volumeCeilingUnderVoid(room, voids, capMm, roofVoids = null) {
 if (!voids || voids.length === 0) return false;
 const slabMm = (Number(capMm) || 0) - VOLUME_SLAB_MM;
 if (!(slabMm > 0)) return false;
+if (roofVoids && roofVoids.length > 0 && (Number(room.heightMm) || 0) > slabMm + VOLUME_PLANE_EPS_MM) {
+if (roofVoids.some((hole) => volumePolysOverlap(room.pointsMm, hole))) return true;
+}
 if (Math.abs((Number(room.heightMm) || 0) - slabMm) > VOLUME_PLANE_EPS_MM) return false;
 return voids.some((hole) => volumePolysOverlap(room.pointsMm, hole));
 }
@@ -43753,7 +43981,10 @@ if (spans.length > 0) covers.set(wall.id, spans);
 const voids = volumeRooms(project, above.schemeId)
 .filter((room) => room.hasFloor === false)
 .map((room) => volumeShiftPoints(room.pointsMm, { x: dx, y: dy }));
-return { capMm: above.baseMm - here.baseMm, covers, voids };
+const roofVoids = volumeRooms(project, above.schemeId)
+.filter((room) => room.hasFloor === false && room.slopes)
+.map((room) => volumeShiftPoints(room.pointsMm, { x: dx, y: dy }));
+return { capMm: above.baseMm - here.baseMm, covers, voids, roofVoids };
 };
 const had = new Map();
 for (const part of (was && was.stackParts) || []) if (!had.has(part.schemeId)) had.set(part.schemeId, part);
@@ -44186,10 +44417,20 @@ room.floorRgb,
 );
 volumeSlabFaces(room.pointsMm, 0, faces);
 }
-if (volumeCeilingUnderVoid(room, options.voids, options.capMm)) continue;
+if (volumeCeilingUnderVoid(room, options.voids, options.capMm, options.roofVoids)) continue;
 if (room.hasCeiling === false) continue;
 if (room.slopes) {
 let pieces = slopeCeilingPieces(room.pointsMm, room.slopes, room.heightMm);
+for (const cheek of slopeCheeks(pieces)) {
+const points = cheek.points.map((point) => volumeAt(point, point.z));
+faces.push(
+volumePainted(
+volumeFace(points, VOLUME_CEILING_RGB, { normal: volumeFaceNormal(points), both: true, room: volumeRoomKey(room) }),
+room.ceilingRgb,
+"ceiling",
+),
+);
+}
 for (const object of objects) {
 if (!schemeObjectIsSkylight(object) || !volumePointInside(object.atMm, room.pointsMm)) continue;
 const slopeAt = slopeIndexAt(room.slopes, object.atMm);
@@ -44221,6 +44462,7 @@ room: volumeRoomKey(room),
 volumeTagThing(faces, from, object.id);
 }
 for (const piece of pieces) {
+if (slopePieceStray(piece)) continue;
 const points = piece.points.map((point) => volumeAt(point, point.z));
 const normal = volumeFaceNormal(points);
 const down = normal.z > 0;
@@ -44608,12 +44850,10 @@ const half = { x: (along.back.x - along.from.x) / 2, y: (along.back.y - along.fr
 const z = (Number(prism.bottomMm) + Number(prism.topMm)) / 2;
 for (let index = 0; index < count; index += 1) {
 const t = (index + 0.5) / count;
+const x = along.from.x + (along.to.x - along.from.x) * t + half.x;
+const y = along.from.y + (along.to.y - along.from.y) * t + half.y;
 out.push({
-at: {
-x: along.from.x + (along.to.x - along.from.x) * t + half.x,
-y: along.from.y + (along.to.y - along.from.y) * t + half.y,
-z,
-},
+at: { x, y, z: prism.tilt ? z + volumeTiltLift(prism.tilt, { x, y }) : z },
 power: (perMeter * length) / count / 1000,
 });
 }
@@ -78420,6 +78660,7 @@ onPick: (color) => applyObjectColor(part, color),
 return { part, field, row: uiEl("div", { class: "workshop__paintRow" }, [label, field.node]) };
 });
 const objectBad = uiBadLine();
+const floorField = uiField(strings.workshop.objectFloor, objectFloor);
 const objectDetail = uiEl("div", { class: "workshop__detail ui-fields" }, [
 thingButton,
 widthField,
@@ -78428,7 +78669,7 @@ turnField,
 turnChips,
 mirrorRow,
 uiField(strings.workshop.objectHeight, objectHeight, { title: strings.workshop.objectHeightHint }),
-uiField(strings.workshop.objectFloor, objectFloor),
+floorField,
 ...objectColors.map((item) => item.row),
 deviceButton,
 objectBad,
@@ -80851,7 +81092,10 @@ fieldValue(objectFloor, object.heightAboveFloorMm || 0);
 const mount = schemeObjectMountOf(current, object);
 const top = schemeObjectTopMm(object);
 const where = mount ? strings.schemeObjectMounts[mount] || "" : "";
-const high = top === null ? strings.workshop.objectFullHeight : text("workshop.objectTop", { top });
+const hung = mount === "ceiling";
+const floorLabel = floorField.querySelector(".ui-field__label");
+if (floorLabel) floorLabel.textContent = hung ? strings.workshop.objectDrop : strings.workshop.objectFloor;
+const high = hung ? "" : top === null ? strings.workshop.objectFullHeight : text("workshop.objectTop", { top });
 objectNote.textContent = key
 ? [where, high].filter(Boolean).join(" · ")
 : text("workshop.objectLegacy", { name: schemeObjectNameOf(current, object) });

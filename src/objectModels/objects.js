@@ -127,6 +127,32 @@ export const MODELS_OBJECTS = {
     modelBox("frame", { z: 0, height: 0.5 }),
     modelBox("glass", { x: -0.44, width: 0.88, y: -0.46, depth: 0.92, z: 0.5, height: 0.5, material: "glass" }),
   ),
+  // ——— под потолком (правка 2026-11-21) ———
+  //
+  // Балка и потолочный короб — брус по габариту: длину, сечение и место
+  // под потолком даёт вещь (`mount: "ceiling"`), под скатом сцена кладёт её по
+  // уклону. Короб отличается от балки полкой: узкая тёмная полоса вдоль
+  // нижней кромки — паз, в котором лежит лента подсветки.
+  // Балка — брус чуть уже габарита и полка-накладка во всю ширину поверху:
+  // сплошной брус во весь габарит неотличим от колонны.
+  beam: modelParts(
+    modelBox("beam", { y: -0.4, depth: 0.8, z: 0, height: 0.88 }),
+    modelBox("cap", { z: 0.88, height: 0.12 }),
+  ),
+  ceilingBox: modelParts(
+    modelBox("box", { z: 0.12, height: 0.88 }),
+    modelBox("shelf", { y: -0.5, depth: 1, z: 0, height: 0.12, material: "dark" }),
+  ),
+  // Воздуховод: труба лёжа вдоль длины вещи и четыре решётки-диффузора по
+  // длине, под трубой. Решётка шире трубы на её нижней хорде — выступает из
+  // круглого бока коробочкой, как анемостат на рендерах бассейна.
+  airDuct: modelParts(
+    modelTube("pipe", { axis: "x", material: "metal" }),
+    modelBox("grille1", { x: -0.4, width: 0.05, y: -0.34, depth: 0.68, z: 0, height: 0.14, material: "light" }),
+    modelBox("grille2", { x: -0.15, width: 0.05, y: -0.34, depth: 0.68, z: 0, height: 0.14, material: "light" }),
+    modelBox("grille3", { x: 0.1, width: 0.05, y: -0.34, depth: 0.68, z: 0, height: 0.14, material: "light" }),
+    modelBox("grille4", { x: 0.35, width: 0.05, y: -0.34, depth: 0.68, z: 0, height: 0.14, material: "light" }),
+  ),
   // Ниша: задняя стенка и полка. Сплошным кубом, как рисовалось до моделей,
   // ниша и выглядела кубом — то есть выступом там, где в стене углубление.
   niche: modelParts(

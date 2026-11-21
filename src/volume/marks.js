@@ -44,6 +44,7 @@ import {
   volumeBoxCorners,
   volumeMix,
   volumePrismFaces,
+  volumeTiltLift,
   volumeRoomAt,
 } from "./shapes.js";
 import { volumeMiddleOf } from "./order.js";
@@ -219,21 +220,39 @@ export function volumeMarkView(project, mark) {
 // Звенья ленты: по призме на отрезок пути, поперечник у всех один. То же, что у
 // ломаного объекта чертежа (`volumeObjectPrisms`), и по той же причине —
 // соседние звенья заходят друг в друга на изломе, как две стены в углу.
-/** Не длиннее этого кусок ломаной под скатом: ступень ленты по высоте мала, мм. */
-const VOLUME_SLOPE_PIECE_MM = 80;
+/** Шаг, которым щупается потолок вдоль ломаной под скатом: точнее него место излома не найти, мм. */
+const VOLUME_SLOPE_PROBE_MM = 20;
+/** Отклонение высоты от прямой, с которого начинается новый кусок, мм. */
+const VOLUME_SLOPE_BEND_MM = 1.5;
 
-// Путь ломаной, раздробленный на короткие куски (ADR 043).
-function volumeSlopePath(path) {
+/**
+ * **Ломаная под скатом — наклонными кусками** (правка 2026-11-21, слова
+ * заказчика: «ступенчатая лента смотрится очень плохо»). Ответ — куски
+ * `[{a, b, fromZ, toZ}]`: между концами куска потолок идёт прямой, излом —
+ * только там, где он есть у потолка (конёк, ендова, край ската). Потолок
+ * щупается шагом `VOLUME_SLOPE_PROBE_MM`, соседние пробы на одной прямой
+ * сливаются в один кусок: лента вдоль ската — одна призма на звено пути.
+ */
+function volumeSlopeRuns(path, ceilingAt) {
   const out = [];
   for (let index = 0; index + 1 < path.length; index += 1) {
     const a = path[index];
     const b = path[index + 1];
-    const count = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / VOLUME_SLOPE_PIECE_MM));
-    for (let step = 0; step < count; step += 1) {
-      out.push({ x: a.x + ((b.x - a.x) * step) / count, y: a.y + ((b.y - a.y) * step) / count });
+    const length = Math.hypot(b.x - a.x, b.y - a.y);
+    if (!(length > 0)) continue;
+    const count = Math.max(1, Math.ceil(length / VOLUME_SLOPE_PROBE_MM));
+    const at = (step) => ({ x: a.x + ((b.x - a.x) * step) / count, y: a.y + ((b.y - a.y) * step) / count });
+    const zs = [];
+    for (let step = 0; step <= count; step += 1) zs.push(ceilingAt(at(step)));
+    let from = 0;
+    while (from < count) {
+      let to = from + 1;
+      const rise = zs[to] - zs[from];
+      while (to < count && Math.abs(zs[to + 1] - (zs[from] + rise * (to + 1 - from))) <= VOLUME_SLOPE_BEND_MM) to += 1;
+      out.push({ a: at(from), b: at(to), fromZ: zs[from], toZ: zs[to] });
+      from = to;
     }
   }
-  if (path.length > 0) out.push(path[path.length - 1]);
   return out;
 }
 
@@ -1414,24 +1433,25 @@ export function volumeMarkPlacement(project, mark, where = [], seat = null, poin
   if (slopes) {
     const gapMm = depthMm + VOLUME_MARK_LIFT_MM;
     if (line) {
-      // Ломаная под скатом — ступенями: звено режется на куски, и каждый висит
-      // под своим местом потолка.
-      const pieces = volumeSlopePath(path);
+      // Ломаная под скатом — наклонными кусками: призма лежит в плоскости
+      // потолка над собой (`tilt`), излом — только там, где он есть у потолка.
+      // `bottomMm` и `topMm` — высоты в середине куска: кто наклона не читает,
+      // видит призму на её средней высоте.
       const prisms = [];
-      for (let index = 0; index + 1 < pieces.length; index += 1) {
-        const a = pieces[index];
-        const b = pieces[index + 1];
+      for (const run of volumeSlopeRuns(path, ceilingAt)) {
+        const a = run.a;
+        const b = run.b;
         const length = Math.hypot(b.x - a.x, b.y - a.y);
         if (!(length > 0)) continue;
-        const here = ceilingAt(a);
-        const there = ceilingAt(b);
-        const low = Math.min(here, there) - gapMm;
-        // Кусок толще на свой подъём: соседние ступени заходят друг в друга, и
-        // лента идёт вверх по скату сплошной полосой, а не штрихами.
+        const at = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        const u = { x: (b.x - a.x) / length, y: (b.y - a.y) / length };
+        const low = (run.fromZ + run.toZ) / 2 - gapMm;
+        const perMm = (run.toZ - run.fromZ) / length;
         prisms.push({
-          corners: volumeBoxCorners({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, { x: (b.x - a.x) / length, y: (b.y - a.y) / length }, length, lengthMm),
-          bottomMm: low - Math.abs(here - there),
+          corners: volumeBoxCorners(at, u, length, lengthMm),
+          bottomMm: low,
           topMm: low + depthMm,
+          ...(perMm !== 0 ? { tilt: { at, u, perMm } } : {}),
         });
       }
       if (prisms.length === 0) return { markId: mark.id, skip: VOLUME_MARK_NO_POINT };
@@ -1650,7 +1670,7 @@ export function volumeMarkFaces(place, out = [], open = 0) {
   // включай, — свечение кадр даёт только свету и экрану.
   const lit = !place.repeat;
   for (const prism of place.prisms || []) {
-    volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, place.bodyRgb, out, { markId: place.markId, lit });
+    volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, place.bodyRgb, out, { markId: place.markId, lit, tilt: prism.tilt });
   }
   // Повтор вдоль пути (таск 177, G275): полоса уже нарисована звеньями, а
   // поверх неё садятся светильники трека. Хозяин у них тот же — сама метка,
@@ -2241,7 +2261,7 @@ export function volumeSelectLines(place, out = []) {
     const middleZ = (prism.bottomMm + prism.topMm) / 2;
     out.push(
       volumeLine(
-        prism.corners.map((point) => ({ x: point.x, y: point.y, z: middleZ })),
+        prism.corners.map((point) => ({ x: point.x, y: point.y, z: middleZ + volumeTiltLift(prism.tilt, point) })),
         VOLUME_SELECT_COLOR,
         { closed: true, dash: VOLUME_SELECT_DASH, width: 2, layer: VOLUME_LAYER_MARK },
       ),

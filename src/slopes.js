@@ -129,12 +129,17 @@ export function slopeCovers(slope, point, reachMm = 0) {
  */
 export function slopesHeightAt(slopes, point, flatMm, reachMm = 0) {
   let best = null;
-  for (const slope of slopes || []) {
-    if (!slopeCovers(slope, point, reachMm)) continue;
-    const plane = slopePlane(slope);
-    if (!plane) continue;
-    const height = slopePlaneAt(plane, point);
-    if (best === null || height < best) best = height;
+  // Запас за краем работает, только когда над самой точкой ската нет (см.
+  // `slopeProfile`): сосед по ендове, продлённый запасом, ниже настоящего.
+  for (const reach of [0, reachMm]) {
+    for (const slope of slopes || []) {
+      if (!slopeCovers(slope, point, reach)) continue;
+      const plane = slopePlane(slope);
+      if (!plane) continue;
+      const height = slopePlaneAt(plane, point);
+      if (best === null || height < best) best = height;
+    }
+    if (best !== null || !(reachMm > 0)) break;
   }
   return best === null ? flatMm : Math.max(0, best);
 }
@@ -288,6 +293,87 @@ export function slopeCeilingPieces(pointsMm, slopes, flatMm) {
   }));
 }
 
+/** Перепад высот на стыке кусков меньше этого — не щека, а погрешность счёта, мм. */
+const SLOPE_CHEEK_MIN_MM = 10;
+
+/**
+ * **Обрезок плоского потолка** — плоский кусок уже половины запаса ската
+ * (`SLOPE_REACH_MM`): участок обвели чуть мимо контура помещения, и между
+ * скатом и стеной осталась полоска на высоте помещения. Это погрешность
+ * обводки, а не потолок: стена под неё и так срезана по скату (тот же запас),
+ * поэтому сцена такой кусок не рисует и щеки к нему не ставит. Ширина —
+ * `2·площадь / периметр`.
+ */
+export function slopePieceStray(piece) {
+  if (!piece || piece.slope >= 0 || !Array.isArray(piece.points) || piece.points.length < 3) return false;
+  let around = 0;
+  for (let i = 0, j = piece.points.length - 1; i < piece.points.length; j = i, i += 1) {
+    around += Math.hypot(piece.points[i].x - piece.points[j].x, piece.points[i].y - piece.points[j].y);
+  }
+  return around > 0 && (2 * slopeArea(piece.points)) / around < SLOPE_REACH_MM / 2;
+}
+
+/**
+ * **Щёки потолка** — вертикальные грани на стыках кусков, где высоты не
+ * сходятся: кромка ската под плоским потолком, край ската, начерченного не на
+ * всё помещение, уступ между двумя скатами (стенка слухового окна). Без них
+ * скат висел листом со свободной кромкой, а в щель над ней было видно небо
+ * (слова заказчика: «как будто просто лист приложили»).
+ *
+ * `pieces` — ответ `slopeCeilingPieces`; ответ — `[{points: [{x, y, z}]}]`,
+ * три или четыре точки на грань. Куски, сошедшиеся по высоте (конёк, ендова),
+ * щёк не дают, поэтому потолок из сходящихся скатов собирается как прежде.
+ */
+export function slopeCheeks(pieces) {
+  const out = [];
+  const list = (pieces || []).filter((piece) => !slopePieceStray(piece));
+  const lerp = (from, to, t) => from + (to - from) * t;
+  for (let i = 0; i < list.length; i += 1) {
+    for (let j = i + 1; j < list.length; j += 1) {
+      const first = list[i].points;
+      const second = list[j].points;
+      for (let ei = 0; ei < first.length; ei += 1) {
+        const a = first[ei];
+        const b = first[(ei + 1) % first.length];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const len = Math.hypot(dx, dy);
+        if (!(len > SLOPE_STEP_MIN_MM)) continue;
+        const ux = dx / len;
+        const uy = dy / len;
+        for (let ej = 0; ej < second.length; ej += 1) {
+          const c = second[ej];
+          const d = second[(ej + 1) % second.length];
+          const offC = (c.x - a.x) * -uy + (c.y - a.y) * ux;
+          const offD = (d.x - a.x) * -uy + (d.y - a.y) * ux;
+          if (Math.abs(offC) > SLOPE_STEP_MIN_MM || Math.abs(offD) > SLOPE_STEP_MIN_MM) continue;
+          const tc = (c.x - a.x) * ux + (c.y - a.y) * uy;
+          const td = (d.x - a.x) * ux + (d.y - a.y) * uy;
+          if (!(Math.abs(td - tc) > SLOPE_STEP_MIN_MM)) continue;
+          const from = Math.max(0, Math.min(tc, td));
+          const to = Math.min(len, Math.max(tc, td));
+          if (!(to - from > SLOPE_CHEEK_MIN_MM)) continue;
+          const mine = (t) => lerp(a.z, b.z, t / len);
+          const theirs = (t) => lerp(c.z, d.z, (t - tc) / (td - tc));
+          const at = (t, z) => ({ x: a.x + ux * t, y: a.y + uy * t, z });
+          const gapFrom = mine(from) - theirs(from);
+          const gapTo = mine(to) - theirs(to);
+          if (Math.abs(gapFrom) < SLOPE_CHEEK_MIN_MM && Math.abs(gapTo) < SLOPE_CHEEK_MIN_MM) continue;
+          // Высоты пересеклись посреди стыка — щека из двух треугольников.
+          const spans = gapFrom * gapTo < -1e-9 ? [[from, from + ((to - from) * gapFrom) / (gapFrom - gapTo)], [from + ((to - from) * gapFrom) / (gapFrom - gapTo), to]] : [[from, to]];
+          for (const [t0, t1] of spans) {
+            const points = [at(t0, mine(t0)), at(t1, mine(t1))];
+            if (Math.abs(mine(t1) - theirs(t1)) >= SLOPE_CHEEK_MIN_MM / 2) points.push(at(t1, theirs(t1)));
+            if (Math.abs(mine(t0) - theirs(t0)) >= SLOPE_CHEEK_MIN_MM / 2) points.push(at(t0, theirs(t0)));
+            if (points.length >= 3) out.push({ points });
+          }
+        }
+      }
+    }
+  }
+  return out;
+}
+
 /**
  * Вырезать из кусков потолка выпуклый участок плана (мансардное окно):
  * `{pieces, cut}` — что осталось и что вырезано; высоты пересчитаны по
@@ -378,10 +464,16 @@ export function slopeProfile(slopes, a, b, flatMm, reachMm = SLOPE_REACH_MM) {
     const to = cuts[index + 1];
     if (!(to - from > SLOPE_STEP_MIN_MM)) continue;
     const mid = at((from + to) / 2);
+    // Сначала скаты, которые лежат над точкой сами, и только если таких нет —
+    // те, что дотягиваются запасом. Иначе у ендовы сосед, продлённый за свою
+    // кромку, оказывался ниже и срезал стену под потолком (правка 2026-11-21).
     let best = null;
-    for (const item of list) {
-      if (!slopeCovers(item.slope, mid, reachMm)) continue;
-      if (best === null || slopePlaneAt(item.plane, mid) < slopePlaneAt(best, mid)) best = item.plane;
+    for (const reach of [0, reachMm]) {
+      for (const item of list) {
+        if (!slopeCovers(item.slope, mid, reach)) continue;
+        if (best === null || slopePlaneAt(item.plane, mid) < slopePlaneAt(best, mid)) best = item.plane;
+      }
+      if (best !== null || !(reachMm > 0)) break;
     }
     const fromZ = best ? Math.max(0, slopePlaneAt(best, at(from))) : flatMm;
     const toZ = best ? Math.max(0, slopePlaneAt(best, at(to))) : flatMm;

@@ -109,8 +109,9 @@ test("реестр изображений разложен по семьям, и
   // Рукомойник — ещё одна вещь той же правки.
   // Стул и бильярдный стол — правка 2026-11-21.
   // Мансардное окно — правка 2026-11-21 (скаты, ADR 043).
-  assert.equal(objectViewNames().length, 119);
-  assert.equal(objectViewFamily(OBJECT_VIEW_FAMILY_OBJECTS).length, 77);
+  // Балка, потолочный короб и воздуховод — правка 2026-11-21 (вещи под потолком).
+  assert.equal(objectViewNames().length, 122);
+  assert.equal(objectViewFamily(OBJECT_VIEW_FAMILY_OBJECTS).length, 80);
 });
 
 test("у каждого изображения метки есть человеческое имя", () => {
@@ -376,11 +377,11 @@ test("сетка изображений: разделы реестра, зате
   // Телевизор, полотенцесушитель и вытяжка — и в семье меток, и в каталоге
   // вещей (сборка «связь метки и вещи»); плитка у них **одна**, в семье
   // (правка этой сборки: прежде стояли дважды, плиток было 106).
-  assert.equal(tiles.length, 118, "в сетке не все изображения реестра");
+  assert.equal(tiles.length, 121, "в сетке не все изображения реестра");
   assert.equal(new Set(tiles.map((entry) => entry.key)).size, tiles.length, "плитка одного ключа стоит в сетке дважды");
   assert.equal(
     typeViewGroups("", { key: "plumbing" }).flatMap((group) => group.entries).length,
-    119,
+    122,
     "своё изображение типа пропало из сетки — человек не видит, чем он размечен",
   );
   assert.deepEqual(

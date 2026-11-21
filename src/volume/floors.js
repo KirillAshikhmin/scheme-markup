@@ -26,6 +26,7 @@ import {
   schemeAnchorOriginMm,
   schemeFloorOf,
   schemeHasSlopes,
+  schemeObjectCeilingSeat,
   schemeObjectColors,
   schemeObjectCorners,
   schemeObjectKeyOf,
@@ -60,6 +61,7 @@ import {
   volumeDrawn,
   volumePointInside,
   volumePrismFaces,
+  volumeTiltLift,
   volumeValueSame,
 } from "./shapes.js";
 import { volumeDoorOpen } from "./walls.js";
@@ -280,6 +282,13 @@ function volumeMiterOffset(prev, next, halfWidth) {
 export function volumeObjectPrisms(project, schemeId, object, fallbackHeightMm) {
   const corners = schemeObjectCorners(object);
   if (corners.length === 0) return [];
+  // **Вещь под потолком** (правка 2026-11-21: балка, короб, воздуховод):
+  // высоту даёт потолок, под скатом призма наклонена вдоль длины (`tilt`).
+  const seat = schemeObjectCeilingSeat(project, object);
+  if (seat) {
+    const tilt = seat.perMm !== 0 ? { tilt: { at: { x: Number(object.atMm.x), y: Number(object.atMm.y) }, u: seat.u, perMm: seat.perMm } } : {};
+    return [{ corners: volumeClockwise(corners), bottomMm: seat.bottomMm, topMm: seat.topMm, ...tilt }];
+  }
   const bottom = Math.max(0, Number(object.heightAboveFloorMm || 0));
   const own = typeof object.heightMm === "number" ? Number(object.heightMm) : null;
   const topAt = (middle) => (own === null ? volumeHeightAt(project, schemeId, middle, fallbackHeightMm) : bottom + own);
@@ -375,7 +384,29 @@ export function volumeObjectFrame(project, schemeId, object, fallbackHeightMm) {
     widthMm: Number(object.widthMm),
     depthMm: Number(object.depthMm),
     heightMm: prism.topMm - prism.bottomMm,
+    ...(prism.tilt ? { tilt: prism.tilt } : {}),
   };
+}
+
+/**
+ * Наклонить готовые грани вещи вдоль её длины (`tilt` — `{at, u, perMm}`):
+ * каждая точка поднимается на свой `volumeTiltLift`. Сдвиг линейный, поэтому
+ * плоская грань остаётся плоской; нормаль пересчитывается тем же сдвигом.
+ */
+export function volumeTiltFaces(faces, from, tilt) {
+  const gx = tilt.u.x * tilt.perMm;
+  const gy = tilt.u.y * tilt.perMm;
+  for (let index = from; index < faces.length; index += 1) {
+    const face = faces[index];
+    for (const point of face.p) point.z += volumeTiltLift(tilt, point);
+    if (face.n) {
+      const x = face.n.x - gx * face.n.z;
+      const y = face.n.y - gy * face.n.z;
+      const size = Math.hypot(x, y, face.n.z) || 1;
+      face.n = { x: x / size, y: y / size, z: face.n.z / size };
+    }
+  }
+  return faces;
 }
 
 /**
@@ -435,12 +466,18 @@ export function volumeObjectFaces(project, schemeId, object, fallbackHeightMm, o
   const colors = schemeObjectColors(object);
   const bodyRgb = colors.main ? volumePaintRgb(colors.main) : VOLUME_OBJECT_RGB;
   const lightRgb = colors.second ? volumePaintRgb(colors.second) : null;
-  if (frame) return volumeModelFaces(frame, stair ? { key: model.key, parts: stair } : shown, bodyRgb, out, { clear: own, markId, leafId, lightRgb });
+  if (frame) {
+    const from = out.length;
+    volumeModelFaces(frame, stair ? { key: model.key, parts: stair } : shown, bodyRgb, out, { clear: own, markId, leafId, lightRgb });
+    // Вещь под скатом (балка, воздуховод): тела собраны ровными, наклон — следом.
+    if (frame.tilt) volumeTiltFaces(out, from, frame.tilt);
+    return out;
+  }
   // У вещи без модели тело — её габарит, и хозяин у него тот же; **свечения
   // нет**: светится экран, а не шкаф, и коробка по габариту не знает, где у
   // неё лицо (у метки без модели правило своё — `volumeMarkFaces`).
   for (const prism of volumeObjectPrisms(project, schemeId, object, fallbackHeightMm)) {
-    volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, bodyRgb, out, { clear: own, markId });
+    volumePrismFaces(prism.corners, prism.bottomMm, prism.topMm, bodyRgb, out, { clear: own, markId, tilt: prism.tilt });
   }
   return out;
 }
@@ -1214,10 +1251,15 @@ export function volumePolysOverlap(a, b) {
  * двусвете (таск 214). Без стопки ни того, ни другого нет вовсе — и тогда всё
  * как было: одна схема про соседние этажи не знает ничего (G68).
  */
-export function volumeCeilingUnderVoid(room, voids, capMm) {
+export function volumeCeilingUnderVoid(room, voids, capMm, roofVoids = null) {
   if (!voids || voids.length === 0) return false;
   const slabMm = (Number(capMm) || 0) - VOLUME_SLAB_MM;
   if (!(slabMm > 0)) return false;
+  // Над комнатой дыра со скатами, а комната выше своего этажа (двусвет в
+  // 6 м): её потолок — крыша помещения этажом выше, свой плоский она не рисует.
+  if (roofVoids && roofVoids.length > 0 && (Number(room.heightMm) || 0) > slabMm + VOLUME_PLANE_EPS_MM) {
+    if (roofVoids.some((hole) => volumePolysOverlap(room.pointsMm, hole))) return true;
+  }
   // Потолок в плоскости перекрытия — и только он: выше дыры или ниже её стоит
   // своя плоскость комнаты, и снимать её нечем.
   if (Math.abs((Number(room.heightMm) || 0) - slabMm) > VOLUME_PLANE_EPS_MM) return false;

@@ -2627,6 +2627,9 @@ function createWorkshop({ api, hosts }) {
     return { part, field, row: uiEl("div", { class: "workshop__paintRow" }, [label, field.node]) };
   });
   const objectBad = uiBadLine();
+  // Поле «От пола»: у вещи под потолком (балка, короб, воздуховод) то же число
+  // читается как опуск от потолка, и подпись меняется вместе с вещью.
+  const floorField = uiField(strings.workshop.objectFloor, objectFloor);
   const objectDetail = uiEl("div", { class: "workshop__detail ui-fields" }, [
     thingButton,
     widthField,
@@ -2635,7 +2638,7 @@ function createWorkshop({ api, hosts }) {
     turnChips,
     mirrorRow,
     uiField(strings.workshop.objectHeight, objectHeight, { title: strings.workshop.objectHeightHint }),
-    uiField(strings.workshop.objectFloor, objectFloor),
+    floorField,
     ...objectColors.map((item) => item.row),
     deviceButton,
     objectBad,
@@ -6301,7 +6304,11 @@ function createWorkshop({ api, hosts }) {
     const mount = schemeObjectMountOf(current, object);
     const top = schemeObjectTopMm(object);
     const where = mount ? strings.schemeObjectMounts[mount] || "" : "";
-    const high = top === null ? strings.workshop.objectFullHeight : text("workshop.objectTop", { top });
+    const hung = mount === "ceiling";
+    const floorLabel = floorField.querySelector(".ui-field__label");
+    if (floorLabel) floorLabel.textContent = hung ? strings.workshop.objectDrop : strings.workshop.objectFloor;
+    // У вещи под потолком верх даёт потолок — числа «верх на …» у неё нет.
+    const high = hung ? "" : top === null ? strings.workshop.objectFullHeight : text("workshop.objectTop", { top });
     objectNote.textContent = key
       ? [where, high].filter(Boolean).join(" · ")
       : text("workshop.objectLegacy", { name: schemeObjectNameOf(current, object) });

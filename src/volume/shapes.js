@@ -38,6 +38,13 @@ export function volumePrismFaces(corners, bottomMm, topMm, rgb, out, options = {
   // Может ли тело светиться (таск 09 сценариев) — доезжает до каждой грани.
   const lit = options.lit === true;
   const bulb = Number.isInteger(options.bulb) ? options.bulb : null;
+  // **Наклонная призма** (правка 2026-11-21, лента по скату): `options.tilt` —
+  // `{at, u, perMm}`: и низ, и верх поднимаются на `perMm` за миллиметр пути
+  // вдоль `u` от точки `at`. Стенки остаются вертикальными, а крышка и дно
+  // ложатся в наклонную плоскость — они плоские, потому что высота линейна по
+  // плану. Без довода — тот же код, что был (`lift` — ноль).
+  const tilt = options.tilt && Number.isFinite(options.tilt.perMm) && options.tilt.perMm !== 0 ? options.tilt : null;
+  if (tilt) return volumeTiltedPrism(corners, bottomMm, topMm, rgb, out, tilt, { markId, doorId, clear, channel, lit, bulb });
   for (let index = 0; index < corners.length; index += 1) {
     const a = corners[index];
     const b = corners[(index + 1) % corners.length];
@@ -75,6 +82,33 @@ export function volumePrismFaces(corners, bottomMm, topMm, rgb, out, options = {
       ),
     );
   }
+  return out;
+}
+
+/** Подъём точки наклонной призмы над её серединой, мм (`tilt` — `{at, u, perMm}`). */
+export function volumeTiltLift(tilt, point) {
+  if (!tilt) return 0;
+  return ((point.x - tilt.at.x) * tilt.u.x + (point.y - tilt.at.y) * tilt.u.y) * tilt.perMm;
+}
+
+// Призма с наклонными крышкой и дном: те же грани и в том же порядке, что у
+// прямой (стенки, верх, низ), только высота у каждого угла своя.
+function volumeTiltedPrism(corners, bottomMm, topMm, rgb, out, tilt, own) {
+  const low = (point) => volumeAt(point, bottomMm + volumeTiltLift(tilt, point));
+  const high = (point) => volumeAt(point, topMm + volumeTiltLift(tilt, point));
+  for (let index = 0; index < corners.length; index += 1) {
+    const a = corners[index];
+    const b = corners[(index + 1) % corners.length];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    if (dx === 0 && dy === 0) continue;
+    const length = Math.hypot(dx, dy);
+    out.push(volumeFace([low(a), low(b), high(b), high(a)], rgb, { normal: { x: dy / length, y: -dx / length, z: 0 }, ...own }));
+  }
+  const size = Math.hypot(tilt.u.x * tilt.perMm, tilt.u.y * tilt.perMm, 1);
+  const up = { x: (-tilt.u.x * tilt.perMm) / size, y: (-tilt.u.y * tilt.perMm) / size, z: 1 / size };
+  out.push(volumeFace(corners.map(high), rgb, { normal: up, ...own }));
+  out.push(volumeFace(corners.map(low), rgb, { normal: { x: -up.x, y: -up.y, z: -up.z }, ...own }));
   return out;
 }
 

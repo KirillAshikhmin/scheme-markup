@@ -46,7 +46,7 @@ import {
   volumeShiftPoints,
 } from "./shapes.js";
 import { volumeMiddleOf, volumeOrderAll, volumeOrderStack, volumeOrderTree } from "./order.js";
-import { slopeCeilingPieces, slopeIndexAt, slopePiecesCut, slopeProfileAt } from "../slopes.js";
+import { slopeCeilingPieces, slopeCheeks, slopeIndexAt, slopePieceStray, slopePiecesCut, slopeProfileAt } from "../slopes.js";
 import {
   volumeSideParts,
   volumeSideStops,
@@ -168,7 +168,14 @@ export function volumeStackScene(project, plan, optionsOf, was = null) {
       .map((room) => volumeShiftPoints(room.pointsMm, { x: dx, y: dy }));
     // Потолок полосы этажа в его собственных миллиметрах: база соседа минус
     // своя, то есть высота этажа вместе с перекрытием.
-    return { capMm: above.baseMm - here.baseMm, covers, voids };
+    // **Дыра со скатами** (правка 2026-11-21): потолок двусвета — крыша, и
+    // чертят её помещению верхнего этажа (ADR 043). Комната под такой дырой
+    // своего потолка не рисует, какой бы высоты она ни была: иначе её плоский
+    // потолок торчал листом сквозь скаты.
+    const roofVoids = volumeRooms(project, above.schemeId)
+      .filter((room) => room.hasFloor === false && room.slopes)
+      .map((room) => volumeShiftPoints(room.pointsMm, { x: dx, y: dy }));
+    return { capMm: above.baseMm - here.baseMm, covers, voids, roofVoids };
   };
   // Этажи прошлой сцены — по схеме. Ключ сошёлся, значит этаж собран из того же
   // и годится как есть; разошёлся — этот этаж собирается заново, и только он.
@@ -901,7 +908,7 @@ function volumeSceneBuild(project, schemeId, options = {}) {
     // этажом выше без пола — значит перекрытия над этой комнатой нет, и низу
     // плиты, которым её потолок и был, стоять негде. Мерку считает одно место
     // (`volumeCeilingUnderVoid`), доводы ей даёт стопка — как и накрытиям стен.
-    if (volumeCeilingUnderVoid(room, options.voids, options.capMm)) continue;
+    if (volumeCeilingUnderVoid(room, options.voids, options.capMm, options.roofVoids)) continue;
     // **Потолка нет у помещения, открытого небу** (правка после сборки
     // сценариев): балкон, у которого стены к улице ниже этажа, или помещение,
     // которому потолок сняли рукой. Пол при этом остаётся — «только пол».
@@ -911,6 +918,21 @@ function volumeSceneBuild(project, schemeId, options = {}) {
     // крыша, — и «Снять крышу» снимает её тем же правилом.
     if (room.slopes) {
       let pieces = slopeCeilingPieces(room.pointsMm, room.slopes, room.heightMm);
+      // **Щёки** (правка 2026-11-21, слова заказчика: «как будто просто лист
+      // приложили»): где куски потолка не сошлись по высоте — кромка ската
+      // под плоским потолком, край ската не на всё помещение, стенка слухового
+      // окна, — стык закрывает вертикальная грань того же потолка. Сошедшиеся
+      // скаты щёк не дают: такой потолок собирается грань в грань прежним.
+      for (const cheek of slopeCheeks(pieces)) {
+        const points = cheek.points.map((point) => volumeAt(point, point.z));
+        faces.push(
+          volumePainted(
+            volumeFace(points, VOLUME_CEILING_RGB, { normal: volumeFaceNormal(points), both: true, room: volumeRoomKey(room) }),
+            room.ceilingRgb,
+            "ceiling",
+          ),
+        );
+      }
       // **Мансардные окна** (ADR 043): под габаритом окна из ската вырезается
       // отверстие, в него встают рама и стекло — в плоскости того же ската.
       // Окно принадлежит скату над своей серединой; над плоской частью потолка
@@ -946,6 +968,8 @@ function volumeSceneBuild(project, schemeId, options = {}) {
         volumeTagThing(faces, from, object.id);
       }
       for (const piece of pieces) {
+        // Полоска плоского потолка между скатом и стеной — погрешность обводки.
+        if (slopePieceStray(piece)) continue;
         const points = piece.points.map((point) => volumeAt(point, point.z));
         const normal = volumeFaceNormal(points);
         const down = normal.z > 0;

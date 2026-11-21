@@ -41,6 +41,7 @@ import {
   volumePointInside,
   volumeRoomKey,
   volumeRoomKeyAt,
+  volumeTiltLift,
 } from "./shapes.js";
 import { volumeMiddleOf, volumeOrderAll } from "./order.js";
 import { VOLUME_NIGHT_SHARE } from "./sky.js";
@@ -281,12 +282,12 @@ function volumeLampPieces(place) {
     const z = (Number(prism.bottomMm) + Number(prism.topMm)) / 2;
     for (let index = 0; index < count; index += 1) {
       const t = (index + 0.5) / count;
+      const x = along.from.x + (along.to.x - along.from.x) * t + half.x;
+      const y = along.from.y + (along.to.y - along.from.y) * t + half.y;
       out.push({
-        at: {
-          x: along.from.x + (along.to.x - along.from.x) * t + half.x,
-          y: along.from.y + (along.to.y - along.from.y) * t + half.y,
-          z,
-        },
+        // Наклонный кусок ленты под скатом (`prism.tilt`): точка света — на
+        // самой ленте, а не на её средней высоте.
+        at: { x, y, z: prism.tilt ? z + volumeTiltLift(prism.tilt, { x, y }) : z },
         power: (perMeter * length) / count / 1000,
       });
     }

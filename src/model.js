@@ -8242,6 +8242,71 @@ export function updateSchemeObject(project, objectId, patch = {}) {
   return { project: withProject(project, { schemeObjects }), schemeObject: next };
 }
 
+// ——— вещь под потолком (правка без автопилота, 2026-11-21) ————————————————
+//
+// Слова заказчика: «Балки и короба с подсветкой вдоль конька… сделай их тоже
+// отдельной задачей», «Воздуховоды включи». Балка, потолочный короб и
+// воздуховод — вещи каталога с местом установки `ceiling`. Как и у
+// мансардного окна (`slope`), высоты от пола у них нет: её даёт потолок над
+// вещью, и спрашивают его у той же двери — `ceilingHeightAt`.
+//
+// **Вещь ложится вдоль своей длины.** Длина — «ширина» габарита (`widthMm`),
+// концы стоят на оси поворота. У каждого конца потолок берётся наименьший по
+// торцу (две кромки и середина) — поперёк вещь не наклоняется и в потолок не
+// врезается, — а между концами верх идёт прямой: под скатом это уклон ската,
+// под ровным потолком — горизонталь. Если посередине потолок ниже этой прямой
+// (вещь переброшена через ендову), она опускается целиком.
+//
+// В объект не пишется ничего: посадка считается чтением (G68). Поле
+// `heightAboveFloorMm` у такой вещи читается как **опуск от потолка** (в
+// каталоге ноль): воздуховод вешают ниже балок, короб — ниже ленты. Второго
+// поля под это не заведено — формат объекта прежний.
+
+/** Зазор между верхом вещи и потолком, мм: грани в одной плоскости спорят. */
+const CEILING_SEAT_GAP_MM = 2;
+
+/** Висит ли вещь под потолком: вещь каталога с местом установки `ceiling`, не ломаная. */
+export function schemeObjectIsCeiling(project, object) {
+  return Boolean(object && object.shape !== "polyline" && object.atMm && schemeObjectMountOf(project, object) === "ceiling");
+}
+
+/**
+ * **Посадка вещи под потолком:** `{bottomMm, topMm, perMm, u}` — низ и верх в
+ * середине вещи, подъём на миллиметр длины и орт длины; `null` — вещь стоит
+ * не под потолком. Высота вещи без своего числа — 200 мм.
+ */
+export function schemeObjectCeilingSeat(project, object) {
+  if (!schemeObjectIsCeiling(project, object)) return null;
+  const angle = ((Number(object.turnDeg) || 0) * Math.PI) / 180;
+  const u = { x: Math.cos(angle), y: Math.sin(angle) };
+  const half = Number(object.widthMm) / 2;
+  const side = Number(object.depthMm) / 2;
+  const at = { x: Number(object.atMm.x), y: Number(object.atMm.y) };
+  // Торец чуть внутрь: вещь, дотянутая до стены, не щупает потолок за стеной.
+  const inset = Math.min(half, 20);
+  const lowestAt = (along) => {
+    let best = Infinity;
+    for (const across of [-side, 0, side]) {
+      const point = { x: at.x + u.x * along - u.y * across, y: at.y + u.y * along + u.x * across };
+      best = Math.min(best, ceilingHeightAt(project, object.schemeId, point));
+    }
+    return best;
+  };
+  let from = lowestAt(-(half - inset));
+  let to = lowestAt(half - inset);
+  const perMm = half > inset ? (to - from) / (2 * (half - inset)) : 0;
+  // Высоты у самих концов — по той же прямой.
+  from -= perMm * inset;
+  to += perMm * inset;
+  const sag = (from + to) / 2 - lowestAt(0);
+  const drop = sag > 0 ? sag : 0;
+  const heightMm = typeof object.heightMm === "number" && object.heightMm > 0 ? object.heightMm : 200;
+  // «От пола» у такой вещи — опуск от потолка: воздуховод висит ниже балок.
+  const hang = Math.max(0, Number(object.heightAboveFloorMm) || 0);
+  const topMm = (from + to) / 2 - drop - hang - CEILING_SEAT_GAP_MM;
+  return { bottomMm: topMm - heightMm, topMm, perMm, u };
+}
+
 /** Мансардное ли это окно — вещь каталога, которая врезается в скат (ADR 043). */
 export function schemeObjectIsSkylight(object) {
   return Boolean(object && object.catalogKey === OBJECT_SKYLIGHT_KEY && object.shape !== "polyline");
@@ -10845,8 +10910,9 @@ export function wallObjectsOn(project, wallId, side) {
   const half = Number(wall.thicknessMm) / 2;
   const found = [];
   for (const object of schemeObjectsOnScheme(project, wall.schemeId)) {
-    // Мансардное окно лежит в скате, а не стоит у стены (ADR 043).
-    if (schemeObjectIsSkylight(object)) continue;
+    // Мансардное окно лежит в скате, а не стоит у стены (ADR 043); балка,
+    // короб и воздуховод висят под потолком — развёртка стены их не рисует.
+    if (schemeObjectIsSkylight(object) || schemeObjectIsCeiling(project, object)) continue;
     const corners = schemeObjectCorners(object);
     if (corners.length === 0) continue;
     const gap = Math.min(...corners.map((point) => segmentDistanceMm(point, wall.aMm, wall.bMm)));
